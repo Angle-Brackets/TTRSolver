@@ -67,6 +67,16 @@
   .node .sub { color:var(--muted); font-size:11px; margin-top:2px;
                white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+  /* Artwork is optional -- assets/ is gitignored and only appears once
+     tools/fetch_icons.py has run, so every icon hides itself on error and
+     the layout is sized to look right either way. */
+  .icon { width:22px; height:22px; object-fit:contain; flex-shrink:0;
+          image-rendering:auto; }
+  .icon.sm { width:16px; height:16px; }
+  .icon.lg { width:30px; height:30px; }
+  .cogstrip { display:flex; gap:3px; align-items:center; margin-top:3px; }
+  .cogstrip img { width:20px; height:20px; object-fit:contain; }
+  .cogstrip img.dead { opacity:.25; filter:grayscale(1); }
   .chev { color:var(--dim); font-size:10px; margin-left:auto; }
 
   .card { background:var(--panel2); border:1px solid var(--line);
@@ -107,6 +117,12 @@ const KIND = {
   bucket:   {color:"var(--bucket)",   name:"Rare outcomes"},
 };
 const pct = (p) => (p * 100).toFixed(p < 0.1 ? 1 : 0) + "%";
+
+/** An icon that removes itself if the file isn't there. */
+const Icon = ({name, cls = "", title}) => name
+  ? <img className={"icon " + cls} src={"assets/" + name} alt="" title={title}
+         onError={(e) => { e.target.style.display = "none"; }} />
+  : null;
 
 /* ---------- Pyodide boot ---------------------------------------------- */
 
@@ -220,12 +236,22 @@ function NodeCard({node, selected, busy, onSelect}) {
     <div className={cls} data-nodeid={node.id} style={{left:node.x, top:node.y}}
          onClick={(e) => { e.stopPropagation(); onSelect(node); }}>
       <div className="top">
-        <span className="dot" style={{background:color}} />
+        {node.icon ? <Icon name={node.icon} title={node.label} />
+                   : <span className="dot" style={{background:color}} />}
         <span className="title">{node.label}</span>
         {busy && <span className="chev">…</span>}
         {!busy && node.kind !== "terminal" && node.kind !== "bucket" &&
           <span className="chev">{node.open ? "−" : "+"}</span>}
       </div>
+      {node.cog_icons && node.cog_icons.length > 0 &&
+        <div className="cogstrip">
+          {node.cog_icons.map((ic, i) => (
+            <Icon key={i} name={ic}
+                  cls={node.state && node.state.cogs[i] &&
+                       node.state.cogs[i].dead ? "dead" : ""}
+                  title={node.cogs && node.cogs[i]} />
+          ))}
+        </div>}
       <div className="sub mono">
         {node.ev != null && <span style={{color}}>EV {node.ev > 0 ? "+" : ""}{node.ev.toFixed(1)} </span>}
         {node.gap != null && <span>(+{node.gap.toFixed(1)}) </span>}
@@ -300,8 +326,11 @@ function Inspector({node, bridge, depth}) {
           <h3>What the cogs do next</h3>
           {forecast.map((c) => (
             <div key={c.index} style={{marginBottom:9}}>
-              <div className="kv">
-                <span style={{fontWeight:600, color:"var(--text)"}}>
+              <div className="kv" style={{alignItems:"center"}}>
+                <span style={{fontWeight:600, color:"var(--text)",
+                              display:"flex", alignItems:"center", gap:6}}>
+                  <Icon name={c.icon} cls="lg" title={c.cog} />
+                  <Icon name={c.dept_icon} cls="sm" title={c.department} />
                   {c.cog} L{c.level}</span>
                 <span className="mono">~{c.expected_damage} dmg</span>
               </div>
@@ -515,12 +544,15 @@ function App({bridge, catalogue}) {
         <div style={{padding:"10px 16px", borderBottom:"1px solid var(--line)",
                      display:"flex", gap:12, flexWrap:"wrap", alignItems:"center"}}>
           <label>Department
+            <span style={{display:"flex", alignItems:"center", gap:5}}>
+            <Icon name={(catalogue.emblems || {})[dept]} cls="lg" />
             <select value={dept} onChange={e => {
               const d = e.target.value; setDept(d);
               setCogs(depts[d].slice(0, 3).map(c => ({type:c.type, level:c.levels[0]})));
             }}>
               {Object.keys(depts).map(d => <option key={d} value={d}>{d}</option>)}
             </select>
+            </span>
           </label>
           <label>Laff
             <input type="number" min="15" max="140" value={laff} style={{width:64}}
@@ -528,6 +560,7 @@ function App({bridge, catalogue}) {
           </label>
           {cogs.map((c, i) => (
             <label key={i}>Cog {i + 1}
+              <Icon name={`cog-${dept}-${c.type}.png`} cls="lg" />
               <select value={c.type} onChange={e => setCogs(cs => cs.map((x, j) =>
                   j === i ? {type:e.target.value,
                              level:levelsFor(e.target.value)[0]} : x))}>

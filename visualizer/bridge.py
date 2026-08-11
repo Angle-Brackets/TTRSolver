@@ -106,6 +106,23 @@ def gag_name(track: Track, level: int) -> str:
     return data.gag(track, level).display
 
 
+# Icon filenames are derived from the same identity the data uses, so they
+# cannot drift from it. The page prefixes the directory; tools/fetch_icons.py
+# writes the files. Both sides tolerate them being absent -- assets/ is
+# gitignored, so a fresh clone has none until the fetcher is run.
+
+def gag_icon(track: Track, level: int) -> str:
+    return f"gag-{track.value}-{level}.png"
+
+
+def cog_icon(department: str, cog_type: str) -> str:
+    return f"cog-{department}-{cog_type}.png"
+
+
+def department_icon(department: str) -> str:
+    return f"dept-{department}.png"
+
+
 def describe_action(action: Action) -> str:
     name = gag_name(action.track, action.level)
     where = "all cogs" if action.target_index is None else f"cog {action.target_index + 1}"
@@ -155,14 +172,17 @@ def catalogue() -> Dict[str, Any]:
     depts = {}
     for key, dept in sorted(data.COG_DEPARTMENTS.items()):
         depts[key] = [{"type": c.key, "label": c.display,
-                       "levels": list(c.levels)} for c in dept]
+                       "levels": list(c.levels),
+                       "icon": cog_icon(c.department, c.key)} for c in dept]
     gags = []
     for track in Track:
         for level in range(1, 8):
             gags.append({"track": track.value, "level": level,
                          "name": gag_name(track, level),
+                         "icon": gag_icon(track, level),
                          "group": simulator.is_group_action(track, level)})
-    return {"departments": depts, "gags": gags}
+    emblems = {d: department_icon(d) for d in sorted(data.COG_DEPARTMENTS)}
+    return {"departments": depts, "gags": gags, "emblems": emblems}
 
 
 # ---------------------------------------------------------------------
@@ -192,6 +212,7 @@ def expand_decision(state_dict: Dict[str, Any], depth: int) -> List[Dict[str, An
             "kind": "action",
             "action": action_to_dict(action),
             "label": describe_action(action),
+            "icon": gag_icon(action.track, action.level),
             "ev": round(value, 2),
             "gap": None if gap is None else round(gap, 2),
             "best": i == 0,
@@ -265,6 +286,8 @@ def expand_action(state_dict: Dict[str, Any], action_dict: Dict[str, Any],
             "laff_lost": state.toon.laff - next_state.toon.laff,
             "state": state_to_dict(next_state),
             "cogs": [cog_label(c, i) for i, c in enumerate(next_state.cogs)],
+            "cog_icons": [cog_icon(c.department, c.cog_type)
+                          for c in next_state.cogs],
         })
 
     rest = branches[cap:]
@@ -285,7 +308,14 @@ def cog_forecast(state_dict: Dict[str, Any]) -> List[Dict[str, Any]]:
     """What each surviving cog is about to do, and how likely each attack
     is. Marginal per cog -- see outcomes.cog_phase_summary for why not the
     joint."""
-    return outcomes.cog_phase_summary(state_from_dict(state_dict))
+    state = state_from_dict(state_dict)
+    summary = outcomes.cog_phase_summary(state)
+    for entry in summary:
+        cog = state.cogs[entry["index"]]
+        entry["icon"] = cog_icon(cog.department, cog.cog_type)
+        entry["department"] = cog.department
+        entry["dept_icon"] = department_icon(cog.department)
+    return summary
 
 
 # ---------------------------------------------------------------------
@@ -304,6 +334,7 @@ def api_root(cfg_json: str) -> str:
         "label": "Toon's turn",
         "state": state_to_dict(state),
         "cogs": [cog_label(c, i) for i, c in enumerate(state.cogs)],
+        "cog_icons": [cog_icon(c.department, c.cog_type) for c in state.cogs],
     })
 
 

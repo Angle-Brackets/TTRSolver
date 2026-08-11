@@ -153,6 +153,42 @@ class TestCogForecast(unittest.TestCase):
         self.assertEqual(entry["expected_damage"], 0.0)
 
 
+class TestIcons(unittest.TestCase):
+    """Icon filenames are derived from the same identity the data uses, so
+    they can't drift from it. The files themselves are optional -- assets/
+    is gitignored and only appears once tools/fetch_icons.py has run -- so
+    nothing here asserts a file exists, only that the name is right."""
+
+    def test_names_are_derived_from_identity(self):
+        self.assertEqual(bridge.gag_icon(Track.LURE, 2), "gag-lure-2.png")
+        self.assertEqual(bridge.cog_icon("bossbot", "the_big_cheese"),
+                         "cog-bossbot-the_big_cheese.png")
+        self.assertEqual(bridge.department_icon("lawbot"), "dept-lawbot.png")
+
+    def test_every_gag_and_cog_in_the_catalogue_has_one(self):
+        cat = json.loads(bridge.api_catalogue())
+        for g in cat["gags"]:
+            self.assertTrue(g["icon"].endswith(".png"))
+        for dept, cogs in cat["departments"].items():
+            self.assertIn(dept, cat["emblems"])
+            for c in cogs:
+                self.assertEqual(c["icon"], f"cog-{dept}-{c['type']}.png")
+
+    def test_action_nodes_and_forecasts_carry_icons(self):
+        state_dict = bridge.state_to_dict(bridge.build_state(CFG))
+        for child in bridge.expand_decision(state_dict, depth=1):
+            action = child["action"]
+            self.assertEqual(child["icon"],
+                             f"gag-{action['track']}-{action['level']}.png")
+        for entry in bridge.cog_forecast(state_dict):
+            self.assertTrue(entry["icon"].startswith("cog-"))
+            self.assertTrue(entry["dept_icon"].startswith("dept-"))
+
+    def test_state_nodes_carry_one_cog_icon_per_cog(self):
+        root = json.loads(bridge.api_root(json.dumps(CFG)))
+        self.assertEqual(len(root["cog_icons"]), len(root["cogs"]))
+
+
 class TestBestLine(unittest.TestCase):
     def test_opens_with_the_action_the_solver_recommends(self):
         state_dict = bridge.state_to_dict(bridge.build_state(CFG))

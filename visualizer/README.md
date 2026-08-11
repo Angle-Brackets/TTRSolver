@@ -7,6 +7,7 @@ JavaScript copy of the battle rules and nothing to keep in sync.
 ## Running it
 
 ```
+python tools/fetch_icons.py     # once, optional -- gag/cog/emblem artwork
 python -m visualizer.serve
 ```
 
@@ -83,6 +84,23 @@ Two copies of a rule set is one copy too many, so the JS port is gone —
 the old layout. The UI here is deliberately plain (inline CSS, no Tailwind
 or icon library) so that it stays a thin shell over the solver and can be
 served from a single file.
+
+## Icons
+
+`tools/fetch_icons.py` pulls 85 images from the wiki into `visualizer/assets/`
+— an icon per gag, a portrait per cog, and the four department emblems. The
+directory is **gitignored**: this is Toontown Rewritten's own artwork, fetched
+for a local tool the way a browser fetches it to render the wiki, and not
+this project's to redistribute. The repo carries the fetcher, not the files.
+
+Filenames are derived from the same identity the data uses
+(`gag-lure-2.png`, `cog-bossbot-the_big_cheese.png`, `dept-lawbot.png`) so
+they can't drift from it, and `tests/test_bridge.py` pins that. Every icon
+hides itself if the file is absent, so the page works untouched without ever
+running the fetcher — you just get text labels.
+
+One cog breaks the wiki's own naming: Mover & Shaker's file drops the "and"
+(`movershaker`), and is special-cased in the fetcher.
 
 ## Caveats
 
