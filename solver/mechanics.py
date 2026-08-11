@@ -415,9 +415,9 @@ def lure_duration_rounds(level: int) -> int:
     """Rounds a Lure of this level holds for -- cog phases the cog skips.
     [CONFIRMED] TTR wiki: 2/2/3/3/4/4/8 by level.
 
-    Note 3.0.0: "Lure gags no longer stack rounds." Re-luring an already
-    lured cog overwrites its counter rather than adding to it, which is
-    what CogStatus.apply_lure does.
+    This duration is set once, when the lure lands on an un-lured cog, and
+    is never extended: re-luring neither stacks (3.0.0 removed that) nor
+    refreshes. See CogStatus.apply_lure.
     """
     rounds = LURE_ROUNDS_BY_LEVEL.get(level)
     if rounds is None:

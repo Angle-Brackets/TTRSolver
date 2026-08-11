@@ -17,7 +17,12 @@ The wiki blocks ordinary fetches (403) but serves its MediaWiki API:
           &page=Lure&prop=wikitext&format=json"
 
 TTR REBALANCING HISTORY captured here (from the page's own changelog):
-  3.0.0 -- Presentation 15 -> 8 rounds; Lure gags no longer stack rounds.
+  3.0.0 -- Presentation 15 -> 8 rounds. "Removed the Lure Stacking Rounds
+           mechanic that allowed the accumulation of Lure rounds ... if
+           multiple Lure Gags are used simultaneously." Note that is about
+           SIMULTANEOUS lures; re-luring across rounds doesn't refresh the
+           counter either, but that part is play knowledge rather than
+           something the wiki states -- see CogStatus.apply_lure.
   3.3.0 -- Lure gags with base accuracy below 50% no longer have a chance
            for Lure effects to expire early.
   4.0.0 -- Dollar Bill gags +10% base accuracy; multi-Lure gags +5%;

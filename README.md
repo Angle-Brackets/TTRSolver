@@ -58,8 +58,8 @@ Pusher L5, Yesman L6) against a 45-laff toon with a tight gag supply —
 
 | policy | win rate | mean laff left |
 | --- | --- | --- |
-| random | 67% | 16.6 |
-| expectimax (depth 2) | 100% | 40.3 |
+| random | 60% | 15.6 |
+| expectimax (depth 2) | 100% | 32.7 |
 
 The default `two_flunky_fight` scenario is *not* useful for this: every
 policy wins it ~100% of the time, so it can't distinguish anything. If you

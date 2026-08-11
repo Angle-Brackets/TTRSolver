@@ -40,7 +40,7 @@ def _state_with(cogs):
     toon = ToonState(laff=100, max_laff=100,
                      track_exp={Track.THROW: 7, Track.LURE: 7, Track.TRAP: 7},
                      gag_counts={(Track.THROW, 3): 5, (Track.LURE, 2): 5,
-                                 (Track.TRAP, 2): 5})
+                                 (Track.LURE, 5): 5, (Track.TRAP, 2): 5})
     return BattleState(toon=toon, cogs=list(cogs))
 
 
@@ -281,19 +281,38 @@ class TestLureLanding(unittest.TestCase):
         self.assertLess(state.toon.laff, laff_after_lure,
                         "the lure never ended -- cog got no attacks in")
 
-    def test_relanding_a_lure_refreshes_it(self):
-        """A fresh Lure on an already-lured cog overwrites the record
-        (duration and stored accuracy). The guide only documents lure
-        ROUNDS STACKING for several Lures thrown in the same round, which
-        a solo toon can never do, so nothing here contradicts it."""
-        cog = _lured_cog(105, rounds=1, hp=500)
+    def test_relanding_a_lure_does_not_refresh_it(self):
+        """A Lure on an already-lured cog is wasted: the existing counter
+        keeps running down on its original schedule. It neither stacks
+        (3.0.0 removed that) nor refreshes."""
+        cog = _lured_cog(105, rounds=2, hp=500)
         state = _state_with([cog])
         with mock.patch.object(mechanics, "roll_hit", return_value=True):
             state, _r, _done = simulator.step(
-                state, Action(track=Track.LURE, level=2, target_index=0))
-        # Refreshed to Small Magnet's 2 rounds, not 1 + 2; then this round's
-        # own cog phase ticks one off.
+                state, Action(track=Track.LURE, level=5, target_index=0))
+        after = state.cogs[0].status
+        # Not 4 (a level-5 refresh), not 6 (stacked) -- just the original 2
+        # less the tick this round's own cog phase took.
+        self.assertEqual(after.lure_rounds_remaining, 1)
+        self.assertEqual(after.lure_acc_before_bonus, 105,
+                         "the original lure's accuracy must survive")
+        self.assertEqual(after.lure_level, 2,
+                         "the original lure's gag level must survive")
+
+    def test_group_lure_still_catches_the_unlured(self):
+        """The no-refresh rule is a per-cog no-op, not a rejected action:
+        a group Lure over a partly-lured battle must still catch the cogs
+        that aren't lured yet."""
+        already = _lured_cog(105, rounds=2, hp=500)
+        fresh = CogState(cog_type="flunky", department="bossbot", level=2,
+                         hp=500, max_hp=500)
+        state = _state_with([already, fresh])
+        with mock.patch.object(mechanics, "roll_hit", return_value=True):
+            state, _r, _done = simulator.step(
+                state, Action(track=Track.LURE, level=2, target_index=None))
+        self.assertTrue(state.cogs[1].status.lured, "un-lured cog missed out")
         self.assertEqual(state.cogs[0].status.lure_rounds_remaining, 1)
+        self.assertEqual(state.cogs[1].status.lure_rounds_remaining, 1)
 
 
 class TestLuredRatioBonus(unittest.TestCase):

@@ -82,15 +82,33 @@ class CogStatus:
     is_dead: bool = False
 
     def apply_lure(self, acc_before_bonus: int, rounds: int,
-                    level: Optional[int] = None) -> None:
-        """A Lure lands on this cog. Re-luring an already-lured cog
-        overwrites the record rather than adding to it: the guide only
-        documents lure rounds *stacking* between several Lures thrown in
-        the same round, which a solo toon can't do."""
+                    level: Optional[int] = None) -> bool:
+        """A Lure lands on this cog. Returns whether it did anything.
+
+        **Re-luring an already-lured cog does NOT refresh its duration.**
+        The existing counter runs down on its original schedule and the new
+        gag is simply wasted on that cog. It doesn't stack either -- TTR
+        3.0.0 "Removed the Lure Stacking Rounds mechanic that allowed the
+        accumulation of Lure rounds ... if multiple Lure Gags are used
+        simultaneously". Neither refresh nor stack: an already-lured cog is
+        untouchable by Lure until its rounds run out.
+
+        This is a no-op rather than an illegal action on purpose. A group
+        Lure over a partly-lured battle has to be able to catch the
+        un-lured cogs, so it can't be rejected wholesale -- it just leaves
+        the already-lured ones alone.
+
+        [UNVERIFIED] The no-refresh rule comes from play knowledge, not the
+        wiki: the wiki documents the simultaneous-stacking removal above and
+        says nothing about re-luring across rounds.
+        """
+        if self.lured:
+            return False
         self.lured = True
         self.lure_rounds_remaining = rounds
         self.lure_acc_before_bonus = acc_before_bonus
         self.lure_level = level
+        return True
 
     def clear_lure(self) -> None:
         """Cog stops being lured -- woke up early, or its rounds ran out."""

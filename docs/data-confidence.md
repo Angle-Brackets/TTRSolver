@@ -124,7 +124,12 @@ at `cdn.toontownrewritten.com` are the likeliest place.
 8. **Cogs can appear three levels above their normal range** (an 8-level
    span, damage published for all 8). Not modeled, and largely moot: the
    upper levels have no frequency or accuracy from either source.
-9. **Whether Throw/Squirt damage ends a lure.** The wiki names Sound
+9. **Re-luring does not refresh a lure's duration** — an already-lured cog
+   is untouchable by Lure until its rounds run out, neither stacking nor
+   refreshing. Modeled, but from play knowledge: the wiki only documents
+   3.0.0 removing *simultaneous* stacking and is silent on re-luring across
+   rounds.
+10. **Whether Throw/Squirt damage ends a lure.** The wiki names Sound
    explicitly, which is modeled. It's silent on knockback, so that isn't
    (`mechanics.LURE_ENDS_ON_DAMAGE = None`). Same for a cog that just
    detonated its trap.
