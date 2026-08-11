@@ -7,11 +7,16 @@ multi-toon initiative rules in mechanics.py's docstring):
   1. Toon acts (one Action).
   2. Any status effects that action triggers resolve (trap set, trap
      triggered by lure, cog death, cog lured).
-  3. Each surviving, non-lured cog attacks (lured cogs roll a wake-up
-     check first; if they wake, they attack this round too).
+  3. Each surviving cog attacks. A lured cog first has its lure timeout
+     ticked and then rolls its wake-up check; if either ends the lure it
+     attacks this same round, otherwise it skips.
   4. Reward is computed, round counter increments.
+
+Step 3's ordering (timeout expiry before the wake-up roll) follows the
+source: `__updateLureTimeouts()` runs once per round before the cog
+attacks are picked, and the wake-up check is itself gated on the cog's
+round counter still being > 0.
 """
-import copy
 from typing import List, Tuple
 
 from . import data
@@ -65,7 +70,19 @@ def _targets_for(state: BattleState, action: Action) -> List[CogState]:
 
 def _apply_trap_trigger(cog: CogState) -> int:
     """Cog was lured onto its own trap: detonate it, clear trap status,
-    return damage dealt."""
+    return damage dealt.
+
+    Ordering [CONFIRMED]: within a round, attacks resolve Toon-up -> Trap
+    -> Lure -> Sound -> Throw -> Squirt -> Drop, so a Trap laid in the
+    same round is already on the ground when the Lure resolves. A solo
+    toon acts once per round, so the trap here is always from an earlier
+    round; either way, detonating at Lure time matches the source order.
+
+    A trapped cog that is DAMAGED rather than lured keeps its trap: the
+    guide describes Trap as persisting on the cog until a Lure moves it
+    onto the trap, and gives no rule for damage clearing a trap. (Nor is
+    re-trapping possible -- legal_actions blocks trapping an already
+    trapped or lured cog, which is [CONFIRMED].)"""
     entry = data.GAG_DAMAGE_MINMAX[Track.TRAP].get(cog.status.trap_level)
     if entry is None:
         raise NotImplementedError(
@@ -78,13 +95,29 @@ def _apply_trap_trigger(cog: CogState) -> int:
     return dmg
 
 
-def _resolve_toon_action(state: BattleState, action: Action) -> Tuple[BattleState, int, int]:
-    """Returns (state, laff_healed, damage_dealt_total) -- mutates state in place."""
+def toon_action_accuracy(state: BattleState, action: Action) -> int:
+    """The gag's hit chance, 0-100.
+
+    Passes all_cogs (not just the targets) so the luredRatio half of `bonus`
+    sees the whole battle -- its denominator is every cog in play.
+    """
+    return mechanics.calc_toon_accuracy(
+        action.track, action.level, state.toon,
+        _targets_for(state, action), all_cogs=state.cogs)
+
+
+def apply_toon_action(state: BattleState, action: Action,
+                       hit: bool) -> Tuple[int, int]:
+    """Apply the toon's action given a known hit/miss, mutating `state`.
+    Returns (laff_healed, damage_dealt_total).
+
+    Deterministic on purpose: this is the single implementation of the
+    toon-phase rules, shared by `_resolve_toon_action` (which rolls the
+    dice) and `outcomes.action_outcomes` (which enumerates both branches).
+    Anything added here reaches the solver automatically -- don't fork it.
+    """
     toon = state.toon
     targets = _targets_for(state, action)
-
-    acc = mechanics.calc_toon_accuracy(action.track, action.level, toon, targets)
-    hit = mechanics.roll_hit(acc)
 
     toon.gag_counts[(action.track, action.level)] -= 1
 
@@ -92,7 +125,7 @@ def _resolve_toon_action(state: BattleState, action: Action) -> Tuple[BattleStat
     dealt = 0
 
     if not hit:
-        return state, healed, dealt
+        return healed, dealt
 
     if action.track == Track.TOON_UP:
         # Heal table not yet transcribed -- see docs/data-confidence.md.
@@ -105,6 +138,15 @@ def _resolve_toon_action(state: BattleState, action: Action) -> Tuple[BattleStat
         cog.status.trap_level = action.level
 
     elif action.track == Track.LURE:
+        # Snapshot the accuracy this Lure landed with, BEFORE any bonus and
+        # uncapped -- that is the value wakeupChance is computed from every
+        # round the lure holds. One value per attack, stored on every cog
+        # the attack lured (matching the source's single atkAccResult).
+        acc_before_bonus = mechanics.lure_accuracy_before_bonus(
+            action.track, action.level, toon, targets)
+        # Looked up before any state is mutated so that the [TODO] raise
+        # can't leave a half-applied lure behind.
+        rounds = mechanics.lure_duration_rounds(action.level)
         for cog in targets:
             if cog.status.trapped:
                 dmg = _apply_trap_trigger(cog)
@@ -113,31 +155,84 @@ def _resolve_toon_action(state: BattleState, action: Action) -> Tuple[BattleStat
                 if cog.hp <= 0:
                     cog.status.is_dead = True
                     continue
-            cog.status.lured = True
-            # wakeupChance uses the pre-bonus accuracy value; recomputed
-            # per-round in the cog phase below via lure_wakeup_chance().
+                # [TODO] Unconfirmed whether a cog that just detonated its
+                # trap is then lured, or knocked out of the lure by the
+                # trap damage (same open question as
+                # mechanics.LURE_ENDS_ON_DAMAGE). Kept as "still lured",
+                # the pre-existing behaviour. Not reachable today anyway:
+                # lure_duration_rounds() above and per-level trap damage
+                # in _apply_trap_trigger() are both [TODO] and raise.
+            cog.status.apply_lure(acc_before_bonus, rounds)
 
     else:  # SOUND, THROW, SQUIRT, DROP -- direct damage
         for cog in targets:
-            dmg = mechanics.calc_toon_damage(action.track, action.level)
+            base = mechanics.calc_toon_damage(action.track, action.level)
+            # Damage instances in source order: gag damage, then hpBonus
+            # (always 0 solo), then kbBonus (Throw/Squirt on a lured cog).
+            total = (base
+                     + mechanics.calc_hp_bonus(base)
+                     + mechanics.calc_kb_bonus(action.track,
+                                               cog.status.lured, base))
+            # Source damage is float; HP here is an int, so floor. Only
+            # bites when kbBonus lands on an odd base damage.
+            dmg = int(total)
             cog.hp -= dmg
             dealt += dmg
             if cog.hp <= 0:
                 cog.status.is_dead = True
+                cog.status.clear_lure()
+            # NOTE: a surviving lured cog stays lured after being damaged.
+            # See mechanics.LURE_ENDS_ON_DAMAGE -- the guide does not
+            # confirm that damage ends a lure, so it isn't modeled.
 
+    return healed, dealt
+
+
+def _resolve_toon_action(state: BattleState, action: Action) -> Tuple[BattleState, int, int]:
+    """Roll the gag's hit and apply it. Returns (state, healed, dealt)."""
+    hit = mechanics.roll_hit(toon_action_accuracy(state, action))
+    healed, dealt = apply_toon_action(state, action, hit)
     return state, healed, dealt
+
+
+def _tick_lure(cog: CogState) -> bool:
+    """Resolve one round of lure on a lured cog. Returns True if the lure
+    ended (so the cog attacks this same round), False if it holds.
+
+    Source order, both [CONFIRMED]:
+      1. `__updateLureTimeouts()` -- the round counter runs out, lure ends.
+      2. the wake-up roll, itself gated on that counter still being > 0:
+         `__suitIsLured(...) and currentlyLuredSuits[suitId][0] > 0
+          and random.randint(0, 99) < wakeupChance`
+
+    lure_rounds_remaining counts cog phases the cog skips, so a lure of N
+    rounds set this round makes the cog miss this round and the next N-1.
+    The exact off-by-one against the source can't be pinned down while the
+    per-level durations are [TODO] -- see mechanics.lure_duration_rounds.
+    """
+    status = cog.status
+    if status.lure_rounds_remaining <= 0:
+        status.clear_lure()
+        return True
+    if status.lure_acc_before_bonus is None:
+        raise ValueError(
+            "Lured cog has no lure_acc_before_bonus -- wakeupChance can't "
+            "be computed. Set it (via CogStatus.apply_lure) whenever you "
+            "mark a cog lured."
+        )
+    if mechanics.lure_wakes_up(status.lure_acc_before_bonus):
+        status.clear_lure()
+        return True
+    status.lure_rounds_remaining -= 1
+    return False
 
 
 def _resolve_cog_phase(state: BattleState) -> int:
     """Returns total damage dealt to the toon this round."""
     total_dmg = 0
     for cog in state.active_cogs():
-        if cog.status.lured:
-            # Recompute the pre-bonus accuracy this cog's Lure was hit
-            # with -- not separately stored yet, so this is a known gap;
-            # see docs/roadmap.md item 2. For now, treat lured cogs as
-            # skipping their attack unconditionally (wakeupChance unapplied).
-            continue
+        if cog.status.lured and not _tick_lure(cog):
+            continue    # lure held: cog skips its attack
 
         attack_name = mechanics.pick_cog_attack(cog)
         dmg, acc = mechanics.cog_attack_damage_and_accuracy(cog, attack_name)
@@ -148,7 +243,7 @@ def _resolve_cog_phase(state: BattleState) -> int:
 
 def step(state: BattleState, action: Action, gag_cost_lambda: float = 0.1
           ) -> Tuple[BattleState, float, bool]:
-    next_state = copy.deepcopy(state)
+    next_state = state.clone()
 
     _, healed, dealt = _resolve_toon_action(next_state, action)
 

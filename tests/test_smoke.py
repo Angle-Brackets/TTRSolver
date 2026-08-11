@@ -2,13 +2,15 @@
 End-to-end smoke test plus a few checks on the pieces of the model that
 are [CONFIRMED] enough to assert on.
 
-Run from the repo root with either:
+Run from the repo root with:
     python -m unittest discover tests
-    python -m pytest tests            (if pytest is installed)
 
-The full-fight test runs under solver.testing.synthetic_bossbot_accuracy(),
-i.e. with FAKE cog accuracy -- it proves the code paths connect, not that
-the numbers are game-accurate.
+The full-fight tests run under solver.testing.synthetic_battle_data(),
+i.e. with FAKE cog accuracy and FAKE lure durations -- they prove the
+code paths connect, not that the numbers are game-accurate.
+
+Status-effect mechanics (lure wake-up / duration, luredRatio, kbBonus)
+have their own file: tests/test_mechanics.py.
 """
 import contextlib
 import io
@@ -18,7 +20,8 @@ import unittest
 from solver import data, mechanics, simulator
 from solver.demo import run_random_policy
 from solver.state import Track, Action, CogState
-from solver.testing import synthetic_bossbot_accuracy, two_flunky_fight
+from solver.testing import (synthetic_battle_data, synthetic_battle_data,
+                            synthetic_lure_durations, two_flunky_fight)
 
 
 class TestAccuracy(unittest.TestCase):
@@ -83,10 +86,28 @@ class TestMissingDataRaises(unittest.TestCase):
             mechanics.calc_toon_damage(Track.DROP, 1)
 
     def test_todo_cog_accuracy_raises(self):
-        cog = CogState(cog_type="flunky", department="bossbot", level=1,
-                       hp=1, max_hp=1)
+        """Data-driven so it survives the accuracy tables being filled in:
+        pick any cog whose table is still None, or skip once none are."""
+        for dept, cogs in data.COG_DEPARTMENTS.items():
+            for cog_type, table in cogs.items():
+                if table.get("accuracy") is None:
+                    cog = CogState(cog_type=cog_type, department=dept,
+                                   level=table["levels"][0], hp=1, max_hp=1)
+                    attack = next(iter(table["freq"]))
+                    with self.assertRaises(NotImplementedError):
+                        mechanics.cog_attack_damage_and_accuracy(cog, attack)
+                    return
+        self.skipTest("every cog accuracy table is transcribed")
+
+    def test_todo_lure_duration_raises(self):
+        """Per-gag-level lure duration is [TODO] -- the guide documents the
+        round counter but never the numbers -- so a Lure must raise rather
+        than silently hold forever. Delete this once
+        mechanics.LURE_ROUNDS_BY_LEVEL is filled in."""
+        state = two_flunky_fight()
         with self.assertRaises(NotImplementedError):
-            mechanics.cog_attack_damage_and_accuracy(cog, "pound_key")
+            simulator.step(state, Action(track=Track.LURE, level=2,
+                                         target_index=0))
 
     def test_toon_up_raises(self):
         state = two_flunky_fight()
@@ -100,11 +121,14 @@ class TestMissingDataRaises(unittest.TestCase):
         damage isn't transcribed yet -- so triggering it must raise, not
         deal a guessed number. Delete this test when data/gags.py gains
         real Trap rows."""
+        if data.GAG_DAMAGE_MINMAX[Track.TRAP].get(2) is not None:
+            self.skipTest("Trap level-2 damage has been transcribed")
         state = two_flunky_fight()
         state.cogs[1].status.is_dead = True  # keep it to a single target
-        # Synthetic accuracy only so the cogs' counter-attack phase can run;
-        # the assertion below is about trap damage, which is real TODO data.
-        with synthetic_bossbot_accuracy():
+        # Synthetic data only so the surrounding round loop can run (cog
+        # counter-attacks, lure duration); the assertion below is about
+        # trap damage, which is real TODO data.
+        with synthetic_battle_data():
             state, _r, _done = simulator.step(
                 state, Action(track=Track.TRAP, level=2, target_index=0))
             self.assertTrue(state.cogs[0].status.trapped)
@@ -112,17 +136,21 @@ class TestMissingDataRaises(unittest.TestCase):
                 simulator.step(
                     state, Action(track=Track.LURE, level=2, target_index=0))
 
-    def test_synthetic_accuracy_does_not_leak(self):
-        with synthetic_bossbot_accuracy():
+    def test_synthetic_stand_ins_do_not_leak(self):
+        real_accuracy = data.BOSSBOT_COGS["flunky"]["accuracy"]
+        real_durations = dict(mechanics.LURE_ROUNDS_BY_LEVEL)
+        with synthetic_battle_data():
             self.assertIsNotNone(data.BOSSBOT_COGS["flunky"]["accuracy"])
-        self.assertIsNone(data.BOSSBOT_COGS["flunky"]["accuracy"])
+            self.assertIsNotNone(mechanics.LURE_ROUNDS_BY_LEVEL[2])
+        self.assertIs(data.BOSSBOT_COGS["flunky"]["accuracy"], real_accuracy)
+        self.assertEqual(mechanics.LURE_ROUNDS_BY_LEVEL, real_durations)
 
 
 class TestFullFight(unittest.TestCase):
     def test_random_policy_fight_terminates(self):
         random.seed(0)
         state = two_flunky_fight()
-        with synthetic_bossbot_accuracy():
+        with synthetic_battle_data():
             for _ in range(60):
                 if state.is_terminal():
                     break
@@ -139,9 +167,31 @@ class TestFullFight(unittest.TestCase):
 
     def test_demo_runs(self):
         out = io.StringIO()
-        with synthetic_bossbot_accuracy(), contextlib.redirect_stdout(out):
+        with synthetic_battle_data(), contextlib.redirect_stdout(out):
             run_random_policy(seed=0)
         self.assertIn("Battle finished", out.getvalue())
+
+    def test_a_lure_lands_and_later_ends_during_a_real_fight(self):
+        """Round-loop level check on the lure fix. Before it, one landed
+        Lure removed a cog from the fight permanently. Detailed coverage
+        of the wake-up / timeout paths lives in tests/test_mechanics.py."""
+        random.seed(3)
+        state = two_flunky_fight()
+        state.toon.laff = state.toon.max_laff = 500        # let it run long
+        state.cogs[1].status.is_dead = True                # one target
+        state.cogs[0].hp = state.cogs[0].max_hp = 500      # don't kill it
+        state.toon.gag_counts = {(Track.LURE, 2): 1, (Track.THROW, 3): 40}
+        with synthetic_battle_data():
+            state, _r, _done = simulator.step(
+                state, Action(track=Track.LURE, level=2, target_index=0))
+            lured_at_least_once = state.cogs[0].status.lured
+            for _ in range(6):
+                state, _r, _done = simulator.step(
+                    state, Action(track=Track.THROW, level=3, target_index=0))
+        self.assertTrue(lured_at_least_once)
+        self.assertFalse(state.cogs[0].status.lured)
+        self.assertLess(state.toon.laff, state.toon.max_laff,
+                        "the lured cog never got an attack in")
 
 
 if __name__ == "__main__":

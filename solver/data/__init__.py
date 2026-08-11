@@ -21,6 +21,9 @@ Modules:
   gags.py     -- gag damage tables
   cogs.py     -- cog HP formula, department registry
   bossbot.py  -- Bossbot cog attack tables (freq / damage / accuracy)
+  sellbot.py  -- Sellbot cog attack tables (same shape)
+  cashbot.py  -- Cashbot cog attack tables (same shape)
+  lawbot.py   -- Lawbot cog attack tables (same shape)
 
 Everything is re-exported here, so `from solver import data` then
 `data.AV_PROP_ACCURACY` works regardless of which module a table lives in.
@@ -35,6 +38,9 @@ from .accuracy import (
 )
 from .gags import GAG_DAMAGE_MINMAX
 from .bossbot import BOSSBOT_COGS
+from .cashbot import CASHBOT_COGS
+from .lawbot import LAWBOT_COGS
+from .sellbot import SELLBOT_COGS
 from .cogs import cog_max_hp, COG_DEPARTMENTS
 
 __all__ = [
@@ -46,6 +52,9 @@ __all__ = [
     "PREV_HITS_MAX_BONUS",
     "GAG_DAMAGE_MINMAX",
     "BOSSBOT_COGS",
+    "CASHBOT_COGS",
+    "LAWBOT_COGS",
+    "SELLBOT_COGS",
     "cog_max_hp",
     "COG_DEPARTMENTS",
 ]

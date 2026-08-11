@@ -1,58 +1,78 @@
 # Roadmap
 
-Ordered so that each item unblocks the next. Item 1 is the recommended
-next task.
+## Done
 
-## 1. Fill in Bossbot cog accuracy
+- **Cog attack tables, all four departments.** 32 cogs, 124 attack rows of
+  frequency / damage / accuracy from Appendices A/B/C, plus group-attack
+  flags from Appendix B's Type column. Structural invariants pinned by
+  `tests/test_data.py`. Two cells deliberately left `[TODO]` — see
+  [data-confidence.md](data-confidence.md).
+- **Lure wake-up.** A lured cog is no longer removed from the fight
+  permanently: it ticks its timeout, rolls `wakeupChance`, and attacks the
+  same round if either ends the lure. Brought `luredRatio` accuracy and
+  `kbBonus` damage in with it.
+- **Expectimax solver.** `solver/outcomes.py` enumerates the exact outcome
+  distribution; `solver/search/expectimax.py` searches it with memoization.
+  `python -m solver.search.demo --compare` measures it against a random
+  policy.
 
-Transcribe the Bossbot section of Appendix C from
-[QED1224/Toontown-Resources](https://github.com/QED1224/Toontown-Resources)
-into the `"accuracy"` field of each cog in
-[solver/data/bossbot.py](../solver/data/bossbot.py), following the
-existing `[CONFIRMED]` / `[PARTIAL]` / `[TODO]` tagging convention.
+## 1. Lure duration — the one gap that changes conclusions
 
-This unblocks the whole Bossbot department for a real, non-synthetic run.
-Once it's in, delete `synthetic_bossbot_accuracy()` from
-[solver/testing.py](../solver/testing.py) and drop its uses from
-`tests/test_smoke.py` and `solver/demo.py` — the tests should then run
-on real data.
+`mechanics.LURE_ROUNDS_BY_LEVEL` is all `None`, so **every Lure action
+raises** unless run under `solver.testing.synthetic_lure_durations()`. The
+strategy guide documents the round-counter mechanic but never lists
+per-gag-level values (its only durations are Lure SOS cards, Appendix D —
+a different thing). This needs a different source: decompiled
+`BattleProps`/`SuitBattleGlobals`, or the TTR wiki's Lure page.
 
-## 2. Wire lure wake-up into the cog phase
+Why it's first: a maxed Lure toon's pre-bonus accuracy is ~105, making
+`wakeupChance` negative, so cogs never wake early and **duration is the
+only thing bounding a lure**. Every judgement the solver makes about Lure
+currently rests on a made-up 3-round stand-in.
 
-`mechanics.lure_wakeup_chance()` is confirmed and implemented but unused.
-`simulator._resolve_cog_phase` currently skips any lured cog's attack
-unconditionally. To fix: store the pre-bonus accuracy (propAcc + trackExp +
-tgtDef, no bonus) the Lure landed with on `CogStatus` when Lure is applied,
-then roll `mechanics.lure_wakes_up()` against it each round.
+## 2. Remaining gag data
 
-## 3. Add the remaining Bossbot cogs
+Trap per-level damage (blocks the trap+lure combo entirely — the
+detonation path is implemented but raises), Toon-Up heal amounts, Throw L6,
+Squirt L2–6, Sound L5–6, Drop L1–6. Also the per-gag `minE`/`maxE`
+experience thresholds, which would let `calc_toon_damage` use the real
+exp-based formula instead of interpolating min/max.
 
-Micromanager, Downsizer, Head Hunter, Corporate Raider, The Big Cheese —
-same shape as Flunky / Pencil Pusher / Yesman in `data/bossbot.py`, just
-more rows. Source: Appendix A/B.
+## 3. Make the search fast enough to go deeper
 
-## 4. Write the solver
+A depth-2 evaluation on a three-cog fight takes ~1.3s. That's after the big
+win — `copy.deepcopy` was 91% of the runtime, and replacing it with
+`BattleState.clone()` cut a depth-2 search from 35s to 1.3s. Depth 3 is
+usable; depth 4 still isn't.
 
-Expectimax or value iteration against `simulator.step` /
-`simulator.legal_actions`. The environment interface is stable enough to
-build against now, even with the data gaps above. It belongs in a new
-`solver/search/` package (not `solver/solver/` — the top-level package is
-already named `solver`).
+Remaining options, cheapest first: cache `cog_damage_distribution` per
+`(department, cog_type, level)` — it doesn't depend on mutable state but is
+recomputed at every node; prune outcome branches below an epsilon
+probability (the damage distribution has a long, nearly irrelevant tail);
+order actions by a quick static score so an alpha-beta-style cutoff has
+something to work with. Profile before each — the deepcopy result is a
+reminder that the obvious algorithmic suspect wasn't the problem.
+
+## 4. Validate the solver's advice against real play
+
+The search is verified as an *algorithm* (`tests/test_search.py`) and the
+distribution is verified against the sampler (`test_matches_sampled_step`),
+but nothing yet checks that its advice matches what strong players actually
+do. Worth picking a handful of known positions with a consensus best move
+and seeing whether it agrees.
 
 ## 5. Decide what the visualizer visualizes
 
-Once the solver exists, decide whether
-[visualizer/](../visualizer/) should keep its own lightweight JS port of
-the game logic (fast, no backend, but a second copy of the rules to keep in
-sync) or instead render precomputed trees exported from the real Python
-solver as JSON (single source of truth, but static rather than
-interactively reconfigurable in-browser). Worth a deliberate call rather
-than drifting into whichever happens first.
+[visualizer/](../visualizer/) still carries its own hardcoded JS port of
+the rules, which has now drifted further — it knows nothing about lure
+wake-up, `luredRatio`, or `kbBonus`. Either regenerate it from the Python
+tables or have it render precomputed trees exported as JSON from
+`solver.search`. The second is the single-source-of-truth option and is
+looking more attractive now that the Python side is the richer model.
 
-## Later, if the Bossbot department round-trips cleanly
+## Later
 
-Transcribe Sellbot / Cashbot / Lawbot tables — one module per department in
-`solver/data/`, registered in `data/cogs.py`'s `COG_DEPARTMENTS`. Also
-outstanding: Toon-Up heal amounts, the per-gag `minE`/`maxE` experience
-thresholds needed to replace the min/max interpolation in
-`calc_toon_damage`, and a second source for cog HP at levels 10–12.
+Cog HP at levels 10–12 needs a second source. The non-tier-1 `tgtDef`
+branch at cog levels 4–5 isn't modeled. Multi-toon play would need
+`calc_prev_hits_bonus` and `pick_cog_target` filled in — both are
+deliberate solo-play simplifications today, not stubs.

@@ -54,13 +54,54 @@ class ToonState:
 @dataclass
 class CogStatus:
     lured: bool = False
+
+    # Rounds of lure left on this cog -- the `currentlyLuredSuits[suitId][0]`
+    # counter from the source pseudocode, which gates the wake-up check.
+    # Counts cog phases this cog will skip; decremented every round the lure
+    # holds, and the lure ends when it reaches 0. Set from
+    # mechanics.lure_duration_rounds(), whose per-gag-level table is [TODO]
+    # (the strategy guide never lists it) -- so in practice this is only
+    # non-zero under solver.testing.synthetic_lure_durations().
     lure_rounds_remaining: int = 0
+
+    # The PRE-BONUS accuracy (propAcc + trackExp + tgtDef, no bonus term)
+    # that the Lure landing on this cog was rolled with. This is the input
+    # to mechanics.lure_wakeup_chance(); the source stores it per-cog at the
+    # moment the Lure resolves, because accuracy bonuses must not offset the
+    # wake-up odds. None whenever the cog is not lured.
+    lure_acc_before_bonus: Optional[int] = None
 
     trapped: bool = False
     trap_track: Optional[Track] = None   # which gag laid the trap
     trap_level: Optional[int] = None
 
     is_dead: bool = False
+
+    def apply_lure(self, acc_before_bonus: int, rounds: int) -> None:
+        """A Lure lands on this cog. Re-luring an already-lured cog
+        overwrites the record rather than adding to it: the guide only
+        documents lure rounds *stacking* between several Lures thrown in
+        the same round, which a solo toon can't do."""
+        self.lured = True
+        self.lure_rounds_remaining = rounds
+        self.lure_acc_before_bonus = acc_before_bonus
+
+    def clear_lure(self) -> None:
+        """Cog stops being lured -- woke up early, or its rounds ran out."""
+        self.lured = False
+        self.lure_rounds_remaining = 0
+        self.lure_acc_before_bonus = None
+
+    def copy(self) -> "CogStatus":
+        return CogStatus(
+            lured=self.lured,
+            lure_rounds_remaining=self.lure_rounds_remaining,
+            lure_acc_before_bonus=self.lure_acc_before_bonus,
+            trapped=self.trapped,
+            trap_track=self.trap_track,
+            trap_level=self.trap_level,
+            is_dead=self.is_dead,
+        )
 
 
 @dataclass
@@ -72,12 +113,38 @@ class CogState:
     max_hp: int
     status: CogStatus = field(default_factory=CogStatus)
 
+    def copy(self) -> "CogState":
+        return CogState(cog_type=self.cog_type, department=self.department,
+                        level=self.level, hp=self.hp, max_hp=self.max_hp,
+                        status=self.status.copy())
+
 
 @dataclass
 class BattleState:
     toon: ToonState
     cogs: List[CogState]
     round_num: int = 0
+
+    def clone(self) -> "BattleState":
+        """A deep-enough copy: every mutable field is fresh, and the shared
+        leaves (Track enums, the (track, level) tuples used as gag keys) are
+        immutable.
+
+        Exists because `copy.deepcopy` dominated the solver's runtime -- it
+        was 91% of a depth-2 search, since expectimax copies a state per
+        outcome branch per node. This is ~20x faster for the same result.
+        Extend it whenever you add a mutable field to any battle dataclass.
+        """
+        return BattleState(
+            toon=ToonState(
+                laff=self.toon.laff,
+                max_laff=self.toon.max_laff,
+                track_exp=dict(self.toon.track_exp),
+                gag_counts=dict(self.toon.gag_counts),
+            ),
+            cogs=[c.copy() for c in self.cogs],
+            round_num=self.round_num,
+        )
 
     def active_cogs(self) -> List[CogState]:
         return [c for c in self.cogs if not c.status.is_dead]

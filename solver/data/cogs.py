@@ -3,6 +3,9 @@ Cog-level data that isn't department-specific: the HP formula and the
 registry mapping a department name to its cog attack tables.
 """
 from .bossbot import BOSSBOT_COGS
+from .cashbot import CASHBOT_COGS
+from .lawbot import LAWBOT_COGS
+from .sellbot import SELLBOT_COGS
 
 
 def cog_max_hp(level: int) -> int:
@@ -17,9 +20,12 @@ def cog_max_hp(level: int) -> int:
     return x * (x + 1)
 
 
+# All four departments, 8 cogs each, transcribed from Appendices A/B/C of
+# the QED1224/Toontown-Resources strategy guide (master branch). See each
+# module's docstring for the confidence tag and the per-cell [TODO]s.
 COG_DEPARTMENTS = {
     "bossbot": BOSSBOT_COGS,
-    # sellbot, cashbot, lawbot: TODO -- freq/damage/accuracy tables exist
-    # in the same source, just not yet transcribed. Add one module per
-    # department alongside bossbot.py and register it here.
+    "cashbot": CASHBOT_COGS,
+    "lawbot": LAWBOT_COGS,
+    "sellbot": SELLBOT_COGS,
 }
