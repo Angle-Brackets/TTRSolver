@@ -28,7 +28,11 @@ def is_group_action(track: Track, level: int) -> bool:
     if track in (Track.TOON_UP, Track.SOUND):
         return True
     if track == Track.LURE:
-        return level == 7           # Presentation hits all cogs
+        # [CONFIRMED] TTR wiki: Small Magnet (2), Big Magnet (4),
+        # Hypno-goggles (6) and Presentation (7) all hit every cog. Only
+        # the dollar-bill gags at 1/3/5 are single-target. This used to say
+        # `level == 7`, which made three group gags single-target.
+        return level in data.LURE_GROUP_LEVELS
     if track in (Track.THROW, Track.SQUIRT, Track.DROP, Track.TRAP):
         return level == 7           # Wedding Cake / Geyser / Ocean Liner / Train Tracks
     return False
@@ -162,10 +166,16 @@ def apply_toon_action(state: BattleState, action: Action,
                 # the pre-existing behaviour. Not reachable today anyway:
                 # lure_duration_rounds() above and per-level trap damage
                 # in _apply_trap_trigger() are both [TODO] and raise.
-            cog.status.apply_lure(acc_before_bonus, rounds)
+            cog.status.apply_lure(acc_before_bonus, rounds, action.level)
 
     else:  # SOUND, THROW, SQUIRT, DROP -- direct damage
         for cog in targets:
+            if action.track == Track.DROP and cog.status.lured:
+                # [CONFIRMED] TTR wiki: "Drop gags always miss on lured
+                # Cogs." Per-target, so a group Drop still hits the
+                # un-lured members of a mixed battle.
+                continue
+
             base = mechanics.calc_toon_damage(action.track, action.level)
             # Damage instances in source order: gag damage, then hpBonus
             # (always 0 solo), then kbBonus (Throw/Squirt on a lured cog).
@@ -181,9 +191,14 @@ def apply_toon_action(state: BattleState, action: Action,
             if cog.hp <= 0:
                 cog.status.is_dead = True
                 cog.status.clear_lure()
-            # NOTE: a surviving lured cog stays lured after being damaged.
-            # See mechanics.LURE_ENDS_ON_DAMAGE -- the guide does not
-            # confirm that damage ends a lure, so it isn't modeled.
+            elif action.track == Track.SOUND and cog.status.lured:
+                # [CONFIRMED] TTR wiki: "Lured Cogs are awakened by Sound
+                # gags without a damage bonus." Sound is the one track the
+                # wiki names explicitly, which is why it's handled here and
+                # not as a blanket damage-ends-lure rule -- see
+                # mechanics.LURE_ENDS_ON_DAMAGE for the still-open question
+                # of whether Throw/Squirt knock a cog out of lure too.
+                cog.status.clear_lure()
 
     return healed, dealt
 
@@ -220,7 +235,12 @@ def _tick_lure(cog: CogState) -> bool:
             "be computed. Set it (via CogStatus.apply_lure) whenever you "
             "mark a cog lured."
         )
-    if mechanics.lure_wakes_up(status.lure_acc_before_bonus):
+    # [CONFIRMED] TTR 3.3.0: a Lure gag whose BASE accuracy is under 50%
+    # is the only kind that can still expire early -- and no TTR gag is,
+    # so in practice this roll never happens and a lure runs its full
+    # duration. Kept as a rule rather than deleted; it's a balance knob.
+    if (mechanics.lure_can_expire_early(status.lure_level)
+            and mechanics.lure_wakes_up(status.lure_acc_before_bonus)):
         status.clear_lure()
         return True
     status.lure_rounds_remaining -= 1

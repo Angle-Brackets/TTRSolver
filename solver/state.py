@@ -59,9 +59,8 @@ class CogStatus:
     # counter from the source pseudocode, which gates the wake-up check.
     # Counts cog phases this cog will skip; decremented every round the lure
     # holds, and the lure ends when it reaches 0. Set from
-    # mechanics.lure_duration_rounds(), whose per-gag-level table is [TODO]
-    # (the strategy guide never lists it) -- so in practice this is only
-    # non-zero under solver.testing.synthetic_lure_durations().
+    # mechanics.lure_duration_rounds(), which is [CONFIRMED] against the
+    # TTR wiki: 2/2/3/3/4/4/8 rounds by gag level.
     lure_rounds_remaining: int = 0
 
     # The PRE-BONUS accuracy (propAcc + trackExp + tgtDef, no bonus term)
@@ -71,13 +70,19 @@ class CogStatus:
     # wake-up odds. None whenever the cog is not lured.
     lure_acc_before_bonus: Optional[int] = None
 
+    # Level of the Lure gag that landed. Needed because whether a lure can
+    # expire early is a property of that gag's base accuracy -- see
+    # mechanics.lure_can_expire_early. None whenever the cog is not lured.
+    lure_level: Optional[int] = None
+
     trapped: bool = False
     trap_track: Optional[Track] = None   # which gag laid the trap
     trap_level: Optional[int] = None
 
     is_dead: bool = False
 
-    def apply_lure(self, acc_before_bonus: int, rounds: int) -> None:
+    def apply_lure(self, acc_before_bonus: int, rounds: int,
+                    level: Optional[int] = None) -> None:
         """A Lure lands on this cog. Re-luring an already-lured cog
         overwrites the record rather than adding to it: the guide only
         documents lure rounds *stacking* between several Lures thrown in
@@ -85,18 +90,21 @@ class CogStatus:
         self.lured = True
         self.lure_rounds_remaining = rounds
         self.lure_acc_before_bonus = acc_before_bonus
+        self.lure_level = level
 
     def clear_lure(self) -> None:
         """Cog stops being lured -- woke up early, or its rounds ran out."""
         self.lured = False
         self.lure_rounds_remaining = 0
         self.lure_acc_before_bonus = None
+        self.lure_level = None
 
     def copy(self) -> "CogStatus":
         return CogStatus(
             lured=self.lured,
             lure_rounds_remaining=self.lure_rounds_remaining,
             lure_acc_before_bonus=self.lure_acc_before_bonus,
+            lure_level=self.lure_level,
             trapped=self.trapped,
             trap_track=self.trap_track,
             trap_level=self.trap_level,

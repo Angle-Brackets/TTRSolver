@@ -1,10 +1,16 @@
 # TTRSolver — Toontown solo-toon-vs-cogs solver
 
 A Markov-state battle simulator for a single toon fighting a group of cogs,
-plus an expectimax solver that plays it. Cog attack tables for all four
-departments are transcribed from source; the remaining gaps are listed in
-[docs/data-confidence.md](docs/data-confidence.md) and every one of them
-raises rather than guessing.
+plus an expectimax solver that plays it. Every known data gap raises rather
+than guessing; they're inventoried in
+[docs/data-confidence.md](docs/data-confidence.md).
+
+> **Source of truth is the [TTR wiki](https://toontownrewritten.wiki).** The
+> strategy guide this project started from describes *Toontown Online* and
+> predates TTR's rebalancing. Lure has been redone from the wiki and the
+> guide turned out to be wrong about durations, accuracy, which levels are
+> group gags, and the luredRatio rule. **The rest of `data/` still comes
+> from the guide and is unaudited** — that's roadmap item 1.
 
 ## Layout
 
@@ -58,12 +64,8 @@ The default `two_flunky_fight` scenario is *not* useful for this: every
 policy wins it ~100% of the time, so it can't distinguish anything. If you
 add a benchmark, make sure it's a fight that can actually be lost.
 
-**One caveat on those numbers.** Cog tables are real, but Lure duration is
-still `[TODO]`, so the runs above use
-`solver.testing.synthetic_lure_durations()` — a made-up flat 3 rounds.
-Anything the solver concludes *about Lure specifically* rests on that
-number; the rest doesn't. See
-[docs/data-confidence.md](docs/data-confidence.md).
+**Caveat on those numbers.** They predate the Lure rewrite and haven't been
+re-measured. More importantly, see the source note below.
 
 ## Ground rules
 

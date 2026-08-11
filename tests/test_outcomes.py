@@ -15,7 +15,7 @@ from collections import Counter
 
 from solver import outcomes, simulator
 from solver.state import Track, Action, CogState, ToonState, BattleState
-from solver.testing import synthetic_battle_data, two_flunky_fight
+from solver.testing import two_flunky_fight
 
 TOLERANCE = 1e-9
 
@@ -36,8 +36,7 @@ def single_flunky_fight(level=2, laff=50):
 class TestDistributionsAreProper(unittest.TestCase):
     def test_cog_damage_distribution_sums_to_one(self):
         state = single_flunky_fight()
-        with synthetic_battle_data():
-            dist = outcomes.cog_damage_distribution(state.cogs[0])
+        dist = outcomes.cog_damage_distribution(state.cogs[0])
         self.assertAlmostEqual(sum(dist.values()), 1.0, delta=TOLERANCE)
 
     def test_cog_phase_outcomes_sum_to_one(self):
@@ -49,16 +48,14 @@ class TestDistributionsAreProper(unittest.TestCase):
     def test_action_outcomes_sum_to_one(self):
         state = two_flunky_fight()
         action = Action(track=Track.THROW, level=3, target_index=0)
-        with synthetic_battle_data():
-            branches = outcomes.action_outcomes(state, action)
+        branches = outcomes.action_outcomes(state, action)
         self.assertAlmostEqual(sum(p for p, _s, _r in branches), 1.0,
                                delta=TOLERANCE)
 
     def test_no_zero_probability_branches(self):
         state = two_flunky_fight()
         action = Action(track=Track.THROW, level=3, target_index=0)
-        with synthetic_battle_data():
-            branches = outcomes.action_outcomes(state, action)
+        branches = outcomes.action_outcomes(state, action)
         self.assertTrue(all(p > 0 for p, _s, _r in branches))
 
     def test_missing_cell_raises_as_a_data_gap(self):
@@ -100,10 +97,9 @@ class TestMatchesSampledStep(unittest.TestCase):
         action = Action(track=Track.THROW, level=3, target_index=0)
         trials = 8000
 
-        with synthetic_battle_data():
-            exact = {outcomes.state_key(s): (p, r)
-                     for p, s, r in outcomes.action_outcomes(state, action)}
-            counts, sampled_rewards = self._empirical(state, action, trials)
+        exact = {outcomes.state_key(s): (p, r)
+                 for p, s, r in outcomes.action_outcomes(state, action)}
+        counts, sampled_rewards = self._empirical(state, action, trials)
 
         self.assertEqual(set(counts) - set(exact), set(),
                          "step() reached a state the enumeration missed")

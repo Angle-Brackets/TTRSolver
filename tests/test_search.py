@@ -3,8 +3,9 @@ Tests for the expectimax search in solver/search/expectimax.py.
 
 These check that the search is internally sound and that it makes the
 obviously-right call in positions where the right call isn't debatable.
-They run under synthetic_battle_data(), so they say nothing about
-whether the *game* advice is correct -- only that the algorithm is.
+They assert the algorithm is sound, not that its game advice is expert:
+the data underneath is transcribed, but nothing here checks the choices
+against how strong players actually play.
 
 Keep the fights small and the depths shallow: branching is roughly
 (legal actions) x (outcomes per action) per ply, which is ~120 for a
@@ -17,7 +18,6 @@ import unittest
 from solver import data
 from solver.search import expectimax
 from solver.state import Track, CogState, ToonState, BattleState
-from solver.testing import synthetic_battle_data
 
 from tests.test_outcomes import single_flunky_fight
 
@@ -52,8 +52,7 @@ class TestSearchChoices(unittest.TestCase):
         """One cog at 12 HP, Cream Pie Slice does 17 and ends the fight for
         +100. Lure just delays. There is no case for luring here."""
         state = single_flunky_fight(level=2)
-        with synthetic_battle_data():
-            action = expectimax.best_action(state, depth=2)
+        action = expectimax.best_action(state, depth=2)
         self.assertIsNotNone(action)
         self.assertEqual(action.track, Track.THROW)
 
@@ -73,8 +72,7 @@ class TestSearchChoices(unittest.TestCase):
                      hp=2, max_hp=data.cog_max_hp(2)),
         ]
         state = BattleState(toon=toon, cogs=cogs)
-        with synthetic_battle_data():
-            ranked = expectimax.rank_actions(state, depth=2)
+        ranked = expectimax.rank_actions(state, depth=2)
         self.assertTrue(ranked)
         # The level-5 cog hits harder, so with both one-shottable the search
         # should not prefer leaving it alive.
@@ -82,8 +80,7 @@ class TestSearchChoices(unittest.TestCase):
 
     def test_rank_actions_is_sorted_and_complete(self):
         state = single_flunky_fight()
-        with synthetic_battle_data():
-            ranked = expectimax.rank_actions(state, depth=2)
+        ranked = expectimax.rank_actions(state, depth=2)
         values = [v for v, _a in ranked]
         self.assertEqual(values, sorted(values, reverse=True))
         self.assertGreater(len(ranked), 1)
@@ -104,8 +101,7 @@ class TestSearchMechanics(unittest.TestCase):
         """A one-shot kill is worth about +100 (minus the gag cost), not
         +200."""
         state = single_flunky_fight(level=2)  # 12 HP, dies to a 17-damage pie
-        with synthetic_battle_data():
-            value, _action = expectimax.evaluate(state, depth=2)
+        value, _action = expectimax.evaluate(state, depth=2)
         self.assertLess(value, 100.0)
 
     def test_deeper_search_is_not_worse(self):
@@ -113,18 +109,16 @@ class TestSearchMechanics(unittest.TestCase):
         seeing further shouldn't make the toon think a winnable fight is
         worse than a shallow look suggested."""
         state = single_flunky_fight()
-        with synthetic_battle_data():
-            shallow, _ = expectimax.evaluate(state, depth=1)
-            deep, _ = expectimax.evaluate(state, depth=3)
+        shallow, _ = expectimax.evaluate(state, depth=1)
+        deep, _ = expectimax.evaluate(state, depth=3)
         self.assertGreaterEqual(deep, shallow - 1e-9)
 
     def test_memo_is_reused_across_calls(self):
         state = single_flunky_fight()
         memo = {}
-        with synthetic_battle_data():
-            expectimax.evaluate(state, depth=2, memo=memo)
-            entries_after_first = len(memo)
-            expectimax.evaluate(state, depth=2, memo=memo)
+        expectimax.evaluate(state, depth=2, memo=memo)
+        entries_after_first = len(memo)
+        expectimax.evaluate(state, depth=2, memo=memo)
         self.assertGreater(entries_after_first, 0)
         self.assertEqual(len(memo), entries_after_first)
 
@@ -139,8 +133,7 @@ class TestSearchMechanics(unittest.TestCase):
         cog = CogState(cog_type="flunky", department="bossbot", level=2,
                        hp=data.cog_max_hp(2), max_hp=data.cog_max_hp(2))
         state = BattleState(toon=toon, cogs=[cog])
-        with synthetic_battle_data():
-            action = expectimax.best_action(state, depth=2)
+        action = expectimax.best_action(state, depth=2)
         self.assertIsNotNone(action)
         self.assertEqual(action.track, Track.THROW)
 

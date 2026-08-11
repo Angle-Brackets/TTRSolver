@@ -20,8 +20,7 @@ import unittest
 from solver import data, mechanics, simulator
 from solver.demo import run_random_policy
 from solver.state import Track, Action, CogState
-from solver.testing import (synthetic_battle_data, synthetic_battle_data,
-                            synthetic_lure_durations, two_flunky_fight)
+from solver.testing import two_flunky_fight
 
 
 class TestAccuracy(unittest.TestCase):
@@ -31,12 +30,13 @@ class TestAccuracy(unittest.TestCase):
         self.assertEqual(acc, 100)
 
     def test_formula_components_sum(self):
-        # Lure L1 (propAcc 50) + maxed track (60) + level-6 cog tgtDef (-25)
+        # Lure L1 ($1 Bill, propAcc 60) + maxed track (60)
+        # + level-6 cog tgtDef (-25)
         state = two_flunky_fight()
         cog = CogState(cog_type="flunky", department="bossbot", level=6,
                        hp=1, max_hp=1)
         acc = mechanics.calc_toon_accuracy(Track.LURE, 1, state.toon, [cog])
-        self.assertEqual(acc, 50 + 60 - 25)
+        self.assertEqual(acc, 60 + 60 - 25)
 
     def test_accuracy_is_capped(self):
         # Throw L3: 75 + 60 - 5 = 130, well over the cap.
@@ -99,12 +99,15 @@ class TestMissingDataRaises(unittest.TestCase):
                     return
         self.skipTest("every cog accuracy table is transcribed")
 
-    def test_todo_lure_duration_raises(self):
-        """Per-gag-level lure duration is [TODO] -- the guide documents the
-        round counter but never the numbers -- so a Lure must raise rather
-        than silently hold forever. Delete this once
-        mechanics.LURE_ROUNDS_BY_LEVEL is filled in."""
+    def test_trap_damage_is_still_todo(self):
+        """Per-level Trap damage is the gag gap that remains. Laying a trap
+        and luring the cog onto it must raise rather than invent a number.
+        (Lure duration used to be listed here too; it's [CONFIRMED] from the
+        wiki now.)"""
         state = two_flunky_fight()
+        state.cogs[1].status.is_dead = True
+        state, _r, _d = simulator.step(
+            state, Action(track=Track.TRAP, level=2, target_index=0))
         with self.assertRaises(NotImplementedError):
             simulator.step(state, Action(track=Track.LURE, level=2,
                                          target_index=0))
@@ -128,20 +131,18 @@ class TestMissingDataRaises(unittest.TestCase):
         # Synthetic data only so the surrounding round loop can run (cog
         # counter-attacks, lure duration); the assertion below is about
         # trap damage, which is real TODO data.
-        with synthetic_battle_data():
-            state, _r, _done = simulator.step(
-                state, Action(track=Track.TRAP, level=2, target_index=0))
-            self.assertTrue(state.cogs[0].status.trapped)
-            with self.assertRaises(NotImplementedError):
-                simulator.step(
-                    state, Action(track=Track.LURE, level=2, target_index=0))
+        state, _r, _done = simulator.step(
+            state, Action(track=Track.TRAP, level=2, target_index=0))
+        self.assertTrue(state.cogs[0].status.trapped)
+        with self.assertRaises(NotImplementedError):
+            simulator.step(
+                state, Action(track=Track.LURE, level=2, target_index=0))
 
     def test_synthetic_stand_ins_do_not_leak(self):
         real_accuracy = data.BOSSBOT_COGS["flunky"]["accuracy"]
         real_durations = dict(mechanics.LURE_ROUNDS_BY_LEVEL)
-        with synthetic_battle_data():
-            self.assertIsNotNone(data.BOSSBOT_COGS["flunky"]["accuracy"])
-            self.assertIsNotNone(mechanics.LURE_ROUNDS_BY_LEVEL[2])
+        self.assertIsNotNone(data.BOSSBOT_COGS["flunky"]["accuracy"])
+        self.assertIsNotNone(mechanics.LURE_ROUNDS_BY_LEVEL[2])
         self.assertIs(data.BOSSBOT_COGS["flunky"]["accuracy"], real_accuracy)
         self.assertEqual(mechanics.LURE_ROUNDS_BY_LEVEL, real_durations)
 
@@ -150,24 +151,29 @@ class TestFullFight(unittest.TestCase):
     def test_random_policy_fight_terminates(self):
         random.seed(0)
         state = two_flunky_fight()
-        with synthetic_battle_data():
-            for _ in range(60):
-                if state.is_terminal():
+        for _ in range(60):
+            if state.is_terminal():
+                break
+            candidates = simulator.legal_actions(state)
+            done = None
+            # Luring a trapped cog needs [TODO] Trap damage and raises;
+            # retry past those rather than counting them as the end.
+            while candidates:
+                action = random.choice(candidates)
+                try:
+                    state, _reward, done = simulator.step(state, action)
                     break
-                actions = simulator.legal_actions(state)
-                if not actions:
-                    break
-                state, _reward, done = simulator.step(state,
-                                                      random.choice(actions))
-                if done:
-                    break
+                except NotImplementedError:
+                    candidates.remove(action)
+            if done is None or done:
+                break
         self.assertTrue(state.is_terminal(),
                         "fight ran 60 rounds without reaching a terminal state")
         self.assertGreater(state.round_num, 0)
 
     def test_demo_runs(self):
         out = io.StringIO()
-        with synthetic_battle_data(), contextlib.redirect_stdout(out):
+        with contextlib.redirect_stdout(out):
             run_random_policy(seed=0)
         self.assertIn("Battle finished", out.getvalue())
 
@@ -181,13 +187,12 @@ class TestFullFight(unittest.TestCase):
         state.cogs[1].status.is_dead = True                # one target
         state.cogs[0].hp = state.cogs[0].max_hp = 500      # don't kill it
         state.toon.gag_counts = {(Track.LURE, 2): 1, (Track.THROW, 3): 40}
-        with synthetic_battle_data():
+        state, _r, _done = simulator.step(
+            state, Action(track=Track.LURE, level=2, target_index=0))
+        lured_at_least_once = state.cogs[0].status.lured
+        for _ in range(6):
             state, _r, _done = simulator.step(
-                state, Action(track=Track.LURE, level=2, target_index=0))
-            lured_at_least_once = state.cogs[0].status.lured
-            for _ in range(6):
-                state, _r, _done = simulator.step(
-                    state, Action(track=Track.THROW, level=3, target_index=0))
+                state, Action(track=Track.THROW, level=3, target_index=0))
         self.assertTrue(lured_at_least_once)
         self.assertFalse(state.cogs[0].status.lured)
         self.assertLess(state.toon.laff, state.toon.max_laff,

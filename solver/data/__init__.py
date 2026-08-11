@@ -37,6 +37,14 @@ from .accuracy import (
     PREV_HITS_MAX_BONUS,
 )
 from .gags import GAG_DAMAGE_MINMAX
+from .lure import (
+    LURE_GAG_NAMES,
+    LURE_ROUNDS_BY_LEVEL,
+    LURE_BASE_ACCURACY,
+    LURE_ORGANIC_ACCURACY,
+    LURE_GROUP_LEVELS,
+    EARLY_EXPIRY_ACCURACY_FLOOR,
+)
 from .bossbot import BOSSBOT_COGS
 from .cashbot import CASHBOT_COGS
 from .lawbot import LAWBOT_COGS
@@ -51,6 +59,12 @@ __all__ = [
     "PREV_HITS_BONUS_PER_HIT",
     "PREV_HITS_MAX_BONUS",
     "GAG_DAMAGE_MINMAX",
+    "LURE_GAG_NAMES",
+    "LURE_ROUNDS_BY_LEVEL",
+    "LURE_BASE_ACCURACY",
+    "LURE_ORGANIC_ACCURACY",
+    "LURE_GROUP_LEVELS",
+    "EARLY_EXPIRY_ACCURACY_FLOOR",
     "BOSSBOT_COGS",
     "CASHBOT_COGS",
     "LAWBOT_COGS",

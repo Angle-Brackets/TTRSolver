@@ -6,23 +6,27 @@ Toon attack accuracy formula components.
 [CONFIRMED] -- all four components verified against the source guide.
 """
 from ..state import Track
+from .lure import LURE_BASE_ACCURACY, LURE_ORGANIC_ACCURACY
 
 # propAcc[track][level-1] -> base accuracy, level is 1-indexed
-# [CONFIRMED]
+#
+# The Lure row is [CONFIRMED] against the TTR wiki (see data/lure.py). The
+# other six rows still come from the TTO-era strategy guide and have NOT
+# been re-checked against the wiki -- treat them as [PARTIAL] pending that.
 AV_PROP_ACCURACY = {
     Track.TOON_UP: [70, 70, 70, 70, 70, 70, 100],
     Track.TRAP:    [0, 0, 0, 0, 0, 0, 0],     # trap: handled as always-hit, see mechanics.py
-    Track.LURE:    [50, 50, 60, 60, 70, 70, 90],
+    Track.LURE:    [LURE_BASE_ACCURACY[lvl] for lvl in range(1, 8)],
     Track.SOUND:   [95, 95, 95, 95, 95, 95, 95],
     Track.THROW:   [75, 75, 75, 75, 75, 75, 75],
     Track.SQUIRT:  [95, 95, 95, 95, 95, 95, 95],
     Track.DROP:    [50, 50, 50, 50, 50, 50, 50],
 }
 
-# Organic-lure propAcc replacement, if toon has a Lure tree planted at
+# Organic-lure propAcc replacement, if the toon has a Lure tree planted at
 # >= this gag's level (or an active Lure interactive prop is in play).
-# [CONFIRMED]
-AV_LURE_BONUS_ACCURACY = [60, 60, 70, 70, 80, 80, 100]
+# [CONFIRMED] -- TTR wiki, see data/lure.py.
+AV_LURE_BONUS_ACCURACY = [LURE_ORGANIC_ACCURACY[lvl] for lvl in range(1, 8)]
 
 # tgtDef by cog level (1-12). [PARTIAL]
 # Source table lists two values at levels 4 and 5 (-12/-15, -15/-20):

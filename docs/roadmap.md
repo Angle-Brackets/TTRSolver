@@ -16,27 +16,28 @@
   `python -m solver.search.demo --compare` measures it against a random
   policy.
 
-## 1. Lure duration — the one gap that changes conclusions
+## 1. Audit the rest of `data/` against the TTR wiki
 
-`mechanics.LURE_ROUNDS_BY_LEVEL` is all `None`, so **every Lure action
-raises** unless run under `solver.testing.synthetic_lure_durations()`. The
-strategy guide documents the round-counter mechanic but never lists
-per-gag-level values (its only durations are Lure SOS cards, Appendix D —
-a different thing). This needs a different source: decompiled
-`BattleProps`/`SuitBattleGlobals`, or the TTR wiki's Lure page.
+Lure has been redone from <https://toontownrewritten.wiki> and the old
+strategy guide was wrong about nearly every value (see
+[data-confidence.md](data-confidence.md) for the diff). Everything else in
+`data/` still comes from that guide and is now suspect: cog attack
+frequency/damage/accuracy for all 32 cogs, gag damage, `tgtDef`, cog HP,
+and the accuracy formula's other propAcc rows.
 
-Why it's first: a maxed Lure toon's pre-bonus accuracy is ~105, making
-`wakeupChance` negative, so cogs never wake early and **duration is the
-only thing bounding a lure**. Every judgement the solver makes about Lure
-currently rests on a made-up 3-round stand-in.
+This is the top priority because those values look confirmed and aren't.
 
-## 2. Remaining gag data
+## 2. Remaining gag data (from the wiki, not the guide)
 
-Trap per-level damage (blocks the trap+lure combo entirely — the
-detonation path is implemented but raises), Toon-Up heal amounts, Throw L6,
-Squirt L2–6, Sound L5–6, Drop L1–6. Also the per-gag `minE`/`maxE`
-experience thresholds, which would let `calc_toon_damage` use the real
-exp-based formula instead of interpolating min/max.
+Trap per-level damage (blocks the trap+lure combo entirely — the detonation
+path is implemented but raises), Toon-Up heal amounts, Throw L6, Squirt
+L2-6, Sound L5-6, Drop L1-6. Also the per-gag `minE`/`maxE` experience
+thresholds, which would let `calc_toon_damage` use the real exp-based
+formula instead of interpolating min/max.
+
+The wiki has a page per gag track (`/Throw`, `/Squirt`, `/Sound`, `/Drop`,
+`/Trap`, `/Toon-Up`) in the same shape as `/Lure`, so this should be
+largely mechanical.
 
 ## 3. Make the search fast enough to go deeper
 

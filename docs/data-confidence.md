@@ -1,8 +1,31 @@
 # Data confidence: what's solid, what isn't
 
-Source for everything below: [QED1224/Toontown-Resources](https://github.com/QED1224/Toontown-Resources),
-derived from decompiled Toontown Online source and cross-checked against
-the TTR wiki.
+## Source of truth: the TTR wiki
+
+**<https://toontownrewritten.wiki> is authoritative.** The
+[QED1224/Toontown-Resources](https://github.com/QED1224/Toontown-Resources)
+strategy guide this project started from describes *Toontown Online* and
+predates TTR's 3.0.0 / 3.3.0 / 4.0.0 rebalancing passes.
+
+Lure was the first table checked against the wiki, and the guide was wrong
+about nearly all of it:
+
+| | strategy guide (TTO) | TTR wiki |
+| --- | --- | --- |
+| Lure propAcc | 50/50/60/60/70/70/90 | 60/55/70/65/80/75/90 |
+| Organic propAcc | 60/60/70/70/80/80/100 | 70/65/80/75/90/85/100 |
+| Duration | not listed at all | 2/2/3/3/4/4/8 rounds |
+| Group levels | 7 only | 2, 4, 6, 7 |
+| luredRatio applies to | all but Lure/Toon-Up/Drop | Sound, and level-7 Throw/Squirt |
+| Early wake-up | `100 - 2*acc` every round | removed in 3.3.0 for every gag in the game |
+
+**Everything in `data/` other than `lure.py` still comes from the guide and
+has not been re-verified.** Assume it has the same problem. Fetching: the
+wiki 403s ordinary requests but serves its MediaWiki API:
+
+```
+curl "https://toontownrewritten.wiki/api.php?action=parse&page=Lure&prop=wikitext&format=json"
+```
 
 Every table in [solver/data/](../solver/data/) carries one of three tags:
 
@@ -45,13 +68,21 @@ happened twice — Throw L6 and Sound L5), don't average it out or pick the
   algorithm.
 - **Group attacks**: taken from Appendix B's Single/Group *Type* column,
   not inferred — 15 of them across the four departments.
-- **Lure wake-up**: `wakeupChance = 100 - 2*atkAcc` on the pre-bonus
-  accuracy, rolled each round after the timeout tick, with the cog
-  attacking the same round if the lure ends.
-- **`luredRatio` accuracy bonus** — `(lured cogs / total cogs) * 100`,
-  excluded for Lure/Toon-Up/Drop. Note this one *does* apply to a solo
-  toon: the earlier blanket claim that `bonus` is always 0 solo was right
-  about PrevHits and wrong about luredRatio.
+- **Lure**, wholesale, from the TTR wiki: durations 2/2/3/3/4/4/8 rounds,
+  base and organic accuracy, and which levels are group gags (2, 4, 6, 7).
+- **Lure no longer expires early.** TTR 3.3.0 removed early expiry for any
+  gag with base accuracy under 50%, and the lowest in the game is Small
+  Magnet at 55% — so a lure reliably runs its full duration. The
+  `wakeupChance = 100 - 2*atkAcc` machinery is still implemented and gated
+  behind `mechanics.lure_can_expire_early`, since the threshold is a
+  balance knob a future patch could cross.
+- **Lured cogs and other tracks**: Throw and Squirt are *guaranteed hits*
+  against a fully-lured target (and get the 50% `kbBonus`); Drop always
+  misses lured cogs; Sound wakes them without a damage bonus.
+- **`luredRatio` accuracy bonus** — `(lured cogs / total cogs) * 100`, given
+  to all Sound gags and to level-7 Throw/Squirt only. It *does* apply to a
+  solo toon: the earlier blanket claim that `bonus` is always 0 solo was
+  right about PrevHits and wrong about luredRatio.
 - **`kbBonus` damage** — Throw and Squirt deal an extra 50% against a lured
   target, applied after gag damage and the (solo-zero) hpBonus.
 - Trap gags can't be laid on an already-trapped or already-lured cog
@@ -89,26 +120,16 @@ happened twice — Throw L6 and Sound L5), don't average it out or pick the
    which aren't in `data/` yet. Defaulting to `trained_fraction=1.0` (max
    damage) is a reasonable stand-in for a maxed toon, which is probably
    what you want to solve for anyway.
-4. **Lure duration in rounds.** Wake-up itself is now wired in: a lured cog
-   ticks its timeout, then rolls `wakeupChance = 100 - 2*acc` against the
-   pre-bonus accuracy stored on `CogStatus.lure_acc_before_bonus`, and
-   attacks the same round if either ends the lure. What's missing is the
-   per-gag-level *duration*. The guide documents the round-counter mechanic
-   but never lists the values — its only durations are for Lure **SOS
-   cards** (Appendix D), which are a different thing.
-   `mechanics.LURE_ROUNDS_BY_LEVEL` is all `None` and
-   `lure_duration_rounds()` raises, so **any Lure action currently refuses
-   to resolve** unless run under `solver.testing.synthetic_lure_durations()`.
-
-   This is the single most load-bearing gap left. A maxed Lure toon has a
-   pre-bonus accuracy of ~105, so `wakeupChance` is negative — the cog never
-   wakes early, and duration is the *only* thing bounding how long a lure
-   lasts. Until it's real, any conclusion about how strong Lure is comes
-   from the made-up 3-round stand-in.
-5. **Whether damage ends a lure.** The guide is silent, so it isn't modeled
-   (`mechanics.LURE_ENDS_ON_DAMAGE = None`); a damaged but surviving cog
-   stays lured. Same for whether a cog that just detonated its trap remains
-   lured, and for `DROP_MISSES_LURED_COGS`.
+4. **Whether Throw/Squirt damage ends a lure.** The wiki names Sound
+   explicitly ("Lured Cogs are awakened by Sound gags without a damage
+   bonus"), and that is modeled. It does not say whether the Throw/Squirt
+   knockback also ends the lure, so that isn't modeled
+   (`mechanics.LURE_ENDS_ON_DAMAGE = None`) and a damaged but surviving cog
+   stays lured. Same open question for a cog that just detonated its trap.
+5. **The rest of `data/` has not been wiki-checked.** See the source note
+   at the top of this file. This is the largest known risk in the project
+   — larger than any individual `[TODO]` cell, because these values *look*
+   confirmed and aren't.
 6. **Toon-Up heal amounts** aren't transcribed —
    `simulator.apply_toon_action` raises `NotImplementedError` for
    `Track.TOON_UP`.

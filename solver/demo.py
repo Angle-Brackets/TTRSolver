@@ -3,15 +3,13 @@ Random-policy demo run: `python -m solver.demo`
 
 Plays one fight by picking uniformly at random from legal_actions() each
 round and printing the trace. This is a "does the round loop hold
-together" demo, not a solver and not a benchmark -- it runs under
-solver.testing.synthetic_battle_data(), so the cog hit rates AND the
-lure durations in the output are FAKE. Don't read anything strategic
-into the result.
+together" demo, not a solver and not a benchmark. For a policy that
+actually plays well, see `python -m solver.search.demo`.
 """
 import random
 
 from . import simulator
-from .testing import synthetic_battle_data, two_flunky_fight
+from .testing import two_flunky_fight
 
 MAX_ROUNDS = 20
 
@@ -40,8 +38,23 @@ def run_random_policy(seed: int = 0, max_rounds: int = MAX_ROUNDS) -> None:
         if not actions:
             print("No legal actions left, stopping.")
             break
-        action = random.choice(actions)
-        state, reward, done = simulator.step(state, action)
+
+        # Some legal actions still can't be resolved -- luring a trapped cog
+        # needs per-level Trap damage, which is [TODO]. Retry past those
+        # rather than dying, so the demo exercises the rest of the loop.
+        reward = done = None
+        candidates = list(actions)
+        while candidates:
+            action = random.choice(candidates)
+            try:
+                state, reward, done = simulator.step(state, action)
+                break
+            except NotImplementedError:
+                candidates.remove(action)
+        if done is None:
+            print("Every remaining action depends on [TODO] data, stopping.")
+            break
+
         print(f"round={state.round_num:2d}  action={action.track.value}/{action.level} "
               f"-> target={action.target_index}  reward={reward:+.1f}  "
               f"toon laff={state.toon.laff}  "
@@ -53,5 +66,4 @@ def run_random_policy(seed: int = 0, max_rounds: int = MAX_ROUNDS) -> None:
 
 
 if __name__ == "__main__":
-    with synthetic_battle_data():
-        run_random_policy()
+    run_random_policy()

@@ -15,16 +15,25 @@ from unittest import mock
 
 from solver import data, mechanics, simulator
 from solver.state import Action, BattleState, CogState, ToonState, Track
-from solver.testing import (synthetic_battle_data, synthetic_battle_data,
-                            synthetic_lure_durations, two_flunky_fight)
+from solver.testing import two_flunky_fight
 
 
-def _lured_cog(acc_before_bonus, rounds, level=2, hp=100):
-    """One Flunky, already lured with a known pre-bonus accuracy."""
+def _lured_cog(acc_before_bonus, rounds, level=2, hp=100, lure_level=2):
+    """One Flunky, already lured with a known pre-bonus accuracy.
+    `level` is the cog's level; `lure_level` is the Lure gag that landed."""
     cog = CogState(cog_type="flunky", department="bossbot", level=level,
                    hp=hp, max_hp=hp)
-    cog.status.apply_lure(acc_before_bonus, rounds)
+    cog.status.apply_lure(acc_before_bonus, rounds, lure_level)
     return cog
+
+
+def early_expiry_enabled(lure_level=2):
+    """Force a Lure gag under the 50% base-accuracy floor, which is the
+    only way TTR 3.3.0 leaves the wake-up roll reachable. No real gag
+    qualifies, so tests that exercise wake-up have to say so explicitly
+    rather than relying on it happening by default."""
+    return mock.patch.dict(mechanics.data.LURE_BASE_ACCURACY,
+                           {lure_level: 45})
 
 
 def _state_with(cogs):
@@ -43,8 +52,8 @@ class TestLureAccuracyBeforeBonus(unittest.TestCase):
         cog = CogState(cog_type="flunky", department="bossbot", level=12,
                        hp=1, max_hp=1)
         acc = mechanics.lure_accuracy_before_bonus(Track.LURE, 5, toon, [cog])
-        self.assertEqual(acc, 15)
-        self.assertEqual(mechanics.lure_wakeup_chance(acc), 70)
+        self.assertEqual(acc, 80 - 55)         # L5 propAcc 80, tgtDef -55
+        self.assertEqual(mechanics.lure_wakeup_chance(acc), 50)
 
     def test_components_are_propacc_trackexp_tgtdef(self):
         state = two_flunky_fight()          # maxed Lure -> trackExp 60
@@ -52,7 +61,7 @@ class TestLureAccuracyBeforeBonus(unittest.TestCase):
                        hp=1, max_hp=1)
         acc = mechanics.lure_accuracy_before_bonus(Track.LURE, 1,
                                                    state.toon, [cog])
-        self.assertEqual(acc, 50 + 60 - 25)
+        self.assertEqual(acc, 60 + 60 - 25)   # L1 propAcc 60 (TTR)
 
     def test_not_capped_at_95(self):
         """Documented reading: the 95 cap belongs to the post-bonus value
@@ -62,7 +71,7 @@ class TestLureAccuracyBeforeBonus(unittest.TestCase):
                        hp=1, max_hp=1)
         acc = mechanics.lure_accuracy_before_bonus(Track.LURE, 5,
                                                    state.toon, [cog])
-        self.assertEqual(acc, 70 + 60 - 2)                     # 128
+        self.assertEqual(acc, 80 + 60 - 2)     # L5 propAcc 80 (TTR)
         self.assertGreater(acc, data.ACCURACY_CAP)
         capped = mechanics.calc_toon_accuracy(Track.LURE, 5, state.toon, [cog])
         self.assertEqual(capped, data.ACCURACY_CAP)
@@ -73,7 +82,7 @@ class TestLureAccuracyBeforeBonus(unittest.TestCase):
                        hp=1, max_hp=1)
         acc = mechanics.lure_accuracy_before_bonus(
             Track.LURE, 1, state.toon, [cog], lure_tree_planted=True)
-        self.assertEqual(acc, 60 + 60 - 25)
+        self.assertEqual(acc, 70 + 60 - 25)   # organic L1 is 70
 
 
 class TestWakeupChance(unittest.TestCase):
@@ -103,26 +112,59 @@ class TestWakeupChance(unittest.TestCase):
             self.assertFalse(mechanics.lure_wakes_up(15))    # 70 < 70 is False
 
 
-class TestLureDurationIsTodo(unittest.TestCase):
-    def test_duration_raises_rather_than_guessing(self):
-        for level in range(1, 8):
-            with self.assertRaises(NotImplementedError):
-                mechanics.lure_duration_rounds(level)
+class TestLureDuration(unittest.TestCase):
+    """Durations are now [CONFIRMED] from the TTR wiki, so they resolve
+    instead of raising, and the synthetic stand-in is gone."""
 
-    def test_synthetic_durations_do_not_leak(self):
-        with synthetic_lure_durations(4):
-            self.assertEqual(mechanics.lure_duration_rounds(2), 4)
-        with self.assertRaises(NotImplementedError):
-            mechanics.lure_duration_rounds(2)
+    def test_durations_match_the_wiki(self):
+        expected = {1: 2, 2: 2, 3: 3, 4: 3, 5: 4, 6: 4, 7: 8}
+        for level, rounds in expected.items():
+            self.assertEqual(mechanics.lure_duration_rounds(level), rounds)
 
-    def test_lure_action_raises_without_duration_data(self):
-        """No stand-in installed: cog accuracy is real transcribed data now,
-        but lure duration is still [TODO], so a Lure must refuse to resolve
-        rather than pick a duration out of the air."""
+    def test_lure_action_resolves(self):
+        """A Lure used to raise for want of a duration. It shouldn't now."""
         state = two_flunky_fight()
-        with self.assertRaises(NotImplementedError):
-            simulator.step(state, Action(track=Track.LURE, level=2,
-                                         target_index=0))
+        state, _reward, _done = simulator.step(
+            state, Action(track=Track.LURE, level=2, target_index=None))
+        lured = [c for c in state.cogs if c.status.lured]
+        self.assertTrue(lured, "Small Magnet should have lured something")
+        for cog in lured:
+            # 2 rounds for Small Magnet, less the tick this round's own
+            # cog phase already took.
+            self.assertEqual(cog.status.lure_rounds_remaining, 1)
+            self.assertEqual(cog.status.lure_level, 2)
+
+
+class TestNoEarlyExpiry(unittest.TestCase):
+    """TTR 3.3.0 left early expiry reachable only for Lure gags with base
+    accuracy under 50%, and no such gag exists -- so lures now run their
+    full duration."""
+
+    def test_no_current_lure_gag_can_expire_early(self):
+        for level in range(1, 8):
+            self.assertFalse(mechanics.lure_can_expire_early(level))
+            self.assertFalse(mechanics.lure_can_expire_early(
+                level, lure_tree_planted=True))
+
+    def test_rule_would_re_enable_below_the_floor(self):
+        """Guard the threshold itself, so this stays a rule rather than a
+        hardcoded False if a future rebalance drops a gag under 50%."""
+        with mock.patch.dict(mechanics.data.LURE_BASE_ACCURACY, {3: 45}):
+            self.assertTrue(mechanics.lure_can_expire_early(3))
+            self.assertFalse(mechanics.lure_can_expire_early(4))
+
+    def test_lured_cog_never_wakes_before_its_rounds_run_out(self):
+        """Even with the wake-up roll rigged to always succeed."""
+        state = two_flunky_fight()
+        state, _r, _d = simulator.step(
+            state, Action(track=Track.LURE, level=2, target_index=None))
+        with mock.patch.object(mechanics, "lure_wakes_up", return_value=True):
+            state, _r, _d = simulator.step(
+                state, Action(track=Track.THROW, level=3, target_index=0))
+        survivors = [c for c in state.cogs if not c.status.is_dead]
+        for cog in survivors:
+            self.assertTrue(cog.status.lured,
+                            "lure ended early despite 3.3.0 removing that")
 
 
 class TestCogPhaseWakeUp(unittest.TestCase):
@@ -131,14 +173,15 @@ class TestCogPhaseWakeUp(unittest.TestCase):
     def _phase(self, state):
         # Force every cog attack that does happen to land, so "damage > 0"
         # is a clean proxy for "the cog attacked".
-        with synthetic_battle_data(), \
-                mock.patch.object(mechanics, "roll_hit", return_value=True):
+        with mock.patch.object(mechanics, "roll_hit", return_value=True):
             return simulator._resolve_cog_phase(state)
 
     def test_wakes_clears_state_and_attacks_the_same_round(self):
-        # pre-bonus accuracy 0 -> wakeupChance 100 -> always wakes.
+        # pre-bonus accuracy 0 -> wakeupChance 100 -> always wakes, but only
+        # once the gag is under the 3.3.0 base-accuracy floor.
         cog = _lured_cog(0, rounds=3)
-        dmg = self._phase(_state_with([cog]))
+        with early_expiry_enabled():
+            dmg = self._phase(_state_with([cog]))
         self.assertGreater(dmg, 0, "a woken cog must attack that same round")
         self.assertFalse(cog.status.lured)
         self.assertIsNone(cog.status.lure_acc_before_bonus)
@@ -178,10 +221,12 @@ class TestCogPhaseWakeUp(unittest.TestCase):
             self._phase(_state_with([cog]))
 
     def test_only_the_woken_cog_attacks(self):
+        # Both lured by a sub-floor gag so the wake-up roll is live at all;
+        # the first has wakeupChance 100, the second -110.
         woken = _lured_cog(0, rounds=3)         # wakes
         asleep = _lured_cog(105, rounds=3)      # holds
         state = _state_with([woken, asleep])
-        with synthetic_battle_data(), \
+        with early_expiry_enabled(), \
                 mock.patch.object(mechanics, "roll_hit", return_value=True), \
                 mock.patch.object(mechanics, "cog_attack_damage_and_accuracy",
                                   return_value=(7, 100)):
@@ -195,22 +240,21 @@ class TestLureLanding(unittest.TestCase):
     def test_successful_lure_records_pre_bonus_accuracy(self):
         state = two_flunky_fight()
         state.cogs[1].status.is_dead = True      # single target, level-2 cog
-        with synthetic_battle_data(), \
-                mock.patch.object(mechanics, "roll_hit", return_value=True):
+        with mock.patch.object(mechanics, "roll_hit", return_value=True):
             state, _r, _done = simulator.step(
                 state, Action(track=Track.LURE, level=2, target_index=0))
         cog = state.cogs[0]
         self.assertTrue(cog.status.lured)
-        # propAcc 50 + trackExp 60 + tgtDef(level 2) -5 = 105, uncapped.
-        self.assertEqual(cog.status.lure_acc_before_bonus, 105)
-        # 3 synthetic rounds, one already ticked by this round's cog phase.
-        self.assertEqual(cog.status.lure_rounds_remaining, 2)
+        # propAcc 55 (Small Magnet) + trackExp 60 + tgtDef(level 2) -5.
+        self.assertEqual(cog.status.lure_acc_before_bonus, 110)
+        self.assertEqual(cog.status.lure_level, 2)
+        # 2 rounds, one already ticked by this round's own cog phase.
+        self.assertEqual(cog.status.lure_rounds_remaining, 1)
 
     def test_missed_lure_records_nothing(self):
         state = two_flunky_fight()
         state.cogs[1].status.is_dead = True
-        with synthetic_battle_data(), \
-                mock.patch.object(mechanics, "roll_hit", return_value=False):
+        with mock.patch.object(mechanics, "roll_hit", return_value=False):
             state, _r, _done = simulator.step(
                 state, Action(track=Track.LURE, level=2, target_index=0))
         self.assertFalse(state.cogs[0].status.lured)
@@ -225,8 +269,7 @@ class TestLureLanding(unittest.TestCase):
                        hp=500, max_hp=500)
         state = _state_with([cog])
         random.seed(0)
-        with synthetic_battle_data(), \
-                mock.patch.object(mechanics, "roll_hit", return_value=True):
+        with mock.patch.object(mechanics, "roll_hit", return_value=True):
             state, _r, _done = simulator.step(
                 state, Action(track=Track.LURE, level=2, target_index=0))
             self.assertTrue(state.cogs[0].status.lured)
@@ -245,11 +288,12 @@ class TestLureLanding(unittest.TestCase):
         a solo toon can never do, so nothing here contradicts it."""
         cog = _lured_cog(105, rounds=1, hp=500)
         state = _state_with([cog])
-        with synthetic_lure_durations(3), synthetic_battle_data(), \
-                mock.patch.object(mechanics, "roll_hit", return_value=True):
+        with mock.patch.object(mechanics, "roll_hit", return_value=True):
             state, _r, _done = simulator.step(
                 state, Action(track=Track.LURE, level=2, target_index=0))
-        self.assertEqual(state.cogs[0].status.lure_rounds_remaining, 2)
+        # Refreshed to Small Magnet's 2 rounds, not 1 + 2; then this round's
+        # own cog phase ticks one off.
+        self.assertEqual(state.cogs[0].status.lure_rounds_remaining, 1)
 
 
 class TestLuredRatioBonus(unittest.TestCase):
@@ -261,44 +305,62 @@ class TestLuredRatioBonus(unittest.TestCase):
             cog = CogState(cog_type="flunky", department="bossbot", level=2,
                            hp=10, max_hp=10)
             if lured:
-                cog.status.apply_lure(105, 3)
+                cog.status.apply_lure(105, 3, 2)
             out.append(cog)
         return out
 
     def test_ratio(self):
+        # Sound gets it at every level; Throw/Squirt only at level 7.
         self.assertEqual(
-            mechanics.calc_lured_ratio_bonus(Track.THROW,
+            mechanics.calc_lured_ratio_bonus(Track.SOUND, 3,
                                              self._cogs([True, False])), 50)
         self.assertEqual(
-            mechanics.calc_lured_ratio_bonus(Track.SQUIRT,
+            mechanics.calc_lured_ratio_bonus(Track.SQUIRT, 7,
                                              self._cogs([True, True])), 100)
         self.assertEqual(
-            mechanics.calc_lured_ratio_bonus(Track.SOUND,
+            mechanics.calc_lured_ratio_bonus(Track.SOUND, 1,
                                              self._cogs([False, False])), 0)
+
+    def test_only_sound_and_level_7_throw_squirt_qualify(self):
+        """[CONFIRMED] TTR wiki: the bonus goes to "all Sound gags, and
+        level 7 Throw or Squirt gags". The strategy guide's rule was
+        "everything except Lure/Toon-Up/Drop", which wrongly gave it to
+        ordinary single-target Throw/Squirt and to Trap."""
+        self.assertTrue(mechanics.gets_lured_ratio(Track.SOUND, 1))
+        self.assertTrue(mechanics.gets_lured_ratio(Track.SOUND, 7))
+        self.assertTrue(mechanics.gets_lured_ratio(Track.THROW, 7))
+        self.assertTrue(mechanics.gets_lured_ratio(Track.SQUIRT, 7))
+
+        for level in range(1, 7):
+            self.assertFalse(mechanics.gets_lured_ratio(Track.THROW, level))
+            self.assertFalse(mechanics.gets_lured_ratio(Track.SQUIRT, level))
+        for track in (Track.LURE, Track.TOON_UP, Track.DROP, Track.TRAP):
+            for level in range(1, 8):
+                self.assertFalse(mechanics.gets_lured_ratio(track, level))
 
     def test_excluded_tracks(self):
         cogs = self._cogs([True, True])
-        for track in (Track.LURE, Track.TOON_UP, Track.DROP):
-            self.assertEqual(mechanics.calc_lured_ratio_bonus(track, cogs), 0)
+        for track in (Track.LURE, Track.TOON_UP, Track.DROP, Track.TRAP):
+            self.assertEqual(
+                mechanics.calc_lured_ratio_bonus(track, 3, cogs), 0)
 
     def test_dead_cogs_are_out_of_the_denominator(self):
         cogs = self._cogs([True, False])
         cogs[1].status.is_dead = True
         self.assertEqual(
-            mechanics.calc_lured_ratio_bonus(Track.THROW, cogs), 100)
+            mechanics.calc_lured_ratio_bonus(Track.SOUND, 3, cogs), 100)
 
     def test_feeds_into_toon_accuracy(self):
         state = two_flunky_fight()
         cogs = self._cogs([True, False])
-        base = mechanics.calc_toon_accuracy(Track.DROP, 1, state.toon,
-                                            [cogs[0]], all_cogs=cogs)
+        # Level-3 Throw does NOT get luredRatio: 75 propAcc + 60 trackExp - 5.
+        plain = mechanics.calc_toon_accuracy(Track.THROW, 3, state.toon,
+                                             [cogs[1]], all_cogs=cogs)
+        self.assertEqual(plain, min(75 + 60 - 5, data.ACCURACY_CAP))
+        # Sound does: 95 + 60 - 5 + 50, capped.
         boosted = mechanics.calc_toon_accuracy(Track.SOUND, 1, state.toon,
                                                cogs, all_cogs=cogs)
-        # Drop is excluded from luredRatio: 50 propAcc + 0 trackExp - 5.
-        self.assertEqual(base, 50 - 5)
-        # Sound is not: 95 + 60 - 5 + 50, capped.
         self.assertEqual(boosted, data.ACCURACY_CAP)
-
 
 class TestKnockbackBonus(unittest.TestCase):
     """kbBonus = totalDmgs * 0.50, Throw/Squirt on a lured target."""
@@ -317,8 +379,7 @@ class TestKnockbackBonus(unittest.TestCase):
         base = mechanics.calc_toon_damage(Track.THROW, 3)     # 17
         lured = _lured_cog(105, rounds=3, hp=200)
         state = _state_with([lured])
-        with synthetic_battle_data(), \
-                mock.patch.object(mechanics, "roll_hit", return_value=True), \
+        with mock.patch.object(mechanics, "roll_hit", return_value=True), \
                 mock.patch.object(mechanics, "cog_attack_damage_and_accuracy",
                                   return_value=(0, 100)):
             state, _r, _done = simulator.step(
@@ -332,8 +393,7 @@ class TestKnockbackBonus(unittest.TestCase):
         cog = CogState(cog_type="flunky", department="bossbot", level=2,
                        hp=200, max_hp=200)
         state = _state_with([cog])
-        with synthetic_battle_data(), \
-                mock.patch.object(mechanics, "roll_hit", return_value=True), \
+        with mock.patch.object(mechanics, "roll_hit", return_value=True), \
                 mock.patch.object(mechanics, "cog_attack_damage_and_accuracy",
                                   return_value=(0, 100)):
             state, _r, _done = simulator.step(
@@ -353,8 +413,7 @@ class TestDamageDoesNotEndLure(unittest.TestCase):
     def test_surviving_damaged_cog_keeps_its_lure(self):
         lured = _lured_cog(105, rounds=3, hp=200)
         state = _state_with([lured])
-        with synthetic_battle_data(), \
-                mock.patch.object(mechanics, "roll_hit", return_value=True), \
+        with mock.patch.object(mechanics, "roll_hit", return_value=True), \
                 mock.patch.object(mechanics, "cog_attack_damage_and_accuracy",
                                   return_value=(0, 100)):
             state, _r, _done = simulator.step(
@@ -364,8 +423,7 @@ class TestDamageDoesNotEndLure(unittest.TestCase):
     def test_killed_lured_cog_has_its_lure_cleared(self):
         lured = _lured_cog(105, rounds=3, hp=5)
         state = _state_with([lured])
-        with synthetic_battle_data(), \
-                mock.patch.object(mechanics, "roll_hit", return_value=True):
+        with mock.patch.object(mechanics, "roll_hit", return_value=True):
             state, _r, _done = simulator.step(
                 state, Action(track=Track.THROW, level=3, target_index=0))
         self.assertTrue(state.cogs[0].status.is_dead)

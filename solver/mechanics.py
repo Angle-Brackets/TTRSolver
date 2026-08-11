@@ -73,12 +73,21 @@ def calc_prev_hits_bonus(track: Track) -> int:
     return 0
 
 
-# Tracks the luredRatio bonus does NOT apply to. [CONFIRMED]:
-# "(Note: The Lured Ratio bonus does not apply to Lure, Toon-up or Drop gags.)"
-_NO_LURED_RATIO_TRACKS = (Track.LURE, Track.TOON_UP, Track.DROP)
+def gets_lured_ratio(track: Track, level: int) -> bool:
+    """Which gags receive the luredRatio bonus. [CONFIRMED] TTR wiki
+    (Accuracy#luredRatio): "given to all Sound gags, and level 7 Throw or
+    Squirt gags when there is a mixed set of lured and un-lured Cogs".
+
+    Narrower than the strategy guide's rule, which was "everything except
+    Lure, Toon-Up and Drop" -- that wrongly handed the bonus to ordinary
+    single-target Throw/Squirt and to Trap.
+    """
+    if track == Track.SOUND:
+        return True
+    return level == 7 and track in (Track.THROW, Track.SQUIRT)
 
 
-def calc_lured_ratio_bonus(track: Track, all_cogs) -> int:
+def calc_lured_ratio_bonus(track: Track, level: int, all_cogs) -> int:
     """luredRatio half of the `bonus` term. [CONFIRMED]:
 
         luredRatio = ([number of cogs lured] / [total cogs]) * 100
@@ -95,7 +104,7 @@ def calc_lured_ratio_bonus(track: Track, all_cogs) -> int:
     lured -> 33.33) is rounded. We truncate. Only ever a 1-point
     difference, and only for cog counts that don't divide 100.
     """
-    if track in _NO_LURED_RATIO_TRACKS:
+    if not gets_lured_ratio(track, level):
         return 0
     if not all_cogs:
         return 0
@@ -106,7 +115,7 @@ def calc_lured_ratio_bonus(track: Track, all_cogs) -> int:
     return int(lured * 100 / len(active))
 
 
-def calc_bonus(track: Track, all_cogs=None) -> int:
+def calc_bonus(track: Track, level: int, all_cogs=None) -> int:
     """The full `bonus` term of atkAcc = propAcc + trackExp + tgtDef + bonus.
 
     `all_cogs` is every cog in the battle. It defaults to None, meaning
@@ -115,7 +124,29 @@ def calc_bonus(track: Track, all_cogs=None) -> int:
     Deliberately NOT defaulted to the attack's targets: for a single-target
     attack that would compute the ratio over one cog and read 100.
     """
-    return calc_prev_hits_bonus(track) + calc_lured_ratio_bonus(track, all_cogs)
+    return (calc_prev_hits_bonus(track)
+            + calc_lured_ratio_bonus(track, level, all_cogs))
+
+
+def lure_hit_override(track: Track, target_cogs):
+    """Accuracy forced by the targets' lure state, or None for "roll it".
+    [CONFIRMED] TTR wiki (Lure):
+
+      - Throw and Squirt get "a 50% damage bonus on guaranteed hits"
+        against lured cogs -> 100.
+      - "Drop gags always miss on lured Cogs" -> 0.
+
+    Only applies when EVERY target is lured. The wiki's own trivia is
+    explicit that a mixed set of lured and un-lured cogs is not guaranteed
+    to hit, so a group gag over a partly-lured battle rolls normally.
+    """
+    if not target_cogs or not all(c.status.lured for c in target_cogs):
+        return None
+    if track in (Track.THROW, Track.SQUIRT):
+        return 100
+    if track == Track.DROP:
+        return 0
+    return None
 
 
 def calc_toon_accuracy(track: Track, level: int, toon: ToonState,
@@ -129,10 +160,15 @@ def calc_toon_accuracy(track: Track, level: int, toon: ToonState,
     it the bonus term is 0, as it was before luredRatio was modeled."""
     if track == Track.TRAP:
         return 100  # [CONFIRMED] trap is always-hit
+
+    forced = lure_hit_override(track, target_cogs)
+    if forced is not None:
+        return forced
+
     acc = (calc_prop_acc(track, level, lure_tree_planted)
            + calc_track_exp(toon, track)
            + calc_tgt_def(track, target_cogs)
-           + calc_bonus(track, all_cogs))
+           + calc_bonus(track, level, all_cogs))
     return min(acc, data.ACCURACY_CAP)
 
 
@@ -316,59 +352,43 @@ def lure_wakes_up(atk_acc_before_bonus: int) -> bool:
     return random.randint(0, 99) < chance
 
 
-# [TODO] Lure duration, in rounds, by gag level.
-#
-# The MECHANIC is confirmed: the source's per-cog lure record carries a
-# round counter (`currentlyLuredSuits[suitId][0]`), the wake-up check is
-# gated on that counter still being > 0, and a `__updateLureTimeouts()`
-# pass runs once per round (visible in the guide's battle debug log,
-# between the toon attacks and the cog attacks).
-#
-# The NUMBERS are not in the guide. It gives lure durations only for Lure
-# SOS *cards* (Appendix D: 2-4 rounds; Lil Oldman 15 after the 2016
-# update). Those are SOS cards, not gags -- do not copy them onto gag
-# levels. Fill this in from a confirmed source and flip the tag; until
-# then lure_duration_rounds() raises, per the project's no-guessing rule.
-#
-# This belongs in solver/data/gags.py; it is parked here only because
-# solver/data/ was being rewritten by another agent when this landed.
-LURE_ROUNDS_BY_LEVEL = {1: None, 2: None, 3: None, 4: None,
-                        5: None, 6: None, 7: None}
+# Lure duration and early expiry now come from data/lure.py, which is
+# [CONFIRMED] against the TTR wiki. See that module for the rebalancing
+# history that makes the old strategy-guide values wrong.
+LURE_ROUNDS_BY_LEVEL = dict(data.LURE_ROUNDS_BY_LEVEL)
 
 
 def lure_duration_rounds(level: int) -> int:
-    """Rounds a Lure of this level holds for (cog phases the cog skips).
-    Raises while LURE_ROUNDS_BY_LEVEL is [TODO] rather than invent one.
+    """Rounds a Lure of this level holds for -- cog phases the cog skips.
+    [CONFIRMED] TTR wiki: 2/2/3/3/4/4/8 by level.
 
-    solver.testing.synthetic_lure_durations() patches in an obviously-fake
-    uniform duration so fights can still be run end to end. It is now the
-    only such stand-in left -- real cog accuracy has been transcribed."""
+    Note 3.0.0: "Lure gags no longer stack rounds." Re-luring an already
+    lured cog overwrites its counter rather than adding to it, which is
+    what CogStatus.apply_lure does.
+    """
     rounds = LURE_ROUNDS_BY_LEVEL.get(level)
     if rounds is None:
-        raise NotImplementedError(
-            f"Lure duration for level {level} is [TODO] -- the strategy "
-            f"guide documents the round counter but never lists the "
-            f"per-gag-level values (its only durations are for Lure SOS "
-            f"cards). Fill in mechanics.LURE_ROUNDS_BY_LEVEL from a "
-            f"confirmed source, or run under "
-            f"solver.testing.synthetic_lure_durations()."
-        )
+        raise NotImplementedError(f"No lure duration for gag level {level}.")
     return rounds
 
 
-# [TODO] Does damaging a lured cog end the lure?
-#
-# Deliberately left unimplemented, and left as None rather than a guess.
-# The guide is silent. What it DOES confirm is only adjacent:
-#   - Throw/Squirt against a lured target get kbBonus, which it once calls
-#     "Lure knockback bonus damage" (see calc_kb_bonus). "Knockback"
-#     implies the cog is knocked out of the lure, but the guide never
-#     says the lured state ends, and never gives the rule for the other
-#     damage tracks.
-#   - Drop SOS cards are described as hitting "all unlured cogs", and
-#     luredRatio explicitly excludes Drop -- suggestive that Drop misses
-#     lured cogs, but stated only for SOS cards, not Drop gags.
-# The two documented ways a lure ends are therefore the only two modeled:
-# the per-round wake-up roll, and the round counter running out.
+def lure_can_expire_early(level: int, lure_tree_planted: bool = False) -> bool:
+    """Whether a lure of this level can end before its rounds run out.
+
+    [CONFIRMED] TTR 3.3.0: "Lure gags with a base accuracy below 50% no
+    longer have a chance for Lure effects to expire early."
+
+    In current TTR this is False for every Lure gag -- the lowest base
+    accuracy in the game is Small Magnet at 55%. So the wake-up roll below
+    is unreachable in practice, and a lure reliably lasts its full
+    duration. The threshold is coded rather than hardcoded to False
+    because it is a rebalancing knob: a future patch that drops a gag
+    under 50% would switch early expiry back on for it.
+    """
+    table = (data.LURE_ORGANIC_ACCURACY if lure_tree_planted
+             else data.LURE_BASE_ACCURACY)
+    return table[level] < data.EARLY_EXPIRY_ACCURACY_FLOOR
+
+
 LURE_ENDS_ON_DAMAGE = None
 DROP_MISSES_LURED_COGS = None

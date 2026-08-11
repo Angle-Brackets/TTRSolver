@@ -134,6 +134,8 @@ def lure_end_probability(cog: CogState) -> float:
     """
     if cog.status.lure_rounds_remaining <= 0:
         return 1.0
+    if not mechanics.lure_can_expire_early(cog.status.lure_level):
+        return 0.0     # TTR 3.3.0: no current Lure gag can expire early
     acc = cog.status.lure_acc_before_bonus
     if acc is None:
         raise ValueError(
@@ -268,7 +270,7 @@ def state_key(state: BattleState) -> Tuple:
                      for (t, lvl), n in state.toon.gag_counts.items() if n > 0)),
         tuple((c.cog_type, c.department, c.level, c.hp, c.status.is_dead,
                c.status.lured, c.status.lure_rounds_remaining,
-               c.status.lure_acc_before_bonus,
+               c.status.lure_acc_before_bonus, c.status.lure_level,
                c.status.trapped, c.status.trap_level)
               for c in state.cogs),
     )

@@ -1,62 +1,20 @@
 """
-SYNTHETIC STAND-IN DATA -- NOT GAME ACCURATE. FOR EXERCISING CODE PATHS ONLY.
+Shared battle fixtures for tests and demos.
 
-Where a table is still [TODO], the mechanics deliberately raise rather than
-guess (see docs/data-confidence.md). That's the right default, but it also
-makes it impossible to run a fight end to end, and therefore impossible to
-smoke-test the round loop. This module is the one sanctioned place to paper
-over such a gap: each stand-in is a context manager that restores the real
-value on exit, so a fake can never leak into a solver run by accident.
+This module used to also hold synthetic stand-ins for [TODO] data --
+`synthetic_bossbot_accuracy()` and `synthetic_lure_durations()`. Both are
+gone: their real values have been transcribed (cog accuracy from the
+strategy guide's appendices, lure durations from the TTR wiki), and the
+project rule is that a stand-in is deleted the moment its data lands.
+Leaving one in place stops being scaffolding and starts overwriting good
+data with bad.
 
-Nothing here is a source of truth. Delete a helper the moment its real
-numbers land in data/ -- a stand-in that outlives its gap stops being
-scaffolding and starts overwriting good data with bad, which is worse than
-having no stand-in at all.
-
-`synthetic_bossbot_accuracy()` was removed for exactly that reason once the
-real Appendix C tables were transcribed. Lure duration is the only gap left
-that blocks a full fight.
+If you need a new one, follow the same shape they had: a context manager
+that restores the real value on exit, an obviously-fake value that nobody
+could mistake for transcribed data, and a test asserting it doesn't leak.
 """
-from contextlib import contextmanager
-
 from . import data
-from . import mechanics
 from .state import ToonState, CogState, BattleState, Track
-
-# Flat 3 rounds for every Lure level -- deliberately uniform across levels
-# so it can't be mistaken for a real table (real Lure duration certainly
-# varies with gag level). The strategy guide never lists per-gag-level lure
-# durations, so mechanics.lure_duration_rounds() raises without this patch;
-# see the [TODO] on mechanics.LURE_ROUNDS_BY_LEVEL.
-_FAKE_LURE_ROUNDS = 3
-
-
-@contextmanager
-def synthetic_lure_durations(rounds: int = _FAKE_LURE_ROUNDS):
-    """Temporarily install a fake per-level Lure duration so fights that
-    use Lure can run to completion. Restores the real ([TODO] = all None)
-    table on exit."""
-    previous = dict(mechanics.LURE_ROUNDS_BY_LEVEL)
-    for level in mechanics.LURE_ROUNDS_BY_LEVEL:
-        mechanics.LURE_ROUNDS_BY_LEVEL[level] = rounds
-    try:
-        yield
-    finally:
-        mechanics.LURE_ROUNDS_BY_LEVEL.clear()
-        mechanics.LURE_ROUNDS_BY_LEVEL.update(previous)
-
-
-@contextmanager
-def synthetic_battle_data():
-    """Every synthetic stand-in at once -- what a full fight currently
-    needs. FAKE DATA; see the module docstring.
-
-    Down to just lure durations now that real cog accuracy has landed. Kept
-    as a named alias so callers don't have to track which gaps are still
-    open; when the last one closes, this becomes a no-op and should go."""
-    with synthetic_lure_durations():
-        yield
-
 
 def two_flunky_fight() -> BattleState:
     """A small, fixed scenario used by the smoke test and the demo script:

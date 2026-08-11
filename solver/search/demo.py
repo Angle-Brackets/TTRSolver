@@ -10,19 +10,17 @@ column: a gap near zero means the decision didn't matter and you shouldn't
 read anything into the choice; a large gap means the position has a real
 right answer.
 
-Cog frequencies, damage, and accuracy are now the real transcribed tables,
-so the fights themselves are game-accurate. One caveat remains: Lure
-duration is still [TODO], so this runs under
-solver.testing.synthetic_battle_data(), which patches in a flat 3-round
-lure. Any conclusion about how good Lure is depends on that made-up number
--- everything else here does not.
+Every number here is transcribed data -- no synthetic stand-ins remain.
+Cog frequency/damage/accuracy come from the strategy guide's appendices
+(still pending a wiki re-check, see docs/data-confidence.md); Lure
+durations and accuracy come from the TTR wiki.
 """
 import argparse
 import random
 
 from .. import data, simulator
 from ..state import Track, ToonState, CogState, BattleState
-from ..testing import synthetic_battle_data, two_flunky_fight
+from ..testing import two_flunky_fight
 from . import expectimax
 
 MAX_ROUNDS = 30
@@ -172,13 +170,12 @@ def main() -> None:
                              "discriminates between policies")
     args = parser.parse_args()
 
-    with synthetic_battle_data():
-        if args.compare:
-            compare(trials=args.trials, depth=args.depth,
-                    scenario=args.scenario)
-        else:
-            narrate_fight(depth=args.depth, seed=args.seed,
-                          scenario=args.scenario)
+    if args.compare:
+        compare(trials=args.trials, depth=args.depth,
+                scenario=args.scenario)
+    else:
+        narrate_fight(depth=args.depth, seed=args.seed,
+                      scenario=args.scenario)
 
 
 if __name__ == "__main__":
