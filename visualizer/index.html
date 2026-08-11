@@ -173,7 +173,7 @@ function NodeCard({node, selected, busy, onSelect}) {
   const cls = "node" + (selected ? " sel" : "") + (node.onPath ? " path" : "");
 
   return (
-    <div className={cls} style={{left:node.x, top:node.y}}
+    <div className={cls} data-nodeid={node.id} style={{left:node.x, top:node.y}}
          onClick={(e) => { e.stopPropagation(); onSelect(node); }}>
       <div className="top">
         <span className="dot" style={{background:color}} />
@@ -330,7 +330,9 @@ function App({bridge, catalogue}) {
   const [selected, setSelected] = useState(null);
   const [, bump] = useState(0);
   const [busyId, setBusyId] = useState(null);
+  const [focusId, setFocusId] = useState(null);
   const [err, setErr] = useState(null);
+  const canvasRef = useRef(null);
   const rerender = () => bump(v => v + 1);
 
   const cogTypes = depts[dept];
@@ -349,6 +351,7 @@ function App({bridge, catalogue}) {
 
   const toggle = (node) => {
     setSelected(node);
+    setFocusId(node.id);
     if (node.kind === "terminal" || node.kind === "bucket") { rerender(); return; }
     if (!node.open && !node.children) {
       // First expansion calls into Python and blocks; paint the spinner
@@ -369,7 +372,7 @@ function App({bridge, catalogue}) {
                  gags: DEFAULT_GAGS};
     const r = mkNode(call(bridge.api_root, cfg), null);
     expandInto(r);
-    setRoot(r); setSelected(r); rerender();
+    setRoot(r); setSelected(r); setFocusId(r.id); rerender();
   };
   const expandInto = (r) => { const k = expand(r); if (k) r.open = true; };
 
@@ -384,24 +387,31 @@ function App({bridge, catalogue}) {
     clear(root);
 
     setBusyId(root.id);
+    const spine = [];
     let node = root, guard = 0;
     while (node && guard++ < 8) {
       node.onPath = true;
+      spine.push(node);
       const kids = expand(node);
       if (!kids || !kids.length) break;
       node.open = true;
 
       if (node.kind === "decision") {
         const best = kids.find(k => k.best) || kids[0];
-        best.onPath = true; node = best;
+        best.onPath = true; spine.push(best); node = best;
       } else if (node.kind === "action") {
         const likeliest = kids[0];      // expand_action sorts by probability
-        likeliest.onPath = true;
+        likeliest.onPath = true; spine.push(likeliest);
         if (likeliest.kind !== "decision") { break; }
         node = likeliest;
       } else break;
     }
     setBusyId(null);
+    // Focus the first move rather than the root: on-path children sort
+    // first, so the spine runs along the top of the canvas and centring the
+    // root would leave the plan itself off-screen above.
+    setFocusId((spine[1] || root).id);
+    setSelected(spine[1] || root);
     rerender();
   };
 
@@ -409,6 +419,13 @@ function App({bridge, catalogue}) {
     const walk = (n) => { n.open = false; n.onPath = false; (n.children || []).forEach(walk); };
     if (root) { walk(root); root.open = true; rerender(); }
   };
+
+  useEffect(() => {
+    if (focusId == null || !canvasRef.current) return;
+    const el = canvasRef.current.querySelector(`[data-nodeid="${focusId}"]`);
+    if (el) el.scrollIntoView({block: "center", inline: "start",
+                               behavior: "smooth"});
+  });
 
   if (!root) return <div id="boot">Building tree…</div>;
 
@@ -475,7 +492,7 @@ function App({bridge, catalogue}) {
         </div>}
 
       <main>
-        <div id="canvas" onClick={() => setSelected(root)}>
+        <div id="canvas" ref={canvasRef} onClick={() => setSelected(root)}>
           <div style={{position:"relative", width, height}}>
             <svg width={width} height={height}
                  style={{position:"absolute", left:0, top:0, pointerEvents:"none"}}>
