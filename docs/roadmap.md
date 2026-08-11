@@ -54,18 +54,32 @@ group attacks.
 
 ## 3. Make the search fast enough to go deeper
 
-A depth-2 evaluation on a three-cog fight takes ~1.3s. That's after the big
-win — `copy.deepcopy` was 91% of the runtime, and replacing it with
-`BattleState.clone()` cut a depth-2 search from 35s to 1.3s. Depth 3 is
-usable; depth 4 still isn't.
+Where it stands: a depth-2 evaluation on a three-cog fight is ~1.0s, and
+the 24-fight benchmark runs in 9s across 12 cores where it used to take 45.
 
-Remaining options, cheapest first: cache `cog_damage_distribution` per
-`(department, cog_type, level)` — it doesn't depend on mutable state but is
-recomputed at every node; prune outcome branches below an epsilon
+What got it there, in order of how much it bought:
+
+- **`copy.deepcopy` was 91% of runtime.** `BattleState.clone()` took a
+  depth-2 search from 35s to 1.3s. The lesson worth keeping: profile first.
+  The algorithmic suspect was not the problem either time.
+- **Caching attack distributions.** `cog_attack_outcomes` depends only on
+  (department, type, level), and a depth-2 search called it 11,111 times
+  for three distinct cogs. 1.34s -> 1.03s.
+- **Parallel fights.** Benchmarks and sweeps play independent fights, so
+  `solver/search/parallel.py` spreads them over cores: ~5x on 12 cores
+  (not 12x -- the random policy is nearly free, so half the batch is
+  trivial, and 24 fights over 12 workers is coarse).
+
+Left to try, cheapest first: prune outcome branches below an epsilon
 probability (the damage distribution has a long, nearly irrelevant tail);
-order actions by a quick static score so an alpha-beta-style cutoff has
-something to work with. Profile before each — the deepcopy result is a
-reminder that the obvious algorithmic suspect wasn't the problem.
+order actions by a static score so an alpha-beta-style cutoff has something
+to work with; and only then consider splitting a single search at the root,
+which `parallel.rank_actions` does but which loses to the serial version
+unless you already have a warm pool -- workers can't share the memo, so they
+redo each other's transpositions.
+
+**None of this helps the visualizer.** Pyodide is single-threaded and has no
+`multiprocessing`; the page's per-node latency needs web workers instead.
 
 ## 4. Validate the solver's advice against real play
 

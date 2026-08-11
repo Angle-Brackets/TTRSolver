@@ -44,24 +44,47 @@ DEFAULT_OFFSETS = (-20, -10, -5, 0, 5, 10, 20)
 def perturbed_cog_accuracy(offset: int):
     """Shift every cog accuracy cell by `offset` points, clamped to 0-100.
 
-    Restores the real tables on exit. An offset of 0 still round-trips the
-    tables, so a bug here shows up as the baseline disagreeing with itself.
+    Cog, CogAttack and Department are frozen, so this builds perturbed
+    copies and swaps the registry rather than mutating cells in place, then
+    puts the real one back on exit. Two things have to come with it:
+
+      * both bindings of COG_DEPARTMENTS -- data.cogs owns the dict and
+        data/__init__ re-exports it, and callers use either;
+      * outcomes._attack_outcomes' cache, which is keyed by
+        (department, type, level) and would happily serve pre-perturbation
+        rows all sweep long.
+
+    Miss either and the sweep reports a perfectly flat, perfectly plausible,
+    entirely wrong result -- which is exactly what a sensitivity analysis
+    must not do.
     """
-    saved: List[Tuple[dict, str, list]] = []
-    for cogs in data.COG_DEPARTMENTS.values():
-        for table in cogs.values():
-            acc = table.get("accuracy")
-            if not acc:
-                continue
-            for attack, row in acc.items():
-                saved.append((acc, attack, list(row)))
-                acc[attack] = [None if v is None else max(0, min(100, v + offset))
-                               for v in row]
+    from dataclasses import replace
+
+    from .. import data as data_pkg
+    from ..data import cogs as cogs_mod
+    from .. import outcomes as outcomes_mod
+
+    def shift(row):
+        return tuple(None if v is None else max(0, min(100, v + offset))
+                     for v in row)
+
+    perturbed = {}
+    for key, dept in cogs_mod.COG_DEPARTMENTS.items():
+        perturbed[key] = replace(dept, cogs=tuple(
+            replace(cog, attacks=tuple(
+                replace(a, accuracy=shift(a.accuracy)) for a in cog.attacks))
+            for cog in dept.cogs))
+
+    real = cogs_mod.COG_DEPARTMENTS
+    cogs_mod.COG_DEPARTMENTS = perturbed
+    data_pkg.COG_DEPARTMENTS = perturbed
+    outcomes_mod._attack_outcomes.cache_clear()
     try:
         yield
     finally:
-        for acc, attack, row in saved:
-            acc[attack] = row
+        cogs_mod.COG_DEPARTMENTS = real
+        data_pkg.COG_DEPARTMENTS = real
+        outcomes_mod._attack_outcomes.cache_clear()
 
 
 def _action_key(action) -> Optional[Tuple]:
@@ -115,8 +138,18 @@ def policy_stability(scenario: str, depth: int, offsets, seed: int) -> Dict:
     return {"states": len(states), "rows": rows}
 
 
-def outcome_sensitivity(scenario: str, depth: int, offsets, trials: int) -> List[Dict]:
-    """Win rate and mean laff remaining under each offset."""
+def outcome_sensitivity(scenario: str, depth: int, offsets, trials: int,
+                         workers: Optional[int] = None) -> List[Dict]:
+    """Win rate and mean laff remaining under each offset.
+
+    Serial only. The fights would parallelise, but each offset needs the
+    accuracy tables perturbed *in the worker*, and `perturbed_cog_accuracy`
+    mutates module state in this process -- a spawned worker would import a
+    clean copy and quietly measure the baseline every time. Getting that
+    wrong would produce a flat, entirely believable, entirely wrong result,
+    so it stays single-process until the offset is passed through to the
+    workers explicitly.
+    """
     from .demo import _play
 
     rows = []

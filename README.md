@@ -54,7 +54,11 @@ python -m solver.search.demo                         # solver plays a fight
 python -m solver.search.demo --compare --scenario pressed
 python -m solver.demo                                # random-policy baseline
 python -m visualizer.serve                           # interactive tree in a browser
+python -m solver.search.sensitivity                  # how much the data gaps matter
 ```
+
+`--compare` spreads its fights across cores (`--workers N` to pin it). Seeds
+are the fight index, so the numbers don't depend on the worker count.
 
 On the `pressed` scenario — a mixed Bossbot group (Flunky L4, Pencil
 Pusher L5, Yesman L6) against a 45-laff toon with a tight gag supply —

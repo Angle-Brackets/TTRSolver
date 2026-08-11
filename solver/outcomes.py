@@ -45,6 +45,7 @@ but it would make every sampled step pay for building the full
 distribution -- far too slow for the rollout-heavy uses `step` exists for --
 and it would make simulator and outcomes mutually recursive.)
 """
+from functools import lru_cache
 from typing import Dict, List, Optional, Tuple
 
 from . import data
@@ -74,16 +75,26 @@ def cog_attack_outcomes(cog: CogState) -> List[Tuple[float, str, int, bool]]:
     """(probability, attack_name, damage, hit) for one cog's turn, assuming
     it attacks at all.
 
+    Depends only on the cog's type and level -- not on its HP, lure or trap
+    state -- so the real work is cached. A depth-2 search called this 11,111
+    times for three distinct cogs.
+
     This is the unmerged form of `cog_damage_distribution` below. The search
     only ever needs the damage number, but anything showing a human what
     happened needs to say *which* attack -- "Pencil Pusher used Fountain Pen
     for 6" rather than "6 damage from somewhere".
     """
-    spec = data.cog(cog.department, cog.cog_type)
-    index = spec.rel_index(cog.level)
+    return _attack_outcomes(cog.department, cog.cog_type, cog.level)
+
+
+@lru_cache(maxsize=None)
+def _attack_outcomes(department: str, cog_type: str,
+                      level: int) -> Tuple[Tuple[float, str, int, bool], ...]:
+    spec = data.cog(department, cog_type)
+    index = spec.rel_index(level)
     attacks = spec.modeled_attacks
 
-    freqs = {a.name: spec.frequency_at(a.name, cog.level) for a in attacks}
+    freqs = {a.name: spec.frequency_at(a.name, level) for a in attacks}
     total_freq = sum(freqs.values())
     if total_freq != 100:
         # mechanics.pick_cog_attack samples cumulatively and falls through to
@@ -101,8 +112,8 @@ def cog_attack_outcomes(cog: CogState) -> List[Tuple[float, str, int, bool]]:
         # Individual cells can be a documented gap even when the rest of the
         # cog is filled in; these accessors raise naming the cell rather than
         # letting a None reach the arithmetic.
-        p_hit = spec.accuracy_at(attack.name, cog.level) / 100.0
-        entry = spec.damage_at(attack.name, cog.level)
+        p_hit = spec.accuracy_at(attack.name, level) / 100.0
+        entry = spec.damage_at(attack.name, level)
 
         if isinstance(entry, int):
             damage_options = [(1.0, entry)]
@@ -117,7 +128,7 @@ def cog_attack_outcomes(cog: CogState) -> List[Tuple[float, str, int, bool]]:
         if p_hit < 1.0:
             results.append((p_attack * (1.0 - p_hit), attack.name, 0, False))
 
-    return results
+    return tuple(results)
 
 
 def cog_damage_distribution(cog: CogState) -> Dict[int, float]:

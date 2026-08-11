@@ -17,6 +17,7 @@ durations and accuracy come from the TTR wiki.
 """
 import argparse
 import random
+import time
 
 from .. import data, simulator
 from ..state import Track, ToonState, CogState, BattleState
@@ -141,21 +142,32 @@ def _play(policy, depth, rng_seed, scenario="default"):
     return state
 
 
-def compare(trials: int = 50, depth: int = 2, scenario: str = "default") -> None:
+def compare(trials: int = 50, depth: int = 2, scenario: str = "default",
+             workers: int = None) -> None:
+    """Win rates for both policies.
+
+    Fights are independent, so this runs them across cores. Seeds are the
+    fight index either way, so the numbers don't depend on the worker count
+    -- parallelising changes how long it takes, not the answer.
+    """
+    from . import parallel
+    workers = parallel.default_workers() if workers is None else workers
+
+    started = time.time()
     print(f"{trials} fights per policy, expectimax depth {depth}, "
-          f"scenario '{scenario}'\n")
-    print(f"{'policy':<12}{'win rate':>10}{'mean laff left':>16}")
+          f"scenario '{scenario}', {workers} worker(s)\n")
+    print(f"{'policy':<12}{'win rate':>10}{'mean laff left':>16}{'rounds':>9}")
+
     for policy in ("random", "expectimax"):
-        wins = 0
-        laff_total = 0
-        for i in range(trials):
-            final = _play(policy, depth, rng_seed=i, scenario=scenario)
-            if final.is_win():
-                wins += 1
-                laff_total += final.toon.laff
-        mean_laff = (laff_total / wins) if wins else 0.0
-        print(f"{policy:<12}{wins / trials:>9.0%}{mean_laff:>16.1f}")
-    print("\n(mean laff left is over winning fights only)")
+        results = parallel.play_many(policy, trials, depth, scenario, workers)
+        wins = [r for r in results if r[0]]
+        mean_laff = sum(r[1] for r in wins) / len(wins) if wins else 0.0
+        mean_rounds = sum(r[2] for r in results) / len(results)
+        print(f"{policy:<12}{len(wins) / trials:>9.0%}"
+              f"{mean_laff:>16.1f}{mean_rounds:>9.1f}")
+
+    print(f"\n(mean laff left is over winning fights only; "
+          f"{time.time() - started:.0f}s total)")
 
 
 def main() -> None:
@@ -165,6 +177,8 @@ def main() -> None:
     parser.add_argument("--depth", type=int, default=2)
     parser.add_argument("--trials", type=int, default=50)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--workers", type=int, default=None,
+                        help="processes for --compare (default: one per core)")
     parser.add_argument("--scenario", choices=sorted(SCENARIOS), default="default",
                         help="'pressed' is a harder fight that actually "
                              "discriminates between policies")
@@ -172,11 +186,13 @@ def main() -> None:
 
     if args.compare:
         compare(trials=args.trials, depth=args.depth,
-                scenario=args.scenario)
+                scenario=args.scenario, workers=args.workers)
     else:
         narrate_fight(depth=args.depth, seed=args.seed,
                       scenario=args.scenario)
 
 
 if __name__ == "__main__":
+    # Windows spawns workers, which re-import this module; without the
+    # guard each worker would re-run main() and fork bombs.
     main()
