@@ -34,7 +34,7 @@ the UI match `simulator.is_group_action` rather than restating them.
 
 ## What you see
 
-The tree is a node-link diagram that grows left to right; clicking a node
+The tree is a node-link diagram that grows **downward**; clicking a node
 computes and reveals its children, so nothing exists until you look at it.
 
 - **Your turn** (gold) — a position. Its children are the gags you could play.
@@ -45,8 +45,18 @@ computes and reveals its children, so nothing exists until you look at it.
   probabilities and the laff they cost.
 
 **Show best path** walks the solver's own recommendation down the tree,
-opening as it goes and lighting the spine gold, so the plan is visible
-rather than something you hunt for by clicking.
+lighting the spine gold. It expands *only* the plan and collapses each
+node's other children into a "+N more" chip beside it, so the whole plan
+reads as one straight vertical line and fits on a screen. Click a chip to
+open the alternatives at that step.
+
+Breadth, not depth, is what makes these trees big: a depth-2 three-cog
+fight is 9 levels deep but 57 leaves wide, because four decision points at
+8 gags each fan out into 8-ish outcomes apiece. Expanded in full that is
+3768px tall on its side, or 12,540px wide top-down -- a card is 220 wide
+but only 50 tall, so putting breadth on the horizontal axis costs 3x.
+Capping breadth is what makes the downward layout work: the same plan is
+456 x 962.
 
 The inspector on the right explains the selected position:
 

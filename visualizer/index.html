@@ -91,9 +91,16 @@
 <script type="text/babel" data-type="module">
 const {useState, useEffect, useRef, useCallback} = React;
 
-const COL_W = 250, ROW_H = 74, PAD_X = 24, PAD_Y = 20;
+// Depth runs DOWN the page, breadth across it. Breadth is capped by
+// showing only the on-path child of a spine node (see `shown`), which is
+// what makes a top-down tree fit: with every sibling expanded, breadth x
+// card-width is ~12,500px, three times worse than the same tree on its
+// side, because a card is 220 wide and only ~50 tall.
+const NODE_W = 206, CARD_H = 50;
+const COL_W = 226, ROW_H = 112, PAD_X = 24, PAD_Y = 18;
 
 const KIND = {
+  more:     {color:"var(--bucket)",   name:"Collapsed"},
   decision: {color:"var(--decision)", name:"Your turn"},
   action:   {color:"var(--action)",   name:"Gag"},
   terminal: {color:"var(--win)",      name:"End"},
@@ -134,31 +141,68 @@ const mkNode = (raw, parent) => ({
   ...raw, id: nextId++, parent, children: null, open: false, onPath: false,
 });
 
-/** Assign x/y to every visible node. Leaves take the next row; a parent
- *  centres on its children. Classic tidy layout, good enough here because
- *  every node is the same size. */
+/** The children a node actually renders.
+ *
+ *  A node marked `pathOnly` (every node on the solver's plan) shows just
+ *  its on-path child plus one "+N more" chip. Without that the tree is
+ *  almost all leaves -- 57 of 59 nodes in a depth-2 three-cog fight -- and
+ *  no orientation can make that fit. Clicking the chip opens the rest. */
+function shown(node) {
+  if (!node.open || !node.children || !node.children.length) return [];
+  if (!node.pathOnly) return node.children;
+  const on = node.children.filter(c => c.onPath);
+  if (!on.length) return node.children;
+  const hidden = node.children.length - on.length;
+  if (!hidden) return on;
+  if (!node._more) {
+    node._more = {kind: "more", id: nextId++, parent: node,
+                  label: `+${hidden} more`, owner: node};
+  }
+  node._more.label = `+${hidden} more`;
+  return [...on, node._more];
+}
+
+/** Depth down, breadth across. Leaves take the next column; a parent
+ *  centres over its children.
+ *
+ *  Two special cases keep the plan readable. A `pathOnly` parent sits
+ *  directly above its on-path child rather than centring over the row, so
+ *  the spine is one straight vertical line. And a "+N more" chip is parked
+ *  beside that child instead of claiming a column of its own -- otherwise
+ *  successive chips march off to the right and drag long diagonal edges
+ *  across the canvas. */
 function layout(root) {
-  let row = 0;
+  let col = 0, maxX = 0;
+  const place = (node, x) => { node.x = x; maxX = Math.max(maxX, x); };
+
   const walk = (node, depth) => {
-    node.x = PAD_X + depth * COL_W;
-    if (node.open && node.children && node.children.length) {
-      node.children.forEach(c => walk(c, depth + 1));
-      const kids = node.children;
-      node.y = (kids[0].y + kids[kids.length - 1].y) / 2;
-    } else {
-      node.y = PAD_Y + row * ROW_H;
-      row += 1;
+    node.y = PAD_Y + depth * ROW_H;
+    const kids = shown(node);
+    if (!kids.length) {
+      place(node, PAD_X + col * COL_W);
+      col += 1;
+      return;
     }
+    const chip = node._more && kids.includes(node._more) ? node._more : null;
+    const onPath = node.pathOnly ? kids.find(k => k.onPath) : null;
+
+    kids.forEach(c => { if (c !== chip) walk(c, depth + 1); });
+    if (chip) {
+      chip.y = PAD_Y + (depth + 1) * ROW_H;
+      place(chip, (onPath || kids[0]).x + COL_W);
+    }
+    place(node, onPath ? onPath.x
+                       : (kids[0].x + kids[kids.length - 1].x) / 2);
   };
+
   walk(root, 0);
-  return {rows: Math.max(row, 1)};
+  return {maxX};
 }
 
 const visibleEdges = (root) => {
   const out = [];
   const walk = (n) => {
-    if (!n.open || !n.children) return;
-    for (const c of n.children) { out.push([n, c]); walk(c); }
+    for (const c of shown(n)) { out.push([n, c]); walk(c); }
   };
   walk(root);
   return out;
@@ -350,6 +394,13 @@ function App({bridge, catalogue}) {
   }, [bridge, depth]);
 
   const toggle = (node) => {
+    if (node.kind === "more") {
+      // Reveal the siblings this chip stands for.
+      node.owner.pathOnly = false;
+      setFocusId(node.owner.id);
+      rerender();
+      return;
+    }
     setSelected(node);
     setFocusId(node.id);
     if (node.kind === "terminal" || node.kind === "bucket") { rerender(); return; }
@@ -383,7 +434,10 @@ function App({bridge, catalogue}) {
    *  something you have to hunt for by clicking. */
   const revealBestPath = () => {
     if (!root) return;
-    const clear = (n) => { n.onPath = false; (n.children || []).forEach(clear); };
+    const clear = (n) => {
+      n.onPath = false; n.pathOnly = false;
+      (n.children || []).forEach(clear);
+    };
     clear(root);
 
     setBusyId(root.id);
@@ -391,6 +445,7 @@ function App({bridge, catalogue}) {
     let node = root, guard = 0;
     while (node && guard++ < 8) {
       node.onPath = true;
+      node.pathOnly = true;     // show only the plan; siblings collapse
       spine.push(node);
       const kids = expand(node);
       if (!kids || !kids.length) break;
@@ -429,11 +484,11 @@ function App({bridge, catalogue}) {
 
   if (!root) return <div id="boot">Building tree…</div>;
 
-  const {rows} = layout(root);
+  const {maxX} = layout(root);
   const edges = visibleEdges(root);
-  const maxDepth = Math.max(...edges.map(([, c]) => c.x / COL_W), 1);
-  const width = PAD_X + (maxDepth + 1) * COL_W + 40;
-  const height = PAD_Y + rows * ROW_H + 40;
+  const maxDepth = Math.max(...edges.map(([, c]) => (c.y - PAD_Y) / ROW_H), 1);
+  const width = maxX + NODE_W + 60;
+  const height = PAD_Y + (maxDepth + 1) * ROW_H + 60;
 
   return (
     <div id="shell">
@@ -497,12 +552,12 @@ function App({bridge, catalogue}) {
             <svg width={width} height={height}
                  style={{position:"absolute", left:0, top:0, pointerEvents:"none"}}>
               {edges.map(([a, b], i) => {
-                const x1 = a.x + 206, y1 = a.y + 22;
-                const x2 = b.x,       y2 = b.y + 22;
-                const mid = (x1 + x2) / 2;
+                const x1 = a.x + NODE_W / 2, y1 = a.y + CARD_H;
+                const x2 = b.x + NODE_W / 2, y2 = b.y;
+                const mid = (y1 + y2) / 2;
                 const lit = a.onPath && b.onPath;
                 return <path key={i}
-                  d={`M${x1},${y1} C${mid},${y1} ${mid},${y2} ${x2},${y2}`}
+                  d={`M${x1},${y1} C${x1},${mid} ${x2},${mid} ${x2},${y2}`}
                   fill="none" stroke={lit ? "var(--path)" : "var(--line)"}
                   strokeWidth={lit ? 2 : 1.2} />;
               })}
@@ -514,7 +569,7 @@ function App({bridge, catalogue}) {
                                    selected={selected && selected.id === n.id}
                                    busy={busyId === n.id}
                                    onSelect={toggle} />);
-                if (n.open && n.children) n.children.forEach(walk);
+                shown(n).forEach(walk);
               };
               walk(root);
               return out;
