@@ -38,16 +38,17 @@ from solver.data.cogs import (  # noqa: E402
 # Every per-cell [TODO] currently in the data, as (department, cog, section,
 # attack). Each one is explained by a comment in its module.
 KNOWN_TODO_CELLS = {
-    # The guide's flat accuracy of 5 looks like a dropped zero; the wiki
-    # publishes no cog accuracy at all and so cannot arbitrate.
-    ("bossbot", "micromanager", "accuracy", "brain_storm"),
+    # (micromanager/brain_storm accuracy was here on a suspected dropped
+    # zero. Open Toontown's SuitBattleGlobals.py has the same flat 5, so the
+    # guide was faithful and the value is real. Filled in.)
     # The guide gave three values per level (three unused attacks all
     # rendered as Glower Power). TTR 4.0.0 split them into real attacks, so
     # the wiki now has a single damage row -- but still no accuracy.
     ("bossbot", "the_big_cheese", "accuracy", "glower_power"),
-    # The wiki contradicts itself: the Big Wig page and the Finger Wag page
-    # give different damage for the same five levels.
-    ("lawbot", "big_wig", "damage", "finger_wag"),
+    # (big_wig/finger_wag damage was here. The conflicting Finger_Wag page
+    # turned out to be showing Throw Book's row -- confirmed by the wiki's
+    # own Throw Book entry and by Open Toontown, whose Big Wig has no Finger
+    # Wag at all. Filled in from the Big Wig page.)
 }
 
 # Cogs whose "freq" row cannot sum to 100 over the attacks the cog really

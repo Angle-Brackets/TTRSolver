@@ -170,11 +170,14 @@ BOSSBOT_COGS = {
         #     note "frequency values across all Cogs that have their attack
         #     pool updated" were tweaked -- the frequencies below are the
         #     pre-4.0.0 five-attack split and no longer describe this cog.
-        # [TODO] brain_storm accuracy: the guide lists a flat 5 at every level
-        #     while all four other Micromanager attacks run 50/60/70/80/90, and
-        #     no other attack anywhere in Appendix C is below 10. The wiki
-        #     publishes no cog accuracy at all, so it cannot arbitrate. Still
-        #     None rather than "corrected" to 50.
+        # brain_storm accuracy: RESOLVED, and the suspicion was wrong. A flat
+        #     5 looked like a dropped zero -- the other four attacks run
+        #     50/60/70/80/90 and nothing else in Appendix C is under 10 -- so
+        #     it was left None. Open Toontown's SuitBattleGlobals.py carries
+        #     ('BrainStorm', (4, 6, 9, 12, 15), (5, 5, 5, 5, 5), ...), i.e.
+        #     the guide transcribed it faithfully and the value really is
+        #     that low. Filled in, and [UNVERIFIED] for TTR exactly like every
+        #     other accuracy row rather than held to a stricter standard.
         "levels": [4, 5, 6, 7, 8],
         "freq": {  # [UNVERIFIED, STALE] guide Appendix A, wrong attack pool
             "demotion":     [30, 30, 30, 30, 30],
@@ -194,7 +197,7 @@ BOSSBOT_COGS = {
             "demotion":     [  50,   60,   70,   80,   90],
             "finger_wag":   [  50,   60,   70,   80,   90],
             "fountain_pen": [  50,   60,   70,   80,   90],
-            "brain_storm":  [None, None, None, None, None],
+            "brain_storm":  [   5,    5,    5,    5,    5],
             "buzz_word":    [  50,   60,   70,   80,   90],
         },
         # [CONFIRMED] wiki: the five modeled attacks are all "One Toon".

@@ -243,18 +243,25 @@ LAWBOT_COGS = {
         # [FREQ STALE] The wiki's roster has FOUR attacks; the guide had two.
         #     A 50/50 split over two attacks cannot be right for a
         #     four-attack cog.
-        # [TODO] finger_wag damage: the wiki contradicts itself here. The Big
-        #     Wig page gives 9, 11, 13, 16, 18 (then 20, 22, 25 over-level);
-        #     https://toontownrewritten.wiki/Finger_Wag gives 13, 15, 17, 19,
-        #     21 (then the identical 20, 22, 25). The shared tail with
-        #     divergent heads looks like one page got its first five cells
-        #     refreshed in a rebalance and the other didn't -- and the
-        #     Finger_Wag row is non-monotonic across the seam (21 -> 20),
-        #     which no other damage row in the game does. The guide agrees
-        #     with the Finger_Wag page, but the guide is pre-rebalance, so
-        #     that agreement is evidence the Finger_Wag page is the stale
-        #     one, not evidence the value is right. Left None rather than
-        #     picking a side; needs a third source.
+        # finger_wag damage: RESOLVED by triangulation. The wiki appeared to
+        #     contradict itself -- the Big Wig page gives 9, 11, 13, 16, 18
+        #     while https://toontownrewritten.wiki/Finger_Wag gives
+        #     13, 15, 17, 19, 21 for the same five levels.
+        #
+        #     The Finger_Wag page is misattributing Throw Book's row. Three
+        #     independent places agree Big Wig's THROW BOOK damage is exactly
+        #     13, 15, 17, 19, 21: the wiki's own Throw Book entry for this
+        #     cog (see unmodeled_attacks below), Open Toontown's
+        #     SuitBattleGlobals.py, and the pre-rebalance guide -- which also
+        #     listed this row under "finger_wag" even though Toontown Online's
+        #     Big Wig has no Finger Wag at all, only Power Trip and Throw
+        #     Book. So the row was mislabeled at the source and the wiki's
+        #     per-attack page inherited the error.
+        #
+        #     That leaves the Big Wig page's 9, 11, 13, 16, 18 as the only
+        #     unexplained-away figure for Finger Wag, and it is monotonic
+        #     across the over-level seam where the other row is not. Filled
+        #     in from it. [CONFIRMED] wiki, Big Wig page.
         "levels": [8, 9, 10, 11, 12],
         "freq": {  # [UNVERIFIED, STALE] guide Appendix A, wrong attack pool
             "power_trip": [50, 50, 50, 50, 50],
@@ -262,7 +269,7 @@ LAWBOT_COGS = {
         },
         "damage": {
             "power_trip": [  10,   11,   13,   15,   16],  # [CONFIRMED] wiki
-            "finger_wag": [None, None, None, None, None],  # [TODO] see above
+            "finger_wag": [ 9, 11, 13, 16, 18],
         },
         "accuracy": {  # [UNVERIFIED] guide Appendix C
             "power_trip": [75, 80, 85, 90, 95],

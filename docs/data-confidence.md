@@ -52,6 +52,18 @@ attacks.
 Searches for a public source have come up empty; treat this as closed
 unless decompiled TTR client data turns up.
 
+**What we do have is the ancestor.** Open Toontown
+(<https://github.com/open-toontown>) carries Toontown Online's original
+`SuitBattleGlobals.py`, which is where the strategy guide's appendices came
+from. `python tools/verify_against_tto.py` compares every row we hold
+against it: **359 of 366 match exactly**, and all 7 differences are damage
+rows the wiki independently said TTR rebalanced. Frequency and accuracy
+match at 100%.
+
+That doesn't make them current — TTR moved them — but it does mean they are
+faithfully transcribed TTO values rather than a garbled copy, which is the
+starting point the sensitivity analysis below assumes.
+
 ### How much it matters: measured, not assumed
 
 The stored numbers are real Toontown Online values, not invention — so the
@@ -86,7 +98,9 @@ the solver's move recommendations; caveat its absolute win rates.
   all 20 published rows. The old single formula was right through 11 and
   wrong above it (182 vs TTR's 196 at level 12).
 - **Cog damage, targeting, rosters, level ranges**: wiki-verified for all
-  32 cogs, cross-checked between each cog's page and each attack's page.
+  32 cogs, cross-checked between each cog's page and each attack's page,
+  and cross-checked again against Toontown Online's source arrays
+  (`tools/verify_against_tto.py`).
 - **Gag damage and heals**: all 35 damage cells filled, plus Toon-Up heals,
   organic damage, and per-track organic bonus percentages.
 - **Lure**, wholesale: durations 2/2/3/3/4/4/8, base and organic accuracy,
@@ -109,44 +123,42 @@ the solver's move recommendations; caveat its absolute win rates.
 
 1. **Cog attack frequency and accuracy** — see above. The largest gap in
    the project, and not closable from the wiki.
-2. **Twelve 4.0.0 cog attacks are not modeled.** Their damage and targeting
+2. **Twelve 4.0.0 cog attacks are not modeled.** Two of them
+   (`the_big_cheese/flood_the_market`, `big_wig/throw_book`) existed as
+   unused entries in TTO with full frequency and accuracy, but TTR changed
+   at least Flood the Market's damage, so those columns can't be lifted
+   across either. Their damage and targeting
    are wiki-confirmed and parked in an `"unmodeled_attacks"` key, but with
    no frequency there's no way to fold them into the sampling table. **The
    simulator therefore under-estimates all eight affected cogs**, and nine
    of the twelve are group attacks. Pinned by
    `tests/test_data.py::test_unmodeled_attack_inventory_is_pinned`.
-3. **`lawbot/big_wig/finger_wag` damage** — the wiki contradicts itself. The
-   Big Wig page says `9,11,13,16,18`; `/Finger_Wag` says `13,15,17,19,21`.
-   They share an identical tail (20,22,25), so one page was refreshed in a
-   rebalance and the other wasn't; the `/Finger_Wag` row is also
-   non-monotonic across the seam, which no other damage row is. Left `None`,
-   so Big Wig raises roughly half the time it attacks.
-4. **`sellbot/the_mingler/power_trip` is probably not real.** The wiki's
+3. **`sellbot/the_mingler/power_trip` is probably not real.** The wiki's
    Mingler roster has four attacks and `/Power_Trip` doesn't list this cog.
    Kept anyway, tagged `[STALE]`: removing it would strand 15% frequency,
    and the sampler's fall-through would silently dump that onto whichever
    attack happens to be first in the dict. Treat its damage as fiction.
-5. **Two gag cells, on genuine three-way source conflicts**: Trapdoor
+4. **Two gag cells, on genuine three-way source conflicts**: Trapdoor
    organic damage (83–94 vs 84–94 vs 83–93) and Lipstick minimum heal
    (25 vs 27).
-6. **The 95% cap is soft since 4.3.3** — bonuses "can slightly push the
+5. **The 95% cap is soft since 4.3.3** — bonuses "can slightly push the
    final accuracy value higher" — but the wiki never quantifies it or gives
    a replacement ceiling. Modeled as the pre-4.3.3 hard cap, flagged by
    `data.ACCURACY_CAP_IS_SOFT`.
-7. **`calc_toon_damage` interpolates min/max** rather than using the real
+6. **`calc_toon_damage` interpolates min/max** rather than using the real
    experience-based formula. `mechanics.gag_damage_from_exp` is transcribed
    and correct but needs per-gag `minE`/`maxE` thresholds; the gag
    infoboxes' `prevexp`/`nextexp` fields look like the right source but
    haven't been chased.
-8. **Cogs can appear three levels above their normal range** (an 8-level
+7. **Cogs can appear three levels above their normal range** (an 8-level
    span, damage published for all 8). Not modeled, and largely moot: the
    upper levels have no frequency or accuracy from either source.
-9. **Re-luring does not refresh a lure's duration** — an already-lured cog
+8. **Re-luring does not refresh a lure's duration** — an already-lured cog
    is untouchable by Lure until its rounds run out, neither stacking nor
    refreshing. Modeled, but from play knowledge: the wiki only documents
    3.0.0 removing *simultaneous* stacking and is silent on re-luring across
    rounds.
-10. **Whether Throw/Squirt damage ends a lure.** The wiki names Sound
+9. **Whether Throw/Squirt damage ends a lure.** The wiki names Sound
    explicitly, which is modeled. It's silent on knockback, so that isn't
    (`mechanics.LURE_ENDS_ON_DAMAGE = None`). Same for a cog that just
    detonated its trap.

@@ -107,13 +107,14 @@ class TestExpansionMatchesTheSolver(unittest.TestCase):
         self.assertEqual(capped[-1]["kind"], "bucket")
 
     def test_data_gaps_surface_as_an_error_not_a_crash(self):
-        cfg = dict(CFG, cogs=[{"type": "micromanager", "level": 8}])
+        cfg = dict(CFG, cogs=[{"type": "the_big_cheese",
+                               "department": "bossbot", "level": 11}])
         state_dict = bridge.state_to_dict(bridge.build_state(cfg))
         action = {"track": "throw", "level": 3, "target": 0}
         res = json.loads(bridge.api_expand_action(
             json.dumps({"state": state_dict, "action": action})))
         self.assertIn("error", res)
-        self.assertIn("brain_storm", res["error"])
+        self.assertIn("glower_power", res["error"])
 
 
 class TestCatalogue(unittest.TestCase):

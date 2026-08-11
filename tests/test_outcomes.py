@@ -63,16 +63,15 @@ class TestDistributionsAreProper(unittest.TestCase):
         surface as a data gap, not a TypeError from the arithmetic and not
         a silently-dropped branch.
 
-        micromanager/brain_storm is the live example: the source lists a
-        flat accuracy of 5 where the cog's other four attacks run 50-90,
-        which looks like a dropped zero, so it was left TODO rather than
-        "corrected" to 50."""
+        bossbot/the_big_cheese/glower_power accuracy is the live example:
+        no cog accuracy is published anywhere, and the guide's row for this
+        attack was three superimposed unused attacks rather than one."""
         from solver import data
-        cog = CogState(cog_type="micromanager", department="bossbot", level=8,
-                       hp=10, max_hp=10)
+        cog = CogState(cog_type="the_big_cheese", department="bossbot",
+                       level=11, hp=10, max_hp=10)
         self.assertIsNone(
-            data.BOSSBOT_COGS["micromanager"]["accuracy"]["brain_storm"][0],
-            "test premise changed: brain_storm accuracy is no longer TODO")
+            data.BOSSBOT_COGS["the_big_cheese"]["accuracy"]["glower_power"][0],
+            "test premise changed: glower_power accuracy is no longer TODO")
         with self.assertRaises(NotImplementedError):
             outcomes.cog_damage_distribution(cog)
 
