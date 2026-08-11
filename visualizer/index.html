@@ -8,9 +8,10 @@
   Runs the real solver. The Python package in ../solver is loaded into
   Pyodide and every number on this page comes from it through
   visualizer/bridge.py -- there is no JavaScript copy of the battle rules.
-  That is deliberate: the previous version of this page had its own port,
-  and it drifted until it disagreed with the model on lure duration, group
-  gags, and cog accuracy all at once.
+
+  Layout note: edges are drawn in one SVG layer, nodes are absolutely
+  positioned HTML on top of it. SVG <text> is painful to wrap and style;
+  HTML is not. The SVG only ever draws curves.
 
   Served by `python -m visualizer.serve`.
 -->
@@ -20,68 +21,99 @@
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <style>
   :root {
-    --bg:#14161a; --panel:#1b1e24; --line:#33373f; --dim:#5b6270;
-    --text:#edeff2; --muted:#98a0ae;
+    --bg:#14161a; --panel:#1b1e24; --panel2:#20242b; --line:#33373f;
+    --dim:#5b6270; --text:#edeff2; --muted:#98a0ae;
     --decision:#f2a93b; --action:#6fa3c7; --win:#4caf7d; --loss:#d9564a;
-    --bucket:#8a93a8;
+    --bucket:#8a93a8; --path:#f2a93b;
   }
   * { box-sizing:border-box; }
+  html, body { height:100%; }
   body { margin:0; background:var(--bg); color:var(--text);
-         font:14px/1.5 system-ui, sans-serif; padding:20px; }
-  h1 { font-size:20px; margin:0 0 4px; }
-  .sub { color:var(--muted); font-size:12px; margin:0 0 16px; max-width:70ch; }
-  .panel { background:var(--panel); border:1px solid var(--line);
-           border-radius:8px; padding:12px; margin-bottom:14px; }
-  .row { display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end; }
-  label { display:flex; flex-direction:column; gap:4px; font-size:12px;
-          color:var(--muted); }
-  select, input[type=number] { background:#111318; color:var(--text);
-          border:1px solid var(--dim); border-radius:4px; padding:4px 6px;
-          font:inherit; font-size:13px; }
-  button { background:var(--decision); color:#14161a; border:0;
-           border-radius:4px; padding:7px 14px; font:inherit;
-           font-weight:600; cursor:pointer; }
-  button.ghost { background:transparent; color:var(--muted);
-                 border:1px solid var(--dim); font-weight:400;
-                 padding:3px 8px; font-size:12px; }
+         font:13px/1.45 system-ui, sans-serif; overflow:hidden; }
+  .mono { font-family:ui-monospace, Menlo, Consolas, monospace; }
+
+  #shell { display:flex; flex-direction:column; height:100vh; }
+  header { padding:10px 16px; border-bottom:1px solid var(--line);
+           display:flex; gap:14px; align-items:center; flex-wrap:wrap; }
+  h1 { font-size:15px; margin:0; font-weight:700; }
+  .hint { color:var(--muted); font-size:11px; }
+  main { flex:1; display:flex; min-height:0; }
+  #canvas { flex:1; overflow:auto; position:relative; }
+  aside { width:310px; border-left:1px solid var(--line); overflow:auto;
+          padding:12px; background:var(--panel); flex-shrink:0; }
+
+  button { background:var(--panel2); color:var(--text);
+           border:1px solid var(--dim); border-radius:5px; padding:5px 11px;
+           font:inherit; cursor:pointer; }
+  button:hover { border-color:var(--muted); }
+  button.primary { background:var(--decision); color:#14161a; border:0;
+                   font-weight:600; }
   button:disabled { opacity:.45; cursor:default; }
-  code, .mono { font-family:ui-monospace, Menlo, Consolas, monospace; }
-  .node { border:1px solid; border-radius:7px; padding:7px 10px;
-          margin:0 0 6px; cursor:pointer; background:var(--panel); }
-  .node.leaf { cursor:default; }
-  .badge { font-size:10px; text-transform:uppercase; letter-spacing:.06em;
-           font-weight:700; padding:1px 6px; border-radius:3px; }
-  .kids { margin-left:14px; padding-left:10px; border-left:1px solid var(--line); }
-  .meta { color:var(--muted); font-size:12px; }
-  .cogs { color:var(--muted); font-size:12px; margin-top:3px; }
+  select, input[type=number] { background:#111318; color:var(--text);
+           border:1px solid var(--dim); border-radius:4px; padding:3px 5px;
+           font:inherit; font-size:12px; }
+  label { display:inline-flex; gap:5px; align-items:center;
+          color:var(--muted); font-size:11px; }
+
+  .node { position:absolute; width:206px; border:1px solid var(--line);
+          border-radius:7px; background:var(--panel); padding:6px 9px;
+          cursor:pointer; transition:border-color .12s, box-shadow .12s; }
+  .node:hover { border-color:var(--muted); }
+  .node.sel { box-shadow:0 0 0 2px var(--text) inset; }
+  .node.path { border-color:var(--path); }
+  .node .top { display:flex; align-items:center; gap:6px; }
+  .node .title { font-size:12px; font-weight:600; white-space:nowrap;
+                 overflow:hidden; text-overflow:ellipsis; }
+  .node .sub { color:var(--muted); font-size:11px; margin-top:2px;
+               white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+  .chev { color:var(--dim); font-size:10px; margin-left:auto; }
+
+  .card { background:var(--panel2); border:1px solid var(--line);
+          border-radius:6px; padding:9px; margin-bottom:10px; }
+  .card h3 { margin:0 0 7px; font-size:11px; text-transform:uppercase;
+             letter-spacing:.07em; color:var(--muted); font-weight:700; }
+  .kv { display:flex; justify-content:space-between; gap:8px; padding:1px 0; }
+  .kv span:last-child { color:var(--muted); }
+  .bar { height:4px; border-radius:2px; background:var(--line); margin-top:3px; }
+  .bar > div { height:100%; border-radius:2px; background:var(--action); }
+  .atk { padding:4px 0; border-bottom:1px solid var(--line); }
+  .atk:last-child { border-bottom:0; }
+  .step { display:flex; gap:7px; padding:3px 0; align-items:baseline; }
+  .step .n { color:var(--path); font-weight:700; min-width:14px; }
   .err { color:var(--loss); font-size:12px; }
-  .best { box-shadow:0 0 0 1px var(--decision) inset; }
-  table.legend td { padding:1px 12px 1px 0; font-size:12px; color:var(--muted); }
-  #boot { color:var(--muted); }
+  #boot { padding:40px; color:var(--muted); }
 </style>
 </head>
 <body>
 <div id="root"><div id="boot">Starting Python…</div></div>
 
 <script type="text/babel" data-type="module">
-const {useState, useEffect, useCallback} = React;
+const {useState, useEffect, useRef, useCallback} = React;
 
-/* ---------- Pyodide boot: mount the repo's .py files, import bridge ---- */
+const COL_W = 250, ROW_H = 74, PAD_X = 24, PAD_Y = 20;
+
+const KIND = {
+  decision: {color:"var(--decision)", name:"Your turn"},
+  action:   {color:"var(--action)",   name:"Gag"},
+  terminal: {color:"var(--win)",      name:"End"},
+  bucket:   {color:"var(--bucket)",   name:"Rare outcomes"},
+};
+const pct = (p) => (p * 100).toFixed(p < 0.1 ? 1 : 0) + "%";
+
+/* ---------- Pyodide boot ---------------------------------------------- */
 
 async function boot(setStatus) {
-  setStatus("Downloading Python runtime (~10 MB, cached after the first run)…");
+  setStatus("Downloading Python runtime (~10 MB, cached after first run)…");
   const pyodide = await loadPyodide();
-
   setStatus("Loading solver source…");
   const manifest = await (await fetch("/api/manifest")).json();
   for (const rel of manifest.files) {
     const src = await (await fetch("/" + rel)).text();
     const full = "/app/" + rel;
-    const dir = full.slice(0, full.lastIndexOf("/"));
-    pyodide.FS.mkdirTree(dir);
+    pyodide.FS.mkdirTree(full.slice(0, full.lastIndexOf("/")));
     pyodide.FS.writeFile(full, src);
   }
-
   setStatus("Importing solver…");
   pyodide.runPython(`
 import sys
@@ -95,215 +127,390 @@ import bridge
 
 const call = (fn, payload) => JSON.parse(fn(JSON.stringify(payload)));
 
-/* ---------- tree ------------------------------------------------------ */
+/* ---------- tree model ------------------------------------------------ */
 
-const STYLES = {
-  decision: {color:"var(--decision)", badge:"Your move"},
-  action:   {color:"var(--action)",   badge:"Action"},
-  terminal: {color:"var(--win)",      badge:"End"},
-  bucket:   {color:"var(--bucket)",   badge:"Bucketed"},
+let nextId = 1;
+const mkNode = (raw, parent) => ({
+  ...raw, id: nextId++, parent, children: null, open: false, onPath: false,
+});
+
+/** Assign x/y to every visible node. Leaves take the next row; a parent
+ *  centres on its children. Classic tidy layout, good enough here because
+ *  every node is the same size. */
+function layout(root) {
+  let row = 0;
+  const walk = (node, depth) => {
+    node.x = PAD_X + depth * COL_W;
+    if (node.open && node.children && node.children.length) {
+      node.children.forEach(c => walk(c, depth + 1));
+      const kids = node.children;
+      node.y = (kids[0].y + kids[kids.length - 1].y) / 2;
+    } else {
+      node.y = PAD_Y + row * ROW_H;
+      row += 1;
+    }
+  };
+  walk(root, 0);
+  return {rows: Math.max(row, 1)};
+}
+
+const visibleEdges = (root) => {
+  const out = [];
+  const walk = (n) => {
+    if (!n.open || !n.children) return;
+    for (const c of n.children) { out.push([n, c]); walk(c); }
+  };
+  walk(root);
+  return out;
 };
 
-function Node({node, bridge, searchDepth, depth}) {
-  const [open, setOpen] = useState(depth === 0);
-  const [kids, setKids] = useState(null);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState(null);
+/* ---------- node ------------------------------------------------------ */
 
-  const isLeaf = node.kind === "bucket" || node.kind === "terminal";
-  const lost = node.kind === "terminal" && /lost/.test(node.label);
-  const style = STYLES[node.kind] || STYLES.decision;
+function NodeCard({node, selected, busy, onSelect}) {
+  const style = KIND[node.kind] || KIND.decision;
+  const lost = node.kind === "terminal" && /lost/.test(node.label || "");
   const color = lost ? "var(--loss)" : style.color;
-
-  const load = useCallback(() => {
-    if (isLeaf || kids !== null) return;
-    setBusy(true);
-    // Let the browser paint the spinner before Python blocks the thread.
-    setTimeout(() => {
-      try {
-        const res = node.kind === "action"
-          ? call(bridge.api_expand_action, {state: node.state, action: node.action})
-          : call(bridge.api_expand_decision, {state: node.state, depth: searchDepth});
-        if (res.error) setErr(res.error); else setKids(res.children);
-      } catch (e) { setErr(String(e)); }
-      setBusy(false);
-    }, 0);
-  }, [node, kids, isLeaf, bridge, searchDepth]);
-
-  useEffect(() => { if (depth === 0) load(); }, [depth, load]);
-
-  const toggle = () => {
-    if (isLeaf) return;
-    if (!open) load();
-    setOpen(o => !o);
-  };
+  const cls = "node" + (selected ? " sel" : "") + (node.onPath ? " path" : "");
 
   return (
-    <div>
-      <div className={"node" + (isLeaf ? " leaf" : "") + (node.best ? " best" : "")}
-           style={{borderColor: color + "66"}} onClick={toggle}>
-        <div style={{display:"flex", gap:8, alignItems:"center", flexWrap:"wrap"}}>
-          {!isLeaf && <span className="mono" style={{color:"var(--dim)"}}>{open ? "▾" : "▸"}</span>}
-          <span className="badge" style={{color, background:color+"22"}}>{style.badge}</span>
-          <span>{node.label}</span>
-          {node.ev != null &&
-            <span className="mono" style={{color}}>EV {node.ev > 0 ? "+" : ""}{node.ev.toFixed(2)}</span>}
-          {node.gap != null &&
-            <span className="mono meta">+{node.gap.toFixed(2)} vs next</span>}
-          {node.prob != null &&
-            <span className="mono meta">p={node.prob.toFixed(3)}</span>}
-          {node.reward != null &&
-            <span className="mono meta">reward {node.reward > 0 ? "+" : ""}{node.reward.toFixed(1)}</span>}
-          {busy && <span className="meta">thinking…</span>}
-        </div>
-        {node.cogs && node.cogs.length > 0 &&
-          <div className="cogs">
-            {node.state && <span className="mono">Laff {node.state.toon.laff} · </span>}
-            {node.cogs.join(" · ")}
-          </div>}
-        {err && <div className="err">{err}</div>}
+    <div className={cls} style={{left:node.x, top:node.y}}
+         onClick={(e) => { e.stopPropagation(); onSelect(node); }}>
+      <div className="top">
+        <span className="dot" style={{background:color}} />
+        <span className="title">{node.label}</span>
+        {busy && <span className="chev">…</span>}
+        {!busy && node.kind !== "terminal" && node.kind !== "bucket" &&
+          <span className="chev">{node.open ? "−" : "+"}</span>}
       </div>
-      {open && kids &&
-        <div className="kids">
-          {kids.length === 0 && <div className="meta">No playable actions left.</div>}
-          {kids.map((k, i) => <Node key={i} node={k} bridge={bridge}
-                                    searchDepth={searchDepth} depth={depth + 1} />)}
+      <div className="sub mono">
+        {node.ev != null && <span style={{color}}>EV {node.ev > 0 ? "+" : ""}{node.ev.toFixed(1)} </span>}
+        {node.gap != null && <span>(+{node.gap.toFixed(1)}) </span>}
+        {node.prob != null && <span>p {pct(node.prob)} </span>}
+        {node.laff_lost > 0 && <span style={{color:"var(--loss)"}}>−{node.laff_lost} laff</span>}
+        {node.laff_lost === 0 && node.prob != null && <span>no damage</span>}
+      </div>
+    </div>
+  );
+}
+
+/* ---------- inspector -------------------------------------------------- */
+
+function Inspector({node, bridge, depth}) {
+  const [forecast, setForecast] = useState(null);
+  const [line, setLine] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  // The forecast is a table lookup -- instant, so it loads on selection.
+  useEffect(() => {
+    setForecast(null); setLine(null);
+    if (!node || !node.state) return;
+    try {
+      const f = call(bridge.api_cog_forecast, {state: node.state});
+      setForecast(f.error ? {error: f.error} : f.cogs);
+    } catch (e) { setForecast({error: String(e)}); }
+  }, [node, bridge]);
+
+  // The plan is a full search per step -- seconds under Pyodide, and it
+  // blocks the page while it runs. On demand only.
+  const computeLine = () => {
+    setBusy(true);
+    setTimeout(() => {
+      try {
+        const l = call(bridge.api_best_line, {state: node.state, depth});
+        setLine(l.error ? null : l.line);
+      } catch (e) { /* surfaced by the forecast panel */ }
+      setBusy(false);
+    }, 0);
+  };
+
+  if (!node) return <div className="hint">Click a node to inspect it.</div>;
+
+  const st = node.state;
+  return (
+    <div>
+      <div className="card">
+        <h3>{node.label}</h3>
+        {st && <>
+          <div className="kv"><span>Laff</span>
+            <span className="mono">{st.toon.laff} / {st.toon.max_laff}</span></div>
+          {node.cogs && node.cogs.map((c, i) =>
+            <div className="kv" key={i}><span>Cog {i + 1}</span>
+              <span className="mono">{c}</span></div>)}
+        </>}
+        {node.ev != null &&
+          <div className="kv"><span>Expected value</span>
+            <span className="mono">{node.ev > 0 ? "+" : ""}{node.ev.toFixed(2)}</span></div>}
+        {node.gap != null &&
+          <div className="kv"><span>Lead over 2nd</span>
+            <span className="mono">+{node.gap.toFixed(2)}</span></div>}
+        {node.prob != null &&
+          <div className="kv"><span>Probability</span>
+            <span className="mono">{pct(node.prob)}</span></div>}
+      </div>
+
+      {forecast && forecast.error &&
+        <div className="card err">{forecast.error}</div>}
+
+      {forecast && !forecast.error && forecast.length > 0 &&
+        <div className="card">
+          <h3>What the cogs do next</h3>
+          {forecast.map((c) => (
+            <div key={c.index} style={{marginBottom:9}}>
+              <div className="kv">
+                <span style={{fontWeight:600, color:"var(--text)"}}>
+                  {c.cog} L{c.level}</span>
+                <span className="mono">~{c.expected_damage} dmg</span>
+              </div>
+              {c.lured &&
+                <div className="hint">lured {c.lure_rounds}r · acts {pct(c.p_acts)}</div>}
+              {c.attacks.map((a) => (
+                <div className="atk" key={a.attack}>
+                  <div className="kv">
+                    <span>{a.attack}{a.group ? " ⁂" : ""}</span>
+                    <span className="mono">{pct(a.prob)} · {a.damage} dmg</span>
+                  </div>
+                  <div className="bar">
+                    <div style={{width:pct(a.prob),
+                                 background: a.group ? "var(--loss)" : "var(--action)"}} />
+                  </div>
+                  <div className="hint">hits {pct(a.hit_prob / (a.prob || 1))}</div>
+                </div>
+              ))}
+            </div>
+          ))}
+          <div className="hint" style={{marginTop:6}}>
+            ⁂ hits every toon. Percentages are per cog and independent.
+          </div>
+        </div>}
+
+      {node.state && !line &&
+        <button onClick={computeLine} disabled={busy} style={{width:"100%"}}>
+          {busy ? "Searching…" : "Show the plan from here"}</button>}
+
+      {line && line.length > 0 &&
+        <div className="card">
+          <h3>Solver's plan from here</h3>
+          {line.map((s, i) => (
+            <div className="step" key={i}>
+              <span className="n">{i + 1}</span>
+              <span>
+                {s.label}
+                <div className="hint mono">
+                  EV {s.ev > 0 ? "+" : ""}{s.ev.toFixed(1)} · likeliest p {pct(s.prob)}
+                  {s.laff_lost > 0 ? ` · −${s.laff_lost} laff` : ""}
+                </div>
+                {s.terminal && <div className="hint" style={{color:"var(--win)"}}>{s.terminal}</div>}
+              </span>
+            </div>
+          ))}
+          <div className="hint" style={{marginTop:6}}>
+            Each step takes the most likely outcome, so the whole line is far
+            less likely than any single step of it.
+          </div>
         </div>}
     </div>
   );
 }
 
-/* ---------- config + app --------------------------------------------- */
+/* ---------- app -------------------------------------------------------- */
 
-const DEFAULT_GAGS = [
-  ["throw", 3, 4], ["throw", 4, 2], ["sound", 4, 2], ["lure", 2, 3],
-];
+const DEFAULT_GAGS = [["throw",3,4],["throw",4,2],["sound",4,2],["lure",2,3]];
 
 function App({bridge, catalogue}) {
   const depts = catalogue.departments;
   const [dept, setDept] = useState("bossbot");
   const [cogs, setCogs] = useState([
     {type:"flunky", level:4}, {type:"pencil_pusher", level:5},
+    {type:"yesman", level:6},
   ]);
   const [laff, setLaff] = useState(45);
-  const [searchDepth, setSearchDepth] = useState(2);
-  const [gags, setGags] = useState(DEFAULT_GAGS);
+  const [depth, setDepth] = useState(2);
+  const [showCfg, setShowCfg] = useState(false);
   const [root, setRoot] = useState(null);
-  const [treeKey, setTreeKey] = useState(0);
+  const [selected, setSelected] = useState(null);
+  const [, bump] = useState(0);
+  const [busyId, setBusyId] = useState(null);
+  const [err, setErr] = useState(null);
+  const rerender = () => bump(v => v + 1);
 
   const cogTypes = depts[dept];
   const levelsFor = (t) => (cogTypes.find(c => c.type === t) || cogTypes[0]).levels;
 
-  const rebuild = () => {
-    const cfg = {laff, cogs: cogs.map(c => ({...c, department: dept})), gags};
-    setRoot(call(bridge.api_root, cfg));
-    setTreeKey(k => k + 1);
+  const expand = useCallback((node) => {
+    if (node.children || node.kind === "terminal" || node.kind === "bucket")
+      return node.children;
+    const res = node.kind === "action"
+      ? call(bridge.api_expand_action, {state: node.state, action: node.action})
+      : call(bridge.api_expand_decision, {state: node.state, depth});
+    if (res.error) { setErr(res.error); node.children = []; }
+    else { node.children = res.children.map(c => mkNode(c, node)); }
+    return node.children;
+  }, [bridge, depth]);
+
+  const toggle = (node) => {
+    setSelected(node);
+    if (node.kind === "terminal" || node.kind === "bucket") { rerender(); return; }
+    if (!node.open && !node.children) {
+      // First expansion calls into Python and blocks; paint the spinner
+      // before that happens rather than freezing with no explanation.
+      setBusyId(node.id);
+      setTimeout(() => {
+        expand(node); node.open = true; setBusyId(null); rerender();
+      }, 0);
+      return;
+    }
+    node.open = !node.open;
+    rerender();
   };
+
+  const rebuild = () => {
+    setErr(null);
+    const cfg = {laff, cogs: cogs.map(c => ({...c, department: dept})),
+                 gags: DEFAULT_GAGS};
+    const r = mkNode(call(bridge.api_root, cfg), null);
+    expandInto(r);
+    setRoot(r); setSelected(r); rerender();
+  };
+  const expandInto = (r) => { const k = expand(r); if (k) r.open = true; };
+
   useEffect(rebuild, []);   // eslint-disable-line react-hooks/exhaustive-deps
 
-  const setCog = (i, patch) => setCogs(cs => cs.map((c, j) => {
-    if (j !== i) return c;
-    const next = {...c, ...patch};
-    if (patch.type && !levelsFor(patch.type).includes(next.level))
-      next.level = levelsFor(patch.type)[0];
-    return next;
-  }));
+  /** Walk the solver's own recommendation down the tree, opening as it
+   *  goes, so the plan is visible as a highlighted spine rather than
+   *  something you have to hunt for by clicking. */
+  const revealBestPath = () => {
+    if (!root) return;
+    const clear = (n) => { n.onPath = false; (n.children || []).forEach(clear); };
+    clear(root);
+
+    setBusyId(root.id);
+    let node = root, guard = 0;
+    while (node && guard++ < 8) {
+      node.onPath = true;
+      const kids = expand(node);
+      if (!kids || !kids.length) break;
+      node.open = true;
+
+      if (node.kind === "decision") {
+        const best = kids.find(k => k.best) || kids[0];
+        best.onPath = true; node = best;
+      } else if (node.kind === "action") {
+        const likeliest = kids[0];      // expand_action sorts by probability
+        likeliest.onPath = true;
+        if (likeliest.kind !== "decision") { break; }
+        node = likeliest;
+      } else break;
+    }
+    setBusyId(null);
+    rerender();
+  };
+
+  const collapseAll = () => {
+    const walk = (n) => { n.open = false; n.onPath = false; (n.children || []).forEach(walk); };
+    if (root) { walk(root); root.open = true; rerender(); }
+  };
+
+  if (!root) return <div id="boot">Building tree…</div>;
+
+  const {rows} = layout(root);
+  const edges = visibleEdges(root);
+  const maxDepth = Math.max(...edges.map(([, c]) => c.x / COL_W), 1);
+  const width = PAD_X + (maxDepth + 1) * COL_W + 40;
+  const height = PAD_Y + rows * ROW_H + 40;
 
   return (
-    <div>
-      <h1>Cog Battle Tree Explorer</h1>
-      <p className="sub">
-        Every number here is computed by the Python solver running in your
-        browser — accuracy, damage, lure duration and the expectimax values
-        all come from <code>solver/</code> via Pyodide. Nodes expand lazily,
-        so the tree is only ever computed where you look. The
-        <strong> +N vs next</strong> figure is the gap to the runner-up: near
-        zero means the choice barely matters.
-      </p>
+    <div id="shell">
+      <header>
+        <h1>Cog Battle Tree Explorer</h1>
+        <button className="primary" disabled={busyId != null}
+                onClick={() => { setBusyId(root.id); setTimeout(revealBestPath, 0); }}>
+          {busyId != null ? "Searching…" : "Show best path"}</button>
+        <button onClick={collapseAll}>Collapse</button>
+        <button onClick={() => setShowCfg(s => !s)}>
+          {showCfg ? "Hide setup" : "Setup"}</button>
+        <label>Depth
+          <select value={depth} onChange={e => setDepth(+e.target.value)}>
+            {[1,2,3].map(d => <option key={d} value={d}>{d}</option>)}
+          </select>
+        </label>
+        <span className="hint">
+          Click a node to expand it · gold spine = the solver's plan
+        </span>
+        {err && <span className="err">{err}</span>}
+      </header>
 
-      <div className="panel">
-        <div className="row">
+      {showCfg &&
+        <div style={{padding:"10px 16px", borderBottom:"1px solid var(--line)",
+                     display:"flex", gap:12, flexWrap:"wrap", alignItems:"center"}}>
           <label>Department
             <select value={dept} onChange={e => {
-              const d = e.target.value;
-              setDept(d);
-              setCogs(depts[d].slice(0, 2).map(c => ({type:c.type, level:c.levels[0]})));
+              const d = e.target.value; setDept(d);
+              setCogs(depts[d].slice(0, 3).map(c => ({type:c.type, level:c.levels[0]})));
             }}>
               {Object.keys(depts).map(d => <option key={d} value={d}>{d}</option>)}
             </select>
           </label>
-          <label>Toon laff
-            <input type="number" min="15" max="140" value={laff}
-                   onChange={e => setLaff(+e.target.value)} style={{width:80}} />
+          <label>Laff
+            <input type="number" min="15" max="140" value={laff} style={{width:64}}
+                   onChange={e => setLaff(+e.target.value)} />
           </label>
-          <label>Search depth
-            <select value={searchDepth} onChange={e => setSearchDepth(+e.target.value)}>
-              {[1,2,3].map(d => <option key={d} value={d}>{d}</option>)}
-            </select>
-          </label>
-          <button onClick={rebuild}>Rebuild tree</button>
-        </div>
-
-        <div style={{marginTop:12}}>
-          <div className="meta" style={{marginBottom:6}}>Cogs</div>
           {cogs.map((c, i) => (
-            <div className="row" key={i} style={{marginBottom:6}}>
-              <select value={c.type} onChange={e => setCog(i, {type:e.target.value})}>
+            <label key={i}>Cog {i + 1}
+              <select value={c.type} onChange={e => setCogs(cs => cs.map((x, j) =>
+                  j === i ? {type:e.target.value,
+                             level:levelsFor(e.target.value)[0]} : x))}>
                 {cogTypes.map(t => <option key={t.type} value={t.type}>{t.label}</option>)}
               </select>
-              <select value={c.level} onChange={e => setCog(i, {level:+e.target.value})}>
-                {levelsFor(c.type).map(l => <option key={l} value={l}>Level {l}</option>)}
+              <select value={c.level} onChange={e => setCogs(cs => cs.map((x, j) =>
+                  j === i ? {...x, level:+e.target.value} : x))}>
+                {levelsFor(c.type).map(l => <option key={l} value={l}>L{l}</option>)}
               </select>
-              <button className="ghost"
-                      onClick={() => setCogs(cs => cs.filter((_, j) => j !== i))}>remove</button>
-            </div>
+              <button onClick={() => setCogs(cs => cs.filter((_, j) => j !== i))}>×</button>
+            </label>
           ))}
           {cogs.length < 4 &&
-            <button className="ghost" onClick={() => setCogs(cs => [...cs,
-              {type:cogTypes[0].type, level:cogTypes[0].levels[0]}])}>+ add cog</button>}
+            <button onClick={() => setCogs(cs => [...cs,
+              {type:cogTypes[0].type, level:cogTypes[0].levels[0]}])}>+ cog</button>}
+          <button className="primary" onClick={rebuild}>Rebuild</button>
+        </div>}
+
+      <main>
+        <div id="canvas" onClick={() => setSelected(root)}>
+          <div style={{position:"relative", width, height}}>
+            <svg width={width} height={height}
+                 style={{position:"absolute", left:0, top:0, pointerEvents:"none"}}>
+              {edges.map(([a, b], i) => {
+                const x1 = a.x + 206, y1 = a.y + 22;
+                const x2 = b.x,       y2 = b.y + 22;
+                const mid = (x1 + x2) / 2;
+                const lit = a.onPath && b.onPath;
+                return <path key={i}
+                  d={`M${x1},${y1} C${mid},${y1} ${mid},${y2} ${x2},${y2}`}
+                  fill="none" stroke={lit ? "var(--path)" : "var(--line)"}
+                  strokeWidth={lit ? 2 : 1.2} />;
+              })}
+            </svg>
+            {(() => {
+              const out = [];
+              const walk = (n) => {
+                out.push(<NodeCard key={n.id} node={n}
+                                   selected={selected && selected.id === n.id}
+                                   busy={busyId === n.id}
+                                   onSelect={toggle} />);
+                if (n.open && n.children) n.children.forEach(walk);
+              };
+              walk(root);
+              return out;
+            })()}
+          </div>
         </div>
-
-        <div style={{marginTop:12}}>
-          <div className="meta" style={{marginBottom:6}}>Gag pouch (toon is maxed in every track carried)</div>
-          {gags.map((g, i) => (
-            <div className="row" key={i} style={{marginBottom:6}}>
-              <select value={g[0] + "/" + g[1]} onChange={e => {
-                const [track, lvl] = e.target.value.split("/");
-                setGags(gs => gs.map((x, j) => j === i ? [track, +lvl, x[2]] : x));
-              }}>
-                {catalogue.gags.map(o =>
-                  <option key={o.track + o.level} value={o.track + "/" + o.level}>
-                    {o.name}{o.group ? " (group)" : ""}
-                  </option>)}
-              </select>
-              <input type="number" min="1" max="9" value={g[2]} style={{width:64}}
-                     onChange={e => setGags(gs => gs.map((x, j) =>
-                       j === i ? [x[0], x[1], +e.target.value] : x))} />
-              <button className="ghost"
-                      onClick={() => setGags(gs => gs.filter((_, j) => j !== i))}>remove</button>
-            </div>
-          ))}
-          <button className="ghost"
-                  onClick={() => setGags(gs => [...gs, ["throw", 1, 3]])}>+ add gag</button>
-        </div>
-      </div>
-
-      <div className="panel">
-        <table className="legend"><tbody><tr>
-          {Object.entries(STYLES).map(([k, v]) =>
-            <td key={k}><span className="badge"
-              style={{color:v.color, background:v.color+"22"}}>{v.badge}</span></td>)}
-          <td>outlined = solver's pick</td>
-        </tr></tbody></table>
-      </div>
-
-      {root && <Node key={treeKey} node={root} bridge={bridge}
-                     searchDepth={searchDepth} depth={0} />}
+        <aside><Inspector node={selected} bridge={bridge} depth={depth} /></aside>
+      </main>
     </div>
   );
 }
 
-/* ---------- mount ----------------------------------------------------- */
+/* ---------- mount ------------------------------------------------------ */
 
 (async () => {
   const mount = ReactDOM.createRoot(document.getElementById("root"));
@@ -313,7 +520,7 @@ function App({bridge, catalogue}) {
     const catalogue = JSON.parse(bridge.api_catalogue());
     mount.render(<App bridge={bridge} catalogue={catalogue} />);
   } catch (e) {
-    mount.render(<div className="err">Failed to start: {String(e)}</div>);
+    mount.render(<div id="boot" className="err">Failed to start: {String(e)}</div>);
   }
 })();
 </script>

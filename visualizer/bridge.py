@@ -207,6 +207,49 @@ def expand_decision(state_dict: Dict[str, Any], depth: int) -> List[Dict[str, An
     return children
 
 
+def best_line(state_dict: Dict[str, Any], depth: int,
+               steps: int = 6) -> List[Dict[str, Any]]:
+    """The principal variation: what the solver plays from here, following
+    its own recommendation and then the single most likely outcome of it.
+
+    This is the "expected" line, not a guaranteed one -- each step takes the
+    modal outcome, so the whole line is much less likely than any step in it.
+    Its job is to answer "what is the plan?", which a tree of probabilities
+    doesn't say on its own.
+    """
+    state = state_from_dict(state_dict)
+    line = []
+
+    for _ in range(steps):
+        if state.is_terminal():
+            break
+        try:
+            value, action = expectimax.evaluate(state, depth=max(1, depth))
+        except NotImplementedError:
+            break
+        if action is None:
+            break
+
+        branches = outcomes.action_outcomes(state, action)
+        if not branches:
+            break
+        prob, next_state, reward = max(branches, key=lambda b: b[0])
+
+        line.append({
+            "action": action_to_dict(action),
+            "label": describe_action(action),
+            "ev": round(value, 2),
+            "prob": round(prob, 4),
+            "reward": round(reward, 2),
+            "laff_lost": state.toon.laff - next_state.toon.laff,
+            "cogs": [cog_label(c, i) for i, c in enumerate(next_state.cogs)],
+            "terminal": _terminal_label(next_state),
+        })
+        state = next_state
+
+    return line
+
+
 def expand_action(state_dict: Dict[str, Any], action_dict: Dict[str, Any],
                    cap: int = 8) -> List[Dict[str, Any]]:
     """Every outcome of taking this action, with exact probabilities from
@@ -245,6 +288,13 @@ def expand_action(state_dict: Dict[str, Any], action_dict: Dict[str, Any],
     return children
 
 
+def cog_forecast(state_dict: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """What each surviving cog is about to do, and how likely each attack
+    is. Marginal per cog -- see outcomes.cog_phase_summary for why not the
+    joint."""
+    return outcomes.cog_phase_summary(state_from_dict(state_dict))
+
+
 # ---------------------------------------------------------------------
 # String entry points -- Pyodide passes strings most cleanly
 # ---------------------------------------------------------------------
@@ -280,3 +330,20 @@ def api_expand_action(payload_json: str) -> str:
     except NotImplementedError as exc:
         return json.dumps({"error": str(exc)})
     return json.dumps({"children": children})
+
+
+def api_cog_forecast(payload_json: str) -> str:
+    payload = json.loads(payload_json)
+    try:
+        return json.dumps({"cogs": cog_forecast(payload["state"])})
+    except NotImplementedError as exc:
+        return json.dumps({"error": str(exc)})
+
+
+def api_best_line(payload_json: str) -> str:
+    payload = json.loads(payload_json)
+    try:
+        line = best_line(payload["state"], payload.get("depth", 2))
+    except NotImplementedError as exc:
+        return json.dumps({"error": str(exc)})
+    return json.dumps({"line": line})

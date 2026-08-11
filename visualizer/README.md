@@ -32,10 +32,32 @@ a number it calls into `solver/`. There's a test suite for it at
 `tests/test_bridge.py`, including a check that the group-gag flags it sends
 the UI match `simulator.is_group_action` rather than restating them.
 
-The tree expands lazily: clicking a node calls Python for that layer only,
-so nothing is computed until you look at it. Each action shows its expected
-value and **the gap to the runner-up** — near zero means the decision
-doesn't matter, and a large gap means the position has a real right answer.
+## What you see
+
+The tree is a node-link diagram that grows left to right; clicking a node
+computes and reveals its children, so nothing exists until you look at it.
+
+- **Your turn** (gold) — a position. Its children are the gags you could play.
+- **Gag** (blue) — one option, showing its expected value and **the gap to
+  the runner-up**. Near zero means the decision doesn't matter; a large gap
+  means the position has a real right answer.
+- Children of a gag are the **outcomes** of playing it, with exact
+  probabilities and the laff they cost.
+
+**Show best path** walks the solver's own recommendation down the tree,
+opening as it goes and lighting the spine gold, so the plan is visible
+rather than something you hunt for by clicking.
+
+The inspector on the right explains the selected position:
+
+- **What the cogs do next** — every surviving cog, each of its attacks, how
+  often it picks that attack, how often the attack lands, and its damage.
+  `⁂` marks a group attack. These are *marginals per cog*: the joint over
+  all cogs is combinatorial (three cogs produce ~430 distinct rounds, so
+  even the twelve likeliest cover under a tenth of the probability), and
+  showing a truncated joint would badly misrepresent the round.
+- **The plan from here** — the principal variation, behind a button because
+  it runs a full search per step and blocks the page for a few seconds.
 
 ## Why it's built this way
 

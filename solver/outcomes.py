@@ -70,9 +70,15 @@ def _toon_hit_probability(state: BattleState, action: Action) -> float:
 # Cog phase
 # ---------------------------------------------------------------------
 
-def cog_damage_distribution(cog: CogState) -> Dict[int, float]:
-    """{damage: probability} for one cog's attack this round, assuming it
-    attacks at all. Damage 0 covers every miss."""
+def cog_attack_outcomes(cog: CogState) -> List[Tuple[float, str, int, bool]]:
+    """(probability, attack_name, damage, hit) for one cog's turn, assuming
+    it attacks at all.
+
+    This is the unmerged form of `cog_damage_distribution` below. The search
+    only ever needs the damage number, but anything showing a human what
+    happened needs to say *which* attack -- "Pencil Pusher used Fountain Pen
+    for 6" rather than "6 damage from somewhere".
+    """
     table = data.COG_DEPARTMENTS[cog.department][cog.cog_type]
     if table.get("accuracy") is None:
         raise NotImplementedError(
@@ -91,16 +97,14 @@ def cog_damage_distribution(cog: CogState) -> Dict[int, float]:
         first = next(iter(freqs))
         freqs[first] += 100 - total_freq
 
-    dist: Dict[int, float] = {}
+    results: List[Tuple[float, str, int, bool]] = []
     for name, freq in freqs.items():
         p_attack = freq / 100.0
         if p_attack <= 0:
             continue
 
         # Individual cells can be None even when the table as a whole is
-        # populated (e.g. micromanager/brain_storm accuracy, whose source
-        # value looked like a dropped zero and was left TODO rather than
-        # guessed). Catch that here so it reads as a data gap instead of
+        # populated. Catch that here so it reads as a data gap instead of
         # surfacing as a TypeError deep in the arithmetic.
         raw_acc = table["accuracy"][name][rel_level]
         entry = table["damage"][name][rel_level]
@@ -120,9 +124,24 @@ def cog_damage_distribution(cog: CogState) -> Dict[int, float]:
             damage_options = [(1.0 / span, d) for d in range(low, high + 1)]
 
         for p_dmg, dmg in damage_options:
-            dist[dmg] = dist.get(dmg, 0.0) + p_attack * p_hit * p_dmg
-        dist[0] = dist.get(0, 0.0) + p_attack * (1.0 - p_hit)
+            if p_attack * p_hit * p_dmg > 0:
+                results.append((p_attack * p_hit * p_dmg, name, dmg, True))
+        if p_hit < 1.0:
+            results.append((p_attack * (1.0 - p_hit), name, 0, False))
 
+    return results
+
+
+def cog_damage_distribution(cog: CogState) -> Dict[int, float]:
+    """{damage: probability} for one cog's attack this round, assuming it
+    attacks at all. Damage 0 covers every miss.
+
+    The merged form of `cog_attack_outcomes` -- which attack landed doesn't
+    affect the next state, only the number does, so the search collapses
+    them."""
+    dist: Dict[int, float] = {}
+    for prob, _name, dmg, _hit in cog_attack_outcomes(cog):
+        dist[dmg] = dist.get(dmg, 0.0) + prob
     return dist
 
 
@@ -257,6 +276,61 @@ def _accumulate(results, prob, state_after, laff_lost, action,
         results[key] = [prob, state_after, reward]
     else:
         existing[0] += prob
+
+
+def cog_phase_summary(state: BattleState) -> List[Dict]:
+    """What each cog is about to do, per cog, as marginal probabilities.
+
+    The obvious thing for a UI would be the *joint* -- every combination of
+    what all the cogs do -- but that is combinatorial: three cogs produce
+    ~430 distinct lines, so even the twelve most likely cover under a tenth
+    of the probability, and showing them would badly misrepresent the round.
+    The marginals are compact, exact, and answer the actual question ("what
+    can this cog do to me, and how likely is each?"). The joint over total
+    damage is still available, merged, from `cog_phase_outcomes`.
+    """
+    summary = []
+    for index, cog in enumerate(state.cogs):
+        if cog.status.is_dead:
+            continue
+
+        entry = {
+            "index": index,
+            "cog": cog.cog_type.replace("_", " ").title(),
+            "level": cog.level,
+            "lured": cog.status.lured,
+            "lure_rounds": cog.status.lure_rounds_remaining,
+            "attacks": [],
+        }
+
+        # A lured cog only acts if its lure ends this round; fold that in so
+        # the percentages shown are unconditional.
+        p_acts = lure_end_probability(cog) if cog.status.lured else 1.0
+        entry["p_acts"] = round(p_acts, 4)
+        group_attacks = data.COG_DEPARTMENTS[cog.department][cog.cog_type][
+            "group_attacks"]
+
+        if p_acts > 0:
+            merged: Dict[str, Dict] = {}
+            for prob, name, dmg, hit in cog_attack_outcomes(cog):
+                slot = merged.setdefault(name, {
+                    "attack": name.replace("_", " ").title(),
+                    "prob": 0.0, "hit_prob": 0.0, "damage": 0,
+                    "group": name in group_attacks,
+                })
+                slot["prob"] += prob * p_acts
+                if hit:
+                    slot["hit_prob"] += prob * p_acts
+                    slot["damage"] = max(slot["damage"], dmg)
+            entry["attacks"] = sorted(
+                ({**v, "prob": round(v["prob"], 4),
+                  "hit_prob": round(v["hit_prob"], 4)} for v in merged.values()),
+                key=lambda a: a["prob"], reverse=True)
+
+        entry["expected_damage"] = round(
+            sum(a["hit_prob"] * a["damage"] for a in entry["attacks"]), 2)
+        summary.append(entry)
+    return summary
 
 
 def state_key(state: BattleState) -> Tuple:

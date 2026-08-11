@@ -117,6 +117,59 @@ class TestExpansionMatchesTheSolver(unittest.TestCase):
         self.assertIn("glower_power", res["error"])
 
 
+class TestCogForecast(unittest.TestCase):
+    """The forecast is what tells the user which attack is coming."""
+
+    def setUp(self):
+        self.state_dict = bridge.state_to_dict(bridge.build_state(CFG))
+
+    def test_lists_every_living_cog_with_its_attacks(self):
+        forecast = bridge.cog_forecast(self.state_dict)
+        self.assertEqual(len(forecast), 2)
+        for entry in forecast:
+            self.assertTrue(entry["attacks"], f"{entry['cog']} has no attacks")
+            for atk in entry["attacks"]:
+                self.assertGreater(atk["prob"], 0)
+                self.assertLessEqual(atk["hit_prob"], atk["prob"] + 1e-9)
+
+    def test_attack_probabilities_sum_to_one_per_cog(self):
+        """Marginal per cog: one of its attacks is always chosen."""
+        for entry in bridge.cog_forecast(self.state_dict):
+            self.assertAlmostEqual(sum(a["prob"] for a in entry["attacks"]),
+                                   1.0, places=6)
+
+    def test_dead_cogs_are_omitted(self):
+        state = bridge.build_state(CFG)
+        state.cogs[0].status.is_dead = True
+        forecast = bridge.cog_forecast(bridge.state_to_dict(state))
+        self.assertEqual(len(forecast), 1)
+
+    def test_a_lured_cog_is_shown_as_unlikely_to_act(self):
+        state = bridge.build_state(CFG)
+        state.cogs[0].status.apply_lure(110, 2, 2)
+        entry = bridge.cog_forecast(bridge.state_to_dict(state))[0]
+        self.assertTrue(entry["lured"])
+        self.assertEqual(entry["p_acts"], 0.0)
+        self.assertEqual(entry["expected_damage"], 0.0)
+
+
+class TestBestLine(unittest.TestCase):
+    def test_opens_with_the_action_the_solver_recommends(self):
+        state_dict = bridge.state_to_dict(bridge.build_state(CFG))
+        line = bridge.best_line(state_dict, depth=2)
+        self.assertTrue(line)
+        top = bridge.expand_decision(state_dict, depth=2)[0]
+        self.assertEqual(line[0]["action"], top["action"])
+
+    def test_stops_at_a_terminal_state(self):
+        cfg = dict(CFG, cogs=[{"type": "flunky", "level": 1}])
+        state_dict = bridge.state_to_dict(bridge.build_state(cfg))
+        line = bridge.best_line(state_dict, depth=2, steps=10)
+        self.assertTrue(line)
+        self.assertIsNotNone(line[-1]["terminal"],
+                             "a one-cog fight should reach an end state")
+
+
 class TestCatalogue(unittest.TestCase):
     def test_lists_every_department_and_cog(self):
         cat = json.loads(bridge.api_catalogue())
