@@ -38,10 +38,9 @@ from .state import Track, CogState, ToonState
 # ---------------------------------------------------------------------
 
 def calc_prop_acc(track: Track, level: int, lure_tree_planted: bool = False) -> int:
-    idx = level - 1
-    if track == Track.LURE and lure_tree_planted:
-        return data.AV_LURE_BONUS_ACCURACY[idx]
-    return data.AV_PROP_ACCURACY[track][idx]
+    """propAcc for a gag, organic or not. Only Lure's accuracy changes when
+    organic, which Gag.prop_accuracy already knows -- no special-case here."""
+    return data.gag(track, level).prop_accuracy(organic=lure_tree_planted)
 
 
 def calc_track_exp(toon: ToonState, track: Track) -> int:
@@ -210,45 +209,28 @@ def roll_hit(accuracy_pct: int) -> bool:
 # Toon attack damage
 # ---------------------------------------------------------------------
 
-def calc_toon_damage(track: Track, level: int, trained_fraction: float = 1.0) -> int:
+def calc_toon_damage(track: Track, level: int, trained_fraction: float = 1.0,
+                      organic: bool = False) -> int:
     """Damage dealt by a gag. The real game ties this deterministically to
     the toon's earned experience in the track (see gag_damage_from_exp
     below) -- but we don't have the minE/maxE thresholds transcribed yet.
     As an interim approximation, trained_fraction (0=min dmg, 1=max dmg)
-    linearly interpolates the known min/max range. Default 1.0 assumes a
-    fully maxed track, which is the common "solved" build anyway.
+    linearly interpolates the gag's range. Default 1.0 assumes a fully
+    maxed track, which is the common "solved" build anyway.
     """
-    entry = data.GAG_DAMAGE_MINMAX.get(track, {}).get(level)
-    if entry is None:
-        raise NotImplementedError(
-            f"Gag damage for {track}/{level} is marked TODO in data/gags.py -- "
-            f"fill it in before simulating this gag."
-        )
-    dmg_min, dmg_max = entry
-    return round(dmg_min + (dmg_max - dmg_min) * trained_fraction)
+    return data.gag(track, level).damage_at(trained_fraction, organic)
 
 
 def calc_toon_heal(level: int, hit: bool = True,
-                    trained_fraction: float = 1.0) -> int:
+                    trained_fraction: float = 1.0, organic: bool = False) -> int:
     """Laff restored by a Toon-Up gag.
 
-    [CONFIRMED] TTR wiki: a Toon-Up gag that "misses" still heals 20% of
-    its value, rounded up -- unlike every other track, where a miss does
+    [CONFIRMED] TTR wiki: a Toon-Up gag that "misses" still heals 20% of its
+    value, rounded up -- unlike every other track, where a miss does
     nothing. Pass hit=False for that case.
-
-    Same interim min/max interpolation as calc_toon_damage: the real value
-    is experience-derived, and the minE/maxE thresholds aren't transcribed.
     """
-    entry = data.GAG_HEAL_MINMAX.get(level)
-    if entry is None:
-        raise NotImplementedError(
-            f"Toon-Up heal for level {level} is marked TODO in data/gags.py."
-        )
-    heal_min, heal_max = entry
-    full = round(heal_min + (heal_max - heal_min) * trained_fraction)
-    if hit:
-        return full
-    return math.ceil(full * data.TOON_UP_MISS_FRACTION)
+    full = data.gag(Track.TOON_UP, level).heal_at(trained_fraction, organic)
+    return full if hit else math.ceil(full * data.TOON_UP_MISS_FRACTION)
 
 
 KB_BONUS_MULTIPLIER = 0.50   # [CONFIRMED] kbBonus = totalDmgs * 0.50
@@ -408,7 +390,7 @@ def lure_wakes_up(atk_acc_before_bonus: int) -> bool:
 # Lure duration and early expiry now come from data/lure.py, which is
 # [CONFIRMED] against the TTR wiki. See that module for the rebalancing
 # history that makes the old strategy-guide values wrong.
-LURE_ROUNDS_BY_LEVEL = dict(data.LURE_ROUNDS_BY_LEVEL)
+LURE_ROUNDS_BY_LEVEL = {g.level: g.lure_rounds for g in data.gags_in(Track.LURE)}
 
 
 def lure_duration_rounds(level: int) -> int:
@@ -419,10 +401,7 @@ def lure_duration_rounds(level: int) -> int:
     is never extended: re-luring neither stacks (3.0.0 removed that) nor
     refreshes. See CogStatus.apply_lure.
     """
-    rounds = LURE_ROUNDS_BY_LEVEL.get(level)
-    if rounds is None:
-        raise NotImplementedError(f"No lure duration for gag level {level}.")
-    return rounds
+    return data.gag(Track.LURE, level).rounds()
 
 
 def lure_can_expire_early(level: int, lure_tree_planted: bool = False) -> bool:
@@ -438,9 +417,8 @@ def lure_can_expire_early(level: int, lure_tree_planted: bool = False) -> bool:
     because it is a rebalancing knob: a future patch that drops a gag
     under 50% would switch early expiry back on for it.
     """
-    table = (data.LURE_ORGANIC_ACCURACY if lure_tree_planted
-             else data.LURE_BASE_ACCURACY)
-    return table[level] < data.EARLY_EXPIRY_ACCURACY_FLOOR
+    base = data.gag(Track.LURE, level).prop_accuracy(organic=lure_tree_planted)
+    return base < data.EARLY_EXPIRY_ACCURACY_FLOOR
 
 
 LURE_ENDS_ON_DAMAGE = None

@@ -31,13 +31,13 @@ def is_group_action(track: Track, level: int) -> bool:
         # [CONFIRMED] TTR wiki: Toon-Up has the same 2/4/6/7 zig-zag as
         # Lure -- Feather, Lipstick and Pixie Dust each affect one Toon.
         # (Moot while solo, but wrong is wrong.)
-        return level in data.GAG_GROUP_LEVELS[Track.TOON_UP]
+        return data.gag(Track.TOON_UP, level).group
     if track == Track.LURE:
         # [CONFIRMED] TTR wiki: Small Magnet (2), Big Magnet (4),
         # Hypno-goggles (6) and Presentation (7) all hit every cog. Only
         # the dollar-bill gags at 1/3/5 are single-target. This used to say
         # `level == 7`, which made three group gags single-target.
-        return level in data.LURE_GROUP_LEVELS
+        return data.gag(Track.LURE, level).group
     if track in (Track.THROW, Track.SQUIRT, Track.DROP, Track.TRAP):
         return level == 7           # Wedding Cake / Geyser / Ocean Liner / Train Tracks
     return False
@@ -92,12 +92,7 @@ def _apply_trap_trigger(cog: CogState) -> int:
     onto the trap, and gives no rule for damage clearing a trap. (Nor is
     re-trapping possible -- legal_actions blocks trapping an already
     trapped or lured cog, which is [CONFIRMED].)"""
-    entry = data.GAG_DAMAGE_MINMAX[Track.TRAP].get(cog.status.trap_level)
-    if entry is None:
-        raise NotImplementedError(
-            f"Trap damage for level {cog.status.trap_level} is TODO in data/gags.py"
-        )
-    dmg = entry[0]  # trap damage is a fixed value once populated
+    dmg = data.gag(Track.TRAP, cog.status.trap_level).damage_at(0.0)
     cog.status.trapped = False
     cog.status.trap_track = None
     cog.status.trap_level = None

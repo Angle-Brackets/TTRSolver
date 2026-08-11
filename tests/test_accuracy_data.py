@@ -85,9 +85,13 @@ class TestPropAccValues(unittest.TestCase):
                    if len(set(acc.AV_PROP_ACCURACY[t])) > 1}
         self.assertEqual(varying, {Track.TOON_UP, Track.LURE})
 
-    def test_lure_row_matches_the_lure_module(self):
-        """The Lure row is derived, not transcribed -- data/lure.py owns it."""
-        from solver.data.lure import LURE_BASE_ACCURACY
+    def test_lure_row_matches_the_gag_objects(self):
+        """The propAcc rows are derived from the Gag objects, not restated
+        here -- a second copy keyed by track/level is how Lure drifted out
+        of sync in the first place."""
+        from solver.data.gags import gag
+        LURE_BASE_ACCURACY = {lvl: gag(Track.LURE, lvl).accuracy
+                              for lvl in range(1, 8)}
         self.assertEqual(acc.AV_PROP_ACCURACY[Track.LURE],
                          [LURE_BASE_ACCURACY[lvl] for lvl in range(1, 8)])
         self.assertEqual(acc.AV_PROP_ACCURACY[Track.LURE],
@@ -109,7 +113,7 @@ class TestOrganicAccuracy(unittest.TestCase):
         The None rows are a finding, not a gap -- if someone later fills
         one in with an invented number this test fails."""
         with_rows = {t for t, row in acc.AV_ORGANIC_PROP_ACCURACY.items()
-                     if row is not None}
+                     if any(v is not None for v in row)}
         self.assertEqual(with_rows, {Track.LURE})
         self.assertEqual(acc.ORGANIC_ACCURACY_TRACKS, frozenset({Track.LURE}))
         self.assertEqual(with_rows, set(acc.ORGANIC_ACCURACY_TRACKS))

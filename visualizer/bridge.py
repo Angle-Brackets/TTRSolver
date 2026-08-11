@@ -103,13 +103,7 @@ def action_from_dict(d: Dict[str, Any]) -> Action:
 
 
 def gag_name(track: Track, level: int) -> str:
-    if track == Track.LURE:
-        return data.LURE_GAG_NAMES.get(level, f"{track.value} {level}")
-    names = getattr(data, "GAG_NAMES", {})
-    entry = names.get(track)
-    if isinstance(entry, dict) and level in entry:
-        return entry[level]
-    return f"{track.value.replace('_', ' ').title()} {level}"
+    return data.gag(track, level).name
 
 
 def describe_action(action: Action) -> str:

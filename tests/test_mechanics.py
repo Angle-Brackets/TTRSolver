@@ -28,12 +28,17 @@ def _lured_cog(acc_before_bonus, rounds, level=2, hp=100, lure_level=2):
 
 
 def early_expiry_enabled(lure_level=2):
-    """Force a Lure gag under the 50% base-accuracy floor, which is the
-    only way TTR 3.3.0 leaves the wake-up roll reachable. No real gag
-    qualifies, so tests that exercise wake-up have to say so explicitly
-    rather than relying on it happening by default."""
-    return mock.patch.dict(mechanics.data.LURE_BASE_ACCURACY,
-                           {lure_level: 45})
+    """Bring a Lure gag under the base-accuracy floor, which is the only way
+    TTR 3.3.0 leaves the wake-up roll reachable. No real gag qualifies, so
+    tests that exercise wake-up have to say so explicitly rather than
+    relying on it happening by default.
+
+    Raises the floor rather than lowering a gag's accuracy: Gag is frozen,
+    and the threshold is the thing the rule actually turns on."""
+    from solver.data import gags as _gags
+    above = _gags.gag(Track.LURE, lure_level).accuracy + 1
+    return mock.patch.object(mechanics.data, "EARLY_EXPIRY_ACCURACY_FLOOR",
+                             above)
 
 
 def _state_with(cogs):
@@ -148,10 +153,12 @@ class TestNoEarlyExpiry(unittest.TestCase):
 
     def test_rule_would_re_enable_below_the_floor(self):
         """Guard the threshold itself, so this stays a rule rather than a
-        hardcoded False if a future rebalance drops a gag under 50%."""
-        with mock.patch.dict(mechanics.data.LURE_BASE_ACCURACY, {3: 45}):
-            self.assertTrue(mechanics.lure_can_expire_early(3))
-            self.assertFalse(mechanics.lure_can_expire_early(4))
+        hardcoded False if a future rebalance moves a gag across it. $5 Bill
+        is 70 and Big Magnet 65, so a floor of 68 catches exactly one."""
+        with mock.patch.object(mechanics.data,
+                               "EARLY_EXPIRY_ACCURACY_FLOOR", 68):
+            self.assertFalse(mechanics.lure_can_expire_early(3))   # 70
+            self.assertTrue(mechanics.lure_can_expire_early(4))    # 65
 
     def test_lured_cog_never_wakes_before_its_rounds_run_out(self):
         """Even with the wake-up roll rigged to always succeed."""

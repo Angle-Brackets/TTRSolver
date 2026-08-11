@@ -43,7 +43,7 @@ TTR REBALANCING HISTORY captured here (from the Accuracy page's own
            past 95. See ACCURACY_CAP_IS_SOFT below.
 """
 from ..state import Track
-from .lure import LURE_BASE_ACCURACY, LURE_ORGANIC_ACCURACY
+from .gags import gag
 
 # propAcc[track][level-1] -> base accuracy, level is 1-indexed.
 #
@@ -54,43 +54,22 @@ from .lure import LURE_BASE_ACCURACY, LURE_ORGANIC_ACCURACY
 # base accuracy and handles Trap by a special rule instead -- "When a Trap
 # gag is used, atkAcc is automatically set to 100% and atkHit is set to 1."
 # mechanics.calc_toon_accuracy implements that short-circuit.
+# Derived from the Gag objects rather than restated here: propAcc is a
+# property of a gag, and keeping a second copy keyed by track/level is how
+# the old parallel-dict layout let Lure drift out of sync in the first place.
 AV_PROP_ACCURACY = {
-    # Feather..Juggling Cubes 70%, High Dive 95%. NOT 100 at level 7 --
-    # that was the strategy guide's number and it is wrong for TTR.
-    Track.TOON_UP: [70, 70, 70, 70, 70, 70, 95],
-    Track.TRAP:    [0, 0, 0, 0, 0, 0, 0],     # always-hit, see above
-    Track.LURE:    [LURE_BASE_ACCURACY[lvl] for lvl in range(1, 8)],
-    Track.SOUND:   [95, 95, 95, 95, 95, 95, 95],
-    Track.THROW:   [75, 75, 75, 75, 75, 75, 75],
-    Track.SQUIRT:  [95, 95, 95, 95, 95, 95, 95],
-    Track.DROP:    [50, 50, 50, 50, 50, 50, 50],
+    track: [gag(track, level).accuracy for level in range(1, 8)]
+    for track in Track
 }
 
-# Organic propAcc, when the gag came off a gag tree (or an equivalent
-# interactive prop). [CONFIRMED] -- TTR wiki, Organic gags:
-#
-#   "Damage-dealing gags (Trap, Sound, Throw, Squirt, and Drop) gain an
-#    increase in damage when organic, while Toon-Up gags gain additional
-#    healing power. Lure gags gain an increase in base accuracy when
-#    organic."
-#
-# So Lure is the ONLY track whose accuracy changes when organic; the other
-# six get a damage or healing multiplier and their propAcc is untouched.
-# The `None` rows below are a positive finding, not a [TODO] gap: the wiki
-# says there is no such number to record. Callers must fall back to
-# AV_PROP_ACCURACY for a None row rather than treating it as missing data.
+# Organic propAcc, where a track has one. Only Lure does -- every other
+# track's organic bonus is damage or healing, so these rows are all None
+# and that is a finding, not a gap.
 AV_ORGANIC_PROP_ACCURACY = {
-    Track.TOON_UP: None,     # organic = +20% healing (4.0.0, was +10%)
-    Track.TRAP:    None,     # organic = +10% damage
-    Track.LURE:    [LURE_ORGANIC_ACCURACY[lvl] for lvl in range(1, 8)],
-    Track.SOUND:   None,     # organic = +10% damage
-    Track.THROW:   None,     # organic = +10% damage
-    Track.SQUIRT:  None,     # organic = +15% damage
-    Track.DROP:    None,     # organic = +15% damage (4.0.0, was +10%)
+    track: [gag(track, level).organic_accuracy for level in range(1, 8)]
+    for track in Track
 }
 
-# Tracks whose base accuracy is modified by the gag being organic.
-# [CONFIRMED] -- Lure and only Lure.
 ORGANIC_ACCURACY_TRACKS = frozenset({Track.LURE})
 
 # Back-compat alias: the flat level-indexed organic-Lure row that

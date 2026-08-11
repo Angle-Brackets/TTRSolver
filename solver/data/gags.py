@@ -1,5 +1,11 @@
 """
-Gag damage, heals, organic values and group levels, by (track, level).
+Every gag in the game, one `Gag` object each.
+
+Damage, heals, organic values, accuracy, group flag, and (for Lure)
+duration in rounds -- all on one object per (track, level), so finding
+out what a gag does is one lookup instead of six parallel dicts.
+Lure used to live in data/lure.py purely because it was the first table
+rewritten from the wiki; there was never a reason for it to be separate.
 
 [CONFIRMED] from the Toontown Rewritten wiki, except for the two cells
 explicitly left None below. Sources, all cross-checked against each other:
@@ -7,6 +13,7 @@ explicitly left None below. Sources, all cross-checked against each other:
   https://toontownrewritten.wiki/Throw     https://toontownrewritten.wiki/Squirt
   https://toontownrewritten.wiki/Sound     https://toontownrewritten.wiki/Drop
   https://toontownrewritten.wiki/Trap      https://toontownrewritten.wiki/Toon-Up
+  https://toontownrewritten.wiki/Lure
   https://toontownrewritten.wiki/Organic_gags
   ...plus the per-gag infobox on each of the 42 individual gag pages
   (Cupcake, Banana Peel, Toontanic, ...), which carry mindamage/maxdamage
@@ -72,158 +79,132 @@ TTR REBALANCING HISTORY captured here (from each page's own changelog):
   Toon-Up -- 3.0.0: Pixie Dust 60-70 -> 50-60; Juggling Cubes 90-120 ->
              75-105.
              4.0.0: organic Toon-Up bonus raised 10% -> 20%.
+  Lure    -- 3.0.0: Presentation 15 -> 8 rounds; "Removed the Lure Stacking
+             Rounds mechanic that allowed the accumulation of Lure rounds
+             ... if multiple Lure Gags are used simultaneously". (Re-luring
+             across rounds doesn't refresh the counter either, but that is
+             play knowledge, not something the wiki states -- see
+             CogStatus.apply_lure.)
+             3.3.0: Lure gags with base accuracy below 50% no longer have a
+             chance to expire early. No gag is under 50%, so in practice
+             lures now always run their full duration.
+             4.0.0: dollar-bill accuracy +10%, multi-Lure +5%, Presentation
+             settled at 90%.
 """
+from typing import Dict, Tuple
+
 from ..state import Track
-
-# In-game gag name by (track, level). [CONFIRMED] -- worth keeping around
-# because two of them changed between TTO and TTR and the old names are
-# still scattered through comments elsewhere in the codebase.
-GAG_NAMES = {
-    Track.TOON_UP: {1: "Feather", 2: "Megaphone", 3: "Lipstick",
-                    4: "Bamboo Cane", 5: "Pixie Dust", 6: "Juggling Cubes",
-                    7: "High Dive"},
-    Track.TRAP:    {1: "Banana Peel", 2: "Rake", 3: "Marbles",
-                    4: "Quicksand", 5: "Trapdoor", 6: "TNT",
-                    7: "Railroad"},        # TTO: "Train Tracks"
-    Track.SOUND:   {1: "Bike Horn", 2: "Whistle", 3: "Bugle", 4: "Aoogah",
-                    5: "Elephant Trunk", 6: "Foghorn", 7: "Opera Singer"},
-    Track.THROW:   {1: "Cupcake", 2: "Fruit Pie Slice", 3: "Cream Pie Slice",
-                    4: "Whole Fruit Pie", 5: "Whole Cream Pie",
-                    6: "Birthday Cake", 7: "Wedding Cake"},
-    Track.SQUIRT:  {1: "Squirting Flower", 2: "Glass of Water",
-                    3: "Squirt Gun", 4: "Seltzer Bottle", 5: "Fire Hose",
-                    6: "Storm Cloud", 7: "Geyser"},
-    Track.DROP:    {1: "Flower Pot", 2: "Sandbag", 3: "Anvil",
-                    4: "Big Weight", 5: "Safe", 6: "Grand Piano",
-                    7: "Toontanic"},       # TTO: "Ocean Liner"
-}
+from .types import Gag
 
 # ---------------------------------------------------------------------
-# Damage
+# The gags
 # ---------------------------------------------------------------------
-# (min, max) by (track, level). [CONFIRMED] -- complete, no gaps.
-#
-# The (min, max) shape SURVIVES the wiki audit: TTR still publishes a
-# damage range per gag, and min is what the gag deals when freshly
-# unlocked, max when the track is maxed. Gags with a single published
-# figure (every level 7, and Drop 1-4, which the Drop page notes "can
-# already deal maximum damage") are stored as (x, x), matching the
-# convention the old table already used for level 7.
-#
-# Toon-Up is deliberately absent from this dict -- it heals rather than
-# damages. See GAG_HEAL_MINMAX below.
-GAG_DAMAGE_MINMAX = {
-    Track.THROW: {
-        1: (4, 6),      # Cupcake
-        2: (8, 10),     # Fruit Pie Slice
-        3: (14, 17),    # Cream Pie Slice
-        4: (24, 27),    # Whole Fruit Pie
-        5: (36, 40),    # Whole Cream Pie
-        6: (48, 100),   # Birthday Cake -- the wide range is real, see header
-        7: (120, 120),  # Wedding Cake (group)
-    },
-    Track.SQUIRT: {
-        1: (3, 4),      # Squirting Flower
-        2: (6, 8),      # Glass of Water
-        3: (10, 12),    # Squirt Gun
-        4: (18, 21),    # Seltzer Bottle
-        5: (27, 30),    # Fire Hose
-        6: (36, 80),    # Storm Cloud
-        7: (105, 105),  # Geyser (group)
-    },
-    Track.SOUND: {
-        # NOTE the level numbers: the old table was shifted one level
-        # down because the guide omitted Bike Horn entirely.
-        1: (3, 4),      # Bike Horn
-        2: (5, 7),      # Whistle
-        3: (9, 11),     # Bugle
-        4: (14, 16),    # Aoogah
-        5: (19, 21),    # Elephant Trunk
-        6: (25, 50),    # Foghorn
-        7: (90, 90),    # Opera Singer
-    },
-    Track.DROP: {
-        1: (10, 10),    # Flower Pot
-        2: (18, 18),    # Sandbag
-        3: (30, 30),    # Anvil
-        4: (45, 45),    # Big Weight
-        5: (60, 70),    # Safe -- range added in 3.0.0
-        6: (85, 170),   # Grand Piano
-        7: (180, 180),  # Toontanic (group)
-    },
-    Track.TRAP: {
-        1: (10, 12),    # Banana Peel
-        2: (18, 20),    # Rake
-        3: (30, 35),    # Marbles
-        4: (45, 50),    # Quicksand
-        5: (75, 85),    # Trapdoor -- raised from 60-70 in 3.0.0
-        6: (90, 180),   # TNT
-        7: (200, 200),  # Railroad (group) -- raised from 195 in 3.0.0
-    },
-    Track.TOON_UP: {},  # heals, not damage -- see GAG_HEAL_MINMAX
-}
+# A `None` damage/heal is a documented gap, not an oversight -- see the two
+# disputed cells noted below. Gag.damage_at()/heal_at() raise on them.
 
-# Damage when the gag is organic (grown on a gag tree). [CONFIRMED] from
-# the per-track tables, the Organic gags page, and the per-gag infoboxes,
-# except Trap level 5 -- see the comment there.
-#
-# The Organic gags page states the rule as: Trap/Sound/Throw ceil(1.1x),
-# Squirt/Drop ceil(1.15x), Toon-Up ceil(1.2x). That formula reproduces
-# every published figure below except Squirt level 4 (Seltzer Bottle),
-# where the formula gives 21 but all three wiki sources say 22. The
-# tables win over the prose; the values below are transcribed, never
-# computed.
-GAG_ORGANIC_DAMAGE_MINMAX = {
-    Track.THROW: {
-        1: (5, 7), 2: (9, 11), 3: (16, 19), 4: (27, 30),
-        5: (40, 44), 6: (53, 110), 7: (132, 132),
-    },
-    Track.SQUIRT: {
-        1: (4, 5),
-        2: (7, 10),
-        3: (12, 14),
-        4: (22, 25),    # min 22 disagrees with the page's own ceil(1.15x)
-                        # rule (which gives 21); all three tables say 22
-        5: (32, 35), 6: (42, 92), 7: (121, 121),
-    },
-    Track.SOUND: {
-        1: (4, 5), 2: (6, 8), 3: (10, 13), 4: (16, 18),
-        5: (21, 24), 6: (28, 55), 7: (99, 99),
-    },
-    Track.DROP: {
-        1: (12, 12), 2: (21, 21), 3: (35, 35), 4: (52, 52),
-        5: (69, 81), 6: (98, 196), 7: (207, 207),
-    },
-    Track.TRAP: {
-        1: (11, 14), 2: (20, 22), 3: (33, 39), 4: (50, 55),
-        5: None,        # TODO: Trapdoor organic. Three wiki sources give
-                        # three different mins/maxes and no two agree:
-                        # the Trap page says 83-94, the Organic gags page
-                        # and the Trapdoor infobox say 84-94, and the
-                        # Trap page's own 3.0.0 changelog says 83-93. The
-                        # page's stated ceil(1.1x) rule on 75-85 gives
-                        # 83-94, which matches none of them completely.
-                        # Not guessing -- needs a fourth source.
-        6: (99, 198),
-        7: (220, 220),  # Railroad -- raised from 214 in 3.0.0
-    },
-    Track.TOON_UP: {},  # see GAG_ORGANIC_HEAL_MINMAX
-}
+GAGS: Tuple[Gag, ...] = (
+    # --- Toon Up ---------------------------------------------
+    Gag(Track.TOON_UP, 1, 'Feather', accuracy=70, group=False, heal=(8, 10), organic_heal=(10, 12)),
+    Gag(Track.TOON_UP, 2, 'Megaphone', accuracy=70, group=True, heal=(15, 18), organic_heal=(18, 22)),
+    Gag(Track.TOON_UP, 3, 'Lipstick', accuracy=70, group=False, organic_heal=(30, 36), heal=None),
+    Gag(Track.TOON_UP, 4, 'Bamboo Cane', accuracy=70, group=True, heal=(40, 45), organic_heal=(48, 54)),
+    Gag(Track.TOON_UP, 5, 'Pixie Dust', accuracy=70, group=False, heal=(50, 60), organic_heal=(60, 72)),
+    Gag(Track.TOON_UP, 6, 'Juggling Cubes', accuracy=70, group=True, heal=(75, 105), organic_heal=(90, 126)),
+    Gag(Track.TOON_UP, 7, 'High Dive', accuracy=95, group=True, heal=(210, 210), organic_heal=(252, 252)),
 
-# Organic bonus per track, in whole percent -- the form the Organic gags
-# page and the 4.0.0 patch notes both state it in ("increasing the damage
-# value by 10% and then rounding up the result").
+    # --- Trap ------------------------------------------------
+    Gag(Track.TRAP, 1, 'Banana Peel', accuracy=0, group=False, damage=(10, 12), organic_damage=(11, 14)),
+    Gag(Track.TRAP, 2, 'Rake', accuracy=0, group=False, damage=(18, 20), organic_damage=(20, 22)),
+    Gag(Track.TRAP, 3, 'Marbles', accuracy=0, group=False, damage=(30, 35), organic_damage=(33, 39)),
+    Gag(Track.TRAP, 4, 'Quicksand', accuracy=0, group=False, damage=(45, 50), organic_damage=(50, 55)),
+    Gag(Track.TRAP, 5, 'Trapdoor', accuracy=0, group=False, damage=(75, 85), organic_damage=None),
+    Gag(Track.TRAP, 6, 'TNT', accuracy=0, group=False, damage=(90, 180), organic_damage=(99, 198)),
+    Gag(Track.TRAP, 7, 'Railroad', accuracy=0, group=True, damage=(200, 200), organic_damage=(220, 220)),
+
+    # --- Lure ------------------------------------------------
+    Gag(Track.LURE, 1, '$1 Bill', accuracy=60, group=False, damage=None, organic_accuracy=70, lure_rounds=2),
+    Gag(Track.LURE, 2, 'Small Magnet', accuracy=55, group=True, damage=None, organic_accuracy=65, lure_rounds=2),
+    Gag(Track.LURE, 3, '$5 Bill', accuracy=70, group=False, damage=None, organic_accuracy=80, lure_rounds=3),
+    Gag(Track.LURE, 4, 'Big Magnet', accuracy=65, group=True, damage=None, organic_accuracy=75, lure_rounds=3),
+    Gag(Track.LURE, 5, '$10 Bill', accuracy=80, group=False, damage=None, organic_accuracy=90, lure_rounds=4),
+    Gag(Track.LURE, 6, 'Hypno-goggles', accuracy=75, group=True, damage=None, organic_accuracy=85, lure_rounds=4),
+    Gag(Track.LURE, 7, 'Presentation', accuracy=90, group=True, damage=None, organic_accuracy=100, lure_rounds=8),
+
+    # --- Sound -----------------------------------------------
+    Gag(Track.SOUND, 1, 'Bike Horn', accuracy=95, group=True, damage=(3, 4), organic_damage=(4, 5)),
+    Gag(Track.SOUND, 2, 'Whistle', accuracy=95, group=True, damage=(5, 7), organic_damage=(6, 8)),
+    Gag(Track.SOUND, 3, 'Bugle', accuracy=95, group=True, damage=(9, 11), organic_damage=(10, 13)),
+    Gag(Track.SOUND, 4, 'Aoogah', accuracy=95, group=True, damage=(14, 16), organic_damage=(16, 18)),
+    Gag(Track.SOUND, 5, 'Elephant Trunk', accuracy=95, group=True, damage=(19, 21), organic_damage=(21, 24)),
+    Gag(Track.SOUND, 6, 'Foghorn', accuracy=95, group=True, damage=(25, 50), organic_damage=(28, 55)),
+    Gag(Track.SOUND, 7, 'Opera Singer', accuracy=95, group=True, damage=(90, 90), organic_damage=(99, 99)),
+
+    # --- Throw -----------------------------------------------
+    Gag(Track.THROW, 1, 'Cupcake', accuracy=75, group=False, damage=(4, 6), organic_damage=(5, 7)),
+    Gag(Track.THROW, 2, 'Fruit Pie Slice', accuracy=75, group=False, damage=(8, 10), organic_damage=(9, 11)),
+    Gag(Track.THROW, 3, 'Cream Pie Slice', accuracy=75, group=False, damage=(14, 17), organic_damage=(16, 19)),
+    Gag(Track.THROW, 4, 'Whole Fruit Pie', accuracy=75, group=False, damage=(24, 27), organic_damage=(27, 30)),
+    Gag(Track.THROW, 5, 'Whole Cream Pie', accuracy=75, group=False, damage=(36, 40), organic_damage=(40, 44)),
+    Gag(Track.THROW, 6, 'Birthday Cake', accuracy=75, group=False, damage=(48, 100), organic_damage=(53, 110)),
+    Gag(Track.THROW, 7, 'Wedding Cake', accuracy=75, group=True, damage=(120, 120), organic_damage=(132, 132)),
+
+    # --- Squirt ----------------------------------------------
+    Gag(Track.SQUIRT, 1, 'Squirting Flower', accuracy=95, group=False, damage=(3, 4), organic_damage=(4, 5)),
+    Gag(Track.SQUIRT, 2, 'Glass of Water', accuracy=95, group=False, damage=(6, 8), organic_damage=(7, 10)),
+    Gag(Track.SQUIRT, 3, 'Squirt Gun', accuracy=95, group=False, damage=(10, 12), organic_damage=(12, 14)),
+    Gag(Track.SQUIRT, 4, 'Seltzer Bottle', accuracy=95, group=False, damage=(18, 21), organic_damage=(22, 25)),
+    Gag(Track.SQUIRT, 5, 'Fire Hose', accuracy=95, group=False, damage=(27, 30), organic_damage=(32, 35)),
+    Gag(Track.SQUIRT, 6, 'Storm Cloud', accuracy=95, group=False, damage=(36, 80), organic_damage=(42, 92)),
+    Gag(Track.SQUIRT, 7, 'Geyser', accuracy=95, group=True, damage=(105, 105), organic_damage=(121, 121)),
+
+    # --- Drop ------------------------------------------------
+    Gag(Track.DROP, 1, 'Flower Pot', accuracy=50, group=False, damage=(10, 10), organic_damage=(12, 12)),
+    Gag(Track.DROP, 2, 'Sandbag', accuracy=50, group=False, damage=(18, 18), organic_damage=(21, 21)),
+    Gag(Track.DROP, 3, 'Anvil', accuracy=50, group=False, damage=(30, 30), organic_damage=(35, 35)),
+    Gag(Track.DROP, 4, 'Big Weight', accuracy=50, group=False, damage=(45, 45), organic_damage=(52, 52)),
+    Gag(Track.DROP, 5, 'Safe', accuracy=50, group=False, damage=(60, 70), organic_damage=(69, 81)),
+    Gag(Track.DROP, 6, 'Grand Piano', accuracy=50, group=False, damage=(85, 170), organic_damage=(98, 196)),
+    Gag(Track.DROP, 7, 'Toontanic', accuracy=50, group=True, damage=(180, 180), organic_damage=(207, 207)),
+)
+
+# Two cells no source settles, kept None rather than picked:
+#   Trap 5 (Trapdoor) organic damage -- the Trap page says 83-94, the
+#     Organic gags page and the Trapdoor infobox say 84-94, and the Trap
+#     page's own 3.0.0 changelog says 83-93. Base 75-85 is agreed.
+#   Toon-Up 3 (Lipstick) heal -- Toon-Up and Organic gags pages say 27-30,
+#     the Lipstick infobox says minheal 25. Organic 30-36 is agreed, and
+#     ceil(1.2 * 25) = 30 while ceil(1.2 * 27) = 33, which points at 25 --
+#     against the majority. Left open.
+
+_BY_KEY: Dict[Tuple[Track, int], Gag] = {g.key: g for g in GAGS}
+
+
+def gag(track: Track, level: int) -> Gag:
+    """The Gag for a (track, level). Raises KeyError for a level outside 1-7."""
+    try:
+        return _BY_KEY[(track, level)]
+    except KeyError:
+        raise KeyError(f"no gag at {track.value} level {level}") from None
+
+
+def gags_in(track: Track) -> Tuple[Gag, ...]:
+    return tuple(g for g in GAGS if g.track == track)
+
+
+# ---------------------------------------------------------------------
+# Organic bonus
+# ---------------------------------------------------------------------
+# The wiki's stated rule, per track: "increasing the value by N% and then
+# rounding up".
 #
-# Applied as ceil(x * (100 + pct) / 100). Kept as an integer percent
-# rather than a float multiplier on purpose: 1.1 * 100 is 110.00000000000001
-# in binary floating point, so ceil() of it gives 111 and silently
-# overstates an organic Birthday Cake. Integer arithmetic has no such
-# edge. Use organic_value() below rather than rolling your own.
+# Kept as an integer percent rather than a float multiplier on purpose:
+# 1.1 * 100 is 110.00000000000001 in binary floating point, so ceil() of it
+# gives 111 and silently overstates an organic Birthday Cake. Integer
+# arithmetic has no such edge.
 #
-# Recorded for reference only -- the tables above are transcribed from the
-# wiki, not derived from this, and Squirt level 4 is a known exception.
-# Lure gets a flat accuracy bonus instead of a damage bonus and lives in
-# data/lure.py.
+# Reference only -- each Gag carries its transcribed organic value, and
+# Squirt level 4 is a known exception to this formula. Lure gets an
+# accuracy bonus instead of a damage one; that's Gag.organic_accuracy.
 ORGANIC_BONUS_PCT = {
     Track.TRAP: 10,
     Track.SOUND: 10,
@@ -235,83 +216,20 @@ ORGANIC_BONUS_PCT = {
 
 
 def organic_value(track: Track, value: int) -> int:
-    """The wiki's stated organic rule, in exact integer arithmetic.
-
-    Prefer the transcribed GAG_ORGANIC_* tables over calling this -- they
-    are what the wiki actually publishes, and Squirt level 4 does not
-    match this formula. This exists for gags outside the seven-level
-    tables (unites, SOS cards) and to check the tables for typos.
-    """
+    """The organic rule in exact integer arithmetic. Prefer the transcribed
+    value on the Gag itself; this is for gags outside the seven-level tables
+    (unites, SOS cards) and for spotting typos in them."""
     numerator = value * (100 + ORGANIC_BONUS_PCT[track])
     return -(-numerator // 100)     # ceiling division, no floats
 
-# ---------------------------------------------------------------------
-# Toon-Up heals
-# ---------------------------------------------------------------------
-# (min, max) laff restored. [PARTIAL] -- level 3 is genuinely disputed.
-#
-# Separate dict from GAG_DAMAGE_MINMAX on purpose: Toon-Up targets toons,
-# not cogs, and simulator.apply_toon_action needs to branch on it anyway.
-GAG_HEAL_MINMAX = {
-    1: (8, 10),     # Feather
-    2: (15, 18),    # Megaphone
-    3: None,        # TODO: Lipstick. The Toon-Up page and the Organic
-                    # gags page both say 27-30; the Lipstick infobox says
-                    # minheal=25, maxheal=30. The max (30) is agreed. The
-                    # min is not, and the tie-breaker points the wrong
-                    # way: all three sources agree organic Lipstick is
-                    # 30-36, and ceil(1.2 * 25) = 30 while
-                    # ceil(1.2 * 27) = 33 -- so the organic column
-                    # supports the infobox's 25, not the tables' 27.
-                    # Left None rather than picked. The whole cell is
-                    # None (not a half-tuple) so callers that interpolate
-                    # between min and max can't silently get a bad range.
-    4: (40, 45),    # Bamboo Cane
-    5: (50, 60),    # Pixie Dust -- lowered from 60-70 in 3.0.0
-    6: (75, 105),   # Juggling Cubes -- lowered from 90-120 in 3.0.0
-    7: (210, 210),  # High Dive (group)
-}
 
-# Organic heal. [CONFIRMED] -- all seven agree across all three sources,
-# including level 3, whose base heal is disputed above.
-GAG_ORGANIC_HEAL_MINMAX = {
-    1: (10, 12),    # Feather
-    2: (18, 22),    # Megaphone
-    3: (30, 36),    # Lipstick
-    4: (48, 54),    # Bamboo Cane
-    5: (60, 72),    # Pixie Dust
-    6: (90, 126),   # Juggling Cubes
-    7: (252, 252),  # High Dive
-}
-
-# [CONFIRMED] Toon-Up page: "Unlike other gag tracks, Toon-Up gags do not
-# necessarily miss, but rather, provide 20% of original values that are
-# rounded up." So a missed Toon-Up still heals ceil(0.20 * heal) -- it is
-# NOT a no-op the way a missed damage gag is.
+# [CONFIRMED] "Toon-Up gags do not necessarily miss, but rather, provide 20%
+# of original values that are rounded up" -- the only track where a miss
+# still does something.
 TOON_UP_MISS_FRACTION = 0.20
 
-# ---------------------------------------------------------------------
-# Group gags
-# ---------------------------------------------------------------------
-# Levels whose "Affects" column reads "All Cogs" / "All Toons".
-# [CONFIRMED] from every track page and every per-gag infobox.
-#
-# Two of these contradict simulator.is_group_action as written:
-#   * SOUND is group at every level -- the simulator already hardcodes
-#     True for Sound, which happens to be right.
-#   * TOON_UP is group only at 2/4/6/7, the same zig-zag as Lure. The
-#     simulator hardcodes True for all seven Toon-Up levels, which is
-#     WRONG for levels 1, 3 and 5 (Feather, Lipstick and Pixie Dust each
-#     affect "One Toon").
-# Throw/Squirt/Drop/Trap really are level-7-only, so the simulator's
-# `level == 7` branch is correct for those four.
-# Lure's group levels live in data/lure.py (LURE_GROUP_LEVELS = 2,4,6,7).
-GAG_GROUP_LEVELS = {
-    Track.TOON_UP: frozenset({2, 4, 6, 7}),   # Megaphone, Bamboo Cane,
-                                              # Juggling Cubes, High Dive
-    Track.TRAP:    frozenset({7}),            # Railroad
-    Track.SOUND:   frozenset({1, 2, 3, 4, 5, 6, 7}),  # every Sound gag
-    Track.THROW:   frozenset({7}),            # Wedding Cake
-    Track.SQUIRT:  frozenset({7}),            # Geyser
-    Track.DROP:    frozenset({7}),            # Toontanic
-}
+# [CONFIRMED] TTR 3.3.0: a Lure gag can only expire early if its BASE
+# accuracy is under this. The lowest in the game is Small Magnet at 55, so
+# nothing qualifies and lures run their full duration. Kept as a threshold
+# rather than hardcoded False because it is a balance knob.
+EARLY_EXPIRY_ACCURACY_FLOOR = 50
