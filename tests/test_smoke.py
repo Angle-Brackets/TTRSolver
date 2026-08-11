@@ -5,9 +5,8 @@ are [CONFIRMED] enough to assert on.
 Run from the repo root with:
     python -m unittest discover tests
 
-The full-fight tests run under solver.testing.synthetic_battle_data(),
-i.e. with FAKE cog accuracy and FAKE lure durations -- they prove the
-code paths connect, not that the numbers are game-accurate.
+The full-fight tests run on real transcribed data -- every synthetic
+stand-in has been retired now that its values landed.
 
 Status-effect mechanics (lure wake-up / duration, luredRatio, kbBonus)
 have their own file: tests/test_mechanics.py.
@@ -82,8 +81,11 @@ class TestMissingDataRaises(unittest.TestCase):
     producing a made-up number. These guard that rule."""
 
     def test_todo_gag_damage_raises(self):
+        """Damage is fully transcribed now, but two organic/heal cells are
+        still [TODO] on genuine source conflicts. Trapdoor organic damage
+        is one: three wiki pages give 83-94, 84-94 and 83-93."""
         with self.assertRaises(NotImplementedError):
-            mechanics.calc_toon_damage(Track.DROP, 1)
+            mechanics.calc_toon_heal(3)     # Lipstick: 25 vs 27 minheal
 
     def test_todo_cog_accuracy_raises(self):
         """Data-driven so it survives the accuracy tables being filled in:
@@ -99,52 +101,44 @@ class TestMissingDataRaises(unittest.TestCase):
                     return
         self.skipTest("every cog accuracy table is transcribed")
 
-    def test_trap_damage_is_still_todo(self):
-        """Per-level Trap damage is the gag gap that remains. Laying a trap
-        and luring the cog onto it must raise rather than invent a number.
-        (Lure duration used to be listed here too; it's [CONFIRMED] from the
-        wiki now.)"""
+    def test_trap_lure_combo_now_resolves(self):
+        """Trap damage was the last thing blocking the classic combo. Lay a
+        trap, lure the cog onto it, and it should detonate for real damage
+        instead of raising."""
         state = two_flunky_fight()
         state.cogs[1].status.is_dead = True
         state, _r, _d = simulator.step(
             state, Action(track=Track.TRAP, level=2, target_index=0))
-        with self.assertRaises(NotImplementedError):
-            simulator.step(state, Action(track=Track.LURE, level=2,
-                                         target_index=0))
-
-    def test_toon_up_raises(self):
-        state = two_flunky_fight()
-        state.toon.track_exp[Track.TOON_UP] = 7
-        state.toon.gag_counts[(Track.TOON_UP, 1)] = 1
-        with self.assertRaises(NotImplementedError):
-            simulator.step(state, Action(track=Track.TOON_UP, level=1))
-
-    def test_trap_lure_combo_raises_while_trap_damage_is_todo(self):
-        """The trap+lure detonation path is implemented, but per-level trap
-        damage isn't transcribed yet -- so triggering it must raise, not
-        deal a guessed number. Delete this test when data/gags.py gains
-        real Trap rows."""
-        if data.GAG_DAMAGE_MINMAX[Track.TRAP].get(2) is not None:
-            self.skipTest("Trap level-2 damage has been transcribed")
-        state = two_flunky_fight()
-        state.cogs[1].status.is_dead = True  # keep it to a single target
-        # Synthetic data only so the surrounding round loop can run (cog
-        # counter-attacks, lure duration); the assertion below is about
-        # trap damage, which is real TODO data.
-        state, _r, _done = simulator.step(
-            state, Action(track=Track.TRAP, level=2, target_index=0))
         self.assertTrue(state.cogs[0].status.trapped)
-        with self.assertRaises(NotImplementedError):
-            simulator.step(
-                state, Action(track=Track.LURE, level=2, target_index=0))
+        hp_before = state.cogs[0].hp
+        state, _r, _d = simulator.step(
+            state, Action(track=Track.LURE, level=2, target_index=0))
+        cog = state.cogs[0]
+        self.assertFalse(cog.status.trapped, "trap should have detonated")
+        self.assertTrue(cog.status.is_dead or cog.hp < hp_before,
+                        "detonation should have dealt damage")
 
-    def test_synthetic_stand_ins_do_not_leak(self):
-        real_accuracy = data.BOSSBOT_COGS["flunky"]["accuracy"]
-        real_durations = dict(mechanics.LURE_ROUNDS_BY_LEVEL)
+    def test_toon_up_heals_and_still_heals_on_a_miss(self):
+        """Heal amounts are transcribed now. Toon-Up is also the one track
+        where a miss isn't a no-op: the wiki gives 20% of the value,
+        rounded up."""
+        full = mechanics.calc_toon_heal(1, hit=True)
+        missed = mechanics.calc_toon_heal(1, hit=False)
+        self.assertGreater(full, 0)
+        self.assertGreater(missed, 0, "a missed Toon-Up still heals")
+        self.assertLess(missed, full)
+
+    def test_no_synthetic_stand_ins_remain(self):
+        """Both stand-ins were deleted when their real values landed. Guard
+        against one creeping back: these must be transcribed data."""
         self.assertIsNotNone(data.BOSSBOT_COGS["flunky"]["accuracy"])
-        self.assertIsNotNone(mechanics.LURE_ROUNDS_BY_LEVEL[2])
-        self.assertIs(data.BOSSBOT_COGS["flunky"]["accuracy"], real_accuracy)
-        self.assertEqual(mechanics.LURE_ROUNDS_BY_LEVEL, real_durations)
+        self.assertEqual(mechanics.LURE_ROUNDS_BY_LEVEL,
+                         {1: 2, 2: 2, 3: 3, 4: 3, 5: 4, 6: 4, 7: 8})
+        import solver.testing as testing
+        for gone in ("synthetic_bossbot_accuracy", "synthetic_lure_durations",
+                     "synthetic_battle_data"):
+            self.assertFalse(hasattr(testing, gone),
+                             f"{gone} came back; it should stay deleted")
 
 
 class TestFullFight(unittest.TestCase):

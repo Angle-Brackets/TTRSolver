@@ -9,8 +9,9 @@ than guessing; they're inventoried in
 > strategy guide this project started from describes *Toontown Online* and
 > predates TTR's rebalancing. Lure has been redone from the wiki and the
 > guide turned out to be wrong about durations, accuracy, which levels are
-> group gags, and the luredRatio rule. **The rest of `data/` still comes
-> from the guide and is unaudited** — that's roadmap item 1.
+> group gags, and the luredRatio rule. All of `data/` has since been
+> audited against the wiki; what the wiki simply doesn't publish is
+> inventoried in [docs/data-confidence.md](docs/data-confidence.md).
 
 ## Layout
 
@@ -57,15 +58,17 @@ Pusher L5, Yesman L6) against a 45-laff toon with a tight gag supply —
 
 | policy | win rate | mean laff left |
 | --- | --- | --- |
-| random | 45% | 12.3 |
-| expectimax (depth 2) | 98% | 29.6 |
+| random | 67% | 16.6 |
+| expectimax (depth 2) | 100% | 40.3 |
 
 The default `two_flunky_fight` scenario is *not* useful for this: every
 policy wins it ~100% of the time, so it can't distinguish anything. If you
 add a benchmark, make sure it's a fight that can actually be lost.
 
-**Caveat on those numbers.** They predate the Lure rewrite and haven't been
-re-measured. More importantly, see the source note below.
+**Caveat on those numbers.** Cog attack *damage* and HP are wiki-verified,
+but cog *frequency* and *accuracy* are pre-4.0.0 values the wiki doesn't
+publish — so relative judgements are trustworthy and absolute win rates
+inherit that error. See [docs/data-confidence.md](docs/data-confidence.md).
 
 ## Ground rules
 

@@ -16,28 +16,35 @@
   `python -m solver.search.demo --compare` measures it against a random
   policy.
 
-## 1. Audit the rest of `data/` against the TTR wiki
+## 1. Find TTR cog attack frequency and accuracy
 
-Lure has been redone from <https://toontownrewritten.wiki> and the old
-strategy guide was wrong about nearly every value (see
-[data-confidence.md](data-confidence.md) for the diff). Everything else in
-`data/` still comes from that guide and is now suspect: cog attack
-frequency/damage/accuracy for all 32 cogs, gag damage, `tgtDef`, cog HP,
-and the accuracy formula's other propAcc rows.
+The wiki publishes neither, and 4.0.0 rebalanced both — so `data/*.py`
+holds pre-rebalance values for a game that changed them, with no published
+replacement. This is the largest remaining source of error and it bounds
+what the solver can honestly claim (see
+[data-confidence.md](data-confidence.md)).
 
-This is the top priority because those values look confirmed and aren't.
+Leads, roughly in order of promise:
+- the rebalancing PDFs linked from the wiki at `cdn.toontownrewritten.com`
+- decompiled `SuitBattleGlobals.py` from a TTR client
+- community spreadsheets, if any post-date 4.0.0
 
-## 2. Remaining gag data (from the wiki, not the guide)
+Closing this would also let the **twelve 4.0.0 attacks** currently parked in
+`"unmodeled_attacks"` be folded into the real tables. They have confirmed
+damage and targeting but no frequency, so today the simulator simply
+under-estimates the eight cogs that have them — nine of the twelve are
+group attacks.
 
-Trap per-level damage (blocks the trap+lure combo entirely — the detonation
-path is implemented but raises), Toon-Up heal amounts, Throw L6, Squirt
-L2-6, Sound L5-6, Drop L1-6. Also the per-gag `minE`/`maxE` experience
-thresholds, which would let `calc_toon_damage` use the real exp-based
-formula instead of interpolating min/max.
+## 2. Smaller data gaps
 
-The wiki has a page per gag track (`/Throw`, `/Squirt`, `/Sound`, `/Drop`,
-`/Trap`, `/Toon-Up`) in the same shape as `/Lure`, so this should be
-largely mechanical.
+- `lawbot/big_wig/finger_wag` damage: two wiki pages disagree; needs a
+  third source.
+- `sellbot/the_mingler/power_trip`: probably removed from the cog in 4.0.0.
+  Removing it needs a frequency redistribution no source gives.
+- Trapdoor organic damage and Lipstick minimum heal: three-way conflicts.
+- Per-gag `minE`/`maxE` experience thresholds, which would replace the
+  min/max interpolation in `calc_toon_damage` with the real formula. The
+  gag infoboxes' `prevexp`/`nextexp` fields are the likely source.
 
 ## 3. Make the search fast enough to go deeper
 

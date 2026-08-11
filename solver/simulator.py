@@ -25,8 +25,13 @@ from .state import BattleState, CogState, Action, Track
 
 
 def is_group_action(track: Track, level: int) -> bool:
-    if track in (Track.TOON_UP, Track.SOUND):
-        return True
+    if track == Track.SOUND:
+        return True     # [CONFIRMED] every Sound gag hits all cogs
+    if track == Track.TOON_UP:
+        # [CONFIRMED] TTR wiki: Toon-Up has the same 2/4/6/7 zig-zag as
+        # Lure -- Feather, Lipstick and Pixie Dust each affect one Toon.
+        # (Moot while solo, but wrong is wrong.)
+        return level in data.GAG_GROUP_LEVELS[Track.TOON_UP]
     if track == Track.LURE:
         # [CONFIRMED] TTR wiki: Small Magnet (2), Big Magnet (4),
         # Hypno-goggles (6) and Presentation (7) all hit every cog. Only
@@ -128,14 +133,17 @@ def apply_toon_action(state: BattleState, action: Action,
     healed = 0
     dealt = 0
 
+    if action.track == Track.TOON_UP:
+        # [CONFIRMED] TTR wiki: "Toon-Up gags do not necessarily miss, but
+        # rather, provide 20% of original values that are rounded up." So a
+        # missed Toon-Up still heals -- it is the one track where a miss
+        # isn't a no-op, which is why this sits above the `if not hit`.
+        return mechanics.calc_toon_heal(action.level, hit), dealt
+
     if not hit:
         return healed, dealt
 
-    if action.track == Track.TOON_UP:
-        # Heal table not yet transcribed -- see docs/data-confidence.md.
-        raise NotImplementedError("Toon-Up heal amounts are TODO in data/")
-
-    elif action.track == Track.TRAP:
+    if action.track == Track.TRAP:
         cog = targets[0]
         cog.status.trapped = True
         cog.status.trap_track = action.track

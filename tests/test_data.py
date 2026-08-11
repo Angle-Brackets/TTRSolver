@@ -7,10 +7,18 @@ of them break, the simulator KeyErrors, IndexErrors, or -- worse -- reads a
 number that belongs to a different attack.
 
 Deliberate per-cell gaps (a None inside an otherwise-filled list) are
-allowed by design: they mark a value the source guide doesn't give
-unambiguously, and the ground rule is to leave them blank rather than
-guess. test_no_unexpected_todo_cells pins the exact inventory of them so a
-new one can't appear unnoticed.
+allowed by design: they mark a value no source gives unambiguously, and the
+ground rule is to leave them blank rather than guess.
+test_no_unexpected_todo_cells pins the exact inventory of them so a new one
+can't appear unnoticed.
+
+"unmodeled_attacks" is the other deliberate gap, at whole-attack granularity
+rather than per cell: attacks the TTR wiki confirms a cog has, with damage
+and single/group targeting, but for which no frequency exists anywhere. They
+are held outside "freq"/"damage"/"accuracy" so the samplers keep working on
+the attacks that do have frequencies; the trade-off is that the simulator
+under-estimates those cogs. test_unmodeled_attacks_are_well_formed keeps the
+shape honest and keeps the names from colliding with modeled attacks.
 """
 import os
 import sys
@@ -19,14 +27,41 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from solver.data import COG_DEPARTMENTS  # noqa: E402
+from solver.data.cogs import (  # noqa: E402
+    COG_HP_BY_LEVEL,
+    HP_BOOST,
+    HP_BOOST_LEVEL,
+    cog_max_hp,
+)
 
 
 # Every per-cell [TODO] currently in the data, as (department, cog, section,
 # attack). Each one is explained by a comment in its module.
 KNOWN_TODO_CELLS = {
+    # The guide's flat accuracy of 5 looks like a dropped zero; the wiki
+    # publishes no cog accuracy at all and so cannot arbitrate.
     ("bossbot", "micromanager", "accuracy", "brain_storm"),
-    ("bossbot", "the_big_cheese", "damage", "glower_power"),
+    # The guide gave three values per level (three unused attacks all
+    # rendered as Glower Power). TTR 4.0.0 split them into real attacks, so
+    # the wiki now has a single damage row -- but still no accuracy.
     ("bossbot", "the_big_cheese", "accuracy", "glower_power"),
+    # The wiki contradicts itself: the Big Wig page and the Finger Wag page
+    # give different damage for the same five levels.
+    ("lawbot", "big_wig", "damage", "finger_wag"),
+}
+
+# Cogs whose "freq" row cannot sum to 100 over the attacks the cog really
+# has, because at least one real attack has no published frequency. Every
+# one of these is a cog whose attack pool changed in TTR 4.0.0.
+COGS_WITH_UNMODELED_ATTACKS = {
+    ("bossbot", "micromanager"),
+    ("bossbot", "corporate_raider"),
+    ("bossbot", "the_big_cheese"),
+    ("cashbot", "penny_pincher"),
+    ("cashbot", "money_bags"),
+    ("cashbot", "robber_baron"),
+    ("lawbot", "big_wig"),
+    ("sellbot", "mr_hollywood"),
 }
 
 SECTIONS = ("freq", "damage", "accuracy")
@@ -51,11 +86,13 @@ class TestCogTableShape(unittest.TestCase):
     def test_required_fields(self):
         for dept, cog, table in all_cogs():
             with self.subTest(dept=dept, cog=cog):
-                for field in ("levels", "freq", "damage", "accuracy", "group_attacks"):
+                for field in ("levels", "freq", "damage", "accuracy",
+                              "group_attacks", "unmodeled_attacks"):
                     self.assertIn(field, table)
                 self.assertIsInstance(table["levels"], list)
                 self.assertTrue(table["levels"])
                 self.assertIsInstance(table["group_attacks"], set)
+                self.assertIsInstance(table["unmodeled_attacks"], dict)
 
     def test_levels_are_contiguous_ascending(self):
         for dept, cog, table in all_cogs():
@@ -101,16 +138,50 @@ class TestCogTableShape(unittest.TestCase):
 
     def test_attack_keys_are_snake_case(self):
         for dept, cog, table in all_cogs():
-            for attack in table["freq"]:
+            names = list(table["freq"]) + list(table["unmodeled_attacks"])
+            for attack in names:
                 with self.subTest(dept=dept, cog=cog, attack=attack):
                     self.assertRegex(attack, r"^[a-z0-9]+(_[a-z0-9]+)*$")
+
+    def test_unmodeled_attacks_are_well_formed(self):
+        """An unmodeled attack carries the two things the wiki does give --
+        damage per level and single/group -- and nothing that pretends to be
+        a frequency. Its name must not collide with a modeled attack, or the
+        same attack would exist twice with different meanings."""
+        for dept, cog, table in all_cogs():
+            n = len(table["levels"])
+            for attack, entry in table["unmodeled_attacks"].items():
+                with self.subTest(dept=dept, cog=cog, attack=attack):
+                    self.assertNotIn(
+                        attack, table["freq"],
+                        f"{dept}/{cog}: '{attack}' is both modeled and unmodeled")
+                    self.assertEqual(set(entry), {"damage", "group"})
+                    self.assertIsInstance(entry["group"], bool)
+                    self.assertEqual(len(entry["damage"]), n)
+                    for v in entry["damage"]:
+                        self.assertIsInstance(v, int)
+                        self.assertGreater(v, 0)
+
+    def test_unmodeled_attack_inventory_is_pinned(self):
+        """Which cogs the simulator under-estimates is load-bearing enough
+        to state out loud: every cog listed here has a real attack it can
+        never fire. Shrinking this set means a frequency was found (good);
+        growing it silently means a cog quietly got worse."""
+        found = {(dept, cog) for dept, cog, table in all_cogs()
+                 if table["unmodeled_attacks"]}
+        self.assertEqual(found, COGS_WITH_UNMODELED_ATTACKS)
 
 
 class TestCogTableValues(unittest.TestCase):
     def test_frequencies_are_complete_and_sum_to_100(self):
         """Frequencies drive mechanics.pick_cog_attack's cumulative sample.
         A level that doesn't total 100 silently biases the last attack, so
-        no None is tolerated here and every level must total exactly 100."""
+        no None is tolerated here and every level must total exactly 100.
+
+        Note what this does NOT check: for the cogs in
+        COGS_WITH_UNMODELED_ATTACKS the 100 is spread over a smaller attack
+        pool than the cog really has, so the sampler is self-consistent but
+        the distribution is wrong. Only a real frequency table fixes that."""
         bad = []
         for dept, cog, table in all_cogs():
             for i, level in enumerate(table["levels"]):
@@ -182,6 +253,45 @@ class TestCogTableValues(unittest.TestCase):
                     with self.subTest(dept=dept, cog=cog, section=section, attack=attack):
                         self.assertIn(nones, (0, len(values)),
                                       f"{dept}/{cog}/{section}/{attack} is partly filled: {values}")
+
+
+class TestCogHealth(unittest.TestCase):
+    """cog_max_hp is two formulas, not one: TTR 3.0.0 added a +14 term from
+    level 12 up. The old single formula matched the wiki at levels 4 and 9
+    and was wrong at every level from 12 on (182 where TTR gives 196)."""
+
+    def test_formula_reproduces_every_published_level(self):
+        for level, hp in sorted(COG_HP_BY_LEVEL.items()):
+            with self.subTest(level=level):
+                self.assertEqual(cog_max_hp(level), hp)
+
+    def test_wiki_worked_examples(self):
+        """The three examples the wiki spells out by hand."""
+        self.assertEqual(cog_max_hp(4), 30)     # (4+1)(4+2)
+        self.assertEqual(cog_max_hp(16), 320)   # (16+1)(16+2) + 14
+        self.assertEqual(cog_max_hp(12), 196)   # was 200 before TTR 3.0.0
+
+    def test_boost_applies_from_level_12_and_not_before(self):
+        below = HP_BOOST_LEVEL - 1
+        x = below + 1
+        self.assertEqual(cog_max_hp(below), x * (x + 1))
+        x = HP_BOOST_LEVEL + 1
+        self.assertEqual(cog_max_hp(HP_BOOST_LEVEL), x * (x + 1) + HP_BOOST)
+
+    def test_health_is_increasing(self):
+        levels = sorted(COG_HP_BY_LEVEL)
+        for a, b in zip(levels, levels[1:]):
+            with self.subTest(level=b):
+                self.assertGreater(cog_max_hp(b), cog_max_hp(a))
+
+    def test_every_reachable_cog_level_has_health(self):
+        """Including the three over-levels the wiki says each cog can reach
+        but that the attack tables don't model -- cog_max_hp still has to
+        answer for them."""
+        for _dept, _cog, table in all_cogs():
+            for level in range(table["levels"][0], table["levels"][-1] + 4):
+                with self.subTest(level=level):
+                    self.assertGreater(cog_max_hp(level), 0)
 
 
 class TestTablesDriveMechanics(unittest.TestCase):

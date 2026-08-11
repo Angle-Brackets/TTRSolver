@@ -4,147 +4,127 @@
 
 **<https://toontownrewritten.wiki> is authoritative.** The
 [QED1224/Toontown-Resources](https://github.com/QED1224/Toontown-Resources)
-strategy guide this project started from describes *Toontown Online* and
-predates TTR's 3.0.0 / 3.3.0 / 4.0.0 rebalancing passes.
+strategy guide this project started from documents *Toontown Online* and
+predates TTR's 3.0.0 / 4.0.0 / 4.3.3 rebalancing passes.
 
-Lure was the first table checked against the wiki, and the guide was wrong
-about nearly all of it:
-
-| | strategy guide (TTO) | TTR wiki |
-| --- | --- | --- |
-| Lure propAcc | 50/50/60/60/70/70/90 | 60/55/70/65/80/75/90 |
-| Organic propAcc | 60/60/70/70/80/80/100 | 70/65/80/75/90/85/100 |
-| Duration | not listed at all | 2/2/3/3/4/4/8 rounds |
-| Group levels | 7 only | 2, 4, 6, 7 |
-| luredRatio applies to | all but Lure/Toon-Up/Drop | Sound, and level-7 Throw/Squirt |
-| Early wake-up | `100 - 2*acc` every round | removed in 3.3.0 for every gag in the game |
-
-**Everything in `data/` other than `lure.py` still comes from the guide and
-has not been re-verified.** Assume it has the same problem. Fetching: the
-wiki 403s ordinary requests but serves its MediaWiki API:
+The wiki 403s ordinary page fetches but serves its MediaWiki API:
 
 ```
-curl "https://toontownrewritten.wiki/api.php?action=parse&page=Lure&prop=wikitext&format=json"
+curl -sSL "https://toontownrewritten.wiki/api.php?action=parse&page=Lure&prop=wikitext&format=json"
 ```
 
-Every table in [solver/data/](../solver/data/) carries one of three tags:
+Every table below has now been audited against it. The guide's record was
+mixed in an informative way: **cog damage was 114/122 correct, gag damage
+12/14, and the accuracy formula almost entirely correct — but Lure was
+wrong in nearly every particular.** The lesson isn't "the guide is
+garbage", it's that TTR's rebalances hit some systems hard and left others
+untouched, and you cannot tell which from the inside.
 
 | Tag | Meaning |
 | --- | --- |
-| `[CONFIRMED]` | Taken directly from the source guide. |
-| `[PARTIAL]` | Some cells confirmed, others missing (`None`). |
-| `[TODO]` | Not entered. Callers **raise** rather than use a placeholder. |
+| `[CONFIRMED]` | Verified against the wiki. |
+| `[UNVERIFIED — GUIDE-DERIVED]` | Guide value, wiki publishes nothing. Not a gap you can close by looking harder. |
+| `[TODO]` / `None` | Not entered. Callers **raise** rather than use a placeholder. |
 
-The hard rule: **don't fill a `[TODO]` with a plausible-looking guess.** If a
-number isn't confirmed from the source repo (or a second corroborating
-source), leave it `[TODO]` and let the code raise. When a wiki source
-contradicts itself or breaks a surrounding pattern (this has already
-happened twice — Throw L6 and Sound L5), don't average it out or pick the
-"more plausible" number; leave it `[TODO]` with a note on what looked wrong.
+The hard rules, in [CLAUDE.md](../CLAUDE.md): never guess a value, never
+split the difference when sources conflict, and delete a synthetic stand-in
+the moment its real data lands.
+
+## The biggest limitation: cog frequency and accuracy are unknowable from public sources
+
+**The wiki does not publish cog attack frequency or accuracy anywhere.**
+The `Cog attack` page defines both concepts and gives no numbers; the
+`CogAttackTable` template carries only Attack / Target / Level / Damage; no
+cog page, attack page, or `insource:` search turns up either field.
+
+Worse, both are known to have changed. TTR 4.0.0 "Under New Management":
+
+> "All Cog Attacks across all Cog departments have been rebalanced…"
+> "Tweaked numerous **accuracy** values…" "Tweaked numerous **frequency**
+> values across all Cogs that have their attack pool updated."
+
+So the frequency and accuracy tables in `data/*.py` are pre-rebalance
+values for a game that has since rebalanced them, with no published
+replacement. Eight cogs whose attack pool demonstrably changed are tagged
+`[FREQ STALE]` — their frequencies distribute 100% across the wrong set of
+attacks.
+
+**This bounds what the solver can honestly claim.** Its relative judgements
+(group gags against three cogs, taking a lethal hit) rest on damage and HP,
+which are solid. Its absolute numbers — win rates, expected laff loss —
+inherit this error. If TTR frequencies ever surface, the rebalancing PDFs
+at `cdn.toontownrewritten.com` are the likeliest place.
 
 ## What's solid
 
-- **Accuracy formula**: `atkAcc = propAcc + trackExp + tgtDef + bonus`,
-  capped at 95, Trap always 100%. All four components confirmed;
-  `tgtDef` confirmed for all 12 cog levels.
+- **Accuracy formula**: `atkAcc = propAcc + trackExp + tgtDef + bonus`.
+  All four components confirmed, plus the 5% floor.
+- **propAcc**: confirmed for all seven tracks. Only Lure and Toon-Up vary
+  by level — the wiki states this outright, so the flat rows for
+  Throw/Squirt/Sound/Drop are correct, not lazy transcription.
+- **tgtDef**: confirmed for levels 1–12 and 20, *keyed on cog rank as well
+  as level*. Rank is the cog's position on its department ladder, which
+  equals the lowest level it appears at (`levels[0]`) for all 32 cogs.
+- **Cog HP**: `(x+1)(x+2)` for levels 1–11, `+14` from level 12 up, matching
+  all 20 published rows. The old single formula was right through 11 and
+  wrong above it (182 vs TTR's 196 at level 12).
+- **Cog damage, targeting, rosters, level ranges**: wiki-verified for all
+  32 cogs, cross-checked between each cog's page and each attack's page.
+- **Gag damage and heals**: all 35 damage cells filled, plus Toon-Up heals,
+  organic damage, and per-track organic bonus percentages.
+- **Lure**, wholesale: durations 2/2/3/3/4/4/8, base and organic accuracy,
+  and group levels 2/4/6/7.
+- **Lure no longer expires early.** 3.3.0 removed early expiry below 50%
+  base accuracy, and the lowest gag is 55% — so a lure runs its full
+  duration. The `wakeupChance` machinery survives behind
+  `mechanics.lure_can_expire_early`, since the threshold is a balance knob.
+- **Lured cogs**: Throw/Squirt are guaranteed hits and get the 50%
+  `kbBonus`; Drop always misses; Sound wakes them without a bonus.
+- **`luredRatio`**: `(lured / total) * 100`, to all Sound gags and level-7
+  Throw/Squirt only. It *does* apply to a solo toon — the old blanket claim
+  that `bonus` is always 0 solo was right about PrevHits, wrong about this.
+- **Toon-Up misses still heal** 20% of value, rounded up. The only track
+  where a miss isn't a no-op.
 - **Initiative order**: Toon-Up → Trap → Lure → Sound → Throw → Squirt →
-  Drop, confirmed.
-- **"Stun" corrected**: it's PrevHits, a same-round accuracy bonus between
-  *different* attacks in the *same round*. Since a solo toon only acts once
-  per round, this half of `bonus` is always 0 —
-  `mechanics.calc_prev_hits_bonus()` reflects that on purpose, not as a
-  stub. (The other half, luredRatio, is *not* zero solo — see below.)
-- **Trap+Lure combo**: modeled as the real mechanic — a persistent status
-  that survives across rounds until a Lure hits that cog, at which point it
-  detonates for trap damage. Separate from (and more useful than) the
-  same-round PrevHits bonus above.
-- **Cog attack tables**: all four departments, 8 cogs each — 32 cogs and
-  124 attack rows of frequency, damage, and accuracy, from Appendices
-  A/B/C. `tests/test_data.py` pins the structural invariants (key sets
-  agree across the three tables, list lengths match the level count,
-  frequencies total 100 at every level, accuracies in range) and the exact
-  inventory of `None` cells, so a new gap can't appear unnoticed.
-- **Cog attack selection**: cumulative-frequency sampling, confirmed
-  algorithm.
-- **Group attacks**: taken from Appendix B's Single/Group *Type* column,
-  not inferred — 15 of them across the four departments.
-- **Lure**, wholesale, from the TTR wiki: durations 2/2/3/3/4/4/8 rounds,
-  base and organic accuracy, and which levels are group gags (2, 4, 6, 7).
-- **Lure no longer expires early.** TTR 3.3.0 removed early expiry for any
-  gag with base accuracy under 50%, and the lowest in the game is Small
-  Magnet at 55% — so a lure reliably runs its full duration. The
-  `wakeupChance = 100 - 2*atkAcc` machinery is still implemented and gated
-  behind `mechanics.lure_can_expire_early`, since the threshold is a
-  balance knob a future patch could cross.
-- **Lured cogs and other tracks**: Throw and Squirt are *guaranteed hits*
-  against a fully-lured target (and get the 50% `kbBonus`); Drop always
-  misses lured cogs; Sound wakes them without a damage bonus.
-- **`luredRatio` accuracy bonus** — `(lured cogs / total cogs) * 100`, given
-  to all Sound gags and to level-7 Throw/Squirt only. It *does* apply to a
-  solo toon: the earlier blanket claim that `bonus` is always 0 solo was
-  right about PrevHits and wrong about luredRatio.
-- **`kbBonus` damage** — Throw and Squirt deal an extra 50% against a lured
-  target, applied after gag damage and the (solo-zero) hpBonus.
-- Trap gags can't be laid on an already-trapped or already-lured cog
-  (`simulator.legal_actions` enforces this).
+  Drop.
 
-> **Note on the source.** The appendices live on the repo's **`master`**
-> branch, not its default branch — the default was restructured into an
-> mdBook and dropped them. Use
-> `raw.githubusercontent.com/QED1224/Toontown-Resources/master/README.md`.
+## What's genuinely unverified
 
-## What's genuinely unverified — do not treat as correct yet
-
-1. **Two individual cog attack cells**, left `None` rather than guessed:
-   - `bossbot/micromanager/brain_storm` **accuracy** — the source lists a
-     flat `5` at all five levels while the cog's other four attacks run
-     50/60/70/80/90, and nothing else in Appendix C is below 10. It looks
-     like a dropped zero, but "looks like" isn't confirmation.
-   - `bossbot/the_big_cheese/glower_power` **damage and accuracy** — the
-     source gives *three* values per level (`"10, 14, 14"`,
-     `"55, 70, 60 *"`). Appendix C's footnote explains it: three unused
-     attacks all render as Glower Power but keep their own stats. A single
-     value per level genuinely does not exist in this data shape.
-
-   `mechanics.cog_attack_damage_and_accuracy` raises `NotImplementedError`
-   on either, naming the exact cell.
-2. **Gag damage min/max** — several cells in `data/gags.py` are `None`
-   (Throw L6, Squirt L2–6, Sound L5–6, Drop L1–6, individual Trap gag
-   damages). One suspicious source value (Throw L6, "48–100") was
-   deliberately left out rather than guessed at — it broke the pattern of
-   the surrounding levels and needs a second source to confirm.
-3. **`calc_toon_damage` uses linear interpolation on min/max**, not the
-   real experience-based formula. The real formula
-   (`mechanics.gag_damage_from_exp`) is transcribed and confirmed, but
-   wiring it in needs the per-gag `minE`/`maxE` experience thresholds,
-   which aren't in `data/` yet. Defaulting to `trained_fraction=1.0` (max
-   damage) is a reasonable stand-in for a maxed toon, which is probably
-   what you want to solve for anyway.
-4. **Whether Throw/Squirt damage ends a lure.** The wiki names Sound
-   explicitly ("Lured Cogs are awakened by Sound gags without a damage
-   bonus"), and that is modeled. It does not say whether the Throw/Squirt
-   knockback also ends the lure, so that isn't modeled
-   (`mechanics.LURE_ENDS_ON_DAMAGE = None`) and a damaged but surviving cog
-   stays lured. Same open question for a cog that just detonated its trap.
-5. **The rest of `data/` has not been wiki-checked.** See the source note
-   at the top of this file. This is the largest known risk in the project
-   — larger than any individual `[TODO]` cell, because these values *look*
-   confirmed and aren't.
-6. **Toon-Up heal amounts** aren't transcribed —
-   `simulator.apply_toon_action` raises `NotImplementedError` for
-   `Track.TOON_UP`.
-7. **Cog HP formula** (`data.cog_max_hp`) matches the wiki's own worked
-   examples at levels 4 and 9, but not its stated level-12 value. Levels
-   10–12 need a second source before trusting boss-tier fights.
-8. **Two attack names conflict between appendices.** The numbers are
-   unambiguous (same row position in every table), only the labels differ:
-   `pencil_pusher`'s "Fountain Pencil" (A, C) vs "Fountain Pen" (B), and
-   `corporate_raider`'s 4th attack, "Rolodex" (A, C) vs "Power Tie" (B) —
-   two genuinely different names, not a spelling variant. Also,
-   `lawbot/spin_doctor` has a 5th attack in Appendix C that's absent from
-   A and B; it's omitted, since the other four frequencies already total
-   100 at every level and a 5th could never be selected.
-9. **`tgtDef` at cog levels 4 and 5** — the source lists two values
-   (-12/-15 and -15/-20). `data/accuracy.py` uses the tier-1 (less
-   negative) branch; the other branch applies to non-tier-1 cogs and isn't
-   modeled.
+1. **Cog attack frequency and accuracy** — see above. The largest gap in
+   the project, and not closable from the wiki.
+2. **Twelve 4.0.0 cog attacks are not modeled.** Their damage and targeting
+   are wiki-confirmed and parked in an `"unmodeled_attacks"` key, but with
+   no frequency there's no way to fold them into the sampling table. **The
+   simulator therefore under-estimates all eight affected cogs**, and nine
+   of the twelve are group attacks. Pinned by
+   `tests/test_data.py::test_unmodeled_attack_inventory_is_pinned`.
+3. **`lawbot/big_wig/finger_wag` damage** — the wiki contradicts itself. The
+   Big Wig page says `9,11,13,16,18`; `/Finger_Wag` says `13,15,17,19,21`.
+   They share an identical tail (20,22,25), so one page was refreshed in a
+   rebalance and the other wasn't; the `/Finger_Wag` row is also
+   non-monotonic across the seam, which no other damage row is. Left `None`,
+   so Big Wig raises roughly half the time it attacks.
+4. **`sellbot/the_mingler/power_trip` is probably not real.** The wiki's
+   Mingler roster has four attacks and `/Power_Trip` doesn't list this cog.
+   Kept anyway, tagged `[STALE]`: removing it would strand 15% frequency,
+   and the sampler's fall-through would silently dump that onto whichever
+   attack happens to be first in the dict. Treat its damage as fiction.
+5. **Two gag cells, on genuine three-way source conflicts**: Trapdoor
+   organic damage (83–94 vs 84–94 vs 83–93) and Lipstick minimum heal
+   (25 vs 27).
+6. **The 95% cap is soft since 4.3.3** — bonuses "can slightly push the
+   final accuracy value higher" — but the wiki never quantifies it or gives
+   a replacement ceiling. Modeled as the pre-4.3.3 hard cap, flagged by
+   `data.ACCURACY_CAP_IS_SOFT`.
+7. **`calc_toon_damage` interpolates min/max** rather than using the real
+   experience-based formula. `mechanics.gag_damage_from_exp` is transcribed
+   and correct but needs per-gag `minE`/`maxE` thresholds; the gag
+   infoboxes' `prevexp`/`nextexp` fields look like the right source but
+   haven't been chased.
+8. **Cogs can appear three levels above their normal range** (an 8-level
+   span, damage published for all 8). Not modeled, and largely moot: the
+   upper levels have no frequency or accuracy from either source.
+9. **Whether Throw/Squirt damage ends a lure.** The wiki names Sound
+   explicitly, which is modeled. It's silent on knockback, so that isn't
+   (`mechanics.LURE_ENDS_ON_DAMAGE = None`). Same for a cog that just
+   detonated its trap.

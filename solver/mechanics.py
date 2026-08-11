@@ -56,15 +56,33 @@ def calc_track_exp(toon: ToonState, track: Track) -> int:
     return val
 
 
+def cog_rank(cog: CogState) -> int:
+    """The cog's rank (a.k.a. tier) on its department's corporate ladder,
+    1-8. [CONFIRMED] TTR wiki: rank is position on the ladder, and the
+    lowest level a cog can appear at equals that position -- Flunky is
+    tier 1 and starts at level 1, Pencil Pusher tier 2 at level 2, and so
+    on for all 32 cogs. So the first entry of its "levels" list is its
+    rank, with no extra table needed.
+    """
+    return data.COG_DEPARTMENTS[cog.department][cog.cog_type]["levels"][0]
+
+
 def calc_tgt_def(track: Track, target_cogs) -> int:
     """For group attacks, uses the strongest (highest-level) cog's defense,
-    since every active cog is in the target list. [CONFIRMED]"""
+    since every active cog is in the target list. [CONFIRMED]
+
+    tgtDef depends on the cog's RANK as well as its level: the wiki's table
+    marks levels 4 and 5 with a second value used by rank-1 cogs. This
+    previously always took the rank-1 branch, which understated the defense
+    of every non-rank-1 cog at those two levels by 3 and 5 points -- a
+    level-4 Micromanager was scored -12 instead of -15.
+    """
     if not target_cogs:
         return 0
     if track == Track.TOON_UP:
         return 0
-    strongest = max(c.level for c in target_cogs)
-    return data.TGT_DEF_BY_LEVEL[strongest]
+    strongest = max(target_cogs, key=lambda c: c.level)
+    return data.tgt_def(strongest.level, cog_rank(strongest))
 
 
 def calc_prev_hits_bonus(track: Track) -> int:
@@ -169,6 +187,18 @@ def calc_toon_accuracy(track: Track, level: int, toon: ToonState,
            + calc_track_exp(toon, track)
            + calc_tgt_def(track, target_cogs)
            + calc_bonus(track, level, all_cogs))
+
+    # [CONFIRMED] TTR wiki: "if atkAcc falls below 5%, it is automatically
+    # increased to 5%". The exemption is Drop against a lured cog, which
+    # always misses -- and that case has already returned 0 above.
+    acc = max(acc, data.ACCURACY_FLOOR)
+
+    # The 95 cap became a SOFT cap in 4.3.3: stun/Lure/Trap bonuses and
+    # Toons Hit "can slightly push the final accuracy value higher". The
+    # wiki never quantifies "slightly" or gives a replacement ceiling, so
+    # there is nothing to model -- this stays a hard cap, which is the
+    # pre-4.3.3 rule and the closest defensible approximation. See
+    # data.ACCURACY_CAP_IS_SOFT; revisit if a number ever surfaces.
     return min(acc, data.ACCURACY_CAP)
 
 
@@ -196,6 +226,29 @@ def calc_toon_damage(track: Track, level: int, trained_fraction: float = 1.0) ->
         )
     dmg_min, dmg_max = entry
     return round(dmg_min + (dmg_max - dmg_min) * trained_fraction)
+
+
+def calc_toon_heal(level: int, hit: bool = True,
+                    trained_fraction: float = 1.0) -> int:
+    """Laff restored by a Toon-Up gag.
+
+    [CONFIRMED] TTR wiki: a Toon-Up gag that "misses" still heals 20% of
+    its value, rounded up -- unlike every other track, where a miss does
+    nothing. Pass hit=False for that case.
+
+    Same interim min/max interpolation as calc_toon_damage: the real value
+    is experience-derived, and the minE/maxE thresholds aren't transcribed.
+    """
+    entry = data.GAG_HEAL_MINMAX.get(level)
+    if entry is None:
+        raise NotImplementedError(
+            f"Toon-Up heal for level {level} is marked TODO in data/gags.py."
+        )
+    heal_min, heal_max = entry
+    full = round(heal_min + (heal_max - heal_min) * trained_fraction)
+    if hit:
+        return full
+    return math.ceil(full * data.TOON_UP_MISS_FRACTION)
 
 
 KB_BONUS_MULTIPLIER = 0.50   # [CONFIRMED] kbBonus = totalDmgs * 0.50
