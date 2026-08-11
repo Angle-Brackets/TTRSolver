@@ -49,11 +49,28 @@ replacement. Eight cogs whose attack pool demonstrably changed are tagged
 `[FREQ STALE]` — their frequencies distribute 100% across the wrong set of
 attacks.
 
-**This bounds what the solver can honestly claim.** Its relative judgements
-(group gags against three cogs, taking a lethal hit) rest on damage and HP,
-which are solid. Its absolute numbers — win rates, expected laff loss —
-inherit this error. If TTR frequencies ever surface, the rebalancing PDFs
-at `cdn.toontownrewritten.com` are the likeliest place.
+Searches for a public source have come up empty; treat this as closed
+unless decompiled TTR client data turns up.
+
+### How much it matters: measured, not assumed
+
+The stored numbers are real Toontown Online values, not invention — so the
+truth is *some perturbation of them*, which makes the consequences testable
+even though the values aren't. `python -m solver.search.sensitivity` sweeps
+an offset across every cog accuracy cell and re-asks the solver.
+
+**The recommended move is essentially insensitive to it.** Over the
+positions the solver actually reaches, the chosen action is identical
+across ±20 accuracy points, and the first divergence is a single move at
+−30 — a bigger error than any plausible rebalance. Even at ±60 the policy
+mostly holds.
+
+Predicted outcomes shift, but gently and monotonically: across ±20 points
+the win rate on the `pressed` scenario stays 100% while mean laff remaining
+moves 35.0 → 30.1, roughly 0.12 laff per accuracy point.
+
+So the gap degrades *confidence in the forecast*, not *the advice*. Quote
+the solver's move recommendations; caveat its absolute win rates.
 
 ## What's solid
 

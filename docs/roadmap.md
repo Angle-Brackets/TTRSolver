@@ -24,10 +24,16 @@ replacement. This is the largest remaining source of error and it bounds
 what the solver can honestly claim (see
 [data-confidence.md](data-confidence.md)).
 
-Leads, roughly in order of promise:
-- the rebalancing PDFs linked from the wiki at `cdn.toontownrewritten.com`
-- decompiled `SuitBattleGlobals.py` from a TTR client
-- community spreadsheets, if any post-date 4.0.0
+Leads are thin — the wiki, its linked rebalancing PDFs, and community
+sources have all been checked and none publish it. Realistically this needs
+decompiled `SuitBattleGlobals.py` from a TTR client, or enough recorded
+battle logs to estimate hit rates empirically.
+
+**Before spending effort here, note it may not be worth it.**
+`python -m solver.search.sensitivity` shows the solver's recommended move
+is unchanged across ±20 accuracy points and only diverges at −30. The gap
+costs forecast precision, not advice quality. Chase it if you want
+trustworthy absolute win rates; skip it if you want good moves.
 
 Closing this would also let the **twelve 4.0.0 attacks** currently parked in
 `"unmodeled_attacks"` be folded into the real tables. They have confirmed
