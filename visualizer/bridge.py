@@ -121,8 +121,8 @@ def cog_label(cog: CogState, index: int) -> str:
     if cog.status.trapped:
         tags.append("trapped")
     suffix = f" ({', '.join(tags)})" if tags else ""
-    pretty = cog.cog_type.replace("_", " ").title()
-    return f"{pretty} L{cog.level} {cog.hp}/{cog.max_hp}{suffix}"
+    spec = data.cog(cog.department, cog.cog_type)
+    return f"{spec.display} L{cog.level} {cog.hp}/{cog.max_hp}{suffix}"
 
 
 # ---------------------------------------------------------------------
@@ -153,10 +153,9 @@ def catalogue() -> Dict[str, Any]:
     """Everything the UI needs to populate its dropdowns, straight from the
     data tables so the two can't disagree."""
     depts = {}
-    for dept, cogs in sorted(data.COG_DEPARTMENTS.items()):
-        depts[dept] = [{"type": name, "label": name.replace("_", " ").title(),
-                        "levels": list(table["levels"])}
-                       for name, table in sorted(cogs.items())]
+    for key, dept in sorted(data.COG_DEPARTMENTS.items()):
+        depts[key] = [{"type": c.key, "label": c.display,
+                       "levels": list(c.levels)} for c in dept]
     gags = []
     for track in Track:
         for level in range(1, 8):

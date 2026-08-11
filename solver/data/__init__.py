@@ -59,11 +59,11 @@ from .gags import (
     TOON_UP_MISS_FRACTION,
     EARLY_EXPIRY_ACCURACY_FLOOR,
 )
-from .bossbot import BOSSBOT_COGS
-from .cashbot import CASHBOT_COGS
-from .lawbot import LAWBOT_COGS
-from .sellbot import SELLBOT_COGS
-from .cogs import cog_max_hp, COG_DEPARTMENTS
+from .bossbot import BOSSBOT, BOSSBOT_COGS
+from .cashbot import CASHBOT, CASHBOT_COGS
+from .lawbot import LAWBOT, LAWBOT_COGS
+from .sellbot import SELLBOT, SELLBOT_COGS
+from .cogs import cog_max_hp, cog, all_cogs, COG_DEPARTMENTS
 
 __all__ = [
     "AV_PROP_ACCURACY",
@@ -101,5 +101,11 @@ __all__ = [
     "LAWBOT_COGS",
     "SELLBOT_COGS",
     "cog_max_hp",
+    "cog",
+    "all_cogs",
+    "BOSSBOT",
+    "SELLBOT",
+    "CASHBOT",
+    "LAWBOT",
     "COG_DEPARTMENTS",
 ]

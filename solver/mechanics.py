@@ -63,7 +63,7 @@ def cog_rank(cog: CogState) -> int:
     on for all 32 cogs. So the first entry of its "levels" list is its
     rank, with no extra table needed.
     """
-    return data.COG_DEPARTMENTS[cog.department][cog.cog_type]["levels"][0]
+    return data.cog(cog.department, cog.cog_type).rank
 
 
 def calc_tgt_def(track: Track, target_cogs) -> int:
@@ -288,18 +288,15 @@ def gag_damage_from_exp(exp: int, max_exp: int, min_exp_for_gag: int,
 
 def pick_cog_attack(cog: CogState) -> str:
     """[CONFIRMED] algorithm: cumulative-frequency sample."""
-    table = data.COG_DEPARTMENTS[cog.department].get(cog.cog_type)
-    if table is None:
-        raise NotImplementedError(f"No attack table for cog '{cog.cog_type}'")
-    rel_level = cog.level - table["levels"][0]
+    spec = data.cog(cog.department, cog.cog_type)
     rand_num = random.randint(0, 99)
     count = 0
-    for attack_name, freqs in table["freq"].items():
-        count += freqs[rel_level]
+    for attack in spec.modeled_attacks:
+        count += spec.frequency_at(attack.name, cog.level)
         if rand_num < count:
-            return attack_name
+            return attack.name
     # Shouldn't happen if frequencies sum to 100, but fall back safely.
-    return next(iter(table["freq"]))
+    return spec.modeled_attacks[0].name
 
 
 def pick_cog_target(cog: CogState, toons) -> int:
@@ -312,32 +309,16 @@ def pick_cog_target(cog: CogState, toons) -> int:
 
 
 def cog_attack_damage_and_accuracy(cog: CogState, attack_name: str) -> Tuple[int, int]:
-    table = data.COG_DEPARTMENTS[cog.department][cog.cog_type]
-    rel_level = cog.level - table["levels"][0]
+    """Damage and accuracy for one of this cog's attacks at its level.
 
-    if table.get("accuracy") is None:
-        raise NotImplementedError(
-            f"Accuracy table for '{cog.cog_type}' is marked TODO in "
-            f"data/{cog.department}.py."
-        )
-
-    # Individual cells can be [TODO] even when the table as a whole is
-    # populated -- micromanager/brain_storm accuracy and
-    # the_big_cheese/glower_power are the live cases. Without this check a
-    # None cell reaches the arithmetic and surfaces as a bare TypeError,
-    # which reads like a bug in the simulator rather than a documented gap
-    # in the data.
-    dmg_entry = table["damage"][attack_name][rel_level]
-    acc = table["accuracy"][attack_name][rel_level]
-    if dmg_entry is None or acc is None:
-        missing = "damage" if dmg_entry is None else "accuracy"
-        raise NotImplementedError(
-            f"{cog.cog_type}/{attack_name} at level {cog.level}: {missing} "
-            f"is marked TODO in data/{cog.department}.py."
-        )
-
-    dmg = dmg_entry if isinstance(dmg_entry, int) else random.randint(*dmg_entry)
-    return dmg, acc
+    Raises NotImplementedError naming the cell if either is a documented
+    gap -- without that a None reaches the arithmetic and surfaces as a
+    bare TypeError, which reads like a simulator bug rather than a data one.
+    """
+    spec = data.cog(cog.department, cog.cog_type)
+    entry = spec.damage_at(attack_name, cog.level)
+    dmg = entry if isinstance(entry, int) else random.randint(*entry)
+    return dmg, spec.accuracy_at(attack_name, cog.level)
 
 
 # ---------------------------------------------------------------------

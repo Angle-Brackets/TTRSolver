@@ -37,253 +37,332 @@ source gives unambiguously, left blank rather than guessed at, and called out
 in a comment where it appears. Callers null-check per cell and raise
 NotImplementedError naming the cell.
 """
+from .types import Cog, CogAttack, Department
 
-LAWBOT_COGS = {
-    "bottom_feeder": {
-        # Wiki: https://toontownrewritten.wiki/Bottom_Feeder
-        # [!] The wiki contradicts itself on pick_pocket, but only outside the
-        #     modeled range: the Bottom Feeder page ends the row ...5, 6, 8 at
-        #     levels 6-8 while /Pick_Pocket ends it ...5, 6, 7. Levels 1-5
-        #     agree on both pages, so the row below is unaffected.
-        "levels": [1, 2, 3, 4, 5],
-        "freq": {  # [UNVERIFIED] guide Appendix A
-            "rubber_stamp": [20, 20, 20, 20, 20],
-            "shred":        [20, 20, 20, 20, 20],
-            "watercooler":  [10, 10, 10, 10, 10],
-            "pick_pocket":  [50, 50, 50, 50, 50],
-        },
-        "damage": {  # [CONFIRMED] wiki -- agrees with the guide throughout
-            "rubber_stamp": [ 2,  3,  4,  5,  6],
-            "shred":        [ 2,  4,  6,  8, 10],
-            "watercooler":  [ 3,  4,  5,  6,  7],
-            "pick_pocket":  [ 1,  1,  2,  2,  3],
-        },
-        "accuracy": {  # [UNVERIFIED] guide Appendix C
-            "rubber_stamp": [75, 80, 85, 90, 95],
-            "shred":        [50, 55, 60, 65, 70],
-            "watercooler":  [95, 95, 95, 95, 95],
-            "pick_pocket":  [25, 30, 35, 40, 45],
-        },
-        "group_attacks": set(),  # [CONFIRMED] wiki: all four "One Toon"
-        "unmodeled_attacks": {},
-    },
-    "bloodsucker": {
+LAWBOT = Department(
+    key="lawbot",
+    display="Lawbots",
+    cogs=(
+        Cog(
+            key="bottom_feeder",
+            display="Bottom Feeder",
+            department="lawbot",
+            levels=(1, 2, 3, 4, 5),
+            # Wiki: https://toontownrewritten.wiki/Bottom_Feeder
+            # [!] The wiki contradicts itself on pick_pocket, but only outside the
+            # modeled range: the Bottom Feeder page ends the row ...5, 6, 8 at
+            # levels 6-8 while /Pick_Pocket ends it ...5, 6, 7. Levels 1-5
+            # agree on both pages, so the row below is unaffected.
+            attacks=(
+                CogAttack(
+                    "rubber_stamp", "Rubber Stamp",
+                    damage=(2, 3, 4, 5, 6),
+                    accuracy=(75, 80, 85, 90, 95),
+                    frequency=(20, 20, 20, 20, 20),
+                ),
+                CogAttack(
+                    "shred", "Shred",
+                    damage=(2, 4, 6, 8, 10),
+                    accuracy=(50, 55, 60, 65, 70),
+                    frequency=(20, 20, 20, 20, 20),
+                ),
+                CogAttack(
+                    "watercooler", "Watercooler",
+                    damage=(3, 4, 5, 6, 7),
+                    accuracy=(95, 95, 95, 95, 95),
+                    frequency=(10, 10, 10, 10, 10),
+                ),
+                CogAttack(
+                    "pick_pocket", "Pick Pocket",
+                    damage=(1, 1, 2, 2, 3),
+                    accuracy=(25, 30, 35, 40, 45),
+                    frequency=(50, 50, 50, 50, 50),
+                ),
+            ),
+    ),
+    Cog(
+        key="bloodsucker",
+        display="Bloodsucker",
+        department="lawbot",
+        levels=(2, 3, 4, 5, 6),
         # Wiki: https://toontownrewritten.wiki/Bloodsucker
         # [RESOLVED] Appendix A spelled this attack "Withdrawl", B and C
-        #     "Withdrawal". The wiki uses Withdrawal, which is the key here.
-        "levels": [2, 3, 4, 5, 6],
-        "freq": {  # [UNVERIFIED] guide Appendix A
-            "eviction_notice": [20, 20, 20, 20, 20],
-            "red_tape":        [20, 20, 20, 20, 20],
-            "withdrawal":      [10, 10, 10, 10, 10],
-            "liquidate":       [50, 50, 50, 50, 50],
-        },
-        "damage": {  # [CONFIRMED] wiki -- agrees with the guide throughout
-            "eviction_notice": [ 1,  2,  3,  3,  4],
-            "red_tape":        [ 2,  3,  4,  6,  9],
-            "withdrawal":      [ 6,  8, 10, 12, 14],
-            "liquidate":       [ 2,  3,  4,  6,  9],
-        },
-        "accuracy": {  # [UNVERIFIED] guide Appendix C
-            "eviction_notice": [75, 75, 75, 75, 75],
-            "red_tape":        [75, 75, 75, 75, 75],
-            "withdrawal":      [95, 95, 95, 95, 95],
-            "liquidate":       [50, 60, 70, 80, 90],
-        },
-        "group_attacks": set(),  # [CONFIRMED] wiki: all four "One Toon"
-        "unmodeled_attacks": {},
-    },
-    "double_talker": {
+        # "Withdrawal". The wiki uses Withdrawal, which is the key here.
+        attacks=(
+            CogAttack(
+                "eviction_notice", "Eviction Notice",
+                damage=(1, 2, 3, 3, 4),
+                accuracy=(75, 75, 75, 75, 75),
+                frequency=(20, 20, 20, 20, 20),
+            ),
+            CogAttack(
+                "red_tape", "Red Tape",
+                damage=(2, 3, 4, 6, 9),
+                accuracy=(75, 75, 75, 75, 75),
+                frequency=(20, 20, 20, 20, 20),
+            ),
+            CogAttack(
+                "withdrawal", "Withdrawal",
+                damage=(6, 8, 10, 12, 14),
+                accuracy=(95, 95, 95, 95, 95),
+                frequency=(10, 10, 10, 10, 10),
+            ),
+            CogAttack(
+                "liquidate", "Liquidate",
+                damage=(2, 3, 4, 6, 9),
+                accuracy=(50, 60, 70, 80, 90),
+                frequency=(50, 50, 50, 50, 50),
+            ),
+        ),
+    ),
+    Cog(
+        key="double_talker",
+        display="Double Talker",
+        department="lawbot",
+        levels=(3, 4, 5, 6, 7),
         # Wiki: https://toontownrewritten.wiki/Double_Talker
         # [RESOLVED] Appendix A spelled this "Buzzword", B and C "Buzz Word";
-        #     the wiki uses Buzz Word. Key is buzz_word package-wide.
+        # the wiki uses Buzz Word. Key is buzz_word package-wide.
         # [CORRECTED] group_attacks was {"buzz_word"} on the strength of
-        #     Appendix B's Type column. The wiki says Buzz Word is a single-
-        #     target attack: the Double Talker page gives Target = One Toon,
-        #     https://toontownrewritten.wiki/Buzz_Word gives Target = One Toon
-        #     and files it under Category:Single Cog attacks, and the same
-        #     attack is single-target on Micromanager and The Mingler too.
-        #     Double Talker now has no group attacks at all.
-        "levels": [3, 4, 5, 6, 7],
-        "freq": {  # [UNVERIFIED] guide Appendix A
-            "rubber_stamp": [ 5,  5,  5,  5,  5],
-            "bounce_check": [ 5,  5,  5,  5,  5],
-            "buzz_word":    [20, 20, 20, 20, 20],
-            "double_talk":  [25, 25, 25, 25, 25],
-            "jargon":       [25, 25, 25, 25, 25],
-            "mumbo_jumbo":  [20, 20, 20, 20, 20],
-        },
-        "damage": {  # [CONFIRMED] wiki -- agrees with the guide throughout
-            "rubber_stamp": [ 1,  1,  1,  1,  1],
-            "bounce_check": [ 1,  1,  1,  1,  1],
-            "buzz_word":    [ 1,  2,  3,  5,  6],
-            "double_talk":  [ 6,  6,  9, 13, 18],
-            "jargon":       [ 3,  4,  6,  9, 12],
-            "mumbo_jumbo":  [ 3,  4,  6,  9, 12],
-        },
-        "accuracy": {  # [UNVERIFIED] guide Appendix C
-            "rubber_stamp": [50, 60, 70, 80, 90],
-            "bounce_check": [50, 60, 70, 80, 90],
-            "buzz_word":    [50, 60, 70, 80, 90],
-            "double_talk":  [50, 60, 70, 80, 90],
-            "jargon":       [50, 60, 70, 80, 90],
-            "mumbo_jumbo":  [50, 60, 70, 80, 90],
-        },
-        "group_attacks": set(),  # [CONFIRMED] wiki: all six "One Toon"
-        "unmodeled_attacks": {},
-    },
-    "ambulance_chaser": {
+        # Appendix B's Type column. The wiki says Buzz Word is a single-
+        # target attack: the Double Talker page gives Target = One Toon,
+        # https://toontownrewritten.wiki/Buzz_Word gives Target = One Toon
+        # and files it under Category:Single Cog attacks, and the same
+        # attack is single-target on Micromanager and The Mingler too.
+        # Double Talker now has no group attacks at all.
+        attacks=(
+            CogAttack(
+                "rubber_stamp", "Rubber Stamp",
+                damage=(1, 1, 1, 1, 1),
+                accuracy=(50, 60, 70, 80, 90),
+                frequency=(5, 5, 5, 5, 5),
+            ),
+            CogAttack(
+                "bounce_check", "Bounce Check",
+                damage=(1, 1, 1, 1, 1),
+                accuracy=(50, 60, 70, 80, 90),
+                frequency=(5, 5, 5, 5, 5),
+            ),
+            CogAttack(
+                "buzz_word", "Buzz Word",
+                damage=(1, 2, 3, 5, 6),
+                accuracy=(50, 60, 70, 80, 90),
+                frequency=(20, 20, 20, 20, 20),
+            ),
+            CogAttack(
+                "double_talk", "Double Talk",
+                damage=(6, 6, 9, 13, 18),
+                accuracy=(50, 60, 70, 80, 90),
+                frequency=(25, 25, 25, 25, 25),
+            ),
+            CogAttack(
+                "jargon", "Jargon",
+                damage=(3, 4, 6, 9, 12),
+                accuracy=(50, 60, 70, 80, 90),
+                frequency=(25, 25, 25, 25, 25),
+            ),
+            CogAttack(
+                "mumbo_jumbo", "Mumbo Jumbo",
+                damage=(3, 4, 6, 9, 12),
+                accuracy=(50, 60, 70, 80, 90),
+                frequency=(20, 20, 20, 20, 20),
+            ),
+        ),
+    ),
+    Cog(
+        key="ambulance_chaser",
+        display="Ambulance Chaser",
+        department="lawbot",
+        levels=(4, 5, 6, 7, 8),
         # Wiki: https://toontownrewritten.wiki/Ambulance_Chaser
-        "levels": [4, 5, 6, 7, 8],
-        "freq": {  # [UNVERIFIED] guide Appendix A
-            "shake":    [15, 15, 15, 15, 15],
-            "red_tape": [30, 30, 30, 30, 30],
-            "rolodex":  [20, 20, 20, 20, 20],
-            "hang_up":  [35, 35, 35, 35, 35],
-        },
-        "damage": {  # [CONFIRMED] wiki -- agrees with the guide throughout
-            "shake":    [ 4,  6,  9, 12, 15],
-            "red_tape": [ 6,  8, 12, 15, 19],
-            "rolodex":  [ 3,  4,  5,  6,  7],
-            "hang_up":  [ 2,  3,  4,  5,  6],
-        },
-        "accuracy": {  # [UNVERIFIED] guide Appendix C
-            "shake":    [75, 75, 75, 75, 75],
-            "red_tape": [75, 75, 75, 75, 75],
-            "rolodex":  [75, 75, 75, 75, 75],
-            "hang_up":  [75, 75, 75, 75, 75],
-        },
-        "group_attacks": {"shake"},  # [CONFIRMED] wiki: Shake is "Group"
-        "unmodeled_attacks": {},
-    },
-    "backstabber": {
+        attacks=(
+            CogAttack(
+                "shake", "Shake",
+                damage=(4, 6, 9, 12, 15),
+                accuracy=(75, 75, 75, 75, 75),
+                frequency=(15, 15, 15, 15, 15),
+                group=True,
+            ),
+            CogAttack(
+                "red_tape", "Red Tape",
+                damage=(6, 8, 12, 15, 19),
+                accuracy=(75, 75, 75, 75, 75),
+                frequency=(30, 30, 30, 30, 30),
+            ),
+            CogAttack(
+                "rolodex", "Rolodex",
+                damage=(3, 4, 5, 6, 7),
+                accuracy=(75, 75, 75, 75, 75),
+                frequency=(20, 20, 20, 20, 20),
+            ),
+            CogAttack(
+                "hang_up", "Hang Up",
+                damage=(2, 3, 4, 5, 6),
+                accuracy=(75, 75, 75, 75, 75),
+                frequency=(35, 35, 35, 35, 35),
+            ),
+        ),
+    ),
+    Cog(
+        key="backstabber",
+        display="Backstabber",
+        department="lawbot",
+        levels=(5, 6, 7, 8, 9),
         # Wiki: https://toontownrewritten.wiki/Back_Stabber (the wiki spells
         # the cog's name as two words; the key stays backstabber).
-        "levels": [5, 6, 7, 8, 9],
-        "freq": {  # [UNVERIFIED] guide Appendix A
-            "guilt_trip":        [40, 40, 40, 40, 40],
-            "restraining_order": [25, 25, 25, 25, 25],
-            "finger_wag":        [35, 35, 35, 35, 35],
-        },
-        "damage": {  # [CONFIRMED] wiki -- agrees with the guide throughout
-            "guilt_trip":        [ 8, 11, 13, 15, 18],
-            "restraining_order": [ 6,  7,  9, 11, 13],
-            "finger_wag":        [ 5,  6,  7,  8,  9],
-        },
-        "accuracy": {  # [UNVERIFIED] guide Appendix C
-            "guilt_trip":        [60, 75, 80, 85, 90],
-            "restraining_order": [50, 65, 70, 75, 90],
-            "finger_wag":        [50, 55, 65, 75, 80],
-        },
-        # [CONFIRMED] wiki: Guilt Trip is "Group", the other two "One Toon".
-        "group_attacks": {"guilt_trip"},
-        "unmodeled_attacks": {},
-    },
-    "spin_doctor": {
+        attacks=(
+            CogAttack(
+                "guilt_trip", "Guilt Trip",
+                damage=(8, 11, 13, 15, 18),
+                accuracy=(60, 75, 80, 85, 90),
+                frequency=(40, 40, 40, 40, 40),
+                group=True,
+            ),
+            CogAttack(
+                "restraining_order", "Restraining Order",
+                damage=(6, 7, 9, 11, 13),
+                accuracy=(50, 65, 70, 75, 90),
+                frequency=(25, 25, 25, 25, 25),
+            ),
+            CogAttack(
+                "finger_wag", "Finger Wag",
+                damage=(5, 6, 7, 8, 9),
+                accuracy=(50, 55, 65, 75, 80),
+                frequency=(35, 35, 35, 35, 35),
+            ),
+        ),
+    ),
+    Cog(
+        key="spin_doctor",
+        display="Spin Doctor",
+        department="lawbot",
+        levels=(6, 7, 8, 9, 10),
         # Wiki: https://toontownrewritten.wiki/Spin_Doctor
         # [RESOLVED] Appendix C listed a 5th Spin Doctor attack, "Rolodex"
-        #     (60/65/70/75/80), that Appendices A and B did not. It was
-        #     omitted here as unselectable. The wiki confirms the omission
-        #     was right: Spin Doctor's roster is these four attacks, and
-        #     https://toontownrewritten.wiki/Rolodex lists its users as Head
-        #     Hunter, Ambulance Chaser, Name Dropper and Telemarketer -- not
-        #     Spin Doctor.
-        "levels": [6, 7, 8, 9, 10],
-        "freq": {  # [UNVERIFIED] guide Appendix A
-            "paradigm_shift": [30, 30, 30, 30, 30],
-            "quake":          [20, 20, 20, 20, 20],
-            "spin":           [35, 35, 35, 35, 35],
-            "write_off":      [15, 15, 15, 15, 15],
-        },
-        "damage": {  # [CONFIRMED] wiki -- agrees with the guide throughout
-            "paradigm_shift": [ 9, 10, 13, 16, 17],
-            "quake":          [ 8, 10, 12, 14, 16],
-            "spin":           [10, 12, 15, 18, 20],
-            "write_off":      [ 6,  7,  8,  9, 10],
-        },
-        "accuracy": {  # [UNVERIFIED] guide Appendix C
-            "paradigm_shift": [60, 75, 80, 85, 90],
-            "quake":          [60, 65, 70, 75, 80],
-            "spin":           [70, 75, 80, 85, 90],
-            "write_off":      [60, 65, 75, 85, 90],
-        },
-        # [CONFIRMED] wiki: Paradigm Shift and Quake are "Group".
-        "group_attacks": {"paradigm_shift", "quake"},
-        "unmodeled_attacks": {},
-    },
-    "legal_eagle": {
+        # (60/65/70/75/80), that Appendices A and B did not. It was
+        # omitted here as unselectable. The wiki confirms the omission
+        # was right: Spin Doctor's roster is these four attacks, and
+        # https://toontownrewritten.wiki/Rolodex lists its users as Head
+        # Hunter, Ambulance Chaser, Name Dropper and Telemarketer -- not
+        # Spin Doctor.
+        attacks=(
+            CogAttack(
+                "paradigm_shift", "Paradigm Shift",
+                damage=(9, 10, 13, 16, 17),
+                accuracy=(60, 75, 80, 85, 90),
+                frequency=(30, 30, 30, 30, 30),
+                group=True,
+            ),
+            CogAttack(
+                "quake", "Quake",
+                damage=(8, 10, 12, 14, 16),
+                accuracy=(60, 65, 70, 75, 80),
+                frequency=(20, 20, 20, 20, 20),
+                group=True,
+            ),
+            CogAttack(
+                "spin", "Spin",
+                damage=(10, 12, 15, 18, 20),
+                accuracy=(70, 75, 80, 85, 90),
+                frequency=(35, 35, 35, 35, 35),
+            ),
+            CogAttack(
+                "write_off", "Write Off",
+                damage=(6, 7, 8, 9, 10),
+                accuracy=(60, 65, 75, 85, 90),
+                frequency=(15, 15, 15, 15, 15),
+            ),
+        ),
+    ),
+    Cog(
+        key="legal_eagle",
+        display="Legal Eagle",
+        department="lawbot",
+        levels=(7, 8, 9, 10, 11),
         # Wiki: https://toontownrewritten.wiki/Legal_Eagle
-        "levels": [7, 8, 9, 10, 11],
-        "freq": {  # [UNVERIFIED] guide Appendix A
-            "evil_eye":      [20, 20, 20, 20, 20],
-            "jargon":        [15, 15, 15, 15, 15],
-            "legalese":      [35, 35, 35, 35, 35],
-            "pecking_order": [30, 30, 30, 30, 30],
-        },
-        "damage": {  # [CONFIRMED] wiki
-            # [CORRECTED] pecking_order level 7 was 12; the wiki gives 15 on
-            #     both the Legal Eagle page and /Pecking_Order, making the
-            #     row start flat at 15, 15. Levels 8-11 were already right.
-            "evil_eye":      [10, 11, 13, 15, 16],
-            "jargon":        [ 7,  9, 11, 13, 15],
-            "legalese":      [11, 13, 16, 19, 21],
-            "pecking_order": [15, 15, 17, 19, 22],
-        },
-        "accuracy": {  # [UNVERIFIED] guide Appendix C
-            "evil_eye":      [60, 75, 80, 85, 90],
-            "jargon":        [60, 70, 75, 80, 90],
-            "legalese":      [55, 65, 75, 85, 95],
-            "pecking_order": [70, 75, 80, 85, 95],
-        },
-        "group_attacks": set(),  # [CONFIRMED] wiki: all four "One Toon"
-        "unmodeled_attacks": {},
-    },
-    "big_wig": {
+        attacks=(
+            CogAttack(
+                "evil_eye", "Evil Eye",
+                damage=(10, 11, 13, 15, 16),
+                accuracy=(60, 75, 80, 85, 90),
+                frequency=(20, 20, 20, 20, 20),
+            ),
+            CogAttack(
+                "jargon", "Jargon",
+                damage=(7, 9, 11, 13, 15),
+                accuracy=(60, 70, 75, 80, 90),
+                frequency=(15, 15, 15, 15, 15),
+            ),
+            CogAttack(
+                "legalese", "Legalese",
+                damage=(11, 13, 16, 19, 21),
+                accuracy=(55, 65, 75, 85, 95),
+                frequency=(35, 35, 35, 35, 35),
+            ),
+            CogAttack(
+                "pecking_order", "Pecking Order",
+                damage=(15, 15, 17, 19, 22),
+                accuracy=(70, 75, 80, 85, 95),
+                frequency=(30, 30, 30, 30, 30),
+            ),
+        ),
+    ),
+    Cog(
+        key="big_wig",
+        display="Big Wig",
+        department="lawbot",
+        levels=(8, 9, 10, 11, 12),
         # Wiki: https://toontownrewritten.wiki/Big_Wig
         # [FREQ STALE] The wiki's roster has FOUR attacks; the guide had two.
-        #     A 50/50 split over two attacks cannot be right for a
-        #     four-attack cog.
+        # A 50/50 split over two attacks cannot be right for a
+        # four-attack cog.
         # finger_wag damage: RESOLVED by triangulation. The wiki appeared to
-        #     contradict itself -- the Big Wig page gives 9, 11, 13, 16, 18
-        #     while https://toontownrewritten.wiki/Finger_Wag gives
-        #     13, 15, 17, 19, 21 for the same five levels.
+        # contradict itself -- the Big Wig page gives 9, 11, 13, 16, 18
+        # while https://toontownrewritten.wiki/Finger_Wag gives
+        # 13, 15, 17, 19, 21 for the same five levels.
         #
-        #     The Finger_Wag page is misattributing Throw Book's row. Three
-        #     independent places agree Big Wig's THROW BOOK damage is exactly
-        #     13, 15, 17, 19, 21: the wiki's own Throw Book entry for this
-        #     cog (see unmodeled_attacks below), Open Toontown's
-        #     SuitBattleGlobals.py, and the pre-rebalance guide -- which also
-        #     listed this row under "finger_wag" even though Toontown Online's
-        #     Big Wig has no Finger Wag at all, only Power Trip and Throw
-        #     Book. So the row was mislabeled at the source and the wiki's
-        #     per-attack page inherited the error.
+        # The Finger_Wag page is misattributing Throw Book's row. Three
+        # independent places agree Big Wig's THROW BOOK damage is exactly
+        # 13, 15, 17, 19, 21: the wiki's own Throw Book entry for this
+        # cog (see unmodeled_attacks below), Open Toontown's
+        # SuitBattleGlobals.py, and the pre-rebalance guide -- which also
+        # listed this row under "finger_wag" even though Toontown Online's
+        # Big Wig has no Finger Wag at all, only Power Trip and Throw
+        # Book. So the row was mislabeled at the source and the wiki's
+        # per-attack page inherited the error.
         #
-        #     That leaves the Big Wig page's 9, 11, 13, 16, 18 as the only
-        #     unexplained-away figure for Finger Wag, and it is monotonic
-        #     across the over-level seam where the other row is not. Filled
-        #     in from it. [CONFIRMED] wiki, Big Wig page.
-        "levels": [8, 9, 10, 11, 12],
-        "freq": {  # [UNVERIFIED, STALE] guide Appendix A, wrong attack pool
-            "power_trip": [50, 50, 50, 50, 50],
-            "finger_wag": [50, 50, 50, 50, 50],
-        },
-        "damage": {
-            "power_trip": [  10,   11,   13,   15,   16],  # [CONFIRMED] wiki
-            "finger_wag": [ 9, 11, 13, 16, 18],
-        },
-        "accuracy": {  # [UNVERIFIED] guide Appendix C
-            "power_trip": [75, 80, 85, 90, 95],
-            "finger_wag": [80, 85, 85, 85, 90],
-        },
-        # [CONFIRMED] wiki: Power Trip is "Group", Finger Wag "One Toon".
-        "group_attacks": {"power_trip"},
-        "unmodeled_attacks": {
-            # [CONFIRMED] wiki: /Quash (Big Wig's signature group attack, new
-            # in TTR 4.0.0) and /Throw_Book (one of two Toontown Online
-            # attacks TTR revived in 4.0.0 -- see the Cog attack page's
-            # trivia). Neither has a published frequency.
-            "quash":      {"damage": [12, 13, 15, 17, 19], "group": True},
-            "throw_book": {"damage": [13, 15, 17, 19, 21], "group": False},
-        },
-    },
-}
+        # That leaves the Big Wig page's 9, 11, 13, 16, 18 as the only
+        # unexplained-away figure for Finger Wag, and it is monotonic
+        # across the over-level seam where the other row is not. Filled
+        # in from it. [CONFIRMED] wiki, Big Wig page.
+        attacks=(
+            CogAttack(
+                "power_trip", "Power Trip",
+                damage=(10, 11, 13, 15, 16),
+                accuracy=(75, 80, 85, 90, 95),
+                frequency=(50, 50, 50, 50, 50),
+                group=True,
+            ),
+            CogAttack(
+                "finger_wag", "Finger Wag",
+                damage=(9, 11, 13, 16, 18),
+                accuracy=(80, 85, 85, 85, 90),
+                frequency=(50, 50, 50, 50, 50),
+            ),
+            CogAttack(
+                "quash", "Quash",
+                damage=(12, 13, 15, 17, 19),
+                group=True, modeled=False,
+            ),
+            CogAttack(
+                "throw_book", "Throw Book",
+                damage=(13, 15, 17, 19, 21),
+                group=False, modeled=False,
+            ),
+        ),
+    ),
+    ),
+)
+
+# Backwards-compatible alias; Department indexes by cog key like the old dict.
+LAWBOT_COGS = LAWBOT

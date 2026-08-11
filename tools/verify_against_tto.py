@@ -111,16 +111,20 @@ def compare(src: dict):
     notes = []
     for suit, (dept, cog_type) in sorted(SUIT_KEYS.items(), key=lambda kv: kv[1]):
         theirs = src[suit]["attacks"]
-        ours = data.COG_DEPARTMENTS[dept][cog_type]
+        spec = data.cog(dept, cog_type)
+        mine_names = {a.name for a in spec.modeled_attacks}
 
-        for extra in sorted(set(theirs) - set(ours["freq"])):
+        for extra in sorted(set(theirs) - mine_names):
             notes.append(f"ROSTER  {dept}/{cog_type}: TTO has '{extra}', we don't")
-        for extra in sorted(set(ours["freq"]) - set(theirs)):
+        for extra in sorted(mine_names - set(theirs)):
             notes.append(f"ROSTER  {dept}/{cog_type}: we have '{extra}', TTO doesn't")
 
-        for attack in sorted(set(ours["freq"]) & set(theirs)):
-            for field in ("damage", "accuracy", "freq"):
-                mine, yours = list(ours[field][attack]), theirs[attack][field]
+        for attack in sorted(mine_names & set(theirs)):
+            ours = spec.attack(attack)
+            for field, theirs_key in (("damage", "damage"),
+                                      ("accuracy", "accuracy"),
+                                      ("frequency", "freq")):
+                mine, yours = list(getattr(ours, field)), theirs[attack][theirs_key]
                 if all(v is None for v in mine):
                     stats["ours_todo"] += 1
                     notes.append(f"TODO    {dept}/{cog_type}/{attack}.{field}"

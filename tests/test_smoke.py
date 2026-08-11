@@ -90,16 +90,16 @@ class TestMissingDataRaises(unittest.TestCase):
     def test_todo_cog_accuracy_raises(self):
         """Data-driven so it survives the accuracy tables being filled in:
         pick any cog whose table is still None, or skip once none are."""
-        for dept, cogs in data.COG_DEPARTMENTS.items():
-            for cog_type, table in cogs.items():
-                if table.get("accuracy") is None:
-                    cog = CogState(cog_type=cog_type, department=dept,
-                                   level=table["levels"][0], hp=1, max_hp=1)
-                    attack = next(iter(table["freq"]))
+        for spec in data.all_cogs():
+            for attack in spec.modeled_attacks:
+                if any(v is None for v in attack.accuracy):
+                    level = spec.levels[attack.accuracy.index(None)]
+                    cog = CogState(cog_type=spec.key, department=spec.department,
+                                   level=level, hp=1, max_hp=1)
                     with self.assertRaises(NotImplementedError):
-                        mechanics.cog_attack_damage_and_accuracy(cog, attack)
+                        mechanics.cog_attack_damage_and_accuracy(cog, attack.name)
                     return
-        self.skipTest("every cog accuracy table is transcribed")
+        self.skipTest("every cog accuracy cell is transcribed")
 
     def test_trap_lure_combo_now_resolves(self):
         """Trap damage was the last thing blocking the classic combo. Lay a
@@ -131,7 +131,8 @@ class TestMissingDataRaises(unittest.TestCase):
     def test_no_synthetic_stand_ins_remain(self):
         """Both stand-ins were deleted when their real values landed. Guard
         against one creeping back: these must be transcribed data."""
-        self.assertIsNotNone(data.BOSSBOT_COGS["flunky"]["accuracy"])
+        self.assertIsNotNone(
+            data.cog("bossbot", "flunky").attack("pound_key").accuracy[0])
         self.assertEqual(mechanics.LURE_ROUNDS_BY_LEVEL,
                          {1: 2, 2: 2, 3: 3, 4: 3, 5: 4, 6: 4, 7: 8})
         import solver.testing as testing

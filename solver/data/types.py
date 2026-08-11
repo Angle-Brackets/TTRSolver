@@ -147,6 +147,30 @@ class Cog:
                 f"(only {self.levels[0]}-{self.levels[-1]})")
         return level - self.levels[0]
 
+    def _cell(self, attack_name: str, level: int, field: str):
+        """One cell of one attack, raising with full context if it's a gap.
+
+        Prefer these over CogAttack's own accessors: an attack doesn't know
+        which cog owns it, so its message can only say "Glower Power", while
+        this can say which cog, which level, and which module to go fix.
+        """
+        attack = self.attack(attack_name)
+        value = getattr(attack, field)[self.rel_index(level)]
+        if value is None:
+            raise NotImplementedError(
+                f"{self.key}/{attack_name} at level {level}: {field} is "
+                f"marked TODO in data/{self.department}.py.")
+        return value
+
+    def damage_at(self, attack_name: str, level: int) -> int:
+        return self._cell(attack_name, level, "damage")
+
+    def accuracy_at(self, attack_name: str, level: int) -> int:
+        return self._cell(attack_name, level, "accuracy")
+
+    def frequency_at(self, attack_name: str, level: int) -> int:
+        return self._cell(attack_name, level, "frequency")
+
     def attack(self, name: str) -> CogAttack:
         for a in self.attacks:
             if a.name == name:

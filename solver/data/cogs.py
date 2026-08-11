@@ -2,10 +2,10 @@
 Cog-level data that isn't department-specific: the HP formula and the
 registry mapping a department name to its cog attack tables.
 """
-from .bossbot import BOSSBOT_COGS
-from .cashbot import CASHBOT_COGS
-from .lawbot import LAWBOT_COGS
-from .sellbot import SELLBOT_COGS
+from .bossbot import BOSSBOT
+from .cashbot import CASHBOT
+from .lawbot import LAWBOT
+from .sellbot import SELLBOT
 
 
 # Cog HP by level, straight from the wiki's own table. [CONFIRMED]
@@ -62,8 +62,20 @@ def cog_max_hp(level: int) -> int:
 # docstring for the per-department breakdown and the TTR 4.0.0 changelog
 # entry that makes those two columns actively suspect.
 COG_DEPARTMENTS = {
-    "bossbot": BOSSBOT_COGS,
-    "cashbot": CASHBOT_COGS,
-    "lawbot": LAWBOT_COGS,
-    "sellbot": SELLBOT_COGS,
+    "bossbot": BOSSBOT,
+    "sellbot": SELLBOT,
+    "cashbot": CASHBOT,
+    "lawbot": LAWBOT,
 }
+
+
+def cog(department: str, cog_key: str):
+    """The Cog object for a department/type pair."""
+    return COG_DEPARTMENTS[department][cog_key]
+
+
+def all_cogs():
+    """Every cog in the game, department order then ladder order."""
+    for dept in COG_DEPARTMENTS.values():
+        for c in dept:
+            yield c

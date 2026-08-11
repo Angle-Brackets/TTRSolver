@@ -1,7 +1,7 @@
 """Structural invariants for the cog attack tables in solver/data/.
 
 These are the invariants solver.mechanics relies on when it does
-    table["freq"][attack_name][cog.level - table["levels"][0]]
+    rows(table, "frequency")[attack_name][cog.level - table.levels[0]]
 and then indexes "damage"/"accuracy" with the same key and offset. If any
 of them break, the simulator KeyErrors, IndexErrors, or -- worse -- reads a
 number that belongs to a different attack.
@@ -66,12 +66,20 @@ COGS_WITH_UNMODELED_ATTACKS = {
 }
 
 SECTIONS = ("freq", "damage", "accuracy")
+SECTION_FIELDS = {"freq": "frequency", "damage": "damage",
+                  "accuracy": "accuracy"}
 
 
 def all_cogs():
-    for dept, cogs in sorted(COG_DEPARTMENTS.items()):
-        for cog, table in sorted(cogs.items()):
-            yield dept, cog, table
+    for dept_key, dept in sorted(COG_DEPARTMENTS.items()):
+        for spec in dept:
+            yield dept_key, spec.key, spec
+
+
+def rows(spec, field):
+    """{attack_name: per-level tuple} for one field, modeled attacks only --
+    the shape these invariants were written against."""
+    return {a.name: getattr(a, field) for a in spec.modeled_attacks}
 
 
 class TestCogTableShape(unittest.TestCase):
@@ -87,20 +95,20 @@ class TestCogTableShape(unittest.TestCase):
     def test_required_fields(self):
         for dept, cog, table in all_cogs():
             with self.subTest(dept=dept, cog=cog):
-                for field in ("levels", "freq", "damage", "accuracy",
-                              "group_attacks", "unmodeled_attacks"):
-                    self.assertIn(field, table)
-                self.assertIsInstance(table["levels"], list)
-                self.assertTrue(table["levels"])
-                self.assertIsInstance(table["group_attacks"], set)
-                self.assertIsInstance(table["unmodeled_attacks"], dict)
+                for field in ("levels", "attacks", "rank", "display",
+                              "modeled_attacks", "unmodeled_attacks"):
+                    self.assertTrue(hasattr(table, field))
+                self.assertIsInstance(table.levels, tuple)
+                self.assertTrue(table.levels)
+                self.assertTrue(all(isinstance(a.group, bool)
+                                    for a in table.attacks))
 
     def test_levels_are_contiguous_ascending(self):
         for dept, cog, table in all_cogs():
             with self.subTest(dept=dept, cog=cog):
-                levels = table["levels"]
+                levels = table.levels
                 self.assertEqual(
-                    levels, list(range(levels[0], levels[0] + len(levels))),
+                    list(levels), list(range(levels[0], levels[0] + len(levels))),
                     f"{dept}/{cog} levels must be contiguous ascending "
                     f"for (level - levels[0]) indexing to work",
                 )
@@ -108,29 +116,30 @@ class TestCogTableShape(unittest.TestCase):
     def test_key_sets_match_across_sections(self):
         for dept, cog, table in all_cogs():
             with self.subTest(dept=dept, cog=cog):
-                freq_keys = set(table["freq"])
+                freq_keys = set(rows(table, "frequency"))
                 self.assertTrue(freq_keys, f"{dept}/{cog} has no attacks")
-                self.assertEqual(freq_keys, set(table["damage"]),
+                self.assertEqual(freq_keys, set(rows(table, "damage")),
                                  f"{dept}/{cog}: freq vs damage keys differ")
-                self.assertEqual(freq_keys, set(table["accuracy"]),
+                self.assertEqual(freq_keys, set(rows(table, "accuracy")),
                                  f"{dept}/{cog}: freq vs accuracy keys differ")
 
-    def test_group_attacks_are_known_attacks(self):
+    def test_group_flags_belong_to_real_attacks(self):
+        """Every group attack is one of the cog's attacks. Note this spans
+        unmodeled attacks too -- nine of the twelve 4.0.0 additions are
+        group attacks, and the old layout couldn't express that because
+        group membership lived in a set keyed off the frequency table."""
         for dept, cog, table in all_cogs():
             with self.subTest(dept=dept, cog=cog):
-                self.assertLessEqual(
-                    table["group_attacks"], set(table["freq"]),
-                    f"{dept}/{cog}: group_attacks names an attack that has no "
-                    f"freq entry",
-                )
+                grouped = {a.name for a in table.attacks if a.group}
+                self.assertLessEqual(grouped, {a.name for a in table.attacks})
 
     def test_list_lengths_match_levels(self):
         for dept, cog, table in all_cogs():
-            n = len(table["levels"])
+            n = len(table.levels)
             for section in SECTIONS:
-                for attack, values in table[section].items():
+                for attack, values in rows(table, SECTION_FIELDS[section]).items():
                     with self.subTest(dept=dept, cog=cog, section=section, attack=attack):
-                        self.assertIsInstance(values, list)
+                        self.assertIsInstance(values, tuple)
                         self.assertEqual(
                             len(values), n,
                             f"{dept}/{cog}/{section}/{attack} has {len(values)} "
@@ -139,7 +148,7 @@ class TestCogTableShape(unittest.TestCase):
 
     def test_attack_keys_are_snake_case(self):
         for dept, cog, table in all_cogs():
-            names = list(table["freq"]) + list(table["unmodeled_attacks"])
+            names = [a.name for a in table.attacks]
             for attack in names:
                 with self.subTest(dept=dept, cog=cog, attack=attack):
                     self.assertRegex(attack, r"^[a-z0-9]+(_[a-z0-9]+)*$")
@@ -150,16 +159,16 @@ class TestCogTableShape(unittest.TestCase):
         a frequency. Its name must not collide with a modeled attack, or the
         same attack would exist twice with different meanings."""
         for dept, cog, table in all_cogs():
-            n = len(table["levels"])
-            for attack, entry in table["unmodeled_attacks"].items():
+            n = len(table.levels)
+            for attack, entry in {a.name: a for a in table.unmodeled_attacks}.items():
                 with self.subTest(dept=dept, cog=cog, attack=attack):
                     self.assertNotIn(
-                        attack, table["freq"],
+                        attack, {a.name for a in table.modeled_attacks},
                         f"{dept}/{cog}: '{attack}' is both modeled and unmodeled")
-                    self.assertEqual(set(entry), {"damage", "group"})
-                    self.assertIsInstance(entry["group"], bool)
-                    self.assertEqual(len(entry["damage"]), n)
-                    for v in entry["damage"]:
+                    self.assertIsInstance(entry.group, bool)
+                    self.assertFalse(entry.modeled)
+                    self.assertEqual(len(entry.damage), n)
+                    for v in entry.damage:
                         self.assertIsInstance(v, int)
                         self.assertGreater(v, 0)
 
@@ -169,7 +178,7 @@ class TestCogTableShape(unittest.TestCase):
         never fire. Shrinking this set means a frequency was found (good);
         growing it silently means a cog quietly got worse."""
         found = {(dept, cog) for dept, cog, table in all_cogs()
-                 if table["unmodeled_attacks"]}
+                 if {a.name: a for a in table.unmodeled_attacks}}
         self.assertEqual(found, COGS_WITH_UNMODELED_ATTACKS)
 
 
@@ -185,8 +194,8 @@ class TestCogTableValues(unittest.TestCase):
         the distribution is wrong. Only a real frequency table fixes that."""
         bad = []
         for dept, cog, table in all_cogs():
-            for i, level in enumerate(table["levels"]):
-                values = [table["freq"][a][i] for a in table["freq"]]
+            for i, level in enumerate(table.levels):
+                values = [rows(table, "frequency")[a][i] for a in rows(table, "frequency")]
                 if any(v is None for v in values):
                     bad.append(f"{dept}/{cog} level {level}: freq has a None cell")
                     continue
@@ -197,16 +206,16 @@ class TestCogTableValues(unittest.TestCase):
 
     def test_frequencies_are_non_negative_ints(self):
         for dept, cog, table in all_cogs():
-            for attack, values in table["freq"].items():
-                for level, v in zip(table["levels"], values):
+            for attack, values in rows(table, "frequency").items():
+                for level, v in zip(table.levels, values):
                     with self.subTest(dept=dept, cog=cog, attack=attack, level=level):
                         self.assertIsInstance(v, int)
                         self.assertGreaterEqual(v, 0)
 
     def test_accuracy_within_0_100(self):
         for dept, cog, table in all_cogs():
-            for attack, values in table["accuracy"].items():
-                for level, v in zip(table["levels"], values):
+            for attack, values in rows(table, "accuracy").items():
+                for level, v in zip(table.levels, values):
                     if v is None:
                         continue  # deliberate [TODO]; see KNOWN_TODO_CELLS
                     with self.subTest(dept=dept, cog=cog, attack=attack, level=level):
@@ -216,8 +225,8 @@ class TestCogTableValues(unittest.TestCase):
 
     def test_damage_is_positive_int_or_min_max_pair(self):
         for dept, cog, table in all_cogs():
-            for attack, values in table["damage"].items():
-                for level, v in zip(table["levels"], values):
+            for attack, values in rows(table, "damage").items():
+                for level, v in zip(table.levels, values):
                     if v is None:
                         continue  # deliberate [TODO]; see KNOWN_TODO_CELLS
                     with self.subTest(dept=dept, cog=cog, attack=attack, level=level):
@@ -235,7 +244,7 @@ class TestCogTableValues(unittest.TestCase):
         found = set()
         for dept, cog, table in all_cogs():
             for section in SECTIONS:
-                for attack, values in table[section].items():
+                for attack, values in rows(table, SECTION_FIELDS[section]).items():
                     if any(v is None for v in values):
                         found.add((dept, cog, section, attack))
         self.assertEqual(
@@ -249,7 +258,7 @@ class TestCogTableValues(unittest.TestCase):
         row would mean an indexing offset went wrong somewhere."""
         for dept, cog, table in all_cogs():
             for section in SECTIONS:
-                for attack, values in table[section].items():
+                for attack, values in rows(table, SECTION_FIELDS[section]).items():
                     nones = sum(v is None for v in values)
                     with self.subTest(dept=dept, cog=cog, section=section, attack=attack):
                         self.assertIn(nones, (0, len(values)),
@@ -290,7 +299,7 @@ class TestCogHealth(unittest.TestCase):
         but that the attack tables don't model -- cog_max_hp still has to
         answer for them."""
         for _dept, _cog, table in all_cogs():
-            for level in range(table["levels"][0], table["levels"][-1] + 4):
+            for level in range(table.levels[0], table.levels[-1] + 4):
                 with self.subTest(level=level):
                     self.assertGreater(cog_max_hp(level), 0)
 
@@ -301,13 +310,13 @@ class TestTablesDriveMechanics(unittest.TestCase):
 
     def test_every_cog_level_can_be_indexed(self):
         for dept, cog, table in all_cogs():
-            for level in table["levels"]:
-                rel = level - table["levels"][0]
-                for attack in table["freq"]:
+            for level in table.levels:
+                rel = level - table.levels[0]
+                for attack in rows(table, "frequency"):
                     with self.subTest(dept=dept, cog=cog, level=level, attack=attack):
-                        table["freq"][attack][rel]
-                        table["damage"][attack][rel]
-                        table["accuracy"][attack][rel]
+                        rows(table, "frequency")[attack][rel]
+                        rows(table, "damage")[attack][rel]
+                        rows(table, "accuracy")[attack][rel]
 
     def test_pick_cog_attack_returns_a_valid_attack(self):
         import random
@@ -316,13 +325,13 @@ class TestTablesDriveMechanics(unittest.TestCase):
 
         rng = random.Random(0)
         for dept, cog, table in all_cogs():
-            for level in table["levels"]:
+            for level in table.levels:
                 state = CogState(cog_type=cog, department=dept, level=level,
                                  hp=1, max_hp=1)
                 for _ in range(20):
                     random.seed(rng.randrange(1 << 30))
                     with self.subTest(dept=dept, cog=cog, level=level):
-                        self.assertIn(pick_cog_attack(state), table["freq"])
+                        self.assertIn(pick_cog_attack(state), rows(table, "frequency"))
 
 
 if __name__ == "__main__":

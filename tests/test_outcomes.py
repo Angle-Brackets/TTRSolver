@@ -70,7 +70,7 @@ class TestDistributionsAreProper(unittest.TestCase):
         cog = CogState(cog_type="the_big_cheese", department="bossbot",
                        level=11, hp=10, max_hp=10)
         self.assertIsNone(
-            data.BOSSBOT_COGS["the_big_cheese"]["accuracy"]["glower_power"][0],
+            data.cog("bossbot", "the_big_cheese").attack("glower_power").accuracy[0],
             "test premise changed: glower_power accuracy is no longer TODO")
         with self.assertRaises(NotImplementedError):
             outcomes.cog_damage_distribution(cog)

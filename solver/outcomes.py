@@ -79,42 +79,30 @@ def cog_attack_outcomes(cog: CogState) -> List[Tuple[float, str, int, bool]]:
     happened needs to say *which* attack -- "Pencil Pusher used Fountain Pen
     for 6" rather than "6 damage from somewhere".
     """
-    table = data.COG_DEPARTMENTS[cog.department][cog.cog_type]
-    if table.get("accuracy") is None:
-        raise NotImplementedError(
-            f"Accuracy table for '{cog.cog_type}' is marked TODO in "
-            f"data/{cog.department}.py."
-        )
-    rel_level = cog.level - table["levels"][0]
+    spec = data.cog(cog.department, cog.cog_type)
+    index = spec.rel_index(cog.level)
+    attacks = spec.modeled_attacks
 
-    freqs = {name: rows[rel_level] for name, rows in table["freq"].items()}
+    freqs = {a.name: spec.frequency_at(a.name, cog.level) for a in attacks}
     total_freq = sum(freqs.values())
     if total_freq != 100:
         # mechanics.pick_cog_attack samples cumulatively and falls through to
         # the first attack when the frequencies don't reach the roll, so any
         # shortfall lands on the first attack. Mirror that rather than
         # renormalizing, so this distribution matches the sampler exactly.
-        first = next(iter(freqs))
-        freqs[first] += 100 - total_freq
+        freqs[attacks[0].name] += 100 - total_freq
 
     results: List[Tuple[float, str, int, bool]] = []
-    for name, freq in freqs.items():
-        p_attack = freq / 100.0
+    for attack in attacks:
+        p_attack = freqs[attack.name] / 100.0
         if p_attack <= 0:
             continue
 
-        # Individual cells can be None even when the table as a whole is
-        # populated. Catch that here so it reads as a data gap instead of
-        # surfacing as a TypeError deep in the arithmetic.
-        raw_acc = table["accuracy"][name][rel_level]
-        entry = table["damage"][name][rel_level]
-        if raw_acc is None or entry is None:
-            missing = "accuracy" if raw_acc is None else "damage"
-            raise NotImplementedError(
-                f"{cog.cog_type}/{name} at level {cog.level}: {missing} is "
-                f"marked TODO in data/{cog.department}.py."
-            )
-        p_hit = raw_acc / 100.0
+        # Individual cells can be a documented gap even when the rest of the
+        # cog is filled in; these accessors raise naming the cell rather than
+        # letting a None reach the arithmetic.
+        p_hit = spec.accuracy_at(attack.name, cog.level) / 100.0
+        entry = spec.damage_at(attack.name, cog.level)
 
         if isinstance(entry, int):
             damage_options = [(1.0, entry)]
@@ -125,9 +113,9 @@ def cog_attack_outcomes(cog: CogState) -> List[Tuple[float, str, int, bool]]:
 
         for p_dmg, dmg in damage_options:
             if p_attack * p_hit * p_dmg > 0:
-                results.append((p_attack * p_hit * p_dmg, name, dmg, True))
+                results.append((p_attack * p_hit * p_dmg, attack.name, dmg, True))
         if p_hit < 1.0:
-            results.append((p_attack * (1.0 - p_hit), name, 0, False))
+            results.append((p_attack * (1.0 - p_hit), attack.name, 0, False))
 
     return results
 
@@ -296,7 +284,7 @@ def cog_phase_summary(state: BattleState) -> List[Dict]:
 
         entry = {
             "index": index,
-            "cog": cog.cog_type.replace("_", " ").title(),
+            "cog": data.cog(cog.department, cog.cog_type).display,
             "level": cog.level,
             "lured": cog.status.lured,
             "lure_rounds": cog.status.lure_rounds_remaining,
@@ -307,8 +295,8 @@ def cog_phase_summary(state: BattleState) -> List[Dict]:
         # the percentages shown are unconditional.
         p_acts = lure_end_probability(cog) if cog.status.lured else 1.0
         entry["p_acts"] = round(p_acts, 4)
-        group_attacks = data.COG_DEPARTMENTS[cog.department][cog.cog_type][
-            "group_attacks"]
+        spec = data.cog(cog.department, cog.cog_type)
+        group_attacks = {a.name for a in spec.attacks if a.group}
 
         if p_acts > 0:
             merged: Dict[str, Dict] = {}
