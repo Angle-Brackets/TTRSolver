@@ -69,14 +69,12 @@ but nothing yet checks that its advice matches what strong players actually
 do. Worth picking a handful of known positions with a consensus best move
 and seeing whether it agrees.
 
-## 5. Decide what the visualizer visualizes
+## Done: the visualizer runs the real solver
 
-[visualizer/](../visualizer/) still carries its own hardcoded JS port of
-the rules, which has now drifted further — it knows nothing about lure
-wake-up, `luredRatio`, or `kbBonus`. Either regenerate it from the Python
-tables or have it render precomputed trees exported as JSON from
-`solver.search`. The second is the single-source-of-truth option and is
-looking more attractive now that the Python side is the richer model.
+Resolved in favour of one source of truth. `python -m visualizer.serve`
+loads `solver/` into the browser with Pyodide; `visualizer/bridge.py` is
+the only translation layer and holds no game rules. The JavaScript port is
+deleted.
 
 ## Later
 

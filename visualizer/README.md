@@ -1,29 +1,64 @@
 # Visualizer
 
-`ToontownTreeExplorer.jsx` — a standalone React component that renders a
-lazy expectimax decision tree for a fight. Nodes compute their children
-only when expanded, so the tree never eagerly blows up.
+An interactive view of the expectimax tree, running **the real solver** —
+the Python package is loaded into the browser with Pyodide, so there is no
+JavaScript copy of the battle rules and nothing to keep in sync.
 
-It expects React, `lucide-react`, and Tailwind classes; it was authored as
-a self-contained Claude artifact and has no build setup in this repo yet.
-Drop it into any React sandbox (or a Vite + Tailwind app) to run it.
+## Running it
 
-## Not wired to `solver/`
+```
+python -m visualizer.serve
+```
 
-The component carries its **own small hardcoded copy** of the game data and
-rules — a subset ported from `solver/data/`, with the same confidence
-distinctions (unconfirmed values are marked `isDemo` and rendered with a
-dashed "demo data" badge rather than mixed in silently).
+That's the whole setup. No Node, no npm, no build step — a browser opens on
+`http://localhost:8000/visualizer/index.html`. The first load pulls the
+Pyodide runtime (~10 MB) from a CDN and is slow; after that it's cached.
 
-That means there are currently two copies of the battle rules in this repo.
-Which one wins is a deliberate open decision — see
-[docs/roadmap.md](../docs/roadmap.md) item 5:
+Flags: `--port N`, `--no-browser`.
 
-- keep the JS port (fast, no backend, but a second copy of the rules to
-  keep in sync), or
-- render precomputed trees exported from the Python solver as JSON (single
-  source of truth, but static rather than interactively reconfigurable
-  in-browser).
+## How it works
 
-Until that's settled, treat any change to `solver/` mechanics as
-potentially making this file stale.
+```
+index.html ──fetch /api/manifest──► serve.py  (lists solver/**/*.py)
+     │                                  │
+     └──fetch each .py────────────────► writes them into Pyodide's FS
+     │
+     └── import bridge ──► bridge.py ──► solver.outcomes / solver.search
+```
+
+`bridge.py` is the only translation layer: JSON in, JSON out. It holds
+serialization and display labels and **no game rules** — if the page needs
+a number it calls into `solver/`. There's a test suite for it at
+`tests/test_bridge.py`, including a check that the group-gag flags it sends
+the UI match `simulator.is_group_action` rather than restating them.
+
+The tree expands lazily: clicking a node calls Python for that layer only,
+so nothing is computed until you look at it. Each action shows its expected
+value and **the gap to the runner-up** — near zero means the decision
+doesn't matter, and a large gap means the position has a real right answer.
+
+## Why it's built this way
+
+The previous version was a standalone React component with its own
+hardcoded port of the rules and data. It drifted, exactly as you'd expect:
+by the time it was retired it still believed Small Magnet was
+single-target, that lures never expired, that Flunkies had a flat 75%
+accuracy, and it labelled the level-2 lure "Hypno Goggles" (that's level
+6). Every one of those was correct when written.
+
+Two copies of a rule set is one copy too many, so the JS port is gone —
+`ToontownTreeExplorer.jsx`, recoverable from git history if you ever want
+the old layout. The UI here is deliberately plain (inline CSS, no Tailwind
+or icon library) so that it stays a thin shell over the solver and can be
+served from a single file.
+
+## Caveats
+
+Numbers on the page inherit the model's data gaps — cog attack frequency
+and accuracy in particular are pre-4.0.0 values the wiki doesn't publish.
+See [../docs/data-confidence.md](../docs/data-confidence.md). A cog with a
+`[TODO]` cell (Micromanager, The Big Cheese, Big Wig) shows the raise as an
+inline error on the node rather than a wrong number.
+
+Depth 3 on four cogs is slow — the search is single-threaded and blocks the
+page while it runs. Start at depth 2.

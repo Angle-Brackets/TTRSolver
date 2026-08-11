@@ -38,7 +38,10 @@ tests/              unittest suite
 docs/
   data-confidence.md  what's confirmed vs. unverified, and the tagging rules
   roadmap.md          prioritized next steps
-visualizer/         standalone React artifact: lazy expectimax tree explorer
+visualizer/
+  index.html        interactive tree explorer (React + Pyodide, no build)
+  bridge.py         JSON layer between the page and the solver
+  serve.py          `python -m visualizer.serve`
 ```
 
 ## Running it
@@ -50,6 +53,7 @@ python -m unittest discover tests                    # 85 tests
 python -m solver.search.demo                         # solver plays a fight
 python -m solver.search.demo --compare --scenario pressed
 python -m solver.demo                                # random-policy baseline
+python -m visualizer.serve                           # interactive tree in a browser
 ```
 
 On the `pressed` scenario — a mixed Bossbot group (Flunky L4, Pencil
