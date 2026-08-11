@@ -102,6 +102,7 @@ from .types import Gag
 # A `None` damage/heal is a documented gap, not an oversight -- see the two
 # disputed cells noted below. Gag.damage_at()/heal_at() raise on them.
 
+# Positional args are (track, level, display).
 GAGS: Tuple[Gag, ...] = (
     # --- Toon Up ---------------------------------------------
     Gag(Track.TOON_UP, 1, 'Feather', accuracy=70, group=False, heal=(8, 10), organic_heal=(10, 12)),

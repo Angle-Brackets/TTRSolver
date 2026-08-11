@@ -103,7 +103,7 @@ def action_from_dict(d: Dict[str, Any]) -> Action:
 
 
 def gag_name(track: Track, level: int) -> str:
-    return data.gag(track, level).name
+    return data.gag(track, level).display
 
 
 def describe_action(action: Action) -> str:

@@ -49,10 +49,10 @@ class TestRegistryShape(unittest.TestCase):
             with self.assertRaises(KeyError):
                 g(Track.THROW, bad)
 
-    def test_every_gag_is_named_and_has_an_accuracy(self):
+    def test_every_gag_has_a_display_name_and_an_accuracy(self):
         for gag in gags.GAGS:
             with self.subTest(gag=str(gag)):
-                self.assertTrue(gag.name.strip())
+                self.assertTrue(gag.display.strip())
                 self.assertIsInstance(gag.accuracy, int)
                 self.assertGreaterEqual(gag.accuracy, 0)
                 self.assertLessEqual(gag.accuracy, 100)
@@ -158,15 +158,15 @@ class TestWikiValues(unittest.TestCase):
     def test_sound_is_not_shifted_by_a_level(self):
         """The guide's table began at Whistle and had no Bike Horn, so every
         Sound level sat one row too low. Bike Horn is level 1."""
-        self.assertEqual(g(Track.SOUND, 1).name, "Bike Horn")
+        self.assertEqual(g(Track.SOUND, 1).display, "Bike Horn")
         self.assertEqual(g(Track.SOUND, 1).damage, (3, 4))
-        self.assertEqual(g(Track.SOUND, 6).name, "Foghorn")
+        self.assertEqual(g(Track.SOUND, 6).display, "Foghorn")
         self.assertEqual(g(Track.SOUND, 6).damage, (25, 50))
 
     def test_ttr_renamed_and_rebalanced_level_7_trap_and_drop(self):
-        self.assertEqual(g(Track.TRAP, 7).name, "Railroad")
+        self.assertEqual(g(Track.TRAP, 7).display, "Railroad")
         self.assertEqual(g(Track.TRAP, 7).damage, (200, 200))
-        self.assertEqual(g(Track.DROP, 7).name, "Toontanic")
+        self.assertEqual(g(Track.DROP, 7).display, "Toontanic")
         self.assertEqual(g(Track.DROP, 7).damage, (180, 180))
 
     def test_level_6_gags_all_have_wide_ranges(self):

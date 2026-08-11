@@ -38,7 +38,12 @@ class Gag:
 
     track: Track
     level: int
-    name: str
+    # `display`, not `name`, to match Cog and CogAttack: on those two `name`
+    # is the snake_case key and `display` is the human-readable string. A Gag
+    # is identified by (track, level) rather than a slug, so it has no key --
+    # but calling its one string `name` made the same attribute mean the
+    # opposite thing on Gag and CogAttack, which is a trap.
+    display: str
     accuracy: int                       # propAcc, 0-100
     group: bool                         # hits every cog (or every toon)
 
@@ -77,7 +82,7 @@ class Gag:
         return _require(self.lure_rounds, "Lure duration", self)
 
     def __str__(self) -> str:
-        return f"{self.name} ({self.track.value} {self.level})"
+        return f"{self.display} ({self.track.value} {self.level})"
 
 
 @dataclass(frozen=True)
