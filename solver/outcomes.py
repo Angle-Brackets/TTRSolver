@@ -435,7 +435,8 @@ def _cog_key(state: BattleState) -> Tuple:
     return tuple((c.cog_type, c.department, c.level, c.hp, c.status.is_dead,
                   c.status.lured, c.status.lure_rounds_remaining,
                   c.status.lure_acc_before_bonus, c.status.lure_level,
-                  c.status.trapped, c.status.trap_level)
+                  c.status.trapped, c.status.trap_level,
+                  c.status.trap_organic)
                  for c in state.cogs)
 
 

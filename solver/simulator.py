@@ -92,10 +92,18 @@ def _apply_trap_trigger(cog: CogState) -> int:
     onto the trap, and gives no rule for damage clearing a trap. (Nor is
     re-trapping possible -- legal_actions blocks trapping an already
     trapped or lured cog, which is [CONFIRMED].)"""
-    dmg = data.gag(Track.TRAP, cog.status.trap_level).damage_at(0.0)
+    # trained_fraction 1.0, matching mechanics.calc_toon_damage's default
+    # and therefore every other track. This read 0.0 -- the MINIMUM of the
+    # range -- which is a convention no other gag uses. TNT deals 90-180,
+    # so a trap was being resolved at 90 while a Grand Piano of the same
+    # level resolved at 170, and any comparison between Trap and another
+    # track was measuring that discrepancy rather than the game.
+    dmg = data.gag(Track.TRAP, cog.status.trap_level).damage_at(
+        1.0, organic=cog.status.trap_organic)
     cog.status.trapped = False
     cog.status.trap_track = None
     cog.status.trap_level = None
+    cog.status.trap_organic = False
     return dmg
 
 
@@ -107,7 +115,8 @@ def toon_action_accuracy(state: BattleState, action: Action) -> int:
     """
     return mechanics.calc_toon_accuracy(
         action.track, action.level, state.toon,
-        _targets_for(state, action), all_cogs=state.cogs)
+        _targets_for(state, action), all_cogs=state.cogs,
+        lure_tree_planted=state.toon.is_organic(action.track))
 
 
 def apply_toon_action(state: BattleState, action: Action,
@@ -166,6 +175,7 @@ def apply_toon_action(state: BattleState, action: Action,
             cog.status.trapped = True
             cog.status.trap_track = action.track
             cog.status.trap_level = action.level
+            cog.status.trap_organic = toon.is_organic(action.track)
 
     elif action.track == Track.LURE:
         # Snapshot the accuracy this Lure landed with, BEFORE any bonus and
@@ -202,7 +212,9 @@ def apply_toon_action(state: BattleState, action: Action,
                 # un-lured members of a mixed battle.
                 continue
 
-            base = mechanics.calc_toon_damage(action.track, action.level)
+            base = mechanics.calc_toon_damage(
+                action.track, action.level,
+                organic=toon.is_organic(action.track))
             # Damage instances in source order: gag damage, then hpBonus
             # (always 0 solo), then kbBonus (Throw/Squirt on a lured cog).
             total = (base

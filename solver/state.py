@@ -8,7 +8,7 @@ See docs/data-confidence.md for why this matters and what it does/doesn't buy yo
 """
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional, Dict, Tuple, List
+from typing import Optional, Dict, FrozenSet, Tuple, List
 
 
 class Track(str, Enum):
@@ -47,6 +47,18 @@ class ToonState:
     # gag_counts[(track, level)] = number of that gag left in the pouch
     gag_counts: Dict[Tuple[Track, int], int] = field(default_factory=dict)
 
+    # Tracks whose gags are organic. Organic is a property of the whole
+    # track, not of an individual gag -- a toon earns an organic track
+    # from a ToonTask and every gag in it is organic thereafter.
+    #
+    # Raises damage for every track, and accuracy for Lure specifically
+    # (see Gag.prop_accuracy). Fixed for the battle, so `clone` shares it
+    # rather than copying, exactly like track_exp.
+    organic_tracks: FrozenSet[Track] = frozenset()
+
+    def is_organic(self, track: Track) -> bool:
+        return track in self.organic_tracks
+
     def has_gag(self, track: Track, level: int) -> bool:
         return self.gag_counts.get((track, level), 0) > 0
 
@@ -78,6 +90,10 @@ class CogStatus:
     trapped: bool = False
     trap_track: Optional[Track] = None   # which gag laid the trap
     trap_level: Optional[int] = None
+    # Whether the toon's Trap track was organic when this trap was laid.
+    # Recorded here because the damage is dealt later, when a Lure drags
+    # a cog onto it, by which time the action is long gone.
+    trap_organic: bool = False
 
     is_dead: bool = False
 
@@ -126,6 +142,7 @@ class CogStatus:
             trapped=self.trapped,
             trap_track=self.trap_track,
             trap_level=self.trap_level,
+            trap_organic=self.trap_organic,
             is_dead=self.is_dead,
         )
 
@@ -179,6 +196,7 @@ class BattleState:
                 # copy per action instead of one per outcome branch.
                 track_exp=self.toon.track_exp,
                 gag_counts=self.toon.gag_counts,
+                organic_tracks=self.toon.organic_tracks,
             ),
             cogs=[c.copy() for c in self.cogs],
             round_num=self.round_num,

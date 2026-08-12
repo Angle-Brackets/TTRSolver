@@ -124,7 +124,8 @@ def build_state(snapshot=None, panel=None, readings: Sequence = (),
         return BuildResult(None, problems)
 
     toon = ToonState(laff=snapshot.laff, max_laff=snapshot.max_laff,
-                     track_exp=track_exp, gag_counts=gag_counts)
+                     track_exp=track_exp, gag_counts=gag_counts,
+                     organic_tracks=frozenset(snapshot.organic_tracks()))
     return BuildResult(BattleState(toon=toon, cogs=cogs,
                                    round_num=round_num), [])
 
