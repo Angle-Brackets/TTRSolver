@@ -172,6 +172,22 @@ class Snapshot:
                 for track in Track if track in self.tracks
                 for level in range(1, self.tracks[track][0] + 1)]
 
+    def track_exp(self) -> Dict[Track, int]:
+        """Highest gag unlocked per track, as `ToonState.track_exp` wants.
+
+        This is not a formatting convenience -- it feeds accuracy. The
+        wiki's formula is `atkAcc = propAcc + trackExp + tgtDef + bonus`,
+        and trackExp is `(highest unlocked level - 1) * 10`, halved for
+        Toon-Up. A toon trained to level 7 in a track is therefore
+        carrying a flat +60 accuracy that a solver ignoring this would
+        miss entirely.
+
+        Note it keys off the highest gag *unlocked*, not the raw
+        experience points in `/gags.json`'s `experience` field, which do
+        not enter the calculation at all.
+        """
+        return {track: top for track, (top, _organic) in self.tracks.items()}
+
     def organic_tracks(self) -> List[Track]:
         return [track for track in Track
                 if self.tracks.get(track, (0, False))[1]]

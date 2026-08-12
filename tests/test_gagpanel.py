@@ -1,0 +1,169 @@
+"""Reading gag counts off the gag menu.
+
+Panels are synthesised so these run with no game and no screenshot. The
+geometry they build is the geometry measured from a real 1080p frame: a
+label area then seven cells, rows in track order, each backed by its own
+colour.
+"""
+import unittest
+
+try:
+    import numpy as np
+
+    from solver.live import gagpanel as G
+    from solver.live.gagpanel import PanelCell, find_panel, read_panel
+    from solver.state import Track
+except ImportError as exc:                   # numpy is an optional extra
+    raise unittest.SkipTest(f"gagpanel needs numpy: {exc}") from None
+
+
+PANEL_X, PANEL_W, ROW_H, TOP = 389, 862, 73, 270
+BLUE = (60, 140, 220)
+GREY = (90, 88, 86)
+SCENE = (70, 70, 80)
+
+
+def panel_frame(counts, size=(1920, 1080), unlocked=None):
+    """A frame containing a gag panel showing `counts` per track."""
+    img = np.zeros((size[1], size[0], 3), dtype=np.uint8)
+    img[:, :] = SCENE
+    for r, (track, colour) in enumerate(G.ROW_COLOURS):
+        top = TOP + r * ROW_H
+        img[top:top + ROW_H, PANEL_X:PANEL_X + PANEL_W] = colour
+        row = counts.get(track, [0] * 7)
+        for col in range(7):
+            x0 = PANEL_X + round((G.CELL_LEFT + G.CELL_PITCH * col) * PANEL_W)
+            x1 = x0 + round(G.CELL_WIDTH * PANEL_W)
+            value = row[col]
+            if value is None:               # slot drawn but never filled
+                img[top + 4:top + ROW_H - 6, x0:x1] = BLUE
+                continue
+            img[top + 4:top + ROW_H - 6, x0:x1] = BLUE if value else GREY
+            if value:
+                _draw_digit(img, value, x0, top, x1 - x0)
+    return img
+
+
+def _draw_digit(img, value, x0, top, cell_w):
+    """Paint the count where the game paints it, in the game's font."""
+    from PIL import Image, ImageDraw, ImageFont
+
+    from solver.live import ttr_assets
+
+    font = ImageFont.truetype(str(ttr_assets.interface_font()), 26)
+    tile = Image.new("RGB", (cell_w, ROW_H), tuple(int(c) for c in BLUE))
+    draw = ImageDraw.Draw(tile)
+    text = str(value)
+    box = draw.textbbox((0, 0), text, font=font)
+    draw.text((cell_w - (box[2] - box[0]) - 6,
+               ROW_H - (box[3] - box[1]) - 20), text, font=font,
+              fill=(255, 255, 255))
+    img[top:top + ROW_H, x0:x0 + cell_w] = np.asarray(tile)
+
+
+class FindPanelTest(unittest.TestCase):
+
+    def test_finds_the_panel_and_its_rows(self):
+        located = find_panel(panel_frame({}))
+        self.assertIsNotNone(located)
+        left, width, bands, height = located
+        self.assertAlmostEqual(left, PANEL_X, delta=3)
+        self.assertAlmostEqual(width, PANEL_W, delta=6)
+        self.assertEqual(len(bands), 7)
+        self.assertAlmostEqual(height, ROW_H, delta=2)
+
+    def test_no_panel_in_an_empty_scene(self):
+        img = np.zeros((1080, 1920, 3), dtype=np.uint8)
+        img[:, :] = SCENE
+        self.assertIsNone(find_panel(img))
+
+    def test_scattered_track_colours_are_not_a_panel(self):
+        """A purple cog and a green lawn match the row colours; only a
+        long unbroken run of one is a row."""
+        img = np.zeros((1080, 1920, 3), dtype=np.uint8)
+        img[:, :] = SCENE
+        for r, (_track, colour) in enumerate(G.ROW_COLOURS):
+            img[200 + r * 40:230 + r * 40, 100:180] = colour   # short blobs
+        self.assertIsNone(find_panel(img))
+
+    def test_a_partial_panel_is_rejected(self):
+        """Six rows out of seven is something else on screen."""
+        img = np.zeros((1080, 1920, 3), dtype=np.uint8)
+        img[:, :] = SCENE
+        for r, (_t, colour) in enumerate(G.ROW_COLOURS[:6]):
+            top = TOP + r * ROW_H
+            img[top:top + ROW_H, PANEL_X:PANEL_X + PANEL_W] = colour
+        self.assertIsNone(find_panel(img))
+
+
+class ReadPanelTest(unittest.TestCase):
+
+    def read(self, counts, **kw):
+        panel = read_panel(panel_frame(counts), **kw)
+        self.assertIsNotNone(panel)
+        return panel
+
+    def test_reads_single_digit_counts(self):
+        panel = self.read({Track.THROW: [0, 0, 0, 1, 7, 3, 1]})
+        got = [c.count for c in panel.cells if c.track == Track.THROW]
+        self.assertEqual(got, [0, 0, 0, 1, 7, 3, 1])
+
+    def test_reads_two_digit_counts(self):
+        """A pouch holds thirty Cupcakes, so counts pass nine."""
+        panel = self.read({Track.THROW: [30, 12, 0, 0, 0, 0, 0]})
+        got = [c.count for c in panel.cells if c.track == Track.THROW]
+        self.assertEqual(got[:2], [30, 12])
+
+    def test_greyed_cells_read_as_zero(self):
+        panel = self.read({Track.TRAP: [0, 0, 0, 0, 7, 3, 1]})
+        got = [c.count for c in panel.cells if c.track == Track.TRAP]
+        self.assertEqual(got[:4], [0, 0, 0, 0])
+
+    def test_a_blank_slot_is_not_zero(self):
+        """Drop trained to 6 leaves an empty seventh cell. Calling that
+        zero would tell the solver a level-7 Drop exists to be spent."""
+        panel = self.read({Track.DROP: [0, 0, 0, 0, 7, 3, None]})
+        cell = [c for c in panel.cells
+                if c.track == Track.DROP and c.level == 7][0]
+        self.assertIsNone(cell.count)
+        self.assertFalse(cell.unlocked)
+
+    def test_api_track_exp_marks_locked_levels(self):
+        """Entitlement comes from the Local API, which states it, rather
+        than from pixels, which cannot tell an empty cell from a greyed
+        one (std 42 against 38 on a real frame)."""
+        panel = self.read({Track.DROP: [0, 0, 0, 0, 7, 3, 0]},
+                          track_exp={Track.DROP: 6})
+        cell = [c for c in panel.cells
+                if c.track == Track.DROP and c.level == 7][0]
+        self.assertFalse(cell.unlocked)
+        self.assertIsNone(cell.count)
+
+    def test_counts_maps_to_gag_counts(self):
+        panel = self.read({Track.SOUND: [0, 0, 0, 5, 5, 2, 1]})
+        counts = panel.counts()
+        self.assertEqual(counts[(Track.SOUND, 4)], 5)
+        self.assertEqual(counts[(Track.SOUND, 7)], 1)
+        self.assertNotIn((Track.SOUND, 1), counts)   # zeros are omitted
+
+    def test_track_exp_uses_unlocked_not_carried(self):
+        """An empty pouch still carries its accuracy bonus."""
+        panel = self.read({Track.SOUND: [0, 0, 0, 0, 0, 0, 0]},
+                          track_exp={Track.SOUND: 7})
+        self.assertEqual(panel.track_exp()[Track.SOUND], 7)
+
+
+class MergeColumnsTest(unittest.TestCase):
+    """Thresholding splits a digit; two digits must stay apart."""
+
+    def test_stacked_pieces_of_one_glyph_merge(self):
+        merged = G._merge_columns([(18, 6, 28, 14), (18, 13, 28, 20)])
+        self.assertEqual(merged, [(18, 6, 28, 20)])
+
+    def test_side_by_side_digits_stay_separate(self):
+        merged = G._merge_columns([(4, 6, 12, 20), (14, 6, 22, 20)])
+        self.assertEqual(len(merged), 2)
+
+
+if __name__ == "__main__":
+    unittest.main()
