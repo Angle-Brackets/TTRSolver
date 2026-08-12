@@ -69,11 +69,13 @@ What's implemented, and what each was worth:
   and status is the same move, so `distinct_actions` collapses them. Three
   identical cogs: 8 actions become 4. Free, exact, and identical cogs are
   the common case in a real battle.
-- **Star1 (`*`-minimax) pruning** -- the alpha-beta analogue for chance
-  nodes. Exact, verified against an exhaustive search, but only ~1-2x here.
-  It works best when the utility range is narrow relative to the search
-  window, and ours is wide (a branch can range over ~250 points), so the
-  bounds stay loose and cuts come late.
+- **Star1 and star2 (`*`-minimax) pruning** -- the alpha-beta analogue for
+  chance nodes, star2 adding a probe of one action per child for a real
+  lower bound. Both exact and verified against exhaustive search. **Both
+  are slower here and default to off**: 12s exhaustive, 52s star1, 56s
+  star2 at depth 3. Not a transposition problem (the table stays 99%
+  EXACT); the bounds are simply too loose to cut, so all that is left is
+  per-branch overhead. See the expectimax module docstring.
 - **Transposition table with bound flags** and TT-move-first ordering.
   Iterative deepening is wired up (`best_action_iterative`) but currently
   runs *slower* -- the extra shallow passes don't repay while star1 is
@@ -85,15 +87,18 @@ What's implemented, and what each was worth:
 
 Worth trying next, roughly in order of expected payoff:
 
-1. **Tighter value bounds.** Star1 lives or dies on them. A cheap admissible
-   bound per state -- something like "cogs left x their max damage" for the
-   floor -- would narrow the window far more than any amount of reordering.
-2. **Star2**, which probes one child before committing, and needs those
-   bounds anyway.
-3. **Bucketing near-identical damage outcomes** (merge states differing by
+1. **Tighter value bounds.** This is now the only thing standing between
+   the pruning code and a real speedup, and it is measured rather than
+   assumed: the interval a branch can occupy is ~250 points wide, set by
+   "could still win" against "could still lose every remaining laff". A
+   bound that knew how many rounds the cogs need to finish the toon, or how
+   few they need to die in, would narrow it sharply. Star2's probe is
+   already written and is *not* the bottleneck -- the interval it probes
+   into is.
+2. **Bucketing near-identical damage outcomes** (merge states differing by
    a point or two of laff). Attacks the branching factor itself, which is
    the actual cost driver, at the price of a coarser state space.
-4. **Parallel root search** with a warm pool -- `parallel.rank_actions` is
+3. **Parallel root search** with a warm pool -- `parallel.rank_actions` is
    there, and the memo duplication it costs matters less at depth 4+.
 
 **None of this helps the visualizer**, which runs single-threaded under
