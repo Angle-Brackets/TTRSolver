@@ -20,12 +20,35 @@ Flags: `--port N`, `--no-browser`.
 ## How it works
 
 ```
-index.html ──fetch /api/manifest──► serve.py  (lists solver/**/*.py)
-     │                                  │
-     └──fetch each .py────────────────► writes them into Pyodide's FS
-     │
-     └── import bridge ──► bridge.py ──► solver.outcomes / solver.search
+index.html ──postMessage──► worker.js ──fetch /api/manifest──► serve.py
+   (React, never blocks)   (Pyodide)  ──fetch each .py──────► writes to FS
+        ▲                              └── import bridge ──► solver.*
+        └────────── {id, result} ──────────────┘
 ```
+
+**The solver runs in a Web Worker.** Pyodide is single-threaded and its
+calls are synchronous, so running it in the page froze the UI for the
+length of every search -- about a second for a depth-2 root expansion, ten
+for depth 3. Dragging the gag-cost slider fires one of those per pixel,
+which made the settings unusable rather than merely slow.
+
+Three things keep it responsive, and the effect is measured rather than
+assumed -- dragging the slider across its full range at depth 3 now costs a
+**worst frame gap of 24ms, with no frame over 100ms**:
+
+- **Off the main thread.** Nothing the solver does can block rendering.
+- **Superseding.** Each request carries a generation; a new one abandons
+  everything in flight. A worker call can't be cancelled mid-search, but it
+  can be made not to matter. Abandoned promises are *rejected*, not
+  dropped -- a caller awaiting a reply that never comes is indistinguishable
+  from a hang.
+- **Progressive depth.** Depth 1 costs nothing measurable, so the tree
+  renders at depth 1 immediately and the full-depth answer replaces it when
+  the worker gets there. The header says "refining in the background…"
+  while that is pending.
+
+The gag-cost slider also debounces: the number under it follows the handle
+at once, and the search starts 250ms after the handle stops.
 
 `bridge.py` is the only translation layer: JSON in, JSON out. It holds
 serialization and display labels and **no game rules** — if the page needs

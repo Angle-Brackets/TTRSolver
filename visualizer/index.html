@@ -161,31 +161,64 @@ const Icon = ({name, cls = "", title}) => name
          onError={(e) => { e.target.style.display = "none"; }} />
   : null;
 
-/* ---------- Pyodide boot ---------------------------------------------- */
+/* ---------- worker plumbing ------------------------------------------ */
 
-async function boot(setStatus) {
-  setStatus("Downloading Python runtime (~10 MB, cached after first run)…");
-  const pyodide = await loadPyodide();
-  setStatus("Loading solver source…");
-  const manifest = await (await fetch("/api/manifest")).json();
-  for (const rel of manifest.files) {
-    const src = await (await fetch("/" + rel)).text();
-    const full = "/app/" + rel;
-    pyodide.FS.mkdirTree(full.slice(0, full.lastIndexOf("/")));
-    pyodide.FS.writeFile(full, src);
-  }
-  setStatus("Importing solver…");
-  pyodide.runPython(`
-import sys
-for p in ("/app", "/app/visualizer"):
-    if p not in sys.path:
-        sys.path.insert(0, p)
-import bridge
-`);
-  return pyodide.pyimport("bridge");
+/** The solver runs in a worker (see worker.js), so calls are async and the
+ *  UI never blocks on one. Requests carry a generation; anything from a
+ *  superseded generation is dropped on arrival, which is what lets a slider
+ *  fire freely -- only where it lands has to be computed. */
+class Superseded extends Error {
+  constructor() { super("superseded"); this.superseded = true; }
 }
 
-const call = (fn, payload) => JSON.parse(fn(JSON.stringify(payload)));
+function makeSolver(onStatus) {
+  const worker = new Worker("worker.js");
+  const pending = new Map();
+  let nextId = 1, generation = 0;
+  let ready = null;
+
+  const readyPromise = new Promise((resolve, reject) => {
+    ready = {resolve, reject};
+  });
+
+  worker.onmessage = (e) => {
+    const msg = e.data;
+    if (msg.type === "status") { onStatus(msg.text); return; }
+    if (msg.type === "ready") { ready.resolve(JSON.parse(msg.catalogue)); return; }
+    if (msg.type === "fatal") { ready.reject(new Error(msg.error)); return; }
+
+    const entry = pending.get(msg.id);
+    if (!entry) return;
+    pending.delete(msg.id);
+    if (entry.generation !== generation) return;      // superseded
+    if (msg.error) entry.reject(new Error(msg.error));
+    else entry.resolve(JSON.parse(msg.result));
+  };
+
+  return {
+    ready: readyPromise,
+    /** Abandon every in-flight request. A worker call cannot be cancelled
+     *  mid-search, but it can be made not to matter.
+     *
+     *  Superseded promises are REJECTED rather than dropped: an awaiting
+     *  caller that never hears back just stops, and a half-walked tree
+     *  expansion that stalls forever looks exactly like a hang. */
+    supersede() {
+      generation += 1;
+      for (const entry of pending.values()) {
+        entry.reject(new Superseded());
+      }
+      pending.clear();
+    },
+    call(fn, payload) {
+      const id = nextId++;
+      return new Promise((resolve, reject) => {
+        pending.set(id, {resolve, reject, generation});
+        worker.postMessage({id, fn, payload});
+      });
+    },
+  };
+}
 
 /* ---------- tree model ------------------------------------------------ */
 
@@ -302,33 +335,33 @@ function NodeCard({node, selected, busy, onSelect}) {
 
 /* ---------- inspector -------------------------------------------------- */
 
-function Inspector({node, bridge, depth, objective}) {
+function Inspector({node, solver, depth, objective}) {
   const [forecast, setForecast] = useState(null);
   const [line, setLine] = useState(null);
   const [busy, setBusy] = useState(false);
 
-  // The forecast is a table lookup -- instant, so it loads on selection.
+  // The forecast is a table lookup, so it loads on selection. `stale`
+  // guards against a slow reply landing after you've clicked something
+  // else, which would show one node's numbers under another's heading.
   useEffect(() => {
+    let stale = false;
     setForecast(null); setLine(null);
-    if (!node || !node.state) return;
-    try {
-      const f = call(bridge.api_cog_forecast, {state: node.state});
-      setForecast(f.error ? {error: f.error} : f.cogs);
-    } catch (e) { setForecast({error: String(e)}); }
-  }, [node, bridge]);
+    if (!node || !node.state) return undefined;
+    solver.call("api_cog_forecast", {state: node.state})
+      .then(f => { if (!stale) setForecast(f.error ? {error: f.error} : f.cogs); })
+      .catch(e => { if (!stale) setForecast({error: String(e)}); });
+    return () => { stale = true; };
+  }, [node, solver]);
 
-  // The plan is a full search per step -- seconds under Pyodide, and it
-  // blocks the page while it runs. On demand only.
+  // The plan is a full search per step. Off the main thread now, so it no
+  // longer freezes anything -- but still on demand, since it is seconds of
+  // work nobody asked for on every click.
   const computeLine = () => {
     setBusy(true);
-    setTimeout(() => {
-      try {
-        const l = call(bridge.api_best_line,
-                       {state: node.state, depth, objective});
-        setLine(l.error ? null : l.line);
-      } catch (e) { /* surfaced by the forecast panel */ }
-      setBusy(false);
-    }, 0);
+    solver.call("api_best_line", {state: node.state, depth, objective})
+      .then(l => setLine(l.error ? null : l.line))
+      .catch(() => {})
+      .finally(() => setBusy(false));
   };
 
   if (!node) return <div className="hint">Click a node to inspect it.</div>;
@@ -508,7 +541,7 @@ function GagPicker({catalogue, pouch, setPouch}) {
   );
 }
 
-function App({bridge, catalogue}) {
+function App({solver, catalogue}) {
   const depts = catalogue.departments;
   const [dept, setDept] = useState("bossbot");
   const [cogs, setCogs] = useState([
@@ -520,12 +553,20 @@ function App({bridge, catalogue}) {
   const [pouch, setPouch] = useState(DEFAULT_POUCH);
   const [showCfg, setShowCfg] = useState(false);
   const [root, setRoot] = useState(null);
+  // Progressive rendering swaps the root object when the deeper pass lands,
+  // so anything that walks the tree asynchronously has to read the CURRENT
+  // root, not the one captured when its handler was created -- otherwise it
+  // quietly annotates a tree that is no longer on screen.
+  const rootRef = useRef(null);
+  const setTree = (node) => { rootRef.current = node; setRoot(node); };
   const [selected, setSelected] = useState(null);
   const [, bump] = useState(0);
   const [busyId, setBusyId] = useState(null);
+  const [refining, setRefining] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [preset, setPreset] = useState("balanced");
   const [gagCost, setGagCost] = useState(null);   // null = the preset's own
+  const [gagCostDraft, setGagCostDraft] = useState(null);
   const [focusId, setFocusId] = useState(null);
   const [err, setErr] = useState(null);
   const canvasRef = useRef(null);
@@ -539,25 +580,44 @@ function App({bridge, catalogue}) {
   // setting on the solver, so it travels with the request.
   const objective = gagCost != null
     ? {preset, gag_cost: gagCost} : {preset};
+  const shownGagCost = gagCostDraft != null ? gagCostDraft
+    : gagCost != null ? gagCost : presetGagCost;
+
+  // The label follows the handle at once; the search only starts once the
+  // handle stops. Dragging across the slider is one rebuild, not forty.
+  useEffect(() => {
+    if (gagCostDraft == null) return undefined;
+    const timer = setTimeout(() => setGagCost(gagCostDraft), 250);
+    return () => clearTimeout(timer);
+  }, [gagCostDraft]);
   const levelsFor = (t) => (cogTypes.find(c => c.type === t) || cogTypes[0]).levels;
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const expand = useCallback((node) => {
+  const expand = useCallback(async (node, atDepth) => {
     if (node.children || node.kind === "terminal" || node.kind === "bucket")
       return node.children;
-    const res = node.kind === "action"
-      ? call(bridge.api_expand_action,
-             {state: node.state, action: node.action, objective})
-      : call(bridge.api_expand_decision,
-             {state: node.state, depth, objective});
+    let res;
+    try {
+      res = node.kind === "action"
+        ? await solver.call("api_expand_action",
+                            {state: node.state, action: node.action, objective})
+        : await solver.call("api_expand_decision",
+                            {state: node.state,
+                             depth: atDepth != null ? atDepth : depth,
+                             objective});
+    } catch (e) {
+      if (e.superseded) return null;      // a newer request replaced this
+      setErr(String(e));
+      node.children = [];
+      return node.children;
+    }
     if (res.error) { setErr(res.error); node.children = []; }
     else { node.children = res.children.map(c => mkNode(c, node)); }
     return node.children;
-  }, [bridge, depth, preset, gagCost]);
+  }, [solver, depth, preset, gagCost]);
 
-  const toggle = (node) => {
+  const toggle = async (node) => {
     if (node.kind === "more") {
-      // Reveal the siblings this chip stands for.
       node.owner.pathOnly = false;
       setFocusId(node.owner.id);
       rerender();
@@ -567,32 +627,54 @@ function App({bridge, catalogue}) {
     setFocusId(node.id);
     if (node.kind === "terminal" || node.kind === "bucket") { rerender(); return; }
     if (!node.open && !node.children) {
-      // First expansion calls into Python and blocks; paint the spinner
-      // before that happens rather than freezing with no explanation.
       setBusyId(node.id);
-      setTimeout(() => {
-        expand(node); node.open = true; setBusyId(null); rerender();
-      }, 0);
+      await expand(node);
+      node.open = true;
+      setBusyId(null);
+      rerender();
       return;
     }
     node.open = !node.open;
     rerender();
   };
 
-  const rebuild = () => {
+  /** Two passes. Depth 1 costs nothing and lands immediately, so the tree
+   *  is on screen and interactive at once; the full-depth answer replaces
+   *  it whenever the worker gets there. Changing a setting therefore feels
+   *  instant even when the real search behind it takes seconds. */
+  const rebuild = async () => {
     setErr(null);
+    solver.supersede();                     // drop anything still in flight
     const gags = Object.entries(pouch)
       .map(([k, n]) => [k.split("/")[0], +k.split("/")[1], n]);
     const cfg = {laff, cogs: cogs.map(c => ({...c, department: dept})), gags};
-    const raw = call(bridge.api_root, cfg);
-    if (raw.error) { setErr(raw.error); return; }
-    const r = mkNode(raw, null);
-    expandInto(r);
-    setRoot(r); setSelected(r); setFocusId(r.id); rerender();
-  };
-  const expandInto = (r) => { const k = expand(r); if (k) r.open = true; };
 
-  useEffect(rebuild, []);   // eslint-disable-line react-hooks/exhaustive-deps
+    let raw;
+    try {
+      raw = await solver.call("api_root", cfg);
+    } catch (e) {
+      if (e.superseded) return;
+      setErr(String(e)); return;
+    }
+    if (raw.error) { setErr(raw.error); return; }
+
+    const shallow = mkNode(raw, null);
+    if (await expand(shallow, 1) === null) return;
+    shallow.open = true;
+    setTree(shallow); setSelected(shallow); setFocusId(shallow.id);
+    setRefining(depth > 1);
+    rerender();
+
+    if (depth <= 1) return;
+    const full = mkNode(raw, null);
+    if (await expand(full, depth) === null) return;   // superseded
+    full.open = true;
+    setTree(full); setSelected(full); setFocusId(full.id);
+    setRefining(false);
+    rerender();
+  };
+
+  useEffect(() => { rebuild(); }, []);   // eslint-disable-line react-hooks/exhaustive-deps
 
   // Every EV in the tree was computed under the old objective, so the whole
   // thing is stale the moment it changes. Rebuild rather than show a mix.
@@ -605,7 +687,8 @@ function App({bridge, catalogue}) {
   /** Walk the solver's own recommendation down the tree, opening as it
    *  goes, so the plan is visible as a highlighted spine rather than
    *  something you have to hunt for by clicking. */
-  const revealBestPath = () => {
+  const revealBestPath = async () => {
+    const root = rootRef.current;
     if (!root) return;
     const clear = (n) => {
       n.onPath = false; n.pathOnly = false;
@@ -620,8 +703,8 @@ function App({bridge, catalogue}) {
       node.onPath = true;
       node.pathOnly = true;     // show only the plan; siblings collapse
       spine.push(node);
-      const kids = expand(node);
-      if (!kids || !kids.length) break;
+      const kids = await expand(node);
+      if (!kids || !kids.length) break;    // null means superseded
       node.open = true;
 
       if (node.kind === "decision") {
@@ -644,8 +727,13 @@ function App({bridge, catalogue}) {
   };
 
   const collapseAll = () => {
-    const walk = (n) => { n.open = false; n.onPath = false; (n.children || []).forEach(walk); };
-    if (root) { walk(root); root.open = true; rerender(); }
+    const current = rootRef.current;
+    if (!current) return;
+    const walk = (n) => {
+      n.open = false; n.onPath = false; n.pathOnly = false;
+      (n.children || []).forEach(walk);
+    };
+    walk(current); current.open = true; rerender();
   };
 
   useEffect(() => {
@@ -666,9 +754,10 @@ function App({bridge, catalogue}) {
     <div id="shell">
       <header>
         <h1>Cog Battle Tree Explorer</h1>
-        <button className="primary" disabled={busyId != null}
-                onClick={() => { setBusyId(root.id); setTimeout(revealBestPath, 0); }}>
-          {busyId != null ? "Searching…" : "Show best path"}</button>
+        <button className="primary" disabled={busyId != null || refining}
+                onClick={() => { setBusyId(root.id); revealBestPath(); }}>
+          {busyId != null ? "Searching…"
+                          : refining ? "Refining…" : "Show best path"}</button>
         <button onClick={collapseAll}>Collapse</button>
         <button onClick={() => setShowCfg(s => !s)}>
           {showCfg ? "Hide setup" : "Setup"}</button>
@@ -679,7 +768,7 @@ function App({bridge, catalogue}) {
         </label>
         <label>Plays like
           <select value={preset} onChange={e => {
-            setPreset(e.target.value); setGagCost(null);
+            setPreset(e.target.value); setGagCost(null); setGagCostDraft(null);
           }}>
             {(catalogue.objectives || []).map(o =>
               <option key={o.name} value={o.name} title={o.description}>
@@ -690,10 +779,9 @@ function App({bridge, catalogue}) {
 the solver stops burning big gags for small gains.">
           Gag cost
           <input type="range" min="0" max="100" style={{width:70}}
-                 value={(gagCost != null ? gagCost : presetGagCost) * 100}
-                 onChange={e => setGagCost(+e.target.value / 100)} />
-          <span className="mono">
-            {(gagCost != null ? gagCost : presetGagCost).toFixed(2)}</span>
+                 value={shownGagCost * 100}
+                 onChange={e => setGagCostDraft(+e.target.value / 100)} />
+          <span className="mono">{shownGagCost.toFixed(2)}</span>
         </label>
         <label>Zoom
           <input type="range" min="40" max="100" value={zoom * 100}
@@ -701,7 +789,8 @@ the solver stops burning big gags for small gains.">
                  onChange={e => setZoom(+e.target.value / 100)} />
         </label>
         <span className="hint">
-          Click a node to expand it · gold spine = the solver's plan
+          {refining ? "refining in the background…"
+                    : "Click a node to expand it · gold spine = the solver's plan"}
         </span>
         {err && <span className="err">{err}</span>}
       </header>
@@ -782,22 +871,23 @@ the solver stops burning big gags for small gains.">
            </div>
           </div>
         </div>
-        <aside><Inspector node={selected} bridge={bridge} depth={depth}
+        <aside><Inspector node={selected} solver={solver} depth={depth}
                           objective={objective} /></aside>
       </main>
     </div>
   );
 }
 
-/* ---------- mount ------------------------------------------------------ */
+/* ---------- mount ----------------------------------------------------- */
 
 (async () => {
   const mount = ReactDOM.createRoot(document.getElementById("root"));
-  const status = (msg) => mount.render(<div id="boot">{msg}</div>);
+  const show = (msg) => mount.render(<div id="boot">{msg}</div>);
+  show("Starting the solver…");
   try {
-    const bridge = await boot(status);
-    const catalogue = JSON.parse(bridge.api_catalogue());
-    mount.render(<App bridge={bridge} catalogue={catalogue} />);
+    const solver = makeSolver(show);
+    const catalogue = await solver.ready;
+    mount.render(<App solver={solver} catalogue={catalogue} />);
   } catch (e) {
     mount.render(<div id="boot" className="err">Failed to start: {String(e)}</div>);
   }
