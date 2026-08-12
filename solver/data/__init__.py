@@ -67,7 +67,9 @@ from .bossbot import BOSSBOT, BOSSBOT_COGS
 from .cashbot import CASHBOT, CASHBOT_COGS
 from .lawbot import LAWBOT, LAWBOT_COGS
 from .sellbot import SELLBOT, SELLBOT_COGS
-from .cogs import cog_max_hp, cog, all_cogs, COG_DEPARTMENTS
+from .cogs import (
+    COG_DEPARTMENTS, all_cogs, cog, cog_max_hp, department_of,
+)
 
 __all__ = [
     "AV_PROP_ACCURACY",
@@ -111,6 +113,7 @@ __all__ = [
     "cog_max_hp",
     "cog",
     "all_cogs",
+    "department_of",
     "BOSSBOT",
     "SELLBOT",
     "CASHBOT",

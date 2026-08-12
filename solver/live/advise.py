@@ -1,0 +1,227 @@
+"""Watch a battle and say what to do.
+
+    python -m solver.live.advise                  # follow the screen
+    python -m solver.live.advise --once           # read one frame, advise
+    python -m solver.live.advise --objective speedrun
+
+Everything upstream of this is about *knowing* the battle; this is the
+part that answers the question the project exists for. It follows the
+screen, assembles a BattleState whenever the picture is complete, runs
+the solver, and prints the move.
+
+WHEN IT STAYS QUIET
+-------------------
+A state is only built when every part of it is known. If a cog's face is
+not in the head library, or the gag menu is closed, or the Local API is
+not answering, it says which and waits. It never advises from a state it
+had to guess at -- a recommendation is worth having only if the fight it
+was computed for is the fight being played.
+
+The reader is fast enough to run every poll, but the solver is not, so
+the search runs only when the battle actually changes: a cog defeated,
+damage landing, a new fight starting. Between those, the previous answer
+still stands.
+"""
+from __future__ import annotations
+
+import argparse
+import itertools
+import sys
+import threading
+import time
+from typing import Callable, List, Optional
+
+from .. import data
+from ..search import objective as objectives
+from .session import build_state, describe
+from .watch import BattleWatcher, Event
+
+# Events that change the position. Anything else -- a cog identified, a
+# reading settling -- leaves the previous advice valid.
+RECOMPUTE_ON = {"battle_started", "cog_joined", "cog_defeated", "damage"}
+
+# Measured on a real endgame loadout (20 distinct gags, 30 root actions,
+# two cogs): depth 1 costs 0.01s, depth 2 costs 9.3s, and depth 3 runs
+# for minutes. Two is the deepest that returns inside a round, and the
+# search runs off the polling thread regardless so that following the
+# battle never waits on thinking about it.
+DEFAULT_DEPTH = 2
+
+
+class Thinker:
+    """Runs searches off the polling thread, newest request wins.
+
+    Polling has to stay at its cadence -- it is what notices a cog dying
+    -- and a depth-2 search takes about nine seconds, so the two cannot
+    share a thread. Requests supersede rather than queue: if the battle
+    moves on while a search is running, the answer it is computing is
+    already about a position that no longer exists.
+    """
+
+    def __init__(self, on_result: Callable[[str, object], None]):
+        self.on_result = on_result
+        self._generation = itertools.count()
+        self._current = -1
+        self._lock = threading.Lock()
+
+    def submit(self, frame, readings, snapshot, objective, depth) -> None:
+        with self._lock:
+            token = next(self._generation)
+            self._current = token
+        threading.Thread(target=self._run, daemon=True,
+                         args=(token, frame, readings, snapshot, objective,
+                               depth)).start()
+
+    def _run(self, token, frame, readings, snapshot, objective, depth):
+        lines, state = advise(frame, readings, snapshot=snapshot,
+                              objective=objective, depth=depth)
+        with self._lock:
+            superseded = token != self._current
+        if not superseded:
+            self.on_result(lines, state)
+
+    @property
+    def busy(self) -> bool:
+        return False
+
+
+def _snapshot():
+    """Local API state, or None with the reason printed."""
+    from .ttr_local import LocalAPIError, discover
+
+    try:
+        sessions = discover()
+        return sessions[0].snapshot() if sessions else None
+    except LocalAPIError:
+        return None
+
+
+def _panel(frame):
+    from .gagpanel import read_panel
+
+    return read_panel(frame)
+
+
+def advise(frame, readings, snapshot=None, objective=None,
+           depth: int = DEFAULT_DEPTH):
+    """(text, state) for what to do now, or (reasons, None)."""
+    from ..search import expectimax
+
+    snapshot = snapshot or _snapshot()
+    panel = _panel(frame)
+    if snapshot is not None and panel is not None:
+        # Entitlements from the API, counts from the screen.
+        panel = _panel_with_training(frame, snapshot)
+
+    result = build_state(snapshot=snapshot, panel=panel, readings=readings)
+    if not result:
+        return result.problems, None
+
+    state = result.state
+    objective = objective or objectives.DEFAULT
+    _value, action = expectimax.best_action_iterative(
+        state, depth=depth, objective=objective)
+    if action is None:
+        return ["no legal move -- nothing left to throw"], state
+    return [_render(action, state)], state
+
+
+def _panel_with_training(frame, snapshot):
+    from .gagpanel import read_panel
+
+    return read_panel(frame, track_exp=snapshot.track_exp())
+
+
+def _render(action, state) -> str:
+    gag = data.gag(action.track, action.level)
+    if action.target_index is None:
+        return f"{gag.display} on all cogs"
+    cog = state.cogs[action.target_index]
+    entry = data.cog(cog.department, cog.cog_type)
+    return (f"{gag.display} on cog {action.target_index + 1} "
+            f"({entry.display}, {cog.hp}/{cog.max_hp} hp)")
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--objective", default="balanced",
+                        help="one of " + ", ".join(sorted(objectives.PRESETS)))
+    parser.add_argument("--depth", type=int, default=DEFAULT_DEPTH,
+                        help=f"search depth (default {DEFAULT_DEPTH}; "
+                             f"3 runs for minutes on a full loadout)")
+    parser.add_argument("--interval", type=float, default=0.5)
+    parser.add_argument("--once", action="store_true",
+                        help="read a single frame and stop")
+    args = parser.parse_args(argv)
+
+    try:
+        objective = objectives.get(args.objective)
+    except KeyError as exc:
+        print(exc)
+        return 2
+
+    watcher = BattleWatcher()
+    print(f"advising with the '{objective.name}' objective "
+          f"at depth {args.depth}; Ctrl-C to stop")
+
+    if args.once:
+        frame = watcher.capture.grab()
+        readings = watcher.read_frame(frame)
+        _report(frame, readings, objective, args.depth)
+        watcher.close()
+        return 0
+
+    state_of = {"last_problems": []}
+
+    def show(lines, state):
+        if state is None:
+            if lines != state_of["last_problems"]:
+                for line in lines:
+                    print(f"  waiting: {line}", flush=True)
+            state_of["last_problems"] = lines
+            return
+        state_of["last_problems"] = []
+        print()
+        print(describe(state))
+        for line in lines:
+            print(f"  -> {line}", flush=True)
+
+    thinker = Thinker(show)
+    try:
+        while True:
+            cycle = time.time()
+            events = watcher.poll()
+            for event in events:
+                if event.kind in ("battle_started", "cog_defeated",
+                                  "battle_ended"):
+                    print(f"  [{event.kind}] {event.detail}", flush=True)
+            if any(e.kind in RECOMPUTE_ON for e in events):
+                # Hand the frame to the search and carry on polling; a
+                # nine-second think must not stall the eye.
+                thinker.submit(watcher.capture.grab(), list(watcher.view.cogs),
+                               None, objective, args.depth)
+            time.sleep(max(0.0, args.interval - (time.time() - cycle)))
+    except KeyboardInterrupt:
+        pass
+    watcher.close()
+    return 0
+
+
+def _report(frame, readings, objective, depth,
+            last_problems: Optional[List[str]] = None) -> List[str]:
+    lines, state = advise(frame, readings, objective=objective, depth=depth)
+    if state is None:
+        # Don't repeat the same complaint every poll.
+        if lines != last_problems:
+            for line in lines:
+                print(f"  waiting: {line}")
+        return lines
+    print()
+    print(describe(state))
+    for line in lines:
+        print(f"  -> {line}")
+    return []
+
+
+if __name__ == "__main__":
+    sys.exit(main())

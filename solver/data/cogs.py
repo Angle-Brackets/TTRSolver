@@ -74,6 +74,20 @@ def cog(department: str, cog_key: str):
     return COG_DEPARTMENTS[department][cog_key]
 
 
+def department_of(cog_key: str) -> str:
+    """Which department a cog belongs to, from its key alone.
+
+    The plate's medallion gives the department directly, but it is
+    unreadable below 900p while the head render still identifies the cog
+    -- and a named cog already implies its department.
+    """
+    for name, dept in COG_DEPARTMENTS.items():
+        for entry in dept:
+            if entry.key == cog_key:
+                return name
+    raise KeyError(f"no such cog {cog_key!r}")
+
+
 def all_cogs():
     """Every cog in the game, department order then ladder order."""
     for dept in COG_DEPARTMENTS.values():
