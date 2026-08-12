@@ -918,23 +918,36 @@ the solver stops burning big gags for small gains.">
              }}
              onPointerDown={(e) => {
                if (e.button !== 0) return;
+               // Deliberately NOT capturing the pointer yet. Capturing here
+               // retargets every later pointer event to the canvas, so the
+               // browser fires `click` on the canvas instead of the node
+               // under it -- which makes nodes look unclickable. Capture
+               // only once this turns out to be a drag.
                dragRef.current = {x: e.clientX, y: e.clientY,
-                                  ox: view.x, oy: view.y};
+                                  ox: view.x, oy: view.y, captured: false};
                movedRef.current = false;
-               e.currentTarget.setPointerCapture(e.pointerId);
              }}
              onPointerMove={(e) => {
                const d = dragRef.current;
                if (!d) return;
                const dx = e.clientX - d.x, dy = e.clientY - d.y;
-               if (Math.abs(dx) + Math.abs(dy) > 4) movedRef.current = true;
+               if (!movedRef.current && Math.abs(dx) + Math.abs(dy) <= 4) return;
+               movedRef.current = true;
+               if (!d.captured) {
+                 d.captured = true;
+                 e.currentTarget.setPointerCapture(e.pointerId);
+               }
                setView(v => ({...v, x: d.ox + dx, y: d.oy + dy}));
              }}
              onPointerUp={(e) => {
+               const d = dragRef.current;
                dragRef.current = null;
-               e.currentTarget.releasePointerCapture(e.pointerId);
-               // A drag that ends on the background is not a click on it.
-               if (!movedRef.current) setSelected(rootRef.current);
+               if (d && d.captured) e.currentTarget.releasePointerCapture(e.pointerId);
+               // Clicking the background clears back to the root; a drag
+               // that happens to end there does not.
+               if (!movedRef.current && e.target === e.currentTarget) {
+                 setSelected(rootRef.current);
+               }
              }}>
           <div className="surface" style={{width, height,
                  transform:`translate(${view.x}px, ${view.y}px) scale(${view.z})`}}>
