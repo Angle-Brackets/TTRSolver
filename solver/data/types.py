@@ -54,6 +54,13 @@ class Gag:
     organic_accuracy: Optional[int] = None
     lure_rounds: Optional[int] = None    # Lure only
 
+    # How many of this gag a toon may hold. Per gag, and separate from the
+    # pouch total: you cannot carry 20 Birthday Cakes however much room is
+    # left, because its own cap is 3. `min_carry` is the limit on a starting
+    # pouch, `max_carry` with every pouch upgrade.
+    min_carry: Optional[int] = None
+    max_carry: Optional[int] = None
+
     @property
     def key(self) -> Tuple[Track, int]:
         return (self.track, self.level)
@@ -80,6 +87,9 @@ class Gag:
 
     def rounds(self) -> int:
         return _require(self.lure_rounds, "Lure duration", self)
+
+    def carry_limit(self) -> int:
+        return _require(self.max_carry, "Carry limit", self)
 
     def __str__(self) -> str:
         return f"{self.display} ({self.track.value} {self.level})"

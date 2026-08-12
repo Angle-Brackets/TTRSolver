@@ -285,13 +285,50 @@ class TestLoadoutLimits(unittest.TestCase):
         six = list(Track)[:6]
         self.assertEqual(gags.validate_loadout({(t, 1): 1 for t in six}), [])
 
-    def test_an_overfull_pouch_is_rejected(self):
-        problems = gags.validate_loadout({(Track.THROW, 1): 81})
-        self.assertEqual(len(problems), 1)
-        self.assertIn("80", problems[0])
+    # Filling a pouch takes several gags: no single gag's own cap reaches
+    # 80, so a one-gag loadout hits the per-gag limit long before the pouch
+    # limit. 30 + 25 + 20 + 5 across two tracks is exactly full and legal.
+    FULL_POUCH = {(Track.THROW, 1): 30, (Track.THROW, 2): 25,
+                  (Track.THROW, 3): 20, (Track.LURE, 1): 5}
 
     def test_exactly_a_full_pouch_is_fine(self):
-        self.assertEqual(gags.validate_loadout({(Track.THROW, 1): 80}), [])
+        self.assertEqual(sum(self.FULL_POUCH.values()), gags.MAX_POUCH)
+        self.assertEqual(gags.validate_loadout(self.FULL_POUCH), [])
+
+    def test_an_overfull_pouch_is_rejected(self):
+        over = dict(self.FULL_POUCH)
+        over[(Track.LURE, 1)] += 1
+        problems = gags.validate_loadout(over)
+        self.assertEqual(len(problems), 1)
+        self.assertIn(str(gags.MAX_POUCH), problems[0])
+
+    def test_no_single_gag_can_fill_a_pouch(self):
+        """Which is why the pouch limit is never the first thing you hit."""
+        for gag in gags.GAGS:
+            with self.subTest(gag=str(gag)):
+                self.assertLess(gag.max_carry, gags.MAX_POUCH)
+
+    def test_per_gag_caps_are_enforced(self):
+        problems = gags.validate_loadout({(Track.THROW, 6): 20})
+        self.assertEqual(len(problems), 1)
+        self.assertIn("Birthday Cake", problems[0])
+        self.assertIn("3", problems[0])
+        self.assertEqual(gags.validate_loadout({(Track.THROW, 6): 3}), [])
+
+    def test_every_gag_has_a_carry_limit(self):
+        for gag in gags.GAGS:
+            with self.subTest(gag=str(gag)):
+                self.assertIsNotNone(gag.max_carry)
+                self.assertGreaterEqual(gag.max_carry, 1)
+                self.assertLessEqual(gag.min_carry, gag.max_carry)
+
+    def test_limits_shrink_as_gags_get_stronger(self):
+        """Level 7s are one-per-pouch; caps fall monotonically with level."""
+        for track in ALL_TRACKS:
+            caps = [g(track, lvl).max_carry for lvl in LEVELS]
+            with self.subTest(track=track):
+                self.assertEqual(caps, sorted(caps, reverse=True))
+                self.assertEqual(caps[-1], 1)
 
     def test_zero_counts_dont_consume_a_track_slot(self):
         """Clearing a track's last gag has to free the slot, or the picker

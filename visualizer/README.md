@@ -35,9 +35,10 @@ the UI match `simulator.is_group_action` rather than restating them.
 
 ## What you see
 
-The tree is **indented**: one row per node, depth shown as a small
-horizontal step, so expanding anything makes the page taller and never
-wider. That matters because branching is what makes these trees big --
+The tree grows **downward**: one row per node, with a small horizontal step
+for depth that stops growing after four levels, so a long plan reads as a
+vertical line rather than a staircase drifting off to the right. Expanding
+anything makes the page taller and never wider. That matters because branching is what makes these trees big --
 one decision node adds 8 gags, each of which adds ~9 outcomes. Fanned out
 sideways that reached 12,500px across; indented, the width is bounded by
 depth alone (~9 levels) no matter how much you open.
@@ -99,11 +100,16 @@ a column per level, real gag icons. Click to add one, shift-click or
 right-click to remove. Cells grey out when adding would break a rule the
 game enforces, and the footer tracks both:
 
+- **a per-gag carry limit** — 30 Cupcakes but only 3 Birthday Cakes and
+  exactly 1 of any level 7. This is the one that bites first: no gag's own
+  cap reaches 80, so you can never fill a pouch from a single tile.
 - **six gag tracks of the seven** — no toon has them all
 - **80 gags** — a full pouch after every ToonTask
 
-Both are [CONFIRMED] from the wiki and live in `solver/data/gags.py`
-(`MAX_GAG_TRACKS`, `POUCH_CAPACITIES`, `validate_loadout`), not in the page.
+All three are [CONFIRMED] from the wiki and live in `solver/data/gags.py`
+(`Gag.max_carry`, `MAX_GAG_TRACKS`, `POUCH_CAPACITIES`, `validate_loadout`),
+not in the page. Note Sound is capped lower than every other track at every
+level (20/15/15/10/5/2/1), which matches its own rebalancing note.
 `bridge.build_state` rejects an illegal loadout too, so a config arriving
 from anywhere else can't make the solver plan for a toon who couldn't
 exist.

@@ -106,6 +106,7 @@
   .gagcell:hover { border-color:var(--muted); }
   .gagcell.on { border-color:var(--decision); background:#2a2418; }
   .gagcell.locked { opacity:.28; cursor:not-allowed; }
+  .gagcell.full { border-color:var(--win); }   /* at its own carry limit */
   .gagcell img { width:34px; height:34px; object-fit:contain; }
   .gagcell .count { position:absolute; right:2px; bottom:0; font-size:10px;
                     font-weight:700; color:var(--decision);
@@ -133,8 +134,14 @@ const {useState, useEffect, useRef, useCallback} = React;
 // bounded by depth alone (9 levels x 24px + a card), and expanding anything
 // just makes the page taller, which is the scroll direction that costs
 // nothing.
-const NODE_W = 320, CARD_H = 44;
-const INDENT = 24, ROW_H = 52, PAD_X = 16, PAD_Y = 14;
+const NODE_W = 340, CARD_H = 44;
+// A small indent, and it stops growing after a few levels. Depth still
+// reads -- the guide rails and the elbow do that work -- but the trunk no
+// longer staircases off to the right as the plan gets longer, which is
+// what made a nine-deep line look like it was travelling sideways.
+const INDENT = 13, INDENT_MAX_DEPTH = 4;
+const ROW_H = 52, PAD_X = 14, PAD_Y = 14;
+const indentFor = (depth) => Math.min(depth, INDENT_MAX_DEPTH) * INDENT;
 
 const KIND = {
   more:     {color:"var(--bucket)",   name:"Collapsed"},
@@ -212,7 +219,7 @@ function shown(node) {
 function layout(root) {
   let row = 0, maxDepth = 0;
   const walk = (node, depth) => {
-    node.x = PAD_X + depth * INDENT;
+    node.x = PAD_X + indentFor(depth);
     node.y = PAD_Y + row * ROW_H;
     node.depth = depth;
     row += 1;
@@ -419,6 +426,12 @@ function GagPicker({catalogue, pouch, setPouch}) {
 
   const blocked = (key) => {
     const track = key.split("/")[0];
+    const gag = byKey[key] || {};
+    const held = pouch[key] || 0;
+    // Per-gag cap first: it's the one that bites earliest and surprises
+    // most -- a Birthday Cake tops out at 3 however empty the pouch is.
+    if (gag.max_carry != null && held >= gag.max_carry)
+      return `only ${gag.max_carry} fit`;
     if (total >= limits.max_pouch) return "pouch full";
     if (!tracks.has(track) && tracks.size >= limits.max_tracks)
       return `already carrying ${limits.max_tracks} tracks`;
@@ -441,9 +454,11 @@ function GagPicker({catalogue, pouch, setPouch}) {
               return (
                 <div key={level}
                      className={"gagcell" + (count ? " on" : "") +
-                                (why ? " locked" : "")}
-                     title={why ? `${gag.name} -- ${why}`
-                                : `${gag.name}${gag.group ? " (group)" : ""}`}
+                                (why && !count ? " locked" : "") +
+                                (why && count ? " full" : "")}
+                     title={`${gag.name}${gag.group ? " (group)" : ""}`
+                            + ` -- max ${gag.max_carry}`
+                            + (why ? ` (${why})` : "")}
                      onContextMenu={(e) => { e.preventDefault(); bump(key, -1); }}
                      onClick={(e) => {
                        if (e.shiftKey) return bump(key, -1);
@@ -600,7 +615,7 @@ function App({bridge, catalogue}) {
 
   const {rows, maxDepth} = layout(root);
   const edges = visibleEdges(root);
-  const width = PAD_X + maxDepth * INDENT + NODE_W + 40;
+  const width = PAD_X + indentFor(maxDepth) + NODE_W + 40;
   const height = PAD_Y + rows * ROW_H + 40;
 
   return (
@@ -672,14 +687,15 @@ function App({bridge, catalogue}) {
             <svg width={width} height={height}
                  style={{position:"absolute", left:0, top:0, pointerEvents:"none"}}>
               {edges.map(([a, b], i) => {
-                const rail = a.x + 11;              // parent's left rail
+                const rail = a.x + 7;               // parent's left rail
                 const y1 = a.y + CARD_H;
                 const y2 = b.y + CARD_H / 2;
                 const lit = a.onPath && b.onPath;
+                const stub = b.x - rail;
                 return <path key={i}
-                  d={`M${rail},${y1} V${y2 - 8} Q${rail},${y2} ${rail + 13},${y2}`}
+                  d={`M${rail},${y1} V${y2 - 7} Q${rail},${y2} ${rail + stub},${y2}`}
                   fill="none" stroke={lit ? "var(--path)" : "var(--line)"}
-                  strokeWidth={lit ? 2 : 1.2} />;
+                  strokeWidth={lit ? 2.2 : 1.2} />;
               })}
             </svg>
             {(() => {

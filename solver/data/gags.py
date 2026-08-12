@@ -102,70 +102,72 @@ from .types import Gag
 # A `None` damage/heal is a documented gap, not an oversight -- see the two
 # disputed cells noted below. Gag.damage_at()/heal_at() raise on them.
 
-# Positional args are (track, level, display).
+# Positional args are (track, level, display). min_carry/max_carry are
+# the per-gag holding limits on a starting and a fully upgraded pouch --
+# [CONFIRMED] from each gag's own infobox on the wiki.
 GAGS: Tuple[Gag, ...] = (
     # --- Toon Up ---------------------------------------------
-    Gag(Track.TOON_UP, 1, 'Feather', accuracy=70, group=False, heal=(8, 10), organic_heal=(10, 12)),
-    Gag(Track.TOON_UP, 2, 'Megaphone', accuracy=70, group=True, heal=(15, 18), organic_heal=(18, 22)),
-    Gag(Track.TOON_UP, 3, 'Lipstick', accuracy=70, group=False, organic_heal=(30, 36), heal=None),
-    Gag(Track.TOON_UP, 4, 'Bamboo Cane', accuracy=70, group=True, heal=(40, 45), organic_heal=(48, 54)),
-    Gag(Track.TOON_UP, 5, 'Pixie Dust', accuracy=70, group=False, heal=(50, 60), organic_heal=(60, 72)),
-    Gag(Track.TOON_UP, 6, 'Juggling Cubes', accuracy=70, group=True, heal=(75, 105), organic_heal=(90, 126)),
-    Gag(Track.TOON_UP, 7, 'High Dive', accuracy=95, group=True, heal=(210, 210), organic_heal=(252, 252)),
+    Gag(Track.TOON_UP, 1, 'Feather', accuracy=70, group=False, heal=(8, 10), organic_heal=(10, 12), min_carry=10, max_carry=30),
+    Gag(Track.TOON_UP, 2, 'Megaphone', accuracy=70, group=True, heal=(15, 18), organic_heal=(18, 22), min_carry=5, max_carry=25),
+    Gag(Track.TOON_UP, 3, 'Lipstick', accuracy=70, group=False, organic_heal=(30, 36), heal=None, min_carry=5, max_carry=20),
+    Gag(Track.TOON_UP, 4, 'Bamboo Cane', accuracy=70, group=True, heal=(40, 45), organic_heal=(48, 54), min_carry=5, max_carry=15),
+    Gag(Track.TOON_UP, 5, 'Pixie Dust', accuracy=70, group=False, heal=(50, 60), organic_heal=(60, 72), min_carry=3, max_carry=7),
+    Gag(Track.TOON_UP, 6, 'Juggling Cubes', accuracy=70, group=True, heal=(75, 105), organic_heal=(90, 126), min_carry=3, max_carry=3),
+    Gag(Track.TOON_UP, 7, 'High Dive', accuracy=95, group=True, heal=(210, 210), organic_heal=(252, 252), min_carry=1, max_carry=1),
 
     # --- Trap ------------------------------------------------
-    Gag(Track.TRAP, 1, 'Banana Peel', accuracy=0, group=False, damage=(10, 12), organic_damage=(11, 14)),
-    Gag(Track.TRAP, 2, 'Rake', accuracy=0, group=False, damage=(18, 20), organic_damage=(20, 22)),
-    Gag(Track.TRAP, 3, 'Marbles', accuracy=0, group=False, damage=(30, 35), organic_damage=(33, 39)),
-    Gag(Track.TRAP, 4, 'Quicksand', accuracy=0, group=False, damage=(45, 50), organic_damage=(50, 55)),
-    Gag(Track.TRAP, 5, 'Trapdoor', accuracy=0, group=False, damage=(75, 85), organic_damage=None),
-    Gag(Track.TRAP, 6, 'TNT', accuracy=0, group=False, damage=(90, 180), organic_damage=(99, 198)),
-    Gag(Track.TRAP, 7, 'Railroad', accuracy=0, group=True, damage=(200, 200), organic_damage=(220, 220)),
+    Gag(Track.TRAP, 1, 'Banana Peel', accuracy=0, group=False, damage=(10, 12), organic_damage=(11, 14), min_carry=10, max_carry=30),
+    Gag(Track.TRAP, 2, 'Rake', accuracy=0, group=False, damage=(18, 20), organic_damage=(20, 22), min_carry=5, max_carry=25),
+    Gag(Track.TRAP, 3, 'Marbles', accuracy=0, group=False, damage=(30, 35), organic_damage=(33, 39), min_carry=5, max_carry=20),
+    Gag(Track.TRAP, 4, 'Quicksand', accuracy=0, group=False, damage=(45, 50), organic_damage=(50, 55), min_carry=5, max_carry=15),
+    Gag(Track.TRAP, 5, 'Trapdoor', accuracy=0, group=False, damage=(75, 85), organic_damage=None, min_carry=3, max_carry=7),
+    Gag(Track.TRAP, 6, 'TNT', accuracy=0, group=False, damage=(90, 180), organic_damage=(99, 198), min_carry=3, max_carry=3),
+    Gag(Track.TRAP, 7, 'Railroad', accuracy=0, group=True, damage=(200, 200), organic_damage=(220, 220), min_carry=1, max_carry=1),
 
     # --- Lure ------------------------------------------------
-    Gag(Track.LURE, 1, '$1 Bill', accuracy=60, group=False, damage=None, organic_accuracy=70, lure_rounds=2),
-    Gag(Track.LURE, 2, 'Small Magnet', accuracy=55, group=True, damage=None, organic_accuracy=65, lure_rounds=2),
-    Gag(Track.LURE, 3, '$5 Bill', accuracy=70, group=False, damage=None, organic_accuracy=80, lure_rounds=3),
-    Gag(Track.LURE, 4, 'Big Magnet', accuracy=65, group=True, damage=None, organic_accuracy=75, lure_rounds=3),
-    Gag(Track.LURE, 5, '$10 Bill', accuracy=80, group=False, damage=None, organic_accuracy=90, lure_rounds=4),
-    Gag(Track.LURE, 6, 'Hypno-goggles', accuracy=75, group=True, damage=None, organic_accuracy=85, lure_rounds=4),
-    Gag(Track.LURE, 7, 'Presentation', accuracy=90, group=True, damage=None, organic_accuracy=100, lure_rounds=8),
+    Gag(Track.LURE, 1, '$1 Bill', accuracy=60, group=False, damage=None, organic_accuracy=70, lure_rounds=2, min_carry=10, max_carry=30),
+    Gag(Track.LURE, 2, 'Small Magnet', accuracy=55, group=True, damage=None, organic_accuracy=65, lure_rounds=2, min_carry=5, max_carry=25),
+    Gag(Track.LURE, 3, '$5 Bill', accuracy=70, group=False, damage=None, organic_accuracy=80, lure_rounds=3, min_carry=5, max_carry=20),
+    Gag(Track.LURE, 4, 'Big Magnet', accuracy=65, group=True, damage=None, organic_accuracy=75, lure_rounds=3, min_carry=5, max_carry=15),
+    Gag(Track.LURE, 5, '$10 Bill', accuracy=80, group=False, damage=None, organic_accuracy=90, lure_rounds=4, min_carry=3, max_carry=7),
+    Gag(Track.LURE, 6, 'Hypno-goggles', accuracy=75, group=True, damage=None, organic_accuracy=85, lure_rounds=4, min_carry=3, max_carry=3),
+    Gag(Track.LURE, 7, 'Presentation', accuracy=90, group=True, damage=None, organic_accuracy=100, lure_rounds=8, min_carry=1, max_carry=1),
 
     # --- Sound -----------------------------------------------
-    Gag(Track.SOUND, 1, 'Bike Horn', accuracy=95, group=True, damage=(3, 4), organic_damage=(4, 5)),
-    Gag(Track.SOUND, 2, 'Whistle', accuracy=95, group=True, damage=(5, 7), organic_damage=(6, 8)),
-    Gag(Track.SOUND, 3, 'Bugle', accuracy=95, group=True, damage=(9, 11), organic_damage=(10, 13)),
-    Gag(Track.SOUND, 4, 'Aoogah', accuracy=95, group=True, damage=(14, 16), organic_damage=(16, 18)),
-    Gag(Track.SOUND, 5, 'Elephant Trunk', accuracy=95, group=True, damage=(19, 21), organic_damage=(21, 24)),
-    Gag(Track.SOUND, 6, 'Foghorn', accuracy=95, group=True, damage=(25, 50), organic_damage=(28, 55)),
-    Gag(Track.SOUND, 7, 'Opera Singer', accuracy=95, group=True, damage=(90, 90), organic_damage=(99, 99)),
+    Gag(Track.SOUND, 1, 'Bike Horn', accuracy=95, group=True, damage=(3, 4), organic_damage=(4, 5), min_carry=5, max_carry=20),
+    Gag(Track.SOUND, 2, 'Whistle', accuracy=95, group=True, damage=(5, 7), organic_damage=(6, 8), min_carry=3, max_carry=15),
+    Gag(Track.SOUND, 3, 'Bugle', accuracy=95, group=True, damage=(9, 11), organic_damage=(10, 13), min_carry=3, max_carry=15),
+    Gag(Track.SOUND, 4, 'Aoogah', accuracy=95, group=True, damage=(14, 16), organic_damage=(16, 18), min_carry=3, max_carry=10),
+    Gag(Track.SOUND, 5, 'Elephant Trunk', accuracy=95, group=True, damage=(19, 21), organic_damage=(21, 24), min_carry=3, max_carry=5),
+    Gag(Track.SOUND, 6, 'Foghorn', accuracy=95, group=True, damage=(25, 50), organic_damage=(28, 55), min_carry=2, max_carry=2),
+    Gag(Track.SOUND, 7, 'Opera Singer', accuracy=95, group=True, damage=(90, 90), organic_damage=(99, 99), min_carry=1, max_carry=1),
 
     # --- Throw -----------------------------------------------
-    Gag(Track.THROW, 1, 'Cupcake', accuracy=75, group=False, damage=(4, 6), organic_damage=(5, 7)),
-    Gag(Track.THROW, 2, 'Fruit Pie Slice', accuracy=75, group=False, damage=(8, 10), organic_damage=(9, 11)),
-    Gag(Track.THROW, 3, 'Cream Pie Slice', accuracy=75, group=False, damage=(14, 17), organic_damage=(16, 19)),
-    Gag(Track.THROW, 4, 'Whole Fruit Pie', accuracy=75, group=False, damage=(24, 27), organic_damage=(27, 30)),
-    Gag(Track.THROW, 5, 'Whole Cream Pie', accuracy=75, group=False, damage=(36, 40), organic_damage=(40, 44)),
-    Gag(Track.THROW, 6, 'Birthday Cake', accuracy=75, group=False, damage=(48, 100), organic_damage=(53, 110)),
-    Gag(Track.THROW, 7, 'Wedding Cake', accuracy=75, group=True, damage=(120, 120), organic_damage=(132, 132)),
+    Gag(Track.THROW, 1, 'Cupcake', accuracy=75, group=False, damage=(4, 6), organic_damage=(5, 7), min_carry=10, max_carry=30),
+    Gag(Track.THROW, 2, 'Fruit Pie Slice', accuracy=75, group=False, damage=(8, 10), organic_damage=(9, 11), min_carry=5, max_carry=25),
+    Gag(Track.THROW, 3, 'Cream Pie Slice', accuracy=75, group=False, damage=(14, 17), organic_damage=(16, 19), min_carry=5, max_carry=20),
+    Gag(Track.THROW, 4, 'Whole Fruit Pie', accuracy=75, group=False, damage=(24, 27), organic_damage=(27, 30), min_carry=5, max_carry=15),
+    Gag(Track.THROW, 5, 'Whole Cream Pie', accuracy=75, group=False, damage=(36, 40), organic_damage=(40, 44), min_carry=3, max_carry=7),
+    Gag(Track.THROW, 6, 'Birthday Cake', accuracy=75, group=False, damage=(48, 100), organic_damage=(53, 110), min_carry=3, max_carry=3),
+    Gag(Track.THROW, 7, 'Wedding Cake', accuracy=75, group=True, damage=(120, 120), organic_damage=(132, 132), min_carry=1, max_carry=1),
 
     # --- Squirt ----------------------------------------------
-    Gag(Track.SQUIRT, 1, 'Squirting Flower', accuracy=95, group=False, damage=(3, 4), organic_damage=(4, 5)),
-    Gag(Track.SQUIRT, 2, 'Glass of Water', accuracy=95, group=False, damage=(6, 8), organic_damage=(7, 10)),
-    Gag(Track.SQUIRT, 3, 'Squirt Gun', accuracy=95, group=False, damage=(10, 12), organic_damage=(12, 14)),
-    Gag(Track.SQUIRT, 4, 'Seltzer Bottle', accuracy=95, group=False, damage=(18, 21), organic_damage=(22, 25)),
-    Gag(Track.SQUIRT, 5, 'Fire Hose', accuracy=95, group=False, damage=(27, 30), organic_damage=(32, 35)),
-    Gag(Track.SQUIRT, 6, 'Storm Cloud', accuracy=95, group=False, damage=(36, 80), organic_damage=(42, 92)),
-    Gag(Track.SQUIRT, 7, 'Geyser', accuracy=95, group=True, damage=(105, 105), organic_damage=(121, 121)),
+    Gag(Track.SQUIRT, 1, 'Squirting Flower', accuracy=95, group=False, damage=(3, 4), organic_damage=(4, 5), min_carry=10, max_carry=30),
+    Gag(Track.SQUIRT, 2, 'Glass of Water', accuracy=95, group=False, damage=(6, 8), organic_damage=(7, 10), min_carry=5, max_carry=25),
+    Gag(Track.SQUIRT, 3, 'Squirt Gun', accuracy=95, group=False, damage=(10, 12), organic_damage=(12, 14), min_carry=5, max_carry=20),
+    Gag(Track.SQUIRT, 4, 'Seltzer Bottle', accuracy=95, group=False, damage=(18, 21), organic_damage=(22, 25), min_carry=5, max_carry=15),
+    Gag(Track.SQUIRT, 5, 'Fire Hose', accuracy=95, group=False, damage=(27, 30), organic_damage=(32, 35), min_carry=3, max_carry=7),
+    Gag(Track.SQUIRT, 6, 'Storm Cloud', accuracy=95, group=False, damage=(36, 80), organic_damage=(42, 92), min_carry=3, max_carry=3),
+    Gag(Track.SQUIRT, 7, 'Geyser', accuracy=95, group=True, damage=(105, 105), organic_damage=(121, 121), min_carry=0, max_carry=1),
 
     # --- Drop ------------------------------------------------
-    Gag(Track.DROP, 1, 'Flower Pot', accuracy=50, group=False, damage=(10, 10), organic_damage=(12, 12)),
-    Gag(Track.DROP, 2, 'Sandbag', accuracy=50, group=False, damage=(18, 18), organic_damage=(21, 21)),
-    Gag(Track.DROP, 3, 'Anvil', accuracy=50, group=False, damage=(30, 30), organic_damage=(35, 35)),
-    Gag(Track.DROP, 4, 'Big Weight', accuracy=50, group=False, damage=(45, 45), organic_damage=(52, 52)),
-    Gag(Track.DROP, 5, 'Safe', accuracy=50, group=False, damage=(60, 70), organic_damage=(69, 81)),
-    Gag(Track.DROP, 6, 'Grand Piano', accuracy=50, group=False, damage=(85, 170), organic_damage=(98, 196)),
-    Gag(Track.DROP, 7, 'Toontanic', accuracy=50, group=True, damage=(180, 180), organic_damage=(207, 207)),
+    Gag(Track.DROP, 1, 'Flower Pot', accuracy=50, group=False, damage=(10, 10), organic_damage=(12, 12), min_carry=10, max_carry=30),
+    Gag(Track.DROP, 2, 'Sandbag', accuracy=50, group=False, damage=(18, 18), organic_damage=(21, 21), min_carry=5, max_carry=25),
+    Gag(Track.DROP, 3, 'Anvil', accuracy=50, group=False, damage=(30, 30), organic_damage=(35, 35), min_carry=5, max_carry=20),
+    Gag(Track.DROP, 4, 'Big Weight', accuracy=50, group=False, damage=(45, 45), organic_damage=(52, 52), min_carry=5, max_carry=15),
+    Gag(Track.DROP, 5, 'Safe', accuracy=50, group=False, damage=(60, 70), organic_damage=(69, 81), min_carry=3, max_carry=7),
+    Gag(Track.DROP, 6, 'Grand Piano', accuracy=50, group=False, damage=(85, 170), organic_damage=(98, 196), min_carry=3, max_carry=3),
+    Gag(Track.DROP, 7, 'Toontanic', accuracy=50, group=True, damage=(180, 180), organic_damage=(207, 207), min_carry=1, max_carry=1),
 )
 
 # Two cells no source settles, kept None rather than picked:
@@ -275,6 +277,12 @@ def validate_loadout(gag_counts) -> list:
     for (track, level), count in sorted(gag_counts.items()):
         if count < 0:
             problems.append(f"{gag(track, level).display}: negative count")
+            continue
+        limit = gag(track, level).max_carry
+        if limit is not None and count > limit:
+            problems.append(
+                f"{count} x {gag(track, level).display}, but only {limit} "
+                f"fit in the pouch")
     return problems
 
 

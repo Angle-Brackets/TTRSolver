@@ -189,9 +189,11 @@ def catalogue() -> Dict[str, Any]:
     gags = []
     for track in Track:
         for level in range(1, 8):
+            spec = data.gag(track, level)
             gags.append({"track": track.value, "level": level,
-                         "name": gag_name(track, level),
+                         "name": spec.display,
                          "icon": gag_icon(track, level),
+                         "max_carry": spec.max_carry,
                          "group": simulator.is_group_action(track, level)})
     emblems = {d: department_icon(d) for d in sorted(data.COG_DEPARTMENTS)}
     return {"departments": depts, "gags": gags, "emblems": emblems,
