@@ -120,7 +120,7 @@ GAGS: Tuple[Gag, ...] = (
     Gag(Track.TRAP, 2, 'Rake', accuracy=0, group=False, damage=(18, 20), organic_damage=(20, 22), min_carry=5, max_carry=25),
     Gag(Track.TRAP, 3, 'Marbles', accuracy=0, group=False, damage=(30, 35), organic_damage=(33, 39), min_carry=5, max_carry=20),
     Gag(Track.TRAP, 4, 'Quicksand', accuracy=0, group=False, damage=(45, 50), organic_damage=(50, 55), min_carry=5, max_carry=15),
-    Gag(Track.TRAP, 5, 'Trapdoor', accuracy=0, group=False, damage=(75, 85), organic_damage=(83, 94), min_carry=3, max_carry=7),
+    Gag(Track.TRAP, 5, 'Trapdoor', accuracy=0, group=False, damage=(75, 85), organic_damage=(84, 94), min_carry=3, max_carry=7),
     Gag(Track.TRAP, 6, 'TNT', accuracy=0, group=False, damage=(90, 180), organic_damage=(99, 198), min_carry=3, max_carry=3),
     Gag(Track.TRAP, 7, 'Railroad', accuracy=0, group=True, damage=(200, 200), organic_damage=(220, 220), min_carry=1, max_carry=1),
 
@@ -170,34 +170,45 @@ GAGS: Tuple[Gag, ...] = (
     Gag(Track.DROP, 7, 'Toontanic', accuracy=50, group=True, damage=(180, 180), organic_damage=(207, 207), min_carry=1, max_carry=1),
 )
 
-# Trap 5 (Trapdoor) organic damage: RESOLVED to 83-94 by derivation, not
-# by preferring one page over another. The wiki disagrees with itself --
-# the Trap page table says 83-94, the Organic gags page and the Trapdoor
-# infobox say 84-94, and the Trap page's own 3.0.0 changelog says 83-93 --
-# but organic damage follows a rule, and the rule settles it:
+# Trap 5 (Trapdoor) organic damage: 84-94. The wiki states it three ways
+# -- Trap page table 83-94, Organic gags page and Trapdoor infobox 84-94,
+# Trap page 3.0.0 changelog 83-93 -- on an agreed base of 75-85.
 #
-#     organic = ceil(base * (100 + ORGANIC_BONUS_PCT[track]) / 100)
+# The maximum is not in doubt: 94 is given by three of the four sources
+# and by the organic rule below, and it is the only end the solver reads,
+# since damage_at defaults to trained_fraction=1.0.
 #
-# That reproduces 67 of the 68 organic damage values transcribed here
-# (the exception is noted below). Trap's bonus is 10%, base is 75-85 and
-# agreed by every source, so ceil(75*1.1)=83 and ceil(85*1.1)=94.
+# The minimum took two attempts. Deriving it from
+# ceil(base * (100 + ORGANIC_BONUS_PCT)/100) gives 83, and that rule
+# reproduces 67 of the 68 organic damage values here, so 83 looked
+# settled. It is not. The single exception is Squirt 4 (Seltzer Bottle),
+# where the rule gives 21 and all three wiki sources say 22 -- the rule
+# under-reading a MINIMUM by exactly one. Trapdoor is that same shape:
+# rule 83, two current sources 84. Having found a demonstrated failure
+# mode of precisely this kind, the rule is no longer good evidence for
+# preferring 83 over the two pages that say 84.
 #
-# The 84-94 sources have the minimum wrong; the changelog has the maximum
-# wrong. Independently, the Organic gags page states that "a level 8 Cog
-# can be defeated with an organic Trapdoor" -- a level 8 has 90 hp, and
-# 94 clears it.
+# So the transcription wins over the derivation: 84-94, matching the
+# Organic gags table and the Trapdoor infobox. The Trap page's 83 and the
+# changelog's 93 are the outliers.
 #
+# Independent check on the maximum: the Organic gags page states that "a
+# level 8 Cog can be defeated with an organic Trapdoor". A level 8 has 90
+# hp; 94 clears it and organic Safe at 81 does not.
+
 # One cell no source settles, kept None rather than picked:
 #   Toon-Up 3 (Lipstick) heal -- Toon-Up and Organic gags pages say 27-30,
 #     the Lipstick infobox says minheal 25. Organic 30-36 is agreed, and
 #     ceil(1.2 * 25) = 30 while ceil(1.2 * 27) = 33, which points at 25 --
 #     against the majority. Left open.
 #
-# One transcribed value contradicts the organic rule and is NOT resolved
-# here: Squirt 4 (Seltzer Bottle) base 18 is recorded as organic 22, where
-# the 15% rule gives ceil(18*1.15)=21. Either the transcription is wrong or
-# Seltzer is a genuine exception; nothing checked so far distinguishes
-# those, so the table keeps what the wiki says.
+# Squirt 4 (Seltzer Bottle) is a real exception to the organic rule, not a
+# transcription slip: base 18-21 -> organic 22-25 is stated identically by
+# the Seltzer infobox, the Squirt page table and the Organic gags table,
+# while the 15% rule gives 21-25. Every other Squirt gag follows the rule
+# exactly. Kept as the wiki states it -- and treated as evidence that the
+# rule is a good approximation rather than a law, which is what settled
+# Trapdoor above.
 
 _BY_KEY: Dict[Tuple[Track, int], Gag] = {g.key: g for g in GAGS}
 

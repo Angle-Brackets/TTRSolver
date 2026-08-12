@@ -112,28 +112,21 @@ class TestMissingCellInventory(unittest.TestCase):
         with self.assertRaises(NotImplementedError):
             g(Track.TOON_UP, 3).heal_at()
 
-    def test_trapdoor_organic_was_resolved_by_the_organic_rule(self):
-        """It used to be blank: the wiki says 83-94, 84-94 and 83-93 in
-        three different places. Organic damage follows
-        ceil(base * (100 + bonus)/100), which reproduces 67 of the 68
-        transcribed organic values, and Trap's bonus is 10% on an agreed
-        base of 75-85 -- so 83-94, which is the Trap page's table."""
-        gag = g(Track.TRAP, 5)
-        self.assertEqual(gag.organic_damage, (83, 94))
-        self.assertEqual(gags.organic_value(Track.TRAP, 75), 83)
-        self.assertEqual(gags.organic_value(Track.TRAP, 85), 94)
+    def test_trapdoor_organic_follows_the_transcription_not_the_rule(self):
+        """The wiki says 83-94, 84-94 and 83-93 in three places. The
+        maximum, 94, is agreed by three sources and by the organic rule,
+        and is the only end the solver reads.
 
-    def test_the_organic_rule_reproduces_the_transcribed_values(self):
-        """One exception, deliberately left as transcribed: Seltzer Bottle
-        is recorded at 22 where the 15% rule gives 21."""
-        mismatches = []
-        for gag in gags.GAGS:
-            if not (gag.damage and gag.organic_damage):
-                continue
-            for base, organic in zip(gag.damage, gag.organic_damage):
-                if gags.organic_value(gag.track, base) != organic:
-                    mismatches.append((gag.display, base, organic))
-        self.assertEqual([m[0] for m in mismatches], ["Seltzer Bottle"])
+        The minimum is 84, from the two current sources that state it.
+        Deriving it from the rule gives 83 and that was the first answer
+        here -- but the rule has exactly one exception, Seltzer Bottle,
+        where it under-reads a MINIMUM by one. Trapdoor is the same
+        shape, so the rule cannot be used to overrule the pages.
+        """
+        gag = g(Track.TRAP, 5)
+        self.assertEqual(gag.organic_damage, (84, 94))
+        self.assertEqual(gags.organic_value(Track.TRAP, 85), 94)
+        self.assertEqual(gags.organic_value(Track.TRAP, 75), 83)  # the rule
 
 
 class TestWikiValues(unittest.TestCase):
@@ -278,9 +271,20 @@ class TestOrganicRule(unittest.TestCase):
             predicted = tuple(gags.organic_value(gag.track, v) for v in gag.damage)
             if predicted != gag.organic_damage:
                 mismatches.append(str(gag))
-        # Squirt 4 (Seltzer Bottle): every wiki source says organic 22-25,
-        # the formula gives 21. Tables win; pinned so nobody "fixes" it.
-        self.assertEqual(mismatches, ["Seltzer Bottle (squirt 4)"])
+        # Tables win over the formula. Both exceptions are the formula
+        # under-reading a MINIMUM by one, which is why neither is treated
+        # as a transcription slip:
+        #
+        #   Squirt 4 (Seltzer Bottle) -- every wiki source says 22-25,
+        #     the formula gives 21.
+        #   Trap 5 (Trapdoor) -- the Organic gags table and the Trapdoor
+        #     infobox say 84-94, the formula gives 83. This cell was blank
+        #     for a long time because the wiki states it three ways; the
+        #     formula was tried first and gave 83, and Seltzer is the
+        #     evidence that the formula is an approximation rather than a
+        #     law. See solver/data/gags.py.
+        self.assertEqual(sorted(mismatches),
+                         ["Seltzer Bottle (squirt 4)", "Trapdoor (trap 5)"])
 
 
 class TestLoadoutLimits(unittest.TestCase):
