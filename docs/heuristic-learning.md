@@ -137,6 +137,40 @@ That last one matters and the current heuristic cannot express it: being
 one hit from death is a step change in value, not a linear slide in
 `laff_kept`.
 
+**Conjunctions, not just terms.** Several things here are worth
+something only in combination, which a linear model cannot express no
+matter how many features it is given.
+
+The clearest is Trap. A trap does nothing until a cog is lured onto it,
+so an armed trap with Lure in the pouch is a large stored gain and an
+armed trap with no Lure left is dead weight. Those two states differ
+only in a gag count that has nothing to do with the trap. The search
+already gets this right, because the simulator models it -- given Trap
+and Throw but no Lure, Trap ranks last at EV 31.9 against Throw's 88.6,
+and adding Lure lifts it to 52.3 -- but the search pays depth to
+discover it, and at a cutoff the heuristic sees only `trapped=True` and
+scores both identically.
+
+So the feature set wants `trapped AND lure_gags_remaining > 0`, not
+`trapped` and `lure_gags` separately. Others of the same shape: a gag
+that can one-shot a cog versus one that leaves it at 1 HP, and laff
+below one round of incoming damage.
+
+This is the strongest argument for Stage 1 actually being needed. A
+linear fit can only capture a conjunction if someone writes the product
+term out by hand, and the useful ones are unlikely to all be guessed in
+advance -- which is the same mistake the current two-term heuristic
+represents.
+
+**Out of scope: multi-toon trap interactions.** Two toons can both place
+a trap on the same cog in one round, and the traps cancel -- which makes
+"deliberately waste a cheap trap to cancel a teammate's Banana Peel, so
+the Lure is not squandered on a level 12" a real play. It cannot arise
+here: this solver is solo, a toon acts once per round, and
+`legal_actions` refuses to trap an already-trapped or lured cog. Worth
+recording because it is the kind of rule that looks like a modelling gap
+rather than a scope boundary.
+
 **Objective conditioning.** The heuristic is objective-independent today,
 but the value scale is not — `survive` weights laff 3x, `conserve` prices
 scarce gags at 12. Either feed the objective's parameters in as features
