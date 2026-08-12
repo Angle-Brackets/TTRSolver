@@ -80,5 +80,45 @@ class EmblemOrderTest(unittest.TestCase):
                          "bottom-right is the necktie: Bossbot")
 
 
+
+class TintTest(unittest.TestCase):
+    """Colour is part of the emblem match, and has to stay that way."""
+
+    def setUp(self):
+        try:
+            from solver.live.vision import emblem_templates
+            self.templates = emblem_templates()
+        except Exception as exc:
+            raise unittest.SkipTest(f"no Toontown installation: {exc}")
+
+    def test_each_template_carries_a_tint(self):
+        from solver.live.vision import emblem_templates
+        for dept, (_shape, tint) in emblem_templates().items():
+            with self.subTest(dept=dept):
+                self.assertEqual(len(tint), 3)
+
+    def test_the_tints_are_distinct(self):
+        """If two departments shared a tint, colour would add nothing --
+        and it is what separates Bossbot's necktie from Sellbot's bar
+        chart, which are near-identical pale metal in greyscale."""
+        import itertools
+
+        import numpy as np
+
+        tints = {d: t for d, (_s, t) in self.templates.items()}
+        for a, b in itertools.combinations(tints, 2):
+            with self.subTest(pair=(a, b)):
+                self.assertGreater(
+                    float(np.linalg.norm(tints[a] - tints[b])), 1.0,
+                    f"{a} and {b} have indistinguishable tints")
+
+    def test_bossbot_and_sellbot_differ_most_in_green_and_blue(self):
+        """The pair that was confused. Their red channels are alike; the
+        separation is in the other two."""
+        boss = self.templates["bossbot"][1]
+        sell = self.templates["sellbot"][1]
+        self.assertLess(abs(boss[0] - sell[0]), 2.0)      # red: similar
+        self.assertGreater(abs(boss[2] - sell[2]), 2.0)   # blue: not
+
 if __name__ == "__main__":
     unittest.main()

@@ -401,11 +401,32 @@ def read_level(frame: np.ndarray, plate: Plate) -> Tuple[Optional[int], float]:
     return best, score
 
 
-_EMBLEMS: Dict[str, np.ndarray] = {}
+# How much the emblem's colour counts against its shape. The four
+# emblems are tinted -- Bossbot warm, Sellbot red, Cashbot green, Lawbot
+# blue -- and discarding that was the reason a Bossbot medallion could
+# read as Sellbot at all: in greyscale a necktie and a bar chart are two
+# similar arrangements of pale metal, while their tints differ in the
+# green and blue channels by several units and never overlap. Shape is
+# kept because tint alone is a three-number signature and a lit scene
+# can shift it.
+TINT_WEIGHT = 0.06
+
+_EMBLEMS: Dict[str, Tuple[np.ndarray, np.ndarray]] = {}
 
 
-def emblem_templates() -> Dict[str, np.ndarray]:
-    """Department emblems as normalised greyscale, from the game atlas."""
+def _tint(rgb: np.ndarray) -> np.ndarray:
+    """How a patch's channels depart from its own brightness.
+
+    Subtracting the patch's mean brightness is what makes this survive
+    the scene being lit differently from the flat texture atlas: it
+    measures colour balance, not exposure.
+    """
+    mean = rgb.reshape(-1, 3).astype(float).mean(axis=0)
+    return mean - mean.mean()
+
+
+def emblem_templates() -> Dict[str, Tuple[np.ndarray, np.ndarray]]:
+    """Department emblems as (normalised greyscale, tint)."""
     if _EMBLEMS:
         return _EMBLEMS
     from PIL import Image
@@ -414,19 +435,23 @@ def emblem_templates() -> Dict[str, np.ndarray]:
 
     for dept, path in ttr_assets.department_emblems().items():
         with Image.open(path) as img:
-            grey = np.asarray(img.convert("L").resize((48, 48),
-                                                      Image.LANCZOS),
-                              dtype=float)
-        _EMBLEMS[dept] = (grey - grey.mean()) / (grey.std() or 1.0)
+            colour = img.convert("RGB").resize((48, 48), Image.LANCZOS)
+        rgb = np.asarray(colour, dtype=float)
+        grey = np.asarray(colour.convert("L"), dtype=float)
+        _EMBLEMS[dept] = ((grey - grey.mean()) / (grey.std() or 1.0),
+                          _tint(rgb))
     return _EMBLEMS
 
 
-# How far the best emblem must beat the runner-up to be believed. At
-# 900p and above the winning margin is 0.07-0.22; at 720p the emblem is
-# too few pixels to tell apart and the margin collapses to 0.01-0.02,
-# with the wrong department winning. Reporting the margin rather than
-# the raw correlation is what makes that failure visible instead of
-# silently narrowing the candidate list to the wrong four cogs.
+# How far the best emblem must beat the runner-up to be believed.
+#
+# With colour in the score the winning margin runs 0.21-0.61 across
+# 854x480 to 4K, and the right department wins at every one of them. On
+# shape alone it was 0.07-0.22 and 720p picked the wrong department at a
+# margin of 0.01, which is what this floor was originally sized to
+# catch. It is left where it is: the floor costs nothing when the reads
+# are clean, and it is the only thing standing between an unreadable
+# emblem and a candidate list narrowed to the wrong five cogs.
 MIN_DEPARTMENT_MARGIN = 0.05
 
 
@@ -450,14 +475,17 @@ def read_department(frame: np.ndarray,
     if patch.size == 0:
         return None, 0.0
 
-    grey = np.asarray(
-        Image.fromarray(patch.astype(np.uint8)).convert("L").resize(
-            (48, 48), Image.LANCZOS), dtype=float)
+    colour = Image.fromarray(patch.astype(np.uint8)).resize(
+        (48, 48), Image.LANCZOS)
+    rgb = np.asarray(colour, dtype=float)
+    grey = np.asarray(colour.convert("L"), dtype=float)
     grey = (grey - grey.mean()) / (grey.std() or 1.0)
+    tint = _tint(rgb)
 
     scored = sorted(
-        ((float((grey * template).mean()), dept)
-         for dept, template in emblem_templates().items()),
+        ((float((grey * shape).mean())
+          - TINT_WEIGHT * float(np.linalg.norm(tint - hue)), dept)
+         for dept, (shape, hue) in emblem_templates().items()),
         reverse=True)
     if len(scored) < 2:
         return (scored[0][1], 0.0) if scored else (None, 0.0)

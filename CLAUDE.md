@@ -82,10 +82,19 @@ against — `cogIcons` is the four department emblems, and the per-cog
 files in the phase archives are 3D texture skins. Hence the collected
 library in `solver/live/catalogue.py`.
 
-Read confidence is reported and must be honoured. Below `900p` the
-emblem cannot be told apart and `read_department` returns a margin under
-`MIN_DEPARTMENT_MARGIN`; at `480p` `read_level` returns `None`. Narrowing
-candidates on an unconfident read is worse than not narrowing at all.
+Read confidence is reported and must be honoured. `read_department`
+returns a margin over the runner-up, and a read below
+`MIN_DEPARTMENT_MARGIN` must not be used to narrow candidates —
+narrowing to the wrong five cogs is worse than not narrowing at all,
+because the cog actually on screen is then never offered when labelling.
+`read_level` returns `None` at 480p.
+
+**The emblem match uses colour, and must keep doing so.** The four
+emblems are tinted (Bossbot warm, Sellbot red, Cashbot green, Lawbot
+blue) and in greyscale a necktie and a bar chart are two similar
+arrangements of pale metal. Matching on shape alone gave margins of
+0.07–0.22 and got 720p wrong; with tint it is 0.21–0.61 and correct from
+854x480 to 4K.
 
 `solver/live/session.py` joins the sources into a `BattleState` and
 `solver/live/advise.py` runs the solver on it. Each source is
