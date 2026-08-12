@@ -58,6 +58,10 @@ from .gags import (
     organic_value,
     TOON_UP_MISS_FRACTION,
     EARLY_EXPIRY_ACCURACY_FLOOR,
+    MAX_GAG_TRACKS,
+    POUCH_CAPACITIES,
+    MAX_POUCH,
+    validate_loadout,
 )
 from .bossbot import BOSSBOT, BOSSBOT_COGS
 from .cashbot import CASHBOT, CASHBOT_COGS
@@ -96,6 +100,10 @@ __all__ = [
     "TOON_UP_MISS_FRACTION",
     "organic_value",
     "EARLY_EXPIRY_ACCURACY_FLOOR",
+    "MAX_GAG_TRACKS",
+    "POUCH_CAPACITIES",
+    "MAX_POUCH",
+    "validate_loadout",
     "BOSSBOT_COGS",
     "CASHBOT_COGS",
     "LAWBOT_COGS",

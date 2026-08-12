@@ -260,6 +260,51 @@ class TestOrganicRule(unittest.TestCase):
         self.assertEqual(mismatches, ["Seltzer Bottle (squirt 4)"])
 
 
+class TestLoadoutLimits(unittest.TestCase):
+    """What a toon may actually carry. [CONFIRMED] from the wiki: six tracks
+    of seven, and a full pouch is 80 gags."""
+
+    def test_limits_match_the_wiki(self):
+        self.assertEqual(gags.MAX_GAG_TRACKS, 6)
+        self.assertEqual(gags.MAX_POUCH, 80)
+        self.assertEqual(gags.POUCH_CAPACITIES["Starting Pouch"], 20)
+        self.assertEqual(gags.POUCH_CAPACITIES["Large Backpack"], 80)
+
+    def test_a_normal_loadout_is_legal(self):
+        self.assertEqual(gags.validate_loadout(
+            {(Track.THROW, 3): 10, (Track.LURE, 2): 5}), [])
+
+    def test_seven_tracks_is_rejected(self):
+        """No toon has all seven; every real loadout gives one up."""
+        problems = gags.validate_loadout({(t, 1): 1 for t in Track})
+        self.assertEqual(len(problems), 1)
+        self.assertIn("track", problems[0])
+        self.assertIn(str(gags.MAX_GAG_TRACKS), problems[0])
+
+    def test_six_tracks_is_fine(self):
+        six = list(Track)[:6]
+        self.assertEqual(gags.validate_loadout({(t, 1): 1 for t in six}), [])
+
+    def test_an_overfull_pouch_is_rejected(self):
+        problems = gags.validate_loadout({(Track.THROW, 1): 81})
+        self.assertEqual(len(problems), 1)
+        self.assertIn("80", problems[0])
+
+    def test_exactly_a_full_pouch_is_fine(self):
+        self.assertEqual(gags.validate_loadout({(Track.THROW, 1): 80}), [])
+
+    def test_zero_counts_dont_consume_a_track_slot(self):
+        """Clearing a track's last gag has to free the slot, or the picker
+        would lock you out of a track you no longer carry."""
+        counts = {(t, 1): 0 for t in Track}
+        counts[(Track.THROW, 1)] = 5
+        self.assertEqual(gags.validate_loadout(counts), [])
+
+    def test_both_rules_report_together(self):
+        problems = gags.validate_loadout({(t, 1): 20 for t in Track})
+        self.assertEqual(len(problems), 2)
+
+
 class TestToonUpMiss(unittest.TestCase):
     def test_toon_up_miss_still_heals(self):
         self.assertEqual(gags.TOON_UP_MISS_FRACTION, 0.20)

@@ -206,6 +206,34 @@ class TestBestLine(unittest.TestCase):
                              "a one-cog fight should reach an end state")
 
 
+class TestLoadoutValidation(unittest.TestCase):
+    """The picker enforces the limits, but so must the bridge -- a config
+    can arrive from anywhere, and the solver planning for a toon carrying
+    all seven tracks would give advice nobody can follow."""
+
+    def test_seven_tracks_is_refused(self):
+        cfg = dict(CFG, gags=[[t.value, 1, 2] for t in Track])
+        res = json.loads(bridge.api_root(json.dumps(cfg)))
+        self.assertIn("error", res)
+        self.assertIn("track", res["error"])
+
+    def test_overfull_pouch_is_refused(self):
+        cfg = dict(CFG, gags=[["throw", 1, 200]])
+        res = json.loads(bridge.api_root(json.dumps(cfg)))
+        self.assertIn("error", res)
+
+    def test_a_legal_loadout_builds(self):
+        res = json.loads(bridge.api_root(json.dumps(CFG)))
+        self.assertNotIn("error", res)
+
+    def test_catalogue_publishes_the_same_limits(self):
+        """The grid greys cells out using these, so they have to be the
+        numbers build_state will actually enforce."""
+        limits = json.loads(bridge.api_catalogue())["limits"]
+        self.assertEqual(limits["max_tracks"], data.MAX_GAG_TRACKS)
+        self.assertEqual(limits["max_pouch"], data.MAX_POUCH)
+
+
 class TestCatalogue(unittest.TestCase):
     def test_lists_every_department_and_cog(self):
         cat = json.loads(bridge.api_catalogue())

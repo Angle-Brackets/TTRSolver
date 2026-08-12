@@ -35,8 +35,15 @@ the UI match `simulator.is_group_action` rather than restating them.
 
 ## What you see
 
-The tree is a node-link diagram that grows **downward**; clicking a node
-computes and reveals its children, so nothing exists until you look at it.
+The tree is **indented**: one row per node, depth shown as a small
+horizontal step, so expanding anything makes the page taller and never
+wider. That matters because branching is what makes these trees big --
+one decision node adds 8 gags, each of which adds ~9 outcomes. Fanned out
+sideways that reached 12,500px across; indented, the width is bounded by
+depth alone (~9 levels) no matter how much you open.
+
+Clicking a node computes and reveals its children, so nothing exists until
+you look at it.
 
 - **Your turn** (gold) — a position. Its children are the gags you could play.
 - **Gag** (blue) — one option, showing its expected value and **the gap to
@@ -84,6 +91,22 @@ Two copies of a rule set is one copy too many, so the JS port is gone —
 the old layout. The UI here is deliberately plain (inline CSS, no Tailwind
 or icon library) so that it stays a thin shell over the solver and can be
 served from a single file.
+
+## Choosing a loadout
+
+**Setup** opens a gag grid laid out like the in-game menu: a row per track,
+a column per level, real gag icons. Click to add one, shift-click or
+right-click to remove. Cells grey out when adding would break a rule the
+game enforces, and the footer tracks both:
+
+- **six gag tracks of the seven** — no toon has them all
+- **80 gags** — a full pouch after every ToonTask
+
+Both are [CONFIRMED] from the wiki and live in `solver/data/gags.py`
+(`MAX_GAG_TRACKS`, `POUCH_CAPACITIES`, `validate_loadout`), not in the page.
+`bridge.build_state` rejects an illegal loadout too, so a config arriving
+from anywhere else can't make the solver plan for a toon who couldn't
+exist.
 
 ## Icons
 

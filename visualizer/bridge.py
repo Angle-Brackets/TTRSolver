@@ -148,8 +148,19 @@ def cog_label(cog: CogState, index: int) -> str:
 
 
 def build_state(cfg: Dict[str, Any]) -> BattleState:
-    """cfg: {laff, cogs: [{type, department, level}], gags: [[track, level, n]]}"""
-    tracks = {Track(track) for track, _lvl, _n in cfg["gags"]}
+    """cfg: {laff, cogs: [{type, department, level}], gags: [[track, level, n]]}
+
+    Rejects loadouts no real toon could carry -- more than six gag tracks or
+    more than a full pouch. Without this the solver will happily plan for a
+    toon with all seven tracks and 200 gags and hand back advice nobody can
+    follow.
+    """
+    counts = {(Track(t), lvl): n for t, lvl, n in cfg["gags"] if n > 0}
+    problems = data.validate_loadout(counts)
+    if problems:
+        raise ValueError("; ".join(problems))
+
+    tracks = {Track(track) for track, _lvl, n in cfg["gags"] if n > 0}
     toon = ToonState(
         laff=cfg["laff"], max_laff=cfg["laff"],
         track_exp={t: 7 for t in tracks},      # maxed in every owned track
@@ -167,8 +178,9 @@ def build_state(cfg: Dict[str, Any]) -> BattleState:
 
 
 def catalogue() -> Dict[str, Any]:
-    """Everything the UI needs to populate its dropdowns, straight from the
-    data tables so the two can't disagree."""
+    """Everything the UI needs to populate its pickers, straight from the
+    data tables so the two can't disagree -- including the loadout limits,
+    so the grid enforces the same rule build_state does."""
     depts = {}
     for key, dept in sorted(data.COG_DEPARTMENTS.items()):
         depts[key] = [{"type": c.key, "label": c.display,
@@ -182,7 +194,10 @@ def catalogue() -> Dict[str, Any]:
                          "icon": gag_icon(track, level),
                          "group": simulator.is_group_action(track, level)})
     emblems = {d: department_icon(d) for d in sorted(data.COG_DEPARTMENTS)}
-    return {"departments": depts, "gags": gags, "emblems": emblems}
+    return {"departments": depts, "gags": gags, "emblems": emblems,
+            "tracks": [t.value for t in Track],
+            "limits": {"max_tracks": data.MAX_GAG_TRACKS,
+                       "max_pouch": data.MAX_POUCH}}
 
 
 # ---------------------------------------------------------------------
@@ -328,7 +343,10 @@ def api_catalogue() -> str:
 
 
 def api_root(cfg_json: str) -> str:
-    state = build_state(json.loads(cfg_json))
+    try:
+        state = build_state(json.loads(cfg_json))
+    except ValueError as exc:
+        return json.dumps({"error": str(exc)})
     return json.dumps({
         "kind": "decision",
         "label": "Toon's turn",

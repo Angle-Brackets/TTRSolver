@@ -229,6 +229,55 @@ def organic_value(track: Track, value: int) -> int:
 # still does something.
 TOON_UP_MISS_FRACTION = 0.20
 
+# ---------------------------------------------------------------------
+# What a toon may actually carry
+# ---------------------------------------------------------------------
+# [CONFIRMED] <https://toontownrewritten.wiki/Gags>: "Toons can select up to
+# six total gag tracks that they want to train for." Seven tracks exist and
+# no toon can have them all -- every loadout gives one up.
+MAX_GAG_TRACKS = 6
+
+# [CONFIRMED] <https://toontownrewritten.wiki/Gag_pouch>: pouch capacity by
+# upgrade, "allowing Toons to carry up to a total of 80 gags after
+# completing every ToonTask". This is a cap on the TOTAL across all tracks,
+# not per track.
+POUCH_CAPACITIES = {
+    "Starting Pouch":  20,
+    "Medium Pouch":    25,   # Toontown Central
+    "Large Pouch":     30,   # Donald's Dock
+    "Small Bag":       35,   # Daisy Gardens
+    "Medium Bag":      40,   # Minnie's Melodyland
+    "Large Bag":       50,   # The Brrrgh
+    "Small Backpack":  60,   # Donald's Dreamland
+    "Medium Backpack": 70,   # Donald's Dreamland
+    "Large Backpack":  80,   # Bossbot Headquarters
+}
+MAX_POUCH = max(POUCH_CAPACITIES.values())
+
+
+def validate_loadout(gag_counts) -> list:
+    """Reasons a {(track, level): count} loadout is not legal, or [].
+
+    Checks the two rules the game enforces and a solver could otherwise
+    quietly violate -- it is easy to hand the search a toon carrying all
+    seven tracks and 200 gags and get advice no real toon could follow.
+    """
+    problems = []
+    carried = {t for (t, _lvl), n in gag_counts.items() if n > 0}
+    if len(carried) > MAX_GAG_TRACKS:
+        problems.append(
+            f"{len(carried)} gag tracks, but a toon can train at most "
+            f"{MAX_GAG_TRACKS} of the seven")
+    total = sum(n for n in gag_counts.values() if n > 0)
+    if total > MAX_POUCH:
+        problems.append(
+            f"{total} gags, but the largest pouch holds {MAX_POUCH}")
+    for (track, level), count in sorted(gag_counts.items()):
+        if count < 0:
+            problems.append(f"{gag(track, level).display}: negative count")
+    return problems
+
+
 # [CONFIRMED] TTR 3.3.0: a Lure gag can only expire early if its BASE
 # accuracy is under this. The lowest in the game is Small Magnet at 55, so
 # nothing qualifies and lures run their full duration. Kept as a threshold
