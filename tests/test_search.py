@@ -306,3 +306,74 @@ class TimeBudgetTest(unittest.TestCase):
             state, depth=2, time_budget=600.0)
         self.assertEqual(got_move, want_move)
         self.assertAlmostEqual(got, want, places=6)
+
+
+class ValueBoundsTest(unittest.TestCase):
+    """The floor must never exceed a real value.
+
+    A bound that is too generous only prunes less; a bound that is too
+    tight prunes a real answer and does it silently. This is the direct
+    check -- the pruning-exactness test catches the same class of bug,
+    but only after it has already corrupted a result.
+
+    It has caught one: making the loss term conditional removed a flat
+    -100 that had been standing in for the heuristic's own floor at the
+    depth cutoff, and for the objective knobs (laff_weight, scarcity,
+    turn cost) that were never in the bound at all.
+    """
+
+    def _positions(self):
+        from solver.state import BattleState, CogState, ToonState, Track
+        from solver import data
+
+        yield single_flunky_fight(level=2)
+        yield single_flunky_fight(level=5, laff=20)
+        yield single_flunky_fight(level=5, laff=12)
+        toon = ToonState(laff=40, max_laff=40,
+                         track_exp={Track.THROW: 7, Track.SOUND: 7},
+                         gag_counts={(Track.THROW, 3): 3, (Track.SOUND, 4): 2})
+        cogs = [CogState(cog_type="flunky", department="bossbot", level=4,
+                         hp=data.cog_max_hp(4), max_hp=data.cog_max_hp(4)),
+                CogState(cog_type="flunky", department="bossbot", level=2,
+                         hp=6, max_hp=data.cog_max_hp(2))]
+        yield BattleState(toon=toon, cogs=cogs)
+
+    def test_the_floor_never_exceeds_the_true_value(self):
+        from solver.search import objective as objectives
+
+        for i, state in enumerate(self._positions()):
+            for name, obj in objectives.PRESETS.items():
+                for depth in (1, 2):
+                    with self.subTest(position=i, objective=name, depth=depth):
+                        value, _ = expectimax.evaluate(
+                            state, depth, obj, memo={}, prune=False)
+                        floor, ceiling = expectimax._value_bounds(
+                            state, depth, obj)
+                        self.assertLessEqual(floor, value + 1e-9,
+                                             f"floor {floor} above value {value}")
+                        self.assertGreaterEqual(ceiling, value - 1e-9)
+
+    def test_the_floor_is_tighter_than_assuming_total_loss(self):
+        """The point of the depth-aware floor. If it were not tighter it
+        would buy nothing, and pruning would go back to never firing."""
+        state = single_flunky_fight(level=2)
+        floor, _ = expectimax._value_bounds(state, 1, None)
+        naive = -(float(state.toon.laff) + 100.0 + 0.1 * 7.0)
+        self.assertGreater(floor, naive)
+
+    def test_max_round_damage_is_an_over_estimate(self):
+        """It has to be: it bounds how bad a round can get."""
+        from solver import outcomes
+
+        state = single_flunky_fight(level=5)
+        bound = expectimax.max_round_damage(state)
+        worst = max(d for d, _p in
+                    outcomes.cog_damage_distribution(state.cogs[0]).items())
+        self.assertGreaterEqual(bound, worst)
+
+    def test_dead_cogs_contribute_no_damage(self):
+        state = single_flunky_fight(level=5)
+        before = expectimax.max_round_damage(state)
+        state.cogs[0].status.is_dead = True
+        self.assertEqual(expectimax.max_round_damage(state), 0)
+        self.assertGreater(before, 0)

@@ -15,8 +15,8 @@ Rewards match simulator.step's convention (-laff lost, -lambda*gag level,
 +/-100 terminal), so this optimizes the same objective a sampling agent
 would.
 
-PRUNING -- IMPLEMENTED, MEASURED, AND OFF BY DEFAULT
-----------------------------------------------------
+PRUNING -- MEASURED, AND ON BY DEFAULT
+--------------------------------------
 Plain alpha-beta doesn't apply to expectimax: a chance node is an average,
 not a max, so one bad child can't refute it the way it can under a minimax.
 The analogue is Ballard's *-minimax, and both levels are here: star1 bounds
@@ -26,26 +26,30 @@ child (a MAX node is worth at least any single action, so a probe is a real
 lower bound) to tighten the same test.
 
 Both are exact -- `tests/test_search.py` checks they return the same value
-AND the same move as an exhaustive search. **Both are also slower here, so
-`prune` defaults to False.** Measured on a three-cog fight at depth 3:
+AND the same move as an exhaustive search.
 
-    exhaustive   12s
-    star1        52s
-    star2        56s
+For a long time both were also *slower*, and this module said so. The
+cause was never the probe: it was the interval the probe aimed into. The
+floor assumed the toon could lose every point of laff it had, so a
+branch's value ranged over ~300 points and the unseen-mass term stayed
+too wide to ever cut.
 
-The reason is not lost transposition sharing (the table stays 99% EXACT
-either way) -- it is that the bounds are too loose to cut. A branch's value
-can range over roughly 250 points, so the "unseen mass" term stays wide
-until nearly every branch has been evaluated, and the cut almost never
-fires. What's left is pure overhead: per-branch bound arithmetic, a sort,
-and for star2 an extra subtree per branch.
+The fix was to make the floor depth-aware. At a limit of `d` plies only
+`d` rounds happen, so the toon can lose at most `d` rounds of damage --
+and if that cannot reach zero laff, the battle cannot be lost inside the
+horizon and the -100 does not belong in the bound at all. See
+`_value_bounds`. On a two-cog position at depth 2 the range fell from
+~296 to 151, and pruning went from a loss to a win:
 
-Tighter admissible bounds would change this, and nothing else will. The
-range is set by "could still win" (+100) against "could still lose all
-remaining laff" -- so a bound that knew, say, how many rounds the cogs need
-to finish the toon, or how few they need to die, would narrow it sharply.
-That is the work worth doing before touching star2 again; the probe is not
-the bottleneck, the interval it probes into is.
+    position   exhaustive   pruned    gain
+    1 cog           0.16s    0.06s    2.7x
+    2 cogs          2.30s    0.81s    2.8x
+    3 cogs         27.71s    7.87s    3.5x
+    4 cogs         93.62s   23.71s    3.9x
+
+Values match exactly in every case, and the gain grows with the position,
+which is the right shape -- the crowded fights are the ones that needed
+it. Set `prune=False` to measure against.
 
 WHY A FULL SOLVE IS POSSIBLE
 ----------------------------
@@ -198,7 +202,7 @@ def distinct_actions(state: BattleState) -> List[Action]:
 def evaluate(state: BattleState, depth: int, objective=None,
              discount: float = 1.0, memo: Optional[Dict] = None,
              alpha: float = float("-inf"), beta: float = float("inf"),
-             prune: bool = False, epsilon: float = 0.0,
+             prune: bool = True, epsilon: float = 0.0,
              probe_only: bool = False,
              deadline: Optional[List] = None) -> Tuple[float, Optional[Action]]:
     """Expected value of `state` under optimal play, plus the action that
@@ -293,20 +297,78 @@ def evaluate(state: BattleState, depth: int, objective=None,
     return best_value, best_action
 
 
+def max_round_damage(state: BattleState) -> int:
+    """Most laff the cogs could take in one round, assuming every one of
+    them attacks and every attack hits for its highest roll.
+
+    An over-estimate on purpose: it is used to bound how bad a position
+    can get, and a bound that is too generous only prunes less, while one
+    that is too tight prunes a real answer.
+    """
+    total = 0
+    for cog in state.cogs:
+        if cog.status.is_dead:
+            continue
+        try:
+            damages = outcomes_mod.cog_damage_distribution(cog)
+        except NotImplementedError:
+            return 10 ** 6              # unknown: assume the worst
+        if damages:
+            total += max(damages)
+    return total
+
+
 def _value_bounds(state: BattleState, depth: int,
                    objective: float) -> Tuple[float, float]:
     """Admissible [floor, ceiling] on the value of a state.
 
-    The ceiling is winning outright. The floor is losing every remaining
-    point of laff and then the battle, plus the gag costs along the way.
-    Both are loose -- deliberately, since a bound that is wrong prunes a
-    real answer while a bound that is slack only prunes less -- but the
-    floor uses CURRENT laff rather than max laff, which is both valid and
-    considerably tighter as a fight wears on.
+    The ceiling is winning outright. The floor used to be losing every
+    remaining point of laff and then the battle, which is where nearly
+    all the slack was: at a depth limit of `d` only `d` rounds actually
+    happen, so the toon can lose at most `d` rounds' worth of damage, not
+    its whole bar. And if that much damage cannot reach zero laff, the
+    battle cannot be lost inside the horizon at all and the -100 does not
+    belong in the bound either.
+
+    This is what stood between the *-minimax code and a speedup. A
+    branch's value ranged over ~300 points, so the unseen-mass interval
+    stayed wide enough that the cut almost never fired; capping the loss
+    at what the horizon permits narrows it sharply whenever the toon is
+    not actually in danger, which at shallow depth is most of the time.
     """
     ceiling = WIN_VALUE
-    floor = -(float(state.toon.laff) + 100.0
-              + getattr(objective, "gag_cost", 0.1) * 7.0 * depth)
+    laff = float(state.toon.laff)
+    max_laff = float(state.toon.max_laff) or 1.0
+    reachable = float(max_round_damage(state)) * depth
+    at_risk = min(laff, reachable)
+
+    # Every term that can push the value down has to appear here, and
+    # each one is an objective knob rather than a constant. The previous
+    # floor hard-coded a flat -100 that silently stood in for several of
+    # them at once; once the loss term became conditional that cover went
+    # away, the bound stopped being admissible, and pruning started
+    # returning wrong values -- which the exactness tests caught.
+    laff_weight = getattr(objective, "laff_weight", 1.0)
+    loss_penalty = getattr(objective, "loss_penalty", 100.0)
+    gag_cost = getattr(objective, "gag_cost", 0.1)
+    scarcity = getattr(objective, "scarcity_cost", 0.0)
+    turn_cost = getattr(objective, "turn_cost", 0.0)
+
+    # Dearest a single gag can be: highest level, and the scarcity term
+    # peaks at a gag you can only hold one of.
+    worst_gag = gag_cost * 7.0 + scarcity
+
+    # The battle can only be lost inside the horizon if the damage
+    # available in it can actually reach zero laff.
+    lethal = loss_penalty if reachable >= laff else 0.0
+
+    # And the cutoff itself scores the leaf. heuristic_value floors at
+    # -100 * (1 - laff_kept) with cog progress at worst zero, and laff at
+    # the leaf is at least what is left after `at_risk` is taken.
+    leaf = -100.0 * (1.0 - max(0.0, laff - at_risk) / max_laff)
+
+    floor = -(laff_weight * at_risk + lethal
+              + (worst_gag + turn_cost) * depth) + min(0.0, leaf)
     return floor, ceiling
 
 

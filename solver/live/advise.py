@@ -43,14 +43,20 @@ RECOMPUTE_ON = {"battle_started", "cog_joined", "cog_defeated", "damage"}
 # Depth is capped rather than fixed: the search is given a time budget
 # and returns the deepest pass that finished inside it. Cost depends on
 # the position far more than on the number -- at depth 2 a two-cog fight
-# takes 2.3s and a three-cog fight 28s -- so a fixed depth either stalls
+# takes 0.8s and a four-cog fight 27s -- so a fixed depth either stalls
 # on a crowded battle or under-searches an easy one.
 #
-# With this budget a one- or two-cog fight reaches depth 2 comfortably.
-# Three and four cogs currently only manage depth 1, which is honest but
-# weak; the fix is fewer nodes, not more seconds.
+# The budget comes from the game rather than from taste: Toontown runs a
+# countdown of about thirty seconds for choosing a gag, so ten is a third
+# of the time available and still leaves the answer on screen long before
+# it is needed. What that buys, with pruning on and epsilon 0.03:
+#
+#     1 cog    depth 3
+#     2 cogs   depth 3
+#     3 cogs   depth 2   (8.0s)
+#     4 cogs   depth 1   (depth 2 is 27s)
 DEFAULT_DEPTH = 4
-DEFAULT_BUDGET = 5.0
+DEFAULT_BUDGET = 10.0
 
 # Dropped probability mass per chance node. Checked against an exact
 # search on four positions: at 0.03 every one picks the same move while
