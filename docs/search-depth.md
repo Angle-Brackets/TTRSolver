@@ -85,21 +85,54 @@ risk actually bites, collapsed after, with k tunable and defaulting to
 at least 1. That mirrors late move reduction in chess -- full effort
 near the root, cheaper further down.
 
-## The other untapped lever: move ordering
+## Move ordering: measured, and NOT worth doing
 
-Chess gets most of its effective branching reduction from ordering the
-best move first -- hash move, killer moves, history heuristic, MVV-LVA.
-This search orders by the transposition table's best move and nothing
-else. Static ordering by expected damage or kill potential, plus a
-killer/history table, is standard and unexplored here.
+This looked like the obvious untapped lever -- chess gets most of its
+effective branching reduction from ordering, and this search orders by
+the transposition table's move and nothing else. So the plan was killer
+moves and a history heuristic.
+
+Measuring first killed it. Perfect ordering under alpha-beta examines
+`sqrt(b)` actions per node; that is the floor, and nothing beats it:
+
+| position | actions available | evaluated | sqrt(b) |
+|---|---|---|---|
+| 2 cogs | 28.4 | 6.1 | 5.3 |
+| 3 cogs | 38.0 | 6.6 | 6.2 |
+
+Already within 6-15% of the optimum. Two reasons it comes for free here.
+The transposition move from the previous iterative-deepening pass is an
+excellent first guess, and the domain has a handful of obviously
+dominant actions -- a level 7 group gag is usually either the best move
+or clearly not, with little in between.
+
+There is nothing for a killer table to recover.
+
+Worth recording what a killer *would* have meant, since defining it was
+the part that needed thought. `Action` is `(track, level, target_index)`
+and all three transfer across siblings: cogs are never removed from
+`state.cogs`, only flagged dead, so a slot index means the same cog for
+the whole battle. The wrinkle chess does not have is that actions consume
+resources -- a killer can be *illegal* in a sibling because that gag ran
+out along a different line -- so any such table would have to check
+legality on lookup.
+
+A history heuristic would also have suited this domain unusually well.
+In chess a move's value depends heavily on position; here `(THROW, 7)`
+is Wedding Cake everywhere in the tree and does the same thing, so
+cutoff statistics keyed on the gag would generalise far better than
+they do in chess. Filed as an observation, not a plan: the measurement
+above says there is no gain to collect.
 
 ## Ranked
 
 1. **Collapse the cog phase beyond depth k.** Validated in prototype,
-   +1 to +2 plies, same move at equal depth. Biggest single win
-   available.
-2. **Move ordering.** Standard, exact, unexplored.
-3. **Cut dominated actions.** Exact, attacks the other factor -- 123
-   actions on a maxed four-cog position.
-4. A better leaf evaluator (`docs/heuristic-learning.md`) -- buys
+   +1 to +2 plies, same move at equal depth. This is effectively the
+   whole game: chance width is what is left once ordering is ruled out.
+2. **Cut dominated actions.** Exact, and attacks the other factor -- 123
+   actions on a maxed four-cog position. But modest: only 6.6 actions of
+   38 are actually evaluated, so halving the action count buys about
+   `sqrt(2)`, not 2x.
+3. A better leaf evaluator (`docs/heuristic-learning.md`) -- buys
    quality at whatever depth the above reach, not depth itself.
+4. ~~Move ordering.~~ Measured at the alpha-beta optimum already.
