@@ -105,6 +105,36 @@ So the distortion is not about danger: collapsing is risk-*neutral*, and
 on the objective's `laff_weight`, and `collapse_damage` additionally
 never merges a branch where the toon died into one where it survived.
 
+## Where this lands, including the worst case
+
+Depth reached inside the 15s live budget. The realistic loadout is the
+one read off a real gag menu (20 distinct gag types); the maxed one is
+the legal worst case for branching -- 42 distinct types, a full 80-gag
+pouch plus six level 7s.
+
+Realistic loadout:
+
+| position | exact | collapsed |
+|---|---|---|
+| 2 cogs | 3 (14.3s) | **4** (3.9s) |
+| 3 cogs | 2 (4.7s) | **3** (2.0s) |
+| 4 cogs | 2 (13.9s) | **3** (4.8s) |
+
+Maxed loadout, where actions run 42 / 69 / 96 / 123:
+
+| position | exact | collapsed |
+|---|---|---|
+| 1 cog | 3 (4.0s) | **4** (6.5s) |
+| 2 cogs | 2 (2.4s) | **3** (4.1s) |
+| 3 cogs | 1 (0.05s) | **2** (1.3s) |
+| 4 cogs | 1 (0.09s) | **2** (3.3s) |
+
+The point of the second table is the bottom two rows. Under maximum
+legal diversity a three- or four-cog fight previously got depth 1, which
+is one ply of lookahead and then a hand-written guess -- barely better
+than greedy. Both now clear depth 2 with seconds to spare. Nothing in
+the legal space falls back to depth 1 any more.
+
 ## Move ordering: measured, and NOT worth doing
 
 This looked like the obvious untapped lever -- chess gets most of its
