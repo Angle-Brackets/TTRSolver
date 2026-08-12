@@ -80,10 +80,16 @@ class TestExpansionMatchesTheSolver(unittest.TestCase):
         self.assertFalse(any(c["best"] for c in children[1:]))
 
     def test_gap_is_the_lead_over_the_runner_up(self):
+        """Tolerant of one rounding unit on purpose.
+
+        `gap` is rounded from full-precision EVs while the comparison
+        here subtracts two already-rounded ones, so the two can differ by
+        a cent -- 5.09 against 5.08 -- without anything being wrong.
+        """
         children = bridge.expand_decision(self.state_dict, depth=1)
         self.assertAlmostEqual(children[0]["gap"],
-                               round(children[0]["ev"] - children[1]["ev"], 2),
-                               places=2)
+                               children[0]["ev"] - children[1]["ev"],
+                               delta=0.011)
         self.assertIsNone(children[-1]["gap"])
 
     def test_action_outcomes_are_a_complete_distribution(self):

@@ -1,7 +1,13 @@
 # Learning the leaf evaluator
 
 Scope for replacing `expectimax.heuristic_value` with a fitted model.
-Nothing here is built yet.
+
+**Stage 0 is built.** `solver/search/features.py`,
+`solver/search/fitted.py` and `tools/fit_heuristic.py`. Measured against
+exact play on 120 fights: agreement 86% -> 92%, and regret -- the EV
+given up when the choice differs -- 243.8 -> 7.4. Searches are also
+*faster*, 10.6s -> 6.1s over the same fights, because accurate leaf
+values tighten the window and cut more. Stage 1 has not been started.
 
 ## Why this component and not the search
 

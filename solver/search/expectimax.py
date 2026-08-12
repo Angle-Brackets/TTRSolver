@@ -159,7 +159,7 @@ def trim(branches, epsilon: float):
     return [(prob * scale, nxt, reward) for prob, nxt, reward in kept], 1.0 - mass
 
 
-def heuristic_value(state: BattleState) -> float:
+def hand_written_value(state: BattleState) -> float:
     """Score a non-terminal state at the depth cutoff, on roughly the same
     scale as the terminal rewards (+/-100).
 
@@ -181,6 +181,20 @@ def heuristic_value(state: BattleState) -> float:
     cog_progress = 1.0 - (remaining_hp / total_max_hp) if total_max_hp else 1.0
     laff_kept = state.toon.laff / state.toon.max_laff if state.toon.max_laff else 0.0
     return 100.0 * cog_progress - 100.0 * (1.0 - laff_kept)
+
+
+def heuristic_value(state: BattleState) -> float:
+    """Score a position at the depth cutoff.
+
+    Dispatches to the fitted evaluator when weights are present and to
+    `hand_written_value` otherwise, so the solver always has something to
+    score with. Callers monkeypatch *this* name to benchmark a candidate.
+    """
+    from . import fitted
+
+    if fitted.is_fitted():
+        return fitted.value(state)
+    return hand_written_value(state)
 
 
 # ---------------------------------------------------------------------

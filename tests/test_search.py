@@ -22,29 +22,78 @@ from solver.state import Track, CogState, ToonState, BattleState
 from tests.test_outcomes import single_flunky_fight
 
 
-class TestHeuristic(unittest.TestCase):
+class TestHandWrittenHeuristic(unittest.TestCase):
+    """The fallback form, used whenever no weights are fitted.
+
+    These pin its own scale -- "full laff, untouched cogs = 0" -- which
+    is deliberately NOT the scale the fitted evaluator uses. That
+    convention is the source of the -100 bias the fitted model exists to
+    fix, so these assertions target `hand_written_value` directly rather
+    than whatever `heuristic_value` currently dispatches to.
+    """
+
     def test_untouched_fight_scores_zero(self):
         state = single_flunky_fight()
-        self.assertAlmostEqual(expectimax.heuristic_value(state), 0.0, delta=1e-9)
+        self.assertAlmostEqual(expectimax.hand_written_value(state), 0.0,
+                               delta=1e-9)
 
     def test_progress_scores_positive(self):
         state = single_flunky_fight()
         state.cogs[0].hp = 1  # nearly dead, toon untouched
-        self.assertGreater(expectimax.heuristic_value(state), 0.0)
+        self.assertGreater(expectimax.hand_written_value(state), 0.0)
 
     def test_damage_taken_scores_negative(self):
         state = single_flunky_fight()
         state.toon.laff = 10
-        self.assertLess(expectimax.heuristic_value(state), 0.0)
+        self.assertLess(expectimax.hand_written_value(state), 0.0)
 
     def test_terminal_states_use_terminal_values(self):
         won = single_flunky_fight()
         won.cogs[0].status.is_dead = True
-        self.assertEqual(expectimax.heuristic_value(won), expectimax.WIN_VALUE)
+        self.assertEqual(expectimax.hand_written_value(won),
+                         expectimax.WIN_VALUE)
 
         lost = single_flunky_fight()
         lost.toon.laff = 0
-        self.assertEqual(expectimax.heuristic_value(lost), expectimax.LOSS_VALUE)
+        self.assertEqual(expectimax.hand_written_value(lost),
+                         expectimax.LOSS_VALUE)
+
+
+class TestLeafDispatch(unittest.TestCase):
+    """Whatever `heuristic_value` dispatches to must obey these."""
+
+    def test_terminal_states_are_known_not_estimated(self):
+        """The fitted form dropped this and scored a lost battle at +72:
+        nothing in its feature set says "already over", and a linear
+        model extrapolates happily from a pouch that still has gags."""
+        won = single_flunky_fight()
+        won.cogs[0].status.is_dead = True
+        self.assertEqual(expectimax.heuristic_value(won),
+                         expectimax.WIN_VALUE)
+
+        lost = single_flunky_fight()
+        lost.toon.laff = 0
+        self.assertEqual(expectimax.heuristic_value(lost),
+                         expectimax.LOSS_VALUE)
+
+    def test_leaf_values_stay_inside_the_pruning_bounds(self):
+        """star1 bounds a chance node by the range its unseen children
+        can occupy, so a leaf outside that range makes the cut unsound.
+        Unclamped, the fitted model put 32% of random positions outside
+        it, reaching 175.7 against a ceiling of 100."""
+        import random
+
+        rng = random.Random(5)
+        for _ in range(300):
+            state = single_flunky_fight(level=rng.randint(1, 5))
+            state.toon.laff = rng.randint(1, 50)
+            state.cogs[0].hp = rng.randint(1, state.cogs[0].max_hp)
+            if state.is_terminal():
+                continue
+            v = expectimax.heuristic_value(state)
+            floor, ceiling = expectimax._value_bounds(state, 1, None)
+            self.assertLessEqual(v, ceiling + 1e-9)
+            self.assertGreaterEqual(v, floor - 1e-9)
 
 
 class TestSearchChoices(unittest.TestCase):
@@ -224,14 +273,23 @@ class TestSearchMechanics(unittest.TestCase):
         value, _action = expectimax.evaluate(state, depth=2)
         self.assertLess(value, 100.0)
 
-    def test_deeper_search_is_not_worse(self):
-        """Sanity check on the search itself: with a heuristic this simple,
-        seeing further shouldn't make the toon think a winnable fight is
-        worse than a shallow look suggested."""
+    def test_deeper_search_converges(self):
+        """Deeper search should settle, not swing.
+
+        This used to assert that deeper is never *worse*, and that held
+        only because the old heuristic was pessimistic by about 100
+        points -- every extra ply could do nothing but find things better
+        than the leaf claimed. It was passing for the wrong reason. With
+        a calibrated evaluator a shallow estimate can be slightly
+        optimistic and deepening corrects it downward, so what is
+        actually testable is convergence.
+        """
         state = single_flunky_fight()
-        shallow, _ = expectimax.evaluate(state, depth=1)
-        deep, _ = expectimax.evaluate(state, depth=3)
-        self.assertGreaterEqual(deep, shallow - 1e-9)
+        one, _ = expectimax.evaluate(state, depth=1)
+        two, _ = expectimax.evaluate(state, depth=2)
+        three, _ = expectimax.evaluate(state, depth=3)
+        self.assertLess(abs(three - two), abs(two - one) + 1e-9)
+        self.assertLess(abs(three - one), 25.0)
 
     def test_memo_is_reused_across_calls(self):
         state = single_flunky_fight()

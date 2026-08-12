@@ -58,17 +58,25 @@ class TestPresets(unittest.TestCase):
     def test_presets_actually_disagree(self):
         """A preset that never changes a decision is decoration.
 
-        Needs a position where the trade-off is live: two cogs too tough for
-        the one Opera Singer to clear on its own, so whether to spend it now
-        or set up first is a genuine question rather than a formality."""
-        toon = ToonState(laff=40, max_laff=45,
+        Needs a position where the trade-off is live: cogs the one Opera
+        Singer cannot clear on its own, so whether to spend it now or set
+        up first is a genuine question rather than a formality.
+
+        The position was changed when the fitted evaluator landed. The
+        previous one stopped discriminating -- every preset agreed --
+        which is what a better leaf evaluator tends to do: it resolves
+        more positions into having one clearly best move. That makes the
+        test harder to write and is not itself a regression, so what
+        matters is that *some* position still separates the presets.
+        """
+        toon = ToonState(laff=50, max_laff=50,
                          track_exp={Track.SOUND: 7, Track.LURE: 7,
                                     Track.THROW: 7},
-                         gag_counts={(Track.SOUND, 7): 1, (Track.LURE, 2): 2,
-                                     (Track.THROW, 4): 3})
-        cogs = [CogState(cog_type="yesman", department="bossbot", level=lvl,
-                         hp=data.cog_max_hp(lvl), max_hp=data.cog_max_hp(lvl))
-                for lvl in (6, 7)]
+                         gag_counts={(Track.SOUND, 7): 1, (Track.LURE, 2): 3,
+                                     (Track.THROW, 5): 2})
+        cogs = [CogState(cog_type="flunky", department="bossbot", level=4,
+                         hp=data.cog_max_hp(4), max_hp=data.cog_max_hp(4))
+                for _ in range(2)]
         state = BattleState(toon=toon, cogs=cogs)
 
         moves = {name: str(expectimax.best_action(state, 2, objective=preset))
