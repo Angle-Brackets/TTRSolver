@@ -87,5 +87,25 @@ emblem cannot be told apart and `read_department` returns a margin under
 `MIN_DEPARTMENT_MARGIN`; at `480p` `read_level` returns `None`. Narrowing
 candidates on an unconfident read is worse than not narrowing at all.
 
+`solver/live/session.py` joins the sources into a `BattleState` and
+`solver/live/advise.py` runs the solver on it. Each source is
+authoritative for one thing and must not be substituted for another:
+laff and gag training from the API (training sets accuracy, and the API
+states it exactly), counts from the gag menu, cogs from their plates.
+`build_state` returns a state *or* the reasons there isn't one — never a
+guess. Keep it that way; advice computed from an invented state is worse
+than no advice.
+
+Search cost, measured on a real endgame loadout (20 distinct gags, 30
+root actions, two cogs): depth 1 = 0.01s, depth 2 = 9.3s, depth 3 = many
+minutes. The default is 2 and the search runs off the polling thread.
+
+## Gag pouch
+
+Level 7 gags do **not** count against the pouch (`POUCH_EXEMPT_LEVEL`).
+The gag menu's "Total gags" label counts only levels 1–6, which makes it
+a free checksum on anything reading counts off the screen — compare it
+against `GagPanel.pouch_total()`.
+
 `TTRGame.vlt` (the game's Python) is encrypted, 8.0 bits/byte. The
 `phase_*.mf` files are plain Panda3D multifiles and are readable.
