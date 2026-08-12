@@ -1,0 +1,12 @@
+# Optional extras, needed only by solver/live/vision.py -- reading the
+# cog plates off a rendered battle frame.
+#
+# The solver itself, the Local API client (solver/live/ttr_local.py) and
+# the whole test suite run on the standard library alone. Installing
+# these adds the screen reader; skipping them costs nothing else, and
+# tests/test_vision.py skips itself rather than failing.
+#
+#     python -m pip install -r requirements-vision.txt
+#
+numpy>=1.24
+pillow>=10.0

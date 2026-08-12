@@ -1,0 +1,151 @@
+"""Finding cog plates in a rendered frame.
+
+Frames are synthesised rather than loaded from a screenshot: it keeps the
+suite free of a megabyte of someone's toon, and it allows testing the
+cases that are awkward to capture on purpose -- a cog whose head splits
+its own backdrop, a damaged meter, a 4K frame.
+"""
+import unittest
+
+try:
+    import numpy as np
+
+    from solver.live.vision import (
+        PARTS, Plate, TEAL, find_plates, health_fraction,
+    )
+except ImportError as exc:                   # numpy is an optional extra
+    raise unittest.SkipTest(f"vision needs numpy: {exc}") from None
+
+PLATE_BG = (170, 170, 165)      # brushed metal
+SCENE_BG = (96, 92, 120)        # cobblestone-ish
+
+
+def frame(slots, size=(1920, 1080), head=None, health=1.0):
+    """A frame with `slots` cog plates drawn at (x, y, w, h).
+
+    `head` optionally paints a vertical bar of the cog's head across the
+    middle of each slot, reproducing the case where the render splits its
+    own teal backdrop into two disconnected pieces.
+    """
+    img = np.zeros((size[1], size[0], 3), dtype=np.uint8)
+    img[:, :] = SCENE_BG
+    for x, y, w, h in slots:
+        img[y - h // 3:y + 2 * h, x - w // 4:x + 3 * w] = PLATE_BG
+        img[y:y + h, x:x + w] = TEAL
+        if head:
+            hw = max(1, int(w * head))
+            img[y:y + h, x + w // 2 - hw // 2:x + w // 2 + hw // 2] = (
+                150, 45, 40)
+        plate = Plate(slot=(x, y, x + w, y + h), filled=w * h)
+        bx0, by0, bx1, by1 = plate.region("health")
+        img[by0:by1, bx0:bx1] = (20, 20, 20)
+        lit = bx0 + int((bx1 - bx0) * health)
+        img[by0:by1, bx0:lit] = (0, 254, 0)
+    return img
+
+
+class FindPlatesTest(unittest.TestCase):
+
+    def test_finds_a_single_plate(self):
+        plates = find_plates(frame([(700, 120, 66, 45)]))
+        self.assertEqual(len(plates), 1)
+        self.assertEqual(plates[0].slot, (700, 120, 766, 165))
+
+    def test_finds_four_plates_left_to_right(self):
+        xs = [400, 700, 1000, 1300]
+        plates = find_plates(frame([(x, 120, 66, 45) for x in xs]))
+        self.assertEqual([p.slot[0] for p in plates], xs)
+
+    def test_a_head_splitting_the_backdrop_is_still_one_plate(self):
+        """The cog is drawn over its own teal, cutting it in two. Treating
+        each piece as a separate blob loses the plate entirely once the
+        fragments fall under the area floor."""
+        plates = find_plates(frame([(700, 120, 66, 45)], head=0.35))
+        self.assertEqual(len(plates), 1)
+        self.assertEqual(plates[0].slot, (700, 120, 766, 165))
+
+    def test_empty_scene_finds_nothing(self):
+        img = np.zeros((1080, 1920, 3), dtype=np.uint8)
+        img[:, :] = SCENE_BG
+        self.assertEqual(find_plates(img), [])
+
+    def test_a_teal_smudge_of_the_wrong_shape_is_rejected(self):
+        """Aspect ratio is what separates a slot from stray scenery."""
+        img = np.zeros((1080, 1920, 3), dtype=np.uint8)
+        img[:, :] = SCENE_BG
+        img[300:700, 300:360] = TEAL         # tall and thin
+        self.assertEqual(find_plates(img), [])
+
+
+class ResolutionTest(unittest.TestCase):
+    """Nothing may be tuned to 1080p."""
+
+    CASES = [((854, 480), 30, 20), ((1280, 720), 44, 29),
+             ((1920, 1080), 66, 45), ((2560, 1440), 88, 60),
+             ((3840, 2160), 131, 89)]
+
+    def test_plates_are_found_at_every_resolution(self):
+        for size, w, h in self.CASES:
+            with self.subTest(size=size):
+                x, y = size[0] // 3, size[1] // 8
+                plates = find_plates(frame([(x, y, w, h)], size=size))
+                self.assertEqual(len(plates), 1)
+                self.assertEqual(plates[0].width, w)
+
+    def test_split_backdrop_survives_every_resolution(self):
+        for size, w, h in self.CASES:
+            with self.subTest(size=size):
+                x, y = size[0] // 3, size[1] // 8
+                plates = find_plates(
+                    frame([(x, y, w, h)], size=size, head=0.35))
+                self.assertEqual(len(plates), 1)
+
+
+class RegionTest(unittest.TestCase):
+
+    def test_regions_scale_with_the_plate(self):
+        """A plate drawn twice as large must yield regions twice as large.
+
+        Not exactly 2.0: the regions are ~20px tall at 1080p, so rounding
+        each edge to a whole pixel moves the ratio by a few percent. The
+        tolerance is that quantisation and nothing more -- a genuine
+        scaling error would be far larger.
+        """
+        small = Plate(slot=(100, 100, 166, 145), filled=0)
+        large = Plate(slot=(100, 100, 232, 190), filled=0)
+        for part in PARTS:
+            with self.subTest(part=part):
+                sx0, sy0, sx1, sy1 = small.region(part)
+                lx0, ly0, lx1, ly1 = large.region(part)
+                self.assertAlmostEqual((lx1 - lx0) / (sx1 - sx0), 2.0,
+                                       delta=0.1)
+                self.assertAlmostEqual((ly1 - ly0) / (sy1 - sy0), 2.0,
+                                       delta=0.1)
+
+    def test_unknown_region_names_raise(self):
+        with self.assertRaises(KeyError):
+            Plate(slot=(0, 0, 66, 45), filled=0).region("nose")
+
+
+class HealthTest(unittest.TestCase):
+
+    def read(self, health):
+        img = frame([(700, 120, 66, 45)], health=health)
+        return health_fraction(img, find_plates(img)[0])
+
+    def test_a_full_bar_reads_full(self):
+        """A hand-drawn box around the meter read a full bar as 83%,
+        which would have corrupted every use of this."""
+        self.assertGreater(self.read(1.0), 0.97)
+
+    def test_an_empty_bar_reads_empty(self):
+        self.assertEqual(self.read(0.0), 0.0)
+
+    def test_partial_bars_track_the_fill(self):
+        for want in (0.25, 0.5, 0.75):
+            with self.subTest(want=want):
+                self.assertAlmostEqual(self.read(want), want, delta=0.03)
+
+
+if __name__ == "__main__":
+    unittest.main()

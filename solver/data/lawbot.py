@@ -205,11 +205,13 @@ LAWBOT = Department(
     ),
     Cog(
         key="backstabber",
-        display="Backstabber",
+        display="Back Stabber",
         department="lawbot",
         levels=(5, 6, 7, 8, 9),
-        # Wiki: https://toontownrewritten.wiki/Back_Stabber (the wiki spells
-        # the cog's name as two words; the key stays backstabber).
+        # Wiki: https://toontownrewritten.wiki/Back_Stabber -- two words, and
+        # "Backstabber" is only a redirect to it. The game client agrees: its
+        # summons table calls this cog "Back Stabber". The key stays one word
+        # because it is an internal slug (the icon filename follows it).
         attacks=(
             CogAttack(
                 "guilt_trip", "Guilt Trip",

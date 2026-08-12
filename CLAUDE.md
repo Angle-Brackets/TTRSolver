@@ -44,3 +44,31 @@ stdlib `unittest` only — pytest is not installed. From the repo root:
 ```
 python -m unittest discover tests
 ```
+
+The solver, the Local API client and the whole suite run on the standard
+library alone. `solver/live/vision.py` is the one exception: it needs
+numpy, listed in `requirements-vision.txt`. Keep it that way — the extras
+stay optional, `solver/live/__init__` must not import `vision`, and
+`tests/test_vision.py` skips itself rather than failing when numpy is
+absent. Verify both paths before shipping a change that touches it.
+
+## Reading a live game
+
+Two sources, with different limits, both verified against a running
+client rather than from documentation:
+
+- **Local API** (`solver/live/ttr_local.py`) — official, opt-in via
+  `"want-local-api"` in TTR's `settings.json`, HTTP on `localhost:1547`.
+  Gives laff, unlocked gag tracks, organic, location, invasion. It does
+  **not** expose the battle: every documented endpoint returns 200 and
+  every battle-shaped guess (`/battle.json`, `/combat.json`, `/cogs.json`)
+  returns 404. Do not go looking again.
+  The `Host` header must be exactly `localhost:<port>` — `127.0.0.1` gets
+  the connection dropped with no response, which looks identical to the
+  game not running.
+- **Screen reading** (`solver/live/vision.py`) — needs
+  `"show-cog-levels"` on. Cog level, department and health come off the
+  plate above each cog. This is the only route to the cogs.
+
+`TTRGame.vlt` (the game's Python) is encrypted, 8.0 bits/byte. The
+`phase_*.mf` files are plain Panda3D multifiles and are readable.
