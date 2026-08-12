@@ -178,7 +178,7 @@ SELLBOT = Department(
     ),
     Cog(
         key="mover_and_shaker",
-        display="Mover And Shaker",
+        display="Mover & Shaker",
         department="sellbot",
         levels=(5, 6, 7, 8, 9),
         # Wiki: https://toontownrewritten.wiki/Mover_%26_Shaker
@@ -220,7 +220,7 @@ SELLBOT = Department(
     ),
     Cog(
         key="two_face",
-        display="Two Face",
+        display="Two-Face",
         department="sellbot",
         levels=(6, 7, 8, 9, 10),
         # Wiki: https://toontownrewritten.wiki/Two-Face
@@ -307,7 +307,7 @@ SELLBOT = Department(
     ),
     Cog(
         key="mr_hollywood",
-        display="Mr Hollywood",
+        display="Mr. Hollywood",
         department="sellbot",
         levels=(8, 9, 10, 11, 12),
         # Wiki: https://toontownrewritten.wiki/Mr._Hollywood

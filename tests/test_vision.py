@@ -10,6 +10,7 @@ import unittest
 try:
     import numpy as np
 
+    from solver.live import vision as V
     from solver.live.vision import (
         PARTS, Plate, TEAL, find_plates, health_fraction,
     )
@@ -125,6 +126,64 @@ class RegionTest(unittest.TestCase):
     def test_unknown_region_names_raise(self):
         with self.assertRaises(KeyError):
             Plate(slot=(0, 0, 66, 45), filled=0).region("nose")
+
+
+class TextIsolationTest(unittest.TestCase):
+    """The two ways reading "Level N" went wrong on real frames.
+
+    Both are hermetic: they exercise the mask handling, not the font, so
+    they run without a Toontown installation.
+    """
+
+    @staticmethod
+    def letters(gaps=(2, 2, 2, 2), width=6, height=10, top=2):
+        """A row of blobs standing in for "Level", plus a digit."""
+        total = width * (len(gaps) + 2) + sum(gaps) + 8
+        mask = np.zeros((height + top + 4, total), dtype=bool)
+        x = 0
+        for gap in list(gaps) + [8]:
+            mask[top:top + height, x:x + width] = True
+            x += width + gap
+        mask[top:top + height, x:x + width] = True
+        return mask
+
+    def test_a_speck_does_not_stretch_the_ink_box(self):
+        """One stray pixel below the text turned an 18px-tall "Level 6"
+        into a 32px box, shrinking the glyphs against the templates and
+        dropping the correct answer to IoU 0.08."""
+        mask = self.letters()
+        tall = np.zeros((mask.shape[0] + 12, mask.shape[1]), dtype=bool)
+        tall[:mask.shape[0]] = mask
+        tall[-1, -1] = True                        # the speck
+        cleaned = V._denoise(tall)
+        self.assertFalse(cleaned[-1, -1])
+        self.assertTrue(cleaned[2:12, 0:6].any())  # text survives
+
+    def test_the_widest_gap_splits_word_from_number(self):
+        digits = V._digits_only(self.letters())
+        self.assertIsNotNone(digits)
+        self.assertEqual(digits.shape[1], 6)       # just the last blob
+
+    def test_a_full_height_border_does_not_steal_the_digit(self):
+        """The level region reaches the plate's edge, which thresholds as
+        a thin full-height bar. Being rightmost, it was being taken for
+        the number: at 1440p a 4x40 sliver beat the real '8'."""
+        mask = self.letters()
+        # Real borders measured 1.74x and 2.6x the glyph height; 2.0x
+        # here rather than a value sitting exactly on the threshold.
+        tall = mask.shape[0] + 4
+        wide = np.zeros((tall, mask.shape[1] + 14), dtype=bool)
+        wide[:mask.shape[0], :mask.shape[1]] = mask
+        wide[:, -3:] = True                        # plate border
+        digits = V._digits_only(wide)
+        self.assertIsNotNone(digits)
+        self.assertEqual(digits.shape[1], 6)       # the digit, not the bar
+        self.assertLess(digits.shape[0], tall)
+
+    def test_text_with_no_word_break_reads_as_nothing(self):
+        even = self.letters(gaps=(2, 2, 2, 2))
+        even = even[:, :even.shape[1] - 8]         # drop the wide gap
+        self.assertIsNone(V._digits_only(even))
 
 
 class HealthTest(unittest.TestCase):

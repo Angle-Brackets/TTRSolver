@@ -6,3 +6,8 @@ venv/
 node_modules/
 .tto_SuitBattleGlobals.py
 visualizer/assets/
+
+# Extracted from the player's Toontown install at runtime, never vendored.
+solver/live/_ttr_cache/
+
+solver/live/_cog_heads/

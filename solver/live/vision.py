@@ -54,7 +54,13 @@ ASPECT_RANGE = (1.15, 1.85)
 # land correctly on both plates of a two-cog battle.
 PARTS: Dict[str, Tuple[float, float, float, float]] = {
     "level": (1.15, 0.05, 2.55, 0.95),
-    "medallion": (0.05, 1.20, 0.80, 2.10),
+    # The emblem is a circle, and the box has to be the circle rather
+    # than a rectangle near it. An earlier guess sat 0.15 slot widths too
+    # far left, catching plate metal on one side while clipping the disc
+    # on the other; resized against a square template that mismatch
+    # dropped correlation to noise and picked the wrong department.
+    # Measured: 43x43px on a 66x45 slot, i.e. square, as a disc should be.
+    "medallion": (0.20, 1.16, 0.85, 2.11),
     # Calibrated to the meter's *track*, not a box drawn around it. Both
     # cogs in the reference frame were at full health, so the extent of
     # saturated pixels is exactly the full-bar extent; the two plates
@@ -210,6 +216,243 @@ def find_plates(frame: np.ndarray) -> List[Plate]:
             continue
         plates.append(Plate(slot=(x0, y0, x1, y1), filled=filled))
     return plates
+
+
+def _denoise(mask: np.ndarray, keep_frac: float = 0.10) -> np.ndarray:
+    """Drop blobs far smaller than the largest one.
+
+    A single stray dark pixel -- a rivet edge, a compression artefact,
+    the cog's body showing through the plate -- is enough to stretch the
+    ink's bounding box well past the text. Since the box is what the
+    normalisation scales by, one speck shrinks the glyphs relative to the
+    templates and every comparison then fails. Observed: a speck below
+    the text turned an 18px-tall "Level 6" into a 32px box and dropped
+    the correct match to IoU 0.08.
+
+    Letters of "Level N" are all within an order of magnitude of each
+    other, so a tenth of the largest blob separates text from grit.
+    """
+    runs = _runs(mask)
+    if not runs:
+        return mask
+    groups = _label(runs)
+    areas = {key: sum(runs[i][2] - runs[i][1] for i in members)
+             for key, members in groups.items()}
+    floor = max(areas.values()) * keep_frac
+    cleaned = np.zeros_like(mask)
+    for key, members in groups.items():
+        if areas[key] >= floor:
+            for i in members:
+                row, start, end = runs[i]
+                cleaned[row, start:end] = True
+    return cleaned
+
+
+def _ink(gray: np.ndarray, threshold: int = 110):
+    """Tight crop of dark pixels, or None if the patch is blank.
+
+    Plate text is near-black on brushed metal, so a fixed threshold is
+    enough; the tight crop is what makes the comparison independent of
+    where in the region the text happens to sit.
+    """
+    mask = _denoise(gray < threshold)
+    if not mask.any():
+        return None
+    ys, xs = np.nonzero(mask)
+    return mask[ys.min():ys.max() + 1, xs.min():xs.max() + 1]
+
+
+def _normalise(mask: np.ndarray, height: int = 24) -> np.ndarray:
+    """Scale a binary mask to a fixed height, keeping its aspect."""
+    from PIL import Image
+
+    img = Image.fromarray((mask * 255).astype(np.uint8))
+    width = max(1, round(img.width * height / img.height))
+    return np.asarray(img.resize((width, height), Image.LANCZOS)) > 127
+
+
+def _overlap(a: np.ndarray, b: np.ndarray) -> float:
+    """Intersection over union of two binary masks, padded to match."""
+    h, w = max(a.shape[0], b.shape[0]), max(a.shape[1], b.shape[1])
+    pa = np.zeros((h, w), bool)
+    pb = np.zeros((h, w), bool)
+    pa[:a.shape[0], :a.shape[1]] = a
+    pb[:b.shape[0], :b.shape[1]] = b
+    union = (pa | pb).sum()
+    return float((pa & pb).sum()) / float(union) if union else 0.0
+
+
+def _components(mask: np.ndarray) -> List[Tuple[int, int, int, int]]:
+    """Bounding boxes of each blob, left to right."""
+    runs = _runs(mask)
+    if not runs:
+        return []
+    boxes = []
+    for members in _label(runs).values():
+        rows = [runs[i][0] for i in members]
+        boxes.append((min(runs[i][1] for i in members), min(rows),
+                      max(runs[i][2] for i in members), max(rows) + 1))
+    return sorted(boxes)
+
+
+def _drop_tall_outliers(boxes, limit: float = 1.6):
+    """Discard blobs far taller than the text they sit among.
+
+    The level region reaches close enough to the edge of the plate to
+    catch its border, which thresholds as a thin vertical bar spanning
+    the full height. Being the rightmost blob, it was stealing the role
+    of the digit: at 1440p a 4x40 sliver beat the real "8", which is why
+    the reader returned a confident-looking level with a score of 0.07.
+
+    Glyphs in one line of text share a height band; the border does not.
+    """
+    if len(boxes) < 3:
+        return boxes
+    heights = sorted(b[3] - b[1] for b in boxes)
+    median = heights[len(heights) // 2]
+    kept = [b for b in boxes if (b[3] - b[1]) <= limit * median]
+    return kept if len(kept) >= 2 else boxes
+
+
+def _digits_only(mask: np.ndarray):
+    """Split "Level 6" and keep the "6".
+
+    Matching the whole string does not work: "Level " is six of the seven
+    characters and identical in every template, so the overlap is
+    dominated by the part that carries no information. Measured on a real
+    plate, the correct level scored 0.47 while a wrong one scored 0.69.
+
+    The word and the number are separated by a space wider than any gap
+    between letters, so the widest gap is the split point.
+    """
+    boxes = _drop_tall_outliers(_components(mask))
+    if len(boxes) < 2:
+        return None
+    gaps = [(boxes[i + 1][0] - boxes[i][2], i) for i in range(len(boxes) - 1)]
+    widest, at = max(gaps)
+    letter_gaps = [g for g, _ in gaps]
+    typical = sorted(letter_gaps)[len(letter_gaps) // 2]
+    if widest <= typical:
+        return None                      # no clear word break
+    x0 = boxes[at + 1][0]
+    x1 = max(b[2] for b in boxes[at + 1:])
+    y0 = min(b[1] for b in boxes[at + 1:])
+    y1 = max(b[3] for b in boxes[at + 1:])
+    return mask[y0:y1, x0:x1]
+
+
+_LEVEL_TEMPLATES: Dict[int, np.ndarray] = {}
+
+
+def level_templates(levels=range(1, 13)) -> Dict[int, np.ndarray]:
+    """The rendered *number* of each level, from the game's own font.
+
+    Numbers rather than the whole "Level N" string, and matched as a
+    group rather than per glyph so that "12" needs no splitting into two
+    characters. Width carries real information here -- a two-digit number
+    is far wider relative to its height than a single digit.
+    """
+    if _LEVEL_TEMPLATES:
+        return _LEVEL_TEMPLATES
+    from PIL import Image, ImageDraw, ImageFont
+
+    from . import ttr_assets
+
+    font = ImageFont.truetype(str(ttr_assets.interface_font()), 64)
+    for level in levels:
+        canvas = Image.new("L", (400, 160), 255)
+        ImageDraw.Draw(canvas).text((20, 20), str(level), font=font, fill=0)
+        _LEVEL_TEMPLATES[level] = _normalise(_ink(np.asarray(canvas)))
+    return _LEVEL_TEMPLATES
+
+
+def read_level(frame: np.ndarray, plate: Plate) -> Tuple[Optional[int], float]:
+    """The cog's level, and how well it matched (0..1).
+
+    Returns (None, 0.0) when the region holds no legible text, which
+    happens while the plate is fading in.
+    """
+    x0, y0, x1, y1 = plate.region("level")
+    patch = frame[max(0, y0):y1, max(0, x0):x1, :3]
+    if patch.size == 0:
+        return None, 0.0
+    mask = _ink(patch.mean(axis=2))
+    if mask is None or mask.shape[0] < 4:
+        return None, 0.0
+    digits = _digits_only(mask)
+    if digits is None or digits.shape[0] < 4:
+        return None, 0.0
+
+    observed = _normalise(digits)
+    best, score = None, 0.0
+    for level, template in level_templates().items():
+        overlap = _overlap(observed, template)
+        if overlap > score:
+            best, score = level, overlap
+    return best, score
+
+
+_EMBLEMS: Dict[str, np.ndarray] = {}
+
+
+def emblem_templates() -> Dict[str, np.ndarray]:
+    """Department emblems as normalised greyscale, from the game atlas."""
+    if _EMBLEMS:
+        return _EMBLEMS
+    from PIL import Image
+
+    from . import ttr_assets
+
+    for dept, path in ttr_assets.department_emblems().items():
+        with Image.open(path) as img:
+            grey = np.asarray(img.convert("L").resize((48, 48),
+                                                      Image.LANCZOS),
+                              dtype=float)
+        _EMBLEMS[dept] = (grey - grey.mean()) / (grey.std() or 1.0)
+    return _EMBLEMS
+
+
+# How far the best emblem must beat the runner-up to be believed. At
+# 900p and above the winning margin is 0.07-0.22; at 720p the emblem is
+# too few pixels to tell apart and the margin collapses to 0.01-0.02,
+# with the wrong department winning. Reporting the margin rather than
+# the raw correlation is what makes that failure visible instead of
+# silently narrowing the candidate list to the wrong four cogs.
+MIN_DEPARTMENT_MARGIN = 0.05
+
+
+def read_department(frame: np.ndarray,
+                    plate: Plate) -> Tuple[Optional[str], float]:
+    """Which department's emblem is on the plate, and by what margin.
+
+    The emblem is embossed metal on more metal, so absolute brightness
+    says little and shape says everything -- hence zero-mean,
+    unit-variance correlation rather than a difference of pixels.
+
+    The returned score is the winning *margin* over the runner-up, not
+    the correlation: a high correlation that every department shares
+    means nothing, and the margin is what separates a real read from a
+    coin toss. Compare it against `MIN_DEPARTMENT_MARGIN`.
+    """
+    from PIL import Image
+
+    x0, y0, x1, y1 = plate.region("medallion")
+    patch = frame[max(0, y0):y1, max(0, x0):x1, :3]
+    if patch.size == 0:
+        return None, 0.0
+
+    grey = np.asarray(
+        Image.fromarray(patch.astype(np.uint8)).convert("L").resize(
+            (48, 48), Image.LANCZOS), dtype=float)
+    grey = (grey - grey.mean()) / (grey.std() or 1.0)
+
+    scored = sorted(
+        ((float((grey * template).mean()), dept)
+         for dept, template in emblem_templates().items()),
+        reverse=True)
+    if len(scored) < 2:
+        return (scored[0][1], 0.0) if scored else (None, 0.0)
+    return scored[0][1], scored[0][0] - scored[1][0]
 
 
 def health_fraction(frame: np.ndarray, plate: Plate) -> float:
