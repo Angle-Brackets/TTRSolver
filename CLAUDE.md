@@ -69,6 +69,23 @@ client rather than from documentation:
 - **Screen reading** (`solver/live/vision.py`) — needs
   `"show-cog-levels"` on. Cog level, department and health come off the
   plate above each cog. This is the only route to the cogs.
+  `solver/live/watch.py` polls it live; `solver/live/read_battle.py`
+  reads one screenshot and labels new cogs.
+
+Plates are found by their teal portrait slot, so nothing needs a window
+handle or the platform's window API. Do not add one.
+
+Department and level alone do not name a cog: only 8 of 48 pairs are
+unique, the rest allow up to five. The head render in the plate is the
+remaining evidence, and there is no shipped per-cog icon to match it
+against — `cogIcons` is the four department emblems, and the per-cog
+files in the phase archives are 3D texture skins. Hence the collected
+library in `solver/live/catalogue.py`.
+
+Read confidence is reported and must be honoured. Below `900p` the
+emblem cannot be told apart and `read_department` returns a margin under
+`MIN_DEPARTMENT_MARGIN`; at `480p` `read_level` returns `None`. Narrowing
+candidates on an unconfident read is worse than not narrowing at all.
 
 `TTRGame.vlt` (the game's Python) is encrypted, 8.0 bits/byte. The
 `phase_*.mf` files are plain Panda3D multifiles and are readable.
