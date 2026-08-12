@@ -104,7 +104,39 @@ Worth trying next, roughly in order of expected payoff:
 **None of this helps the visualizer**, which runs single-threaded under
 Pyodide with no `multiprocessing`; that would need web workers.
 
-## 4. Validate the solver's advice against real play
+## 4. Improve the heuristic (attempted; nothing beat it yet)
+
+There is now a way to *score* a heuristic instead of arguing about it:
+small fights can be solved exactly to the end, so a shallow search using
+heuristic X can be graded on how often it picks the exact solver's move,
+and how much EV it gives up when it doesn't.
+
+Baseline (HP progress minus laff lost): **78% optimal, 10.6 EV regret**
+over 40 random fights.
+
+Tried and rejected, all measured:
+
+| idea | result |
+| --- | --- |
+| threat-weighted (dead cog = 0 threat) | 75%, regret 12.3 |
+| blended threat + HP | 72%, regret 15.3 |
+| lure-discounted threat | 65%, regret 20.9 |
+| grid over (HP, kill-bonus, laff) weights | nothing beat 100/0/100 |
+
+The reasoning behind the threat idea was sound -- a dead cog stops
+attacking, a half-dead one hits just as hard -- and it still lost. HP
+progress turns out to be the better proxy simply because the +100 win bonus
+dominates the objective, and you collect it by removing HP, not by removing
+threat. A kill bonus on top consistently hurt.
+
+One candidate (60/0/30) showed lower regret on the first sample and turned
+out to be noise: it was indistinguishable on two fresh samples of 50.
+
+Worth trying next: features the current heuristic cannot see at all --
+gags remaining in the pouch, and whether a cog is one hit from dying (a
+step function, not the linear HP term).
+
+## 5. Validate the solver's advice against real play
 
 The search is verified as an *algorithm* (`tests/test_search.py`) and the
 distribution is verified against the sampler (`test_matches_sampled_step`),

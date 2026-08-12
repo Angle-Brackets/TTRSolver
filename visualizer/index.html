@@ -302,7 +302,7 @@ function NodeCard({node, selected, busy, onSelect}) {
 
 /* ---------- inspector -------------------------------------------------- */
 
-function Inspector({node, bridge, depth}) {
+function Inspector({node, bridge, depth, objective}) {
   const [forecast, setForecast] = useState(null);
   const [line, setLine] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -323,7 +323,8 @@ function Inspector({node, bridge, depth}) {
     setBusy(true);
     setTimeout(() => {
       try {
-        const l = call(bridge.api_best_line, {state: node.state, depth});
+        const l = call(bridge.api_best_line,
+                       {state: node.state, depth, objective});
         setLine(l.error ? null : l.line);
       } catch (e) { /* surfaced by the forecast panel */ }
       setBusy(false);
@@ -523,24 +524,36 @@ function App({bridge, catalogue}) {
   const [, bump] = useState(0);
   const [busyId, setBusyId] = useState(null);
   const [zoom, setZoom] = useState(1);
+  const [preset, setPreset] = useState("balanced");
+  const [gagCost, setGagCost] = useState(null);   // null = the preset's own
   const [focusId, setFocusId] = useState(null);
   const [err, setErr] = useState(null);
   const canvasRef = useRef(null);
   const rerender = () => bump(v => v + 1);
 
   const cogTypes = depts[dept];
+  const presetDef = (catalogue.objectives || [])
+    .find(o => o.name === preset) || {gag_cost: 0.1};
+  const presetGagCost = presetDef.gag_cost;
+  // Sent with every call: the objective is part of the question, not a
+  // setting on the solver, so it travels with the request.
+  const objective = gagCost != null
+    ? {preset, gag_cost: gagCost} : {preset};
   const levelsFor = (t) => (cogTypes.find(c => c.type === t) || cogTypes[0]).levels;
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const expand = useCallback((node) => {
     if (node.children || node.kind === "terminal" || node.kind === "bucket")
       return node.children;
     const res = node.kind === "action"
-      ? call(bridge.api_expand_action, {state: node.state, action: node.action})
-      : call(bridge.api_expand_decision, {state: node.state, depth});
+      ? call(bridge.api_expand_action,
+             {state: node.state, action: node.action, objective})
+      : call(bridge.api_expand_decision,
+             {state: node.state, depth, objective});
     if (res.error) { setErr(res.error); node.children = []; }
     else { node.children = res.children.map(c => mkNode(c, node)); }
     return node.children;
-  }, [bridge, depth]);
+  }, [bridge, depth, preset, gagCost]);
 
   const toggle = (node) => {
     if (node.kind === "more") {
@@ -580,6 +593,14 @@ function App({bridge, catalogue}) {
   const expandInto = (r) => { const k = expand(r); if (k) r.open = true; };
 
   useEffect(rebuild, []);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Every EV in the tree was computed under the old objective, so the whole
+  // thing is stale the moment it changes. Rebuild rather than show a mix.
+  const firstRender = useRef(true);
+  useEffect(() => {
+    if (firstRender.current) { firstRender.current = false; return; }
+    rebuild();
+  }, [preset, gagCost]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   /** Walk the solver's own recommendation down the tree, opening as it
    *  goes, so the plan is visible as a highlighted spine rather than
@@ -655,6 +676,24 @@ function App({bridge, catalogue}) {
           <select value={depth} onChange={e => setDepth(+e.target.value)}>
             {[1,2,3,4].map(d => <option key={d} value={d}>{d}</option>)}
           </select>
+        </label>
+        <label>Plays like
+          <select value={preset} onChange={e => {
+            setPreset(e.target.value); setGagCost(null);
+          }}>
+            {(catalogue.objectives || []).map(o =>
+              <option key={o.name} value={o.name} title={o.description}>
+                {o.name}</option>)}
+          </select>
+        </label>
+        <label title="How much spending a gag costs, per level. Raise it and
+the solver stops burning big gags for small gains.">
+          Gag cost
+          <input type="range" min="0" max="100" style={{width:70}}
+                 value={(gagCost != null ? gagCost : presetGagCost) * 100}
+                 onChange={e => setGagCost(+e.target.value / 100)} />
+          <span className="mono">
+            {(gagCost != null ? gagCost : presetGagCost).toFixed(2)}</span>
         </label>
         <label>Zoom
           <input type="range" min="40" max="100" value={zoom * 100}
@@ -743,7 +782,8 @@ function App({bridge, catalogue}) {
            </div>
           </div>
         </div>
-        <aside><Inspector node={selected} bridge={bridge} depth={depth} /></aside>
+        <aside><Inspector node={selected} bridge={bridge} depth={depth}
+                          objective={objective} /></aside>
       </main>
     </div>
   );

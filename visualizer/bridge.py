@@ -15,11 +15,13 @@ from `solver.mechanics` / `solver.outcomes` / `solver.search`.
 Runs fine under CPython too, which is how it's tested
 (`tests/test_bridge.py`).
 """
+import dataclasses
 import json
 from typing import Any, Dict, List, Optional
 
 from solver import data, outcomes, simulator
 from solver.search import expectimax
+from solver.search import objective as objective_mod
 from solver.state import Action, BattleState, CogState, CogStatus, ToonState, Track
 
 # ---------------------------------------------------------------------
@@ -195,9 +197,14 @@ def catalogue() -> Dict[str, Any]:
                          "icon": gag_icon(track, level),
                          "max_carry": spec.max_carry,
                          "group": simulator.is_group_action(track, level)})
+    presets = [{"name": o.name, "description": o.description,
+                "gag_cost": o.gag_cost, "scarcity_cost": o.scarcity_cost,
+                "turn_cost": o.turn_cost, "laff_weight": o.laff_weight}
+               for o in objective_mod.PRESETS.values()]
     emblems = {d: department_icon(d) for d in sorted(data.COG_DEPARTMENTS)}
     return {"departments": depts, "gags": gags, "emblems": emblems,
             "tracks": [t.value for t in Track],
+            "objectives": presets,
             "limits": {"max_tracks": data.MAX_GAG_TRACKS,
                        "max_pouch": data.MAX_POUCH}}
 
@@ -205,6 +212,22 @@ def catalogue() -> Dict[str, Any]:
 # ---------------------------------------------------------------------
 # Tree expansion -- lazy, one layer per call
 # ---------------------------------------------------------------------
+
+
+def resolve_objective(spec: Optional[Dict[str, Any]]):
+    """Turn the UI's {preset, overrides...} into an Objective.
+
+    The presets are the interesting part -- they change what "best" means,
+    not how hard the solver looks -- so they live in solver/search and the
+    page only names one.
+    """
+    if not spec:
+        return objective_mod.DEFAULT
+    base = objective_mod.get(spec.get("preset", "balanced"))
+    tweaks = {k: float(v) for k, v in spec.items()
+              if k in ("gag_cost", "scarcity_cost", "turn_cost", "laff_weight")
+              and v is not None}
+    return dataclasses.replace(base, **tweaks) if tweaks else base
 
 
 def _terminal_label(state: BattleState) -> Optional[str]:
@@ -215,12 +238,14 @@ def _terminal_label(state: BattleState) -> Optional[str]:
     return None
 
 
-def expand_decision(state_dict: Dict[str, Any], depth: int) -> List[Dict[str, Any]]:
+def expand_decision(state_dict: Dict[str, Any], depth: int,
+                     objective=None) -> List[Dict[str, Any]]:
     """The toon's options from this state, each scored by expectimax and
     sorted best-first. `gap` is the EV lead over the next-best option --
     near zero means the choice doesn't matter."""
     state = state_from_dict(state_dict)
-    ranked = expectimax.rank_actions(state, depth=max(1, depth))
+    ranked = expectimax.rank_actions(state, depth=max(1, depth),
+                                     objective=objective)
 
     children = []
     for i, (value, action) in enumerate(ranked):
@@ -239,7 +264,7 @@ def expand_decision(state_dict: Dict[str, Any], depth: int) -> List[Dict[str, An
 
 
 def best_line(state_dict: Dict[str, Any], depth: int,
-               steps: int = 6) -> List[Dict[str, Any]]:
+               steps: int = 6, objective=None) -> List[Dict[str, Any]]:
     """The principal variation: what the solver plays from here, following
     its own recommendation and then the single most likely outcome of it.
 
@@ -255,13 +280,14 @@ def best_line(state_dict: Dict[str, Any], depth: int,
         if state.is_terminal():
             break
         try:
-            value, action = expectimax.evaluate(state, depth=max(1, depth))
+            value, action = expectimax.evaluate(state, depth=max(1, depth),
+                                                objective=objective)
         except NotImplementedError:
             break
         if action is None:
             break
 
-        branches = outcomes.action_outcomes(state, action)
+        branches = outcomes.action_outcomes(state, action, objective)
         if not branches:
             break
         prob, next_state, reward = max(branches, key=lambda b: b[0])
@@ -282,14 +308,14 @@ def best_line(state_dict: Dict[str, Any], depth: int,
 
 
 def expand_action(state_dict: Dict[str, Any], action_dict: Dict[str, Any],
-                   cap: int = 8) -> List[Dict[str, Any]]:
+                   cap: int = 8, objective=None) -> List[Dict[str, Any]]:
     """Every outcome of taking this action, with exact probabilities from
     `outcomes.action_outcomes`. Outcomes past `cap` are merged into one
     bucket so a node never spawns dozens of children."""
     state = state_from_dict(state_dict)
     action = action_from_dict(action_dict)
 
-    branches = sorted(outcomes.action_outcomes(state, action),
+    branches = sorted(outcomes.action_outcomes(state, action, objective),
                       key=lambda b: b[0], reverse=True)
 
     children = []
@@ -361,7 +387,8 @@ def api_root(cfg_json: str) -> str:
 def api_expand_decision(payload_json: str) -> str:
     payload = json.loads(payload_json)
     try:
-        children = expand_decision(payload["state"], payload.get("depth", 2))
+        children = expand_decision(payload["state"], payload.get("depth", 2),
+            objective=resolve_objective(payload.get("objective")))
     except NotImplementedError as exc:
         return json.dumps({"error": str(exc)})
     return json.dumps({"children": children})
@@ -370,7 +397,8 @@ def api_expand_decision(payload_json: str) -> str:
 def api_expand_action(payload_json: str) -> str:
     payload = json.loads(payload_json)
     try:
-        children = expand_action(payload["state"], payload["action"])
+        children = expand_action(payload["state"], payload["action"],
+            objective=resolve_objective(payload.get("objective")))
     except NotImplementedError as exc:
         return json.dumps({"error": str(exc)})
     return json.dumps({"children": children})
@@ -387,7 +415,8 @@ def api_cog_forecast(payload_json: str) -> str:
 def api_best_line(payload_json: str) -> str:
     payload = json.loads(payload_json)
     try:
-        line = best_line(payload["state"], payload.get("depth", 2))
+        line = best_line(payload["state"], payload.get("depth", 2),
+            objective=resolve_objective(payload.get("objective")))
     except NotImplementedError as exc:
         return json.dumps({"error": str(exc)})
     return json.dumps({"line": line})

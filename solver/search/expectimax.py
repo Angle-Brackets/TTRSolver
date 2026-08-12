@@ -176,7 +176,7 @@ def distinct_actions(state: BattleState) -> List[Action]:
 # Search
 # ---------------------------------------------------------------------
 
-def evaluate(state: BattleState, depth: int, gag_cost_lambda: float = 0.1,
+def evaluate(state: BattleState, depth: int, objective=None,
              discount: float = 1.0, memo: Optional[Dict] = None,
              alpha: float = float("-inf"), beta: float = float("inf"),
              prune: bool = False, epsilon: float = 0.0,
@@ -233,14 +233,14 @@ def evaluate(state: BattleState, depth: int, gag_cost_lambda: float = 0.1,
 
     for action in actions:
         try:
-            branches = outcomes_mod.action_outcomes(state, action, gag_cost_lambda)
+            branches = outcomes_mod.action_outcomes(state, action, objective)
         except NotImplementedError:
             # Gag or cog data still marked TODO -- skip this action rather
             # than let a data gap take down the whole search.
             continue
 
         branches, _dropped = trim(branches, epsilon)
-        value = _chance_value(state, branches, depth, gag_cost_lambda,
+        value = _chance_value(state, branches, depth, objective,
                               discount, memo, alpha, beta, prune, epsilon,
                               probe=not probe_only)
         if value > best_value:
@@ -265,7 +265,7 @@ def evaluate(state: BattleState, depth: int, gag_cost_lambda: float = 0.1,
 
 
 def _value_bounds(state: BattleState, depth: int,
-                   gag_cost_lambda: float) -> Tuple[float, float]:
+                   objective: float) -> Tuple[float, float]:
     """Admissible [floor, ceiling] on the value of a state.
 
     The ceiling is winning outright. The floor is losing every remaining
@@ -276,11 +276,12 @@ def _value_bounds(state: BattleState, depth: int,
     considerably tighter as a fight wears on.
     """
     ceiling = WIN_VALUE
-    floor = -(float(state.toon.laff) + 100.0 + gag_cost_lambda * 7.0 * depth)
+    floor = -(float(state.toon.laff) + 100.0
+              + getattr(objective, "gag_cost", 0.1) * 7.0 * depth)
     return floor, ceiling
 
 
-def _chance_value(state, branches, depth, gag_cost_lambda, discount, memo,
+def _chance_value(state, branches, depth, objective, discount, memo,
                    alpha, beta, prune, epsilon=0.0, probe=True) -> float:
     """Expected value of one action, with *-minimax pruning.
 
@@ -300,14 +301,14 @@ def _chance_value(state, branches, depth, gag_cost_lambda, discount, memo,
     """
     if not prune:
         return sum(prob * (reward + discount *
-                           evaluate(nxt, depth - 1, gag_cost_lambda, discount,
+                           evaluate(nxt, depth - 1, objective, discount,
                                     memo, prune=False, epsilon=epsilon)[0])
                    for prob, nxt, reward in branches)
 
     # Most probable first: they close the gap between lower and upper
     # fastest, so the thin tail is what gets cut.
     branches = sorted(branches, key=lambda b: b[0], reverse=True)
-    bounds = [_value_bounds(nxt, depth - 1, gag_cost_lambda)
+    bounds = [_value_bounds(nxt, depth - 1, objective)
               for _p, nxt, _r in branches]
 
     floors = [f for f, _c in bounds]
@@ -318,7 +319,7 @@ def _chance_value(state, branches, depth, gag_cost_lambda, discount, memo,
             if nxt.is_terminal():
                 floors[i] = 0.0
                 continue
-            probed, _ = evaluate(nxt, depth - 1, gag_cost_lambda, discount,
+            probed, _ = evaluate(nxt, depth - 1, objective, discount,
                                  memo, alpha=float("-inf"), beta=float("inf"),
                                  prune=True, epsilon=epsilon, probe_only=True)
             floors[i] = max(floors[i], probed)
@@ -352,7 +353,7 @@ def _chance_value(state, branches, depth, gag_cost_lambda, discount, memo,
         if child_alpha >= child_beta:
             child_alpha, child_beta = floor, ceiling
 
-        value, _ = evaluate(nxt, depth - 1, gag_cost_lambda, discount, memo,
+        value, _ = evaluate(nxt, depth - 1, objective, discount, memo,
                             child_alpha, child_beta, True, epsilon)
         f = reward + discount * value
 
@@ -368,7 +369,7 @@ def _chance_value(state, branches, depth, gag_cost_lambda, discount, memo,
     return total
 
 
-def solve(state: BattleState, gag_cost_lambda: float = 0.1,
+def solve(state: BattleState, objective=None,
            max_depth: Optional[int] = None,
            memo: Optional[Dict] = None) -> Tuple[float, Optional[Action]]:
     """Play the battle out to the end -- exact, no heuristic.
@@ -379,17 +380,17 @@ def solve(state: BattleState, gag_cost_lambda: float = 0.1,
     """
     if max_depth is None:
         max_depth = sum(n for n in state.toon.gag_counts.values() if n > 0) + 1
-    return evaluate(state, max_depth, gag_cost_lambda, memo=memo)
+    return evaluate(state, max_depth, objective, memo=memo)
 
 
 def best_action(state: BattleState, depth: int = 3,
-                gag_cost_lambda: float = 0.1) -> Optional[Action]:
+                objective=None) -> Optional[Action]:
     """The action to take right now. None if nothing is playable."""
-    return evaluate(state, depth, gag_cost_lambda)[1]
+    return evaluate(state, depth, objective)[1]
 
 
 def best_action_iterative(state: BattleState, depth: int = 4,
-                           gag_cost_lambda: float = 0.1
+                           objective=None
                            ) -> Tuple[float, Optional[Action]]:
     """Search 1..depth, reusing the table between passes.
 
@@ -400,12 +401,12 @@ def best_action_iterative(state: BattleState, depth: int = 4,
     memo: Dict = {}
     value, action = 0.0, None
     for d in range(1, depth + 1):
-        value, action = evaluate(state, d, gag_cost_lambda, memo=memo)
+        value, action = evaluate(state, d, objective, memo=memo)
     return value, action
 
 
 def rank_actions(state: BattleState, depth: int = 3,
-                 gag_cost_lambda: float = 0.1) -> List[Tuple[float, Action]]:
+                 objective=None) -> List[Tuple[float, Action]]:
     """Every legal action with its expected value, best first.
 
     Unpruned by construction: a window that is tight enough to prune is also
@@ -417,11 +418,11 @@ def rank_actions(state: BattleState, depth: int = 3,
     scored = []
     for action in simulator.legal_actions(state):
         try:
-            branches = outcomes_mod.action_outcomes(state, action, gag_cost_lambda)
+            branches = outcomes_mod.action_outcomes(state, action, objective)
         except NotImplementedError:
             continue
         value = sum(
-            prob * (reward + evaluate(nxt, depth - 1, gag_cost_lambda,
+            prob * (reward + evaluate(nxt, depth - 1, objective,
                                       1.0, memo)[0])
             for prob, nxt, reward in branches
         )

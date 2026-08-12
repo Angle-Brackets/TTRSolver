@@ -217,12 +217,21 @@ def cog_phase_outcomes(state: BattleState
 # ---------------------------------------------------------------------
 
 def action_outcomes(state: BattleState, action: Action,
-                     gag_cost_lambda: float = 0.1) -> List[Outcome]:
+                     objective=None) -> List[Outcome]:
     """Every (probability, next_state, reward) triple for taking `action`.
 
-    Probabilities sum to 1. Rewards use simulator.step's convention:
-    -laff_lost - gag_cost_lambda*level, +100 on a win, -100 on a loss.
+    Probabilities sum to 1. `objective` decides what the rewards mean --
+    see solver/search/objective.py. It defaults to the balanced preset,
+    which reproduces simulator.step's convention exactly, so a sampled
+    rollout and a searched line optimise the same thing.
+
+    A float is accepted for the old gag-cost-only calling convention.
     """
+    from .search import objective as objective_mod
+    if objective is None:
+        objective = objective_mod.DEFAULT
+    elif isinstance(objective, (int, float)):
+        objective = objective_mod.Objective(gag_cost=float(objective))
     results: Dict[Tuple, List] = {}
 
     p_hit = _toon_hit_probability(state, action)
@@ -237,7 +246,7 @@ def action_outcomes(state: BattleState, action: Action,
         simulator.apply_toon_action(after_toon, action, hit)
 
         if after_toon.is_terminal():
-            _accumulate(results, p_toon, after_toon, 0, action, gag_cost_lambda)
+            _accumulate(results, p_toon, after_toon, 0, action, objective)
             continue
 
         for p_cogs, laff_lost, ended, held in cog_phase_outcomes(after_toon):
@@ -249,13 +258,13 @@ def action_outcomes(state: BattleState, action: Action,
             for idx in held:
                 final.cogs[idx].status.lure_rounds_remaining -= 1
             _accumulate(results, p_toon * p_cogs, final, laff_lost,
-                        action, gag_cost_lambda)
+                        action, objective)
 
     return [(p, st, r) for p, st, r in results.values()]
 
 
 def _accumulate(results, prob, state_after, laff_lost, action,
-                 gag_cost_lambda) -> None:
+                 objective) -> None:
     """Apply laff loss, advance the round, compute reward, and merge into
     `results` -- identical resulting states have their probabilities summed
     so the solver doesn't explore the same node twice."""
@@ -263,11 +272,9 @@ def _accumulate(results, prob, state_after, laff_lost, action,
                                        state_after.toon.laff - laff_lost))
     state_after.round_num += 1
 
-    reward = -float(laff_lost) - gag_cost_lambda * float(action.level)
-    if state_after.is_win():
-        reward += 100.0
-    elif state_after.toon.laff <= 0:
-        reward -= 100.0
+    reward = objective.step_reward(
+        laff_lost, action.track, action.level,
+        won=state_after.is_win(), lost=state_after.toon.laff <= 0)
 
     key = state_key(state_after)
     existing = results.get(key)
