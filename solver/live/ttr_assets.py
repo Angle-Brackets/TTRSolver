@@ -140,9 +140,26 @@ def find(pattern: str, override: Optional[str] = None) -> List[str]:
 # obvious guess, and the one this project first assumed -- manages 0.33.
 INTERFACE_FONT = ("ImpressBT.ttf", "phase_3.mf")
 
-# A 2x2 atlas of the four department emblems, in this order.
+# A 2x2 atlas of the four department emblems, read left-to-right then
+# top-to-bottom. The order is NOT alphabetical and is not the c/l/m/s
+# order the Local API uses for cog suits:
+#
+#     top-left     rising bar chart  -> Sellbot   (a sales chart)
+#     top-right    dollar sign       -> Cashbot
+#     bottom-left  gavel             -> Lawbot
+#     bottom-right necktie           -> Bossbot   (the boss's tie)
+#
+# [CONFIRMED] against the wiki's own department icons, which carry the
+# department in their filenames. This was wrong for its first several
+# commits: the tiles were assigned by guessing what each picture
+# depicted, which swapped Bossbot and Sellbot and made every reading of
+# those two confidently incorrect -- a real Bossbot plate was reported as
+# Sellbot with a 0.43 margin, well above the confidence floor. Guessing
+# the mapping and then checking only that four emblems existed is what
+# let it stand. If this order is ever touched, re-verify it against a
+# named source rather than by eye.
 COG_ICONS = ("ttr_t_ara_gen_cogIcons.jpg", "phase_3.5.mf")
-EMBLEM_ORDER = ("bossbot", "cashbot", "lawbot", "sellbot")
+EMBLEM_ORDER = ("sellbot", "cashbot", "lawbot", "bossbot")
 
 
 def interface_font(override: Optional[str] = None) -> Path:
@@ -159,9 +176,12 @@ def department_emblems(override: Optional[str] = None) -> Dict[str, Path]:
         half_w, half_h = atlas.width // 2, atlas.height // 2
         for index, dept in enumerate(EMBLEM_ORDER):
             target = atlas_path.parent / f"emblem_{dept}.png"
-            if not target.is_file():
-                left, top = (index % 2) * half_w, (index // 2) * half_h
-                atlas.crop((left, top, left + half_w,
-                            top + half_h)).save(target)
+            # Always re-crop rather than reusing what is on disk. The
+            # filename records only the department, so when EMBLEM_ORDER
+            # was corrected the cache kept serving tiles cut at the old
+            # positions -- a fix that appeared not to take. Cropping a
+            # 256x256 jpg costs nothing next to that class of bug.
+            left, top = (index % 2) * half_w, (index // 2) * half_h
+            atlas.crop((left, top, left + half_w, top + half_h)).save(target)
             out[dept] = target
     return out
