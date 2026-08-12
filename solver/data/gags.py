@@ -256,6 +256,30 @@ POUCH_CAPACITIES = {
 }
 MAX_POUCH = max(POUCH_CAPACITIES.values())
 
+# Level 7 gags are carried outside the pouch and do not count towards its
+# total. [CONFIRMED] three ways: the wiki gives level 7s their own limit
+# ("Toons can only carry one of each level 7 gag but can unlock the
+# ability to carry one additional level 7 gag by speaking to Ripley",
+# with a ToonTask literally titled "Change +1 level 7 gag carry
+# capacity"); a live gag menu showing 75 carried gags displayed "Total
+# gags 70 / 70", and the difference was exactly the five level 7s held;
+# and the player confirmed the rule directly.
+#
+# Counting them in was rejecting legal loadouts: a full 80-gag pouch plus
+# one level 7 per track came back as "86 gags, but the largest pouch
+# holds 80".
+POUCH_EXEMPT_LEVEL = 7
+
+
+def pouch_total(gag_counts) -> int:
+    """Gags counting against the pouch: everything below level 7.
+
+    This is the number the gag menu prints as "Total gags", so it also
+    serves as a checksum on anything that reads the menu off the screen.
+    """
+    return sum(n for (_track, level), n in gag_counts.items()
+               if n > 0 and level < POUCH_EXEMPT_LEVEL)
+
 
 def validate_loadout(gag_counts) -> list:
     """Reasons a {(track, level): count} loadout is not legal, or [].
@@ -270,10 +294,10 @@ def validate_loadout(gag_counts) -> list:
         problems.append(
             f"{len(carried)} gag tracks, but a toon can train at most "
             f"{MAX_GAG_TRACKS} of the seven")
-    total = sum(n for n in gag_counts.values() if n > 0)
+    total = pouch_total(gag_counts)
     if total > MAX_POUCH:
         problems.append(
-            f"{total} gags, but the largest pouch holds {MAX_POUCH}")
+            f"{total} pouch gags, but the largest pouch holds {MAX_POUCH}")
     for (track, level), count in sorted(gag_counts.items()):
         if count < 0:
             problems.append(f"{gag(track, level).display}: negative count")

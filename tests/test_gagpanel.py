@@ -153,6 +153,29 @@ class ReadPanelTest(unittest.TestCase):
         self.assertEqual(panel.track_exp()[Track.SOUND], 7)
 
 
+class PouchTotalTest(unittest.TestCase):
+    """Level 7 gags are carried outside the pouch."""
+
+    def test_pouch_total_excludes_level_sevens(self):
+        panel = read_panel(panel_frame({Track.THROW: [0, 0, 0, 1, 7, 3, 1]}))
+        self.assertEqual(panel.total(), 12)
+        self.assertEqual(panel.pouch_total(), 11)
+
+    def test_the_menu_label_is_a_checksum_on_the_reading(self):
+        """A real frame carrying 75 gags printed "Total gags 70 / 70",
+        the difference being exactly its five level 7s. Agreement
+        between the two is evidence no digit was misread."""
+        counts = {Track.TRAP: [0, 0, 0, 0, 7, 3, 1],
+                  Track.LURE: [0, 0, 0, 7, 7, 3, 1],
+                  Track.SOUND: [0, 0, 0, 5, 5, 2, 1],
+                  Track.THROW: [0, 0, 0, 1, 7, 3, 1],
+                  Track.SQUIRT: [0, 0, 0, 0, 7, 3, 1],
+                  Track.DROP: [0, 0, 0, 0, 7, 3, 0]}
+        panel = read_panel(panel_frame(counts))
+        self.assertEqual(panel.total(), 75)
+        self.assertEqual(panel.pouch_total(), 70)
+
+
 class MergeColumnsTest(unittest.TestCase):
     """Thresholding splits a digit; two digits must stay apart."""
 

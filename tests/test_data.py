@@ -336,3 +336,38 @@ class TestTablesDriveMechanics(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PouchExemptionTest(unittest.TestCase):
+    """Level 7 gags do not count against the gag pouch.
+
+    [CONFIRMED] three ways: the wiki gives level 7s a separate carry
+    limit and a ToonTask titled "Change +1 level 7 gag carry capacity";
+    a live gag menu holding 75 gags printed "Total gags 70 / 70", the
+    difference being exactly its five level 7s; and the player confirmed
+    it. Counting them in rejected legal loadouts.
+    """
+
+    def test_pouch_total_ignores_level_sevens(self):
+        from solver.data.gags import pouch_total
+        from solver.state import Track
+        counts = {(Track.THROW, 5): 10, (Track.THROW, 7): 1,
+                  (Track.DROP, 7): 1}
+        self.assertEqual(pouch_total(counts), 10)
+
+    def test_a_full_pouch_plus_level_sevens_is_legal(self):
+        from solver.data.gags import validate_loadout
+        from solver.state import Track
+        counts = {(Track.THROW, 5): 7, (Track.THROW, 6): 3,
+                  (Track.SQUIRT, 5): 7, (Track.SQUIRT, 6): 3}
+        counts.update({(t, 7): 1 for t in
+                       (Track.TRAP, Track.LURE, Track.SOUND, Track.THROW,
+                        Track.SQUIRT, Track.DROP)})
+        self.assertEqual(validate_loadout(counts), [])
+
+    def test_an_oversized_pouch_is_still_caught(self):
+        from solver.data.gags import validate_loadout
+        from solver.state import Track
+        counts = {(Track.THROW, lvl): 30 for lvl in (1, 2, 3, 4)}
+        problems = validate_loadout(counts)
+        self.assertTrue(any("pouch" in p for p in problems), problems)

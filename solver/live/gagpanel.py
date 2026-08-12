@@ -124,7 +124,22 @@ class GagPanel:
         return out
 
     def total(self) -> int:
+        """Every gag carried, level 7s included."""
         return sum(c.carried for c in self.cells)
+
+    def pouch_total(self) -> int:
+        """What the menu's own "Total gags" label counts.
+
+        Level 7 gags are carried outside the pouch, so the label omits
+        them -- a frame holding 75 gags printed "Total gags 70 / 70",
+        the difference being exactly its five level 7s. Comparing this
+        against that label gives a free checksum on every capture: if
+        they disagree, a digit was misread.
+        """
+        from ..data.gags import POUCH_EXEMPT_LEVEL
+
+        return sum(c.carried for c in self.cells
+                   if c.level < POUCH_EXEMPT_LEVEL)
 
 
 def _row_bands(frame: np.ndarray) -> Dict[Track, int]:
