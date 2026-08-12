@@ -23,6 +23,60 @@ optimal play about **78%** of the time. That number is the target.
 Improving it costs no search time, which is the opposite of every other
 lever left.
 
+## What is actually wrong with the current one
+
+Measured against exact `solve()` values on 45 random positions:
+
+| | |
+|---|---|
+| heuristic mean | **-6.5** (range -66 to 63) |
+| true value mean | **93.7** (range 67 to 100) |
+| systematic bias | **-100.2 points** |
+| mean absolute error | 100.2 |
+| correlation with truth | 0.44 |
+| pairwise ordering correct | 70% |
+
+The bias is not noise and its size is not a coincidence. The heuristic
+scores a position relative to "full laff, cogs untouched = 0". The true
+value of a winnable position includes the **+100 the battle is on track
+to pay**. The heuristic has no notion of who is going to win, so it omits
+the term that dominates the entire value scale.
+
+That matters inside the search, not just on paper. Terminal wins score
++100 and cutoff nodes score around -6, so any line that finishes is
+flattered against any line that merely looks good and runs out of
+horizon. The evaluator is not just imprecise, it is pulling in a
+direction.
+
+### Three things it cannot express at all
+
+Positions it scores *identically* that are not worth the same:
+
+| position | heuristic | true value |
+|---|---|---|
+| focus fire, one cog nearly dead | -18.8 | 68.5 |
+| spread, same total cog HP | -18.8 | **89.8** |
+| four gags against one cog | -35.4 | 99.0 |
+| one gag against one cog | -35.4 | **92.0** |
+| cog lured for three rounds | -35.4 | 99.6 |
+| cog awake | -35.4 | 98.9 |
+
+- **Cog HP is summed, so where the damage went is invisible.** Note the
+  spread position is worth *more* here: both cogs sit inside one-shot
+  range, while focusing leaves a full-health cog needing two gags from a
+  hand of three. The quantity that matters is how many cogs can be
+  killed with what is in the pouch, which is a threshold, not a ratio.
+- **Gags remaining do not appear.** A toon that cannot finish the fight
+  scores the same as one that can.
+- **Lure and trap do not appear.** A lured cog is not attacking, which is
+  most of what lure is for.
+
+So the first job of a fitted evaluator is not subtle feature
+engineering. It is calibration: predict the value the position actually
+has, terminal reward included. The features above are the second job,
+and worth perhaps twenty points where the calibration is worth a
+hundred.
+
 ## Inference cost is not the constraint
 
 This was the first thing to check, and it ruled out the objection the
