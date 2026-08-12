@@ -117,6 +117,17 @@ class SearchTimeout(Exception):
 # the coarser check is overshooting a deadline by a few hundred nodes.
 DEADLINE_CHECK_INTERVAL = 512
 
+# Passing exact_plies=0 turns on `outcomes.collapse_damage`, subject to
+# `may_collapse`. None disables collapsing entirely and is the default,
+# so nothing approximates unless a caller asks.
+#
+# The number counts plies nearest the root that stay exact regardless.
+# It is kept because it is the natural knob to reach for, but 1 is NOT a
+# useful setting and the measurements say why: keeping the root exact
+# removed the entire benefit on three and four cogs, because the saving
+# compounds downward. Collapse near the root or do not bother.
+COLLAPSE_EVERYWHERE = 0
+
 
 def trim(branches, epsilon: float):
     """Keep the likeliest branches covering (1 - epsilon) of the probability,
@@ -215,7 +226,9 @@ def evaluate(state: BattleState, depth: int, objective=None,
              alpha: float = float("-inf"), beta: float = float("inf"),
              prune: bool = True, epsilon: float = 0.0,
              probe_only: bool = False,
-             deadline: Optional[List] = None) -> Tuple[float, Optional[Action]]:
+             deadline: Optional[List] = None,
+             exact_plies: Optional[int] = None,
+             ) -> Tuple[float, Optional[Action]]:
     """Expected value of `state` under optimal play, plus the action that
     achieves it (None at a terminal or cutoff node).
 
@@ -249,7 +262,10 @@ def evaluate(state: BattleState, depth: int, objective=None,
 
     # A probe searches one action and returns a LOWER bound, so it must
     # never be stored as, or answered from, an exact entry.
-    key = (outcomes_mod.state_key(state), depth, epsilon)
+    # exact_plies belongs in the key: the same state searched with
+    # collapsed chance nodes is a different computation, and answering one
+    # from the other would silently mix the two.
+    key = (outcomes_mod.state_key(state), depth, epsilon, exact_plies)
     hit = None if probe_only else memo.get(key)
     if hit is not None:
         value, action, flag = hit
@@ -284,9 +300,13 @@ def evaluate(state: BattleState, depth: int, objective=None,
             continue
 
         branches, _dropped = trim(branches, epsilon)
+        if (exact_plies is not None and exact_plies <= 0
+                and may_collapse(objective)):
+            branches = outcomes_mod.collapse_damage(branches)
         value = _chance_value(state, branches, depth, objective,
                               discount, memo, alpha, beta, prune, epsilon,
-                              probe=not probe_only, deadline=deadline)
+                              probe=not probe_only, deadline=deadline,
+                              exact_plies=exact_plies)
         if value > best_value:
             best_value, best_action = value, action
         if prune:
@@ -325,6 +345,32 @@ def max_round_damage(state: BattleState) -> int:
         except NotImplementedError:
             return 10 ** 6              # unknown: assume the worst
     return total
+
+
+def may_collapse(objective) -> bool:
+    """Whether this objective tolerates averaging the cog phase.
+
+    Collapsing replaces a damage distribution with its mean, which makes
+    the search risk-*neutral* about damage. That is fine for an objective
+    that scores laff linearly, and wrong for one that does not.
+
+    Measured at equal depth on nine positions x two objectives: under
+    `balanced` the collapsed search picked the same move 9/9, under
+    `survive` only 7/9. Both disagreements were `survive`, and one of
+    them was a toon at full laff -- so the distinction is the objective's
+    attitude to risk, not the position's danger.
+
+    An earlier version gated on whether the round could kill the toon.
+    It was the wrong test twice over: it missed the full-laff `survive`
+    disagreement, and with four cogs the worst-case round is large enough
+    that it fired almost everywhere and gave back the entire speedup.
+    """
+    return getattr(objective, "laff_weight", 1.0) <= 1.0
+
+
+def _next_plies(exact_plies: Optional[int]) -> Optional[int]:
+    """One ply further from the root. None means never collapse."""
+    return None if exact_plies is None else exact_plies - 1
 
 
 def _value_bounds(state: BattleState, depth: int,
@@ -383,7 +429,7 @@ def _value_bounds(state: BattleState, depth: int,
 
 def _chance_value(state, branches, depth, objective, discount, memo,
                    alpha, beta, prune, epsilon=0.0, probe=True,
-                   deadline=None) -> float:
+                   deadline=None, exact_plies=None) -> float:
     """Expected value of one action, with *-minimax pruning.
 
     Two things make the bounds tighter than a textbook star1:
@@ -404,7 +450,8 @@ def _chance_value(state, branches, depth, objective, discount, memo,
         return sum(prob * (reward + discount *
                            evaluate(nxt, depth - 1, objective, discount,
                                     memo, prune=False, epsilon=epsilon,
-                                    deadline=deadline)[0])
+                                    deadline=deadline,
+                                    exact_plies=_next_plies(exact_plies))[0])
                    for prob, nxt, reward in branches)
 
     # Most probable first: they close the gap between lower and upper
@@ -424,7 +471,8 @@ def _chance_value(state, branches, depth, objective, discount, memo,
             probed, _ = evaluate(nxt, depth - 1, objective, discount,
                                  memo, alpha=float("-inf"), beta=float("inf"),
                                  prune=True, epsilon=epsilon, probe_only=True,
-                                 deadline=deadline)
+                                 deadline=deadline,
+                                 exact_plies=_next_plies(exact_plies))
             floors[i] = max(floors[i], probed)
 
         best_case_now = sum(p * (r + discount * c)
@@ -458,7 +506,8 @@ def _chance_value(state, branches, depth, objective, discount, memo,
 
         value, _ = evaluate(nxt, depth - 1, objective, discount, memo,
                             child_alpha, child_beta, True, epsilon,
-                            deadline=deadline)
+                            deadline=deadline,
+                            exact_plies=_next_plies(exact_plies))
         f = reward + discount * value
 
         if f <= a_i:
@@ -496,6 +545,7 @@ def best_action(state: BattleState, depth: int = 3,
 def best_action_iterative(state: BattleState, depth: int = 4,
                            objective=None, epsilon: float = 0.0,
                            time_budget: Optional[float] = None,
+                           exact_plies: Optional[int] = None,
                            ) -> Tuple[float, Optional[Action]]:
     """Search 1..depth, reusing the table between passes.
 
@@ -524,7 +574,8 @@ def best_action_iterative(state: BattleState, depth: int = 4,
     for d in range(1, depth + 1):
         try:
             value, action = evaluate(state, d, objective, memo=memo,
-                                     epsilon=epsilon, deadline=deadline)
+                                     epsilon=epsilon, deadline=deadline,
+                                     exact_plies=exact_plies)
         except SearchTimeout:
             # Keep the last completed pass. Predicting the next ply's cost
             # from the previous one does not work here -- depth 1 to 2 on

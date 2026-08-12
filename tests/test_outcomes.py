@@ -136,3 +136,83 @@ class TestStateKey(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+from solver import data  # noqa: E402  (used by the tests below)
+
+
+class CollapseDamageTest(unittest.TestCase):
+    """Merging outcomes that differ only in the damage number.
+
+    The cog phase carries no decision -- cogs cannot kill each other or
+    change what gags remain -- so branches sharing a cog configuration
+    can be averaged. What must NOT be averaged is anything the next
+    choice depends on.
+    """
+
+    def position(self):
+        from solver.state import BattleState, CogState, ToonState, Track
+        toon = ToonState(50, 50, {Track.THROW: 5},
+                         {(Track.THROW, 3): 3, (Track.THROW, 4): 2})
+        cogs = [CogState("flunky", "bossbot", 3, data.cog_max_hp(3),
+                         data.cog_max_hp(3)),
+                CogState("flunky", "bossbot", 4, data.cog_max_hp(4),
+                         data.cog_max_hp(4))]
+        return BattleState(toon=toon, cogs=cogs)
+
+    def branches(self):
+        from solver.state import Action, Track
+        state = self.position()
+        return state, outcomes.action_outcomes(state, Action(Track.THROW, 3, 0))
+
+    def test_collapsing_reduces_the_branch_count(self):
+        _state, branches = self.branches()
+        collapsed = outcomes.collapse_damage(branches)
+        self.assertLess(len(collapsed), len(branches))
+
+    def test_probability_is_conserved(self):
+        _state, branches = self.branches()
+        collapsed = outcomes.collapse_damage(branches)
+        self.assertAlmostEqual(sum(p for p, _s, _r in collapsed), 1.0,
+                               places=9)
+
+    def test_expected_laff_is_conserved(self):
+        """The mean is the whole point; it must survive the merge."""
+        _state, branches = self.branches()
+        before = sum(p * s.toon.laff for p, s, _r in branches)
+        after = sum(p * s.toon.laff
+                    for p, s, _r in outcomes.collapse_damage(branches))
+        self.assertAlmostEqual(before, after, delta=0.5)
+
+    def test_expected_reward_is_conserved(self):
+        _state, branches = self.branches()
+        before = sum(p * r for p, _s, r in branches)
+        after = sum(p * r for p, _s, r in outcomes.collapse_damage(branches))
+        self.assertAlmostEqual(before, after, places=6)
+
+    def test_hit_and_miss_are_not_merged(self):
+        """They differ in cog HP, which decides the next move."""
+        _state, branches = self.branches()
+        collapsed = outcomes.collapse_damage(branches)
+        configs = {tuple(c.hp for c in s.cogs) for _p, s, _r in collapsed}
+        self.assertGreater(len(configs), 1)
+
+    def test_death_is_never_averaged_into_survival(self):
+        """Averaging a loss into a survival is the distortion that would
+        let the search walk into a defeat it cannot see."""
+        from solver.state import Action, BattleState, CogState, ToonState, Track
+
+        toon = ToonState(3, 50, {Track.THROW: 5}, {(Track.THROW, 3): 2})
+        cogs = [CogState("flunky", "bossbot", 5, data.cog_max_hp(5),
+                         data.cog_max_hp(5))]
+        state = BattleState(toon=toon, cogs=cogs)
+        branches = outcomes.action_outcomes(state, Action(Track.THROW, 3, 0))
+        collapsed = outcomes.collapse_damage(branches)
+        terminal = [s.is_terminal() for _p, s, _r in collapsed]
+        self.assertIn(True, terminal, "a lethal branch must survive")
+        self.assertIn(False, terminal, "a survivable branch must survive")
+
+    def test_a_single_branch_is_returned_unchanged(self):
+        self.assertEqual(outcomes.collapse_damage([]), [])
+        one = [(1.0, self.position(), 0.0)]
+        self.assertIs(outcomes.collapse_damage(one), one)

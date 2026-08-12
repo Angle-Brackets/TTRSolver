@@ -75,15 +75,35 @@ isolates the error from the benefit of the extra ply:
 Same move 5/5, error well under the tens of points that separate
 decisions.
 
-**Caveats before shipping this.** Five positions is not a sample -- the
-last round of heuristic work had a 40-fight comparison turn out to be
-noise. And collapsing to the mean makes the search risk-*neutral* about
-cog damage, which is exactly wrong for `survive` (laff weighted 3x) and
-possibly for a toon one hit from death. The design should therefore be
-`collapse_beyond=k`: exact chance nodes for the first k plies where the
-risk actually bites, collapsed after, with k tunable and defaulting to
-at least 1. That mirrors late move reduction in chess -- full effort
-near the root, cheaper further down.
+**Shipped, with the gate somewhere other than where I expected.**
+
+Two attempts at the safety rule were wrong before the third worked.
+
+*Depth-based (`exact_plies=1`, keep the root exact).* This was the late
+move reduction analogy: full effort near the root, cheaper further down.
+It gave back the entire benefit -- three cogs 4.66s to 4.66s, four cogs
+13.94s to 13.54s. The saving compounds *downward*: collapsing a node
+shrinks every subtree beneath it, so the shallow nodes are precisely
+where it pays. Collapse near the root or do not bother.
+
+*Position-based (skip collapsing when a round could kill).* Also wrong,
+twice over. With four cogs the worst-case round is large enough that the
+test fired nearly everywhere and four cogs fell back from depth 3 to
+depth 2. And it missed the real failures anyway.
+
+*Objective-based -- what shipped.* At equal depth over nine positions
+and two objectives:
+
+| objective | same move |
+|---|---|
+| balanced | 9/9 |
+| survive | 7/9 |
+
+Both disagreements were `survive`, and one was a toon at **full laff**.
+So the distortion is not about danger: collapsing is risk-*neutral*, and
+`survive` weights laff 3x, which is risk-*averse*. `may_collapse` gates
+on the objective's `laff_weight`, and `collapse_damage` additionally
+never merges a branch where the toon died into one where it survived.
 
 ## Move ordering: measured, and NOT worth doing
 

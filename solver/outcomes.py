@@ -379,6 +379,58 @@ def cog_phase_summary(state: BattleState) -> List[Dict]:
     return summary
 
 
+def collapse_damage(branches: List[Outcome]) -> List[Outcome]:
+    """Merge outcomes that differ only in how much damage the cogs dealt.
+
+    A ply costs `actions x chance outcomes`, and the second factor is
+    what keeps the search shallow -- 20 to 70 branches per action, almost
+    all of them the same events with a different damage total. Unlike the
+    toon's own hit roll, that number carries no decision: the cogs cannot
+    kill each other, cannot change what gags remain, and cannot alter
+    anything the next choice depends on except the laff figure.
+
+    So branches sharing a cog configuration collapse into one carrying
+    the probability-weighted mean laff. Outcomes per action drop to a
+    handful, which is worth one to two extra plies.
+
+    Two things are deliberately NOT merged. Branches whose cog states
+    differ at all -- a gag hit rather than missed, a lure held rather
+    than ended -- stay separate, because those do change the next
+    decision. And a branch where the toon died stays separate from one
+    where it survived: averaging a death into a survival is exactly the
+    distortion that would make the search cheerfully walk into a loss.
+
+    This is an approximation, and the only one here that touches the
+    shape of the tree rather than its tails. It makes the search
+    risk-*neutral* about damage, which is wrong near zero laff and wrong
+    for an objective that weights laff heavily, so callers should keep
+    the plies nearest the root exact -- see `evaluate`'s `exact_plies`.
+    """
+    if len(branches) <= 1:
+        return branches
+
+    groups: Dict[Tuple, list] = {}
+    for prob, nxt, reward in branches:
+        key = (_cog_key(nxt), nxt.is_terminal())
+        slot = groups.get(key)
+        if slot is None:
+            groups[key] = [prob, prob * nxt.toon.laff, prob * reward, nxt]
+        else:
+            slot[0] += prob
+            slot[1] += prob * nxt.toon.laff
+            slot[2] += prob * reward
+    if len(groups) == len(branches):
+        return branches
+
+    merged: List[Outcome] = []
+    for total, laff_sum, reward_sum, sample in groups.values():
+        state = sample.clone()
+        state.toon.laff = max(0, min(state.toon.max_laff,
+                                     int(round(laff_sum / total))))
+        merged.append((total, state, reward_sum / total))
+    return merged
+
+
 def _cog_key(state: BattleState) -> Tuple:
     return tuple((c.cog_type, c.department, c.level, c.hp, c.status.is_dead,
                   c.status.lured, c.status.lure_rounds_remaining,

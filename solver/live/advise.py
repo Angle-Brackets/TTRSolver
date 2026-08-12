@@ -69,6 +69,14 @@ DEFAULT_BUDGET = 15.0
 # change a decision.
 DEFAULT_EPSILON = 0.03
 
+# Collapse the cog phase into its mean where the objective allows it.
+# A ply costs actions x chance outcomes, and this attacks the second
+# factor: two cogs reach depth 4 instead of 3, three and four reach 3
+# instead of 2. `expectimax.may_collapse` holds it back for `survive`,
+# which weights laff heavily enough that averaging damage changes the
+# move.
+DEFAULT_EXACT_PLIES = 0
+
 
 class Thinker:
     """Runs searches off the polling thread, newest request wins.
@@ -146,7 +154,8 @@ def advise(frame, readings, snapshot=None, objective=None,
     objective = objective or objectives.DEFAULT
     _value, action = expectimax.best_action_iterative(
         state, depth=depth, objective=objective,
-        epsilon=DEFAULT_EPSILON, time_budget=budget)
+        epsilon=DEFAULT_EPSILON, time_budget=budget,
+        exact_plies=DEFAULT_EXACT_PLIES)
     if action is None:
         return ["no legal move -- nothing left to throw"], state
     return [_render(action, state)], state

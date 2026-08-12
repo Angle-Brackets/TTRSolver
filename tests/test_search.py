@@ -377,3 +377,54 @@ class ValueBoundsTest(unittest.TestCase):
         state.cogs[0].status.is_dead = True
         self.assertEqual(expectimax.max_round_damage(state), 0)
         self.assertGreater(before, 0)
+
+
+class CollapseGateTest(unittest.TestCase):
+    """When the cog phase may be averaged into its mean.
+
+    Collapsing makes the search risk-neutral about damage. Measured at
+    equal depth over nine positions, `balanced` picked the same move 9/9
+    and `survive` only 7/9 -- and one of the two disagreements was a toon
+    at full laff, so what matters is the objective's attitude to risk,
+    not how dangerous the position is.
+    """
+
+    def test_risk_neutral_objectives_may_collapse(self):
+        from solver.search import objective as objectives
+        for name in ("balanced", "speedrun", "conserve", "glass cannon"):
+            with self.subTest(objective=name):
+                self.assertTrue(
+                    expectimax.may_collapse(objectives.get(name)))
+
+    def test_survive_may_not_collapse(self):
+        from solver.search import objective as objectives
+        self.assertFalse(expectimax.may_collapse(objectives.get("survive")))
+
+    def test_no_objective_defaults_to_allowing_it(self):
+        self.assertTrue(expectimax.may_collapse(None))
+
+    def test_collapsing_is_off_unless_asked_for(self):
+        """`exact_plies=None` must approximate nothing."""
+        from solver.state import BattleState, CogState, ToonState, Track
+        toon = ToonState(60, 60, {Track.THROW: 6},
+                         {(Track.THROW, 4): 4, (Track.THROW, 5): 2})
+        cogs = [CogState("flunky", "bossbot", 4, data.cog_max_hp(4),
+                         data.cog_max_hp(4))]
+        state = BattleState(toon=toon, cogs=cogs)
+        plain = expectimax.evaluate(state, 2, memo={})
+        explicit = expectimax.evaluate(state, 2, memo={}, exact_plies=None)
+        self.assertEqual(plain, explicit)
+
+    def test_collapsing_reaches_the_same_move_on_a_safe_position(self):
+        from solver.state import BattleState, CogState, ToonState, Track
+        toon = ToonState(60, 60, {Track.THROW: 6, Track.SQUIRT: 6},
+                         {(Track.THROW, 4): 4, (Track.THROW, 5): 2,
+                          (Track.SQUIRT, 4): 4})
+        cogs = [CogState("flunky", "bossbot", 4, data.cog_max_hp(4),
+                         data.cog_max_hp(4)),
+                CogState("flunky", "bossbot", 3, data.cog_max_hp(3),
+                         data.cog_max_hp(3))]
+        state = BattleState(toon=toon, cogs=cogs)
+        _v0, exact = expectimax.evaluate(state, 2, memo={})
+        _v1, collapsed = expectimax.evaluate(state, 2, memo={}, exact_plies=0)
+        self.assertEqual(exact, collapsed)
