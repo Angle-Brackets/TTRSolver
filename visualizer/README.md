@@ -69,6 +69,22 @@ depth alone (~9 levels) no matter how much you open.
 Clicking a node computes and reveals its children, so nothing exists until
 you look at it.
 
+## Moving around
+
+The canvas is an infinite board rather than a scroll pane, because the tree
+can outgrow any viewport in both directions:
+
+- **scroll** to zoom, anchored on the pointer — whatever is under the
+  cursor stays under it
+- **drag anywhere** to pan, including across nodes; a drag longer than a
+  few pixels suppresses the click, so grabbing empty space between tiles
+  never selects one by accident
+- **Fit** frames the whole tree, recomputed on demand since the extent
+  changes every time a node opens
+
+Focus follows what you act on, but only nudges the board when the node is
+actually off-screen — it won't yank the view out from under you mid-read.
+
 - **Your turn** (gold) — a position. Its children are the gags you could play.
 - **Gag** (blue) — one option, showing its expected value and **the gap to
   the runner-up**. Near zero means the decision doesn't matter; a large gap

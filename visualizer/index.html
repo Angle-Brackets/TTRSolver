@@ -38,7 +38,13 @@
   h1 { font-size:15px; margin:0; font-weight:700; }
   .hint { color:var(--muted); font-size:11px; }
   main { flex:1; display:flex; min-height:0; }
-  #canvas { flex:1; overflow:auto; position:relative; }
+  /* A pannable board rather than a scroll pane: the tree can be bigger
+     than any viewport, and dragging beats hunting for a scrollbar. */
+  #canvas { flex:1; overflow:hidden; position:relative; cursor:grab;
+            touch-action:none; user-select:none; }
+  #canvas.dragging { cursor:grabbing; }
+  #canvas .surface { position:absolute; left:0; top:0;
+                     transform-origin:0 0; will-change:transform; }
   aside { width:310px; border-left:1px solid var(--line); overflow:auto;
           padding:12px; background:var(--panel); flex-shrink:0; }
 
@@ -282,7 +288,7 @@ const visibleEdges = (root) => {
 
 /* ---------- node ------------------------------------------------------ */
 
-function NodeCard({node, selected, busy, onSelect}) {
+function NodeCard({node, selected, busy, onSelect, draggedRef}) {
   const style = KIND[node.kind] || KIND.decision;
   const lost = node.kind === "terminal" && /lost/.test(node.label || "");
   const color = lost ? "var(--loss)" : style.color;
@@ -306,7 +312,11 @@ function NodeCard({node, selected, busy, onSelect}) {
                  node.prob != null && `p ${pct(node.prob)}`,
                  node.laff_lost > 0 && `-${node.laff_lost} laff`,
                  ...(node.cogs || [])].filter(Boolean).join(String.fromCharCode(10))}
-         onClick={(e) => { e.stopPropagation(); onSelect(node); }}>
+         onClick={(e) => {
+           e.stopPropagation();
+           if (draggedRef && draggedRef.current) return;   // was a pan
+           onSelect(node);
+         }}>
       <div className="top">
         {node.icon
           ? <Icon name={node.icon} />
@@ -564,7 +574,11 @@ function App({solver, catalogue}) {
   const [busyId, setBusyId] = useState(null);
   const [refining, setRefining] = useState(false);
   const [planSummary, setPlanSummary] = useState(null);
-  const [zoom, setZoom] = useState(1);
+  // One transform for the whole board: pan in screen pixels, zoom about
+  // the cursor. Everything that used to scroll now moves this instead.
+  const [view, setView] = useState({x: 40, y: 20, z: 1});
+  const dragRef = useRef(null);
+  const movedRef = useRef(false);
   const [preset, setPreset] = useState("balanced");
   const [gagCost, setGagCost] = useState(null);   // null = the preset's own
   const [gagCostDraft, setGagCostDraft] = useState(null);
@@ -747,12 +761,52 @@ function App({solver, catalogue}) {
     walk(current); current.open = true; rerender();
   };
 
+  // Bring the focused node into view by panning, since there is nothing to
+  // scroll any more. Only nudges when the node is actually off-screen, so
+  // it doesn't yank the board out from under you mid-inspection.
   useEffect(() => {
-    if (focusId == null || !canvasRef.current) return;
-    const el = canvasRef.current.querySelector(`[data-nodeid="${focusId}"]`);
-    if (el) el.scrollIntoView({block: "center", inline: "start",
-                               behavior: "smooth"});
-  });
+    if (focusId == null || !canvasRef.current || !rootRef.current) return;
+    let target = null;
+    const find = (n) => {
+      if (n.id === focusId) { target = n; return; }
+      (n.children || []).forEach(find);
+      if (n._more && n._more.id === focusId) target = n._more;
+    };
+    find(rootRef.current);
+    if (!target) return;
+
+    const box = canvasRef.current.getBoundingClientRect();
+    setView(v => {
+      const sx = target.x * v.z + v.x, sy = target.y * v.z + v.y;
+      const pad = 80;
+      const inside = sx > pad && sx < box.width - pad - NODE_W * v.z
+                  && sy > pad && sy < box.height - pad;
+      if (inside) return v;
+      return {...v,
+              x: box.width / 2 - (target.x + NODE_W / 2) * v.z,
+              y: Math.max(pad, box.height / 3 - target.y * v.z)};
+    });
+  }, [focusId, root]);
+
+  /** Frame the whole tree. Recomputed on demand rather than tracked,
+   *  because the tree's extent changes every time a node opens. */
+  const fitToScreen = () => {
+    const box = canvasRef.current && canvasRef.current.getBoundingClientRect();
+    const current = rootRef.current;
+    if (!box || !current) return;
+    let minX = Infinity, maxRight = -Infinity, maxBottom = -Infinity;
+    const walk = (n) => {
+      minX = Math.min(minX, n.x);
+      maxRight = Math.max(maxRight, n.x + NODE_W);
+      maxBottom = Math.max(maxBottom, n.y + CARD_H);
+      shown(n).forEach(walk);
+    };
+    walk(current);
+    const w = Math.max(1, maxRight - minX), h = Math.max(1, maxBottom);
+    const z = Math.min(2.5, Math.max(0.15,
+      Math.min((box.width - 80) / w, (box.height - 80) / h)));
+    setView({z, x: (box.width - w * z) / 2 - minX * z, y: 40});
+  };
 
   if (!root) return <div id="boot">Building tree…</div>;
 
@@ -794,11 +848,8 @@ the solver stops burning big gags for small gains.">
                  onChange={e => setGagCostDraft(+e.target.value / 100)} />
           <span className="mono">{shownGagCost.toFixed(2)}</span>
         </label>
-        <label>Zoom
-          <input type="range" min="40" max="100" value={zoom * 100}
-                 style={{width:80}}
-                 onChange={e => setZoom(+e.target.value / 100)} />
-        </label>
+        <button onClick={() => fitToScreen()}>Fit</button>
+        <span className="hint mono">{Math.round(view.z * 100)}%</span>
         <span className="hint">
           {refining ? "refining in the background…"
             : planSummary
@@ -851,11 +902,42 @@ the solver stops burning big gags for small gains.">
         </div>}
 
       <main>
-        <div id="canvas" ref={canvasRef} onClick={() => setSelected(root)}>
-          <div style={{position:"relative", width: width * zoom,
-                       height: height * zoom}}>
-           <div style={{position:"absolute", left:0, top:0, width, height,
-                        transform:`scale(${zoom})`, transformOrigin:"0 0"}}>
+        <div id="canvas" ref={canvasRef}
+             className={dragRef.current ? "dragging" : ""}
+             onWheel={(e) => {
+               e.preventDefault();
+               const box = e.currentTarget.getBoundingClientRect();
+               const cx = e.clientX - box.left, cy = e.clientY - box.top;
+               setView(v => {
+                 const z = Math.min(2.5, Math.max(0.15,
+                   v.z * (e.deltaY < 0 ? 1.12 : 1 / 1.12)));
+                 // Keep whatever is under the pointer under the pointer.
+                 return {z, x: cx - (cx - v.x) * (z / v.z),
+                            y: cy - (cy - v.y) * (z / v.z)};
+               });
+             }}
+             onPointerDown={(e) => {
+               if (e.button !== 0) return;
+               dragRef.current = {x: e.clientX, y: e.clientY,
+                                  ox: view.x, oy: view.y};
+               movedRef.current = false;
+               e.currentTarget.setPointerCapture(e.pointerId);
+             }}
+             onPointerMove={(e) => {
+               const d = dragRef.current;
+               if (!d) return;
+               const dx = e.clientX - d.x, dy = e.clientY - d.y;
+               if (Math.abs(dx) + Math.abs(dy) > 4) movedRef.current = true;
+               setView(v => ({...v, x: d.ox + dx, y: d.oy + dy}));
+             }}
+             onPointerUp={(e) => {
+               dragRef.current = null;
+               e.currentTarget.releasePointerCapture(e.pointerId);
+               // A drag that ends on the background is not a click on it.
+               if (!movedRef.current) setSelected(rootRef.current);
+             }}>
+          <div className="surface" style={{width, height,
+                 transform:`translate(${view.x}px, ${view.y}px) scale(${view.z})`}}>
             <svg width={width} height={height}
                  style={{position:"absolute", left:0, top:0, pointerEvents:"none"}}>
               {edges.map(([a, b], i) => {
@@ -875,13 +957,13 @@ the solver stops burning big gags for small gains.">
                 out.push(<NodeCard key={n.id} node={n}
                                    selected={selected && selected.id === n.id}
                                    busy={busyId === n.id}
+                                   draggedRef={movedRef}
                                    onSelect={toggle} />);
                 shown(n).forEach(walk);
               };
               walk(root);
               return out;
             })()}
-           </div>
           </div>
         </div>
         <aside><Inspector node={selected} solver={solver} depth={depth}
