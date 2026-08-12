@@ -64,6 +64,7 @@ be transcribed -- it's a design choice, and its weights are tunable rather
 than [CONFIRMED]. It only applies at a depth cutoff; a full solve never
 consults it.
 """
+import time
 from typing import Dict, List, Optional, Tuple
 
 from .. import outcomes as outcomes_mod
@@ -82,6 +83,24 @@ def _vmin(state: BattleState) -> float:
     return LOSS_VALUE - float(state.toon.max_laff) - 100.0
 
 EXACT, LOWER, UPPER = 0, 1, 2
+
+
+class SearchTimeout(Exception):
+    """Raised inside `evaluate` when a deadline passes.
+
+    An abandoned pass is discarded whole. Iterative deepening always has
+    a complete shallower answer to fall back on, and half a pass is not
+    an answer -- the unexplored actions are exactly the ones that might
+    have been best.
+    """
+
+
+# How many nodes to visit between clock checks. `time.monotonic()` is
+# cheap but this is the hottest loop in the program, and the search
+# visits ~300,000 nodes for a two-cog depth-2 position, so checking every
+# node is measurable while checking every few hundred is not. The cost of
+# the coarser check is overshooting a deadline by a few hundred nodes.
+DEADLINE_CHECK_INTERVAL = 512
 
 
 def trim(branches, epsilon: float):
@@ -180,7 +199,8 @@ def evaluate(state: BattleState, depth: int, objective=None,
              discount: float = 1.0, memo: Optional[Dict] = None,
              alpha: float = float("-inf"), beta: float = float("inf"),
              prune: bool = False, epsilon: float = 0.0,
-             probe_only: bool = False) -> Tuple[float, Optional[Action]]:
+             probe_only: bool = False,
+             deadline: Optional[List] = None) -> Tuple[float, Optional[Action]]:
     """Expected value of `state` under optimal play, plus the action that
     achieves it (None at a terminal or cutoff node).
 
@@ -194,6 +214,15 @@ def evaluate(state: BattleState, depth: int, objective=None,
     """
     if memo is None:
         memo = {}
+
+    if deadline is not None:
+        # deadline is [when, countdown] -- a list so the countdown is
+        # shared across the whole recursion without a global.
+        deadline[1] -= 1
+        if deadline[1] <= 0:
+            deadline[1] = DEADLINE_CHECK_INTERVAL
+            if time.monotonic() >= deadline[0]:
+                raise SearchTimeout
 
     if state.is_terminal():
         # Zero, NOT +/-WIN_VALUE. The transition that reached this state
@@ -242,7 +271,7 @@ def evaluate(state: BattleState, depth: int, objective=None,
         branches, _dropped = trim(branches, epsilon)
         value = _chance_value(state, branches, depth, objective,
                               discount, memo, alpha, beta, prune, epsilon,
-                              probe=not probe_only)
+                              probe=not probe_only, deadline=deadline)
         if value > best_value:
             best_value, best_action = value, action
         if prune:
@@ -282,7 +311,8 @@ def _value_bounds(state: BattleState, depth: int,
 
 
 def _chance_value(state, branches, depth, objective, discount, memo,
-                   alpha, beta, prune, epsilon=0.0, probe=True) -> float:
+                   alpha, beta, prune, epsilon=0.0, probe=True,
+                   deadline=None) -> float:
     """Expected value of one action, with *-minimax pruning.
 
     Two things make the bounds tighter than a textbook star1:
@@ -302,7 +332,8 @@ def _chance_value(state, branches, depth, objective, discount, memo,
     if not prune:
         return sum(prob * (reward + discount *
                            evaluate(nxt, depth - 1, objective, discount,
-                                    memo, prune=False, epsilon=epsilon)[0])
+                                    memo, prune=False, epsilon=epsilon,
+                                    deadline=deadline)[0])
                    for prob, nxt, reward in branches)
 
     # Most probable first: they close the gap between lower and upper
@@ -321,7 +352,8 @@ def _chance_value(state, branches, depth, objective, discount, memo,
                 continue
             probed, _ = evaluate(nxt, depth - 1, objective, discount,
                                  memo, alpha=float("-inf"), beta=float("inf"),
-                                 prune=True, epsilon=epsilon, probe_only=True)
+                                 prune=True, epsilon=epsilon, probe_only=True,
+                                 deadline=deadline)
             floors[i] = max(floors[i], probed)
 
         best_case_now = sum(p * (r + discount * c)
@@ -354,7 +386,8 @@ def _chance_value(state, branches, depth, objective, discount, memo,
             child_alpha, child_beta = floor, ceiling
 
         value, _ = evaluate(nxt, depth - 1, objective, discount, memo,
-                            child_alpha, child_beta, True, epsilon)
+                            child_alpha, child_beta, True, epsilon,
+                            deadline=deadline)
         f = reward + discount * value
 
         if f <= a_i:
@@ -390,18 +423,44 @@ def best_action(state: BattleState, depth: int = 3,
 
 
 def best_action_iterative(state: BattleState, depth: int = 4,
-                           objective=None
+                           objective=None, epsilon: float = 0.0,
+                           time_budget: Optional[float] = None,
                            ) -> Tuple[float, Optional[Action]]:
     """Search 1..depth, reusing the table between passes.
 
     Costs a little extra work at the shallow depths and usually more than
     repays it: each pass leaves its best move in the table, so the next pass
     tries that first and prunes almost immediately.
+
+    `time_budget`, in seconds, turns this into an anytime search: it
+    stops deepening once the next pass looks unaffordable and returns
+    the deepest one that finished. Depth is the wrong thing to fix in
+    advance because cost depends on the position, not the number --
+    measured at depth 2, two cogs take 2.3s and three take 28s, and four
+    are worse again. Fixing the depth means either waiting half a minute
+    on a crowded battle or wasting the search on an easy one. Fixing the
+    time instead spends what is available.
+
+    Each pass is complete before its result is used, so a budget never
+    yields a half-searched answer -- only a shallower one.
     """
     memo: Dict = {}
     value, action = 0.0, None
+    deadline = None
+    if time_budget is not None:
+        deadline = [time.monotonic() + time_budget, DEADLINE_CHECK_INTERVAL]
+
     for d in range(1, depth + 1):
-        value, action = evaluate(state, d, objective, memo=memo)
+        try:
+            value, action = evaluate(state, d, objective, memo=memo,
+                                     epsilon=epsilon, deadline=deadline)
+        except SearchTimeout:
+            # Keep the last completed pass. Predicting the next ply's cost
+            # from the previous one does not work here -- depth 1 to 2 on
+            # a three-cog position is a jump from 0.01s to 28s -- so the
+            # budget has to be enforced inside the search, not guessed at
+            # between passes.
+            break
     return value, action
 
 

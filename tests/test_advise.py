@@ -22,7 +22,8 @@ class SlowThinker(A.Thinker):
         self.delay = delay
         self.started = threading.Event()
 
-    def _run(self, token, frame, readings, snapshot, objective, depth):
+    def _run(self, token, frame, readings, snapshot, objective, depth,
+             budget=None):
         self.started.set()
         time.sleep(self.delay)
         with self._lock:
@@ -60,12 +61,21 @@ class ThinkerTest(unittest.TestCase):
         self.assertLess(time.time() - start, 0.1)
 
 
-class DepthTest(unittest.TestCase):
+class BudgetTest(unittest.TestCase):
 
-    def test_the_default_depth_is_the_one_that_finishes(self):
-        """Depth 3 ran for minutes on a real endgame loadout; depth 2
-        took 9.3s. The default has to be the one usable in a round."""
-        self.assertEqual(A.DEFAULT_DEPTH, 2)
+    def test_latency_is_bounded_by_time_not_depth(self):
+        """Cost depends on the position, not the depth number: at depth
+        2 a two-cog fight takes 2.3s and a three-cog fight 28s. A fixed
+        depth therefore either stalls on a crowded battle or wastes an
+        easy one, so the depth is only a cap and a budget does the
+        limiting."""
+        self.assertGreater(A.DEFAULT_DEPTH, 2)
+        self.assertGreater(A.DEFAULT_BUDGET, 0)
+
+    def test_epsilon_is_the_value_checked_against_an_exact_search(self):
+        """0.03 kept the same move on every position tried; 0.08 changed
+        the three-cog answer."""
+        self.assertEqual(A.DEFAULT_EPSILON, 0.03)
 
     def test_only_position_changing_events_trigger_a_search(self):
         self.assertIn("damage", A.RECOMPUTE_ON)

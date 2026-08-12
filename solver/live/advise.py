@@ -40,12 +40,24 @@ from .watch import BattleWatcher, Event
 # reading settling -- leaves the previous advice valid.
 RECOMPUTE_ON = {"battle_started", "cog_joined", "cog_defeated", "damage"}
 
-# Measured on a real endgame loadout (20 distinct gags, 30 root actions,
-# two cogs): depth 1 costs 0.01s, depth 2 costs 9.3s, and depth 3 runs
-# for minutes. Two is the deepest that returns inside a round, and the
-# search runs off the polling thread regardless so that following the
-# battle never waits on thinking about it.
-DEFAULT_DEPTH = 2
+# Depth is capped rather than fixed: the search is given a time budget
+# and returns the deepest pass that finished inside it. Cost depends on
+# the position far more than on the number -- at depth 2 a two-cog fight
+# takes 2.3s and a three-cog fight 28s -- so a fixed depth either stalls
+# on a crowded battle or under-searches an easy one.
+#
+# With this budget a one- or two-cog fight reaches depth 2 comfortably.
+# Three and four cogs currently only manage depth 1, which is honest but
+# weak; the fix is fewer nodes, not more seconds.
+DEFAULT_DEPTH = 4
+DEFAULT_BUDGET = 5.0
+
+# Dropped probability mass per chance node. Checked against an exact
+# search on four positions: at 0.03 every one picks the same move while
+# running 1.5-1.8x faster, and at 0.08 the three-cog position changes its
+# answer. Sitting at 0.03 keeps the speedup that has been verified not to
+# change a decision.
+DEFAULT_EPSILON = 0.03
 
 
 class Thinker:
@@ -64,17 +76,20 @@ class Thinker:
         self._current = -1
         self._lock = threading.Lock()
 
-    def submit(self, frame, readings, snapshot, objective, depth) -> None:
+    def submit(self, frame, readings, snapshot, objective, depth,
+               budget=DEFAULT_BUDGET) -> None:
         with self._lock:
             token = next(self._generation)
             self._current = token
         threading.Thread(target=self._run, daemon=True,
                          args=(token, frame, readings, snapshot, objective,
-                               depth)).start()
+                               depth, budget)).start()
 
-    def _run(self, token, frame, readings, snapshot, objective, depth):
+    def _run(self, token, frame, readings, snapshot, objective, depth,
+             budget):
         lines, state = advise(frame, readings, snapshot=snapshot,
-                              objective=objective, depth=depth)
+                              objective=objective, depth=depth,
+                              budget=budget)
         with self._lock:
             superseded = token != self._current
         if not superseded:
@@ -103,7 +118,7 @@ def _panel(frame):
 
 
 def advise(frame, readings, snapshot=None, objective=None,
-           depth: int = DEFAULT_DEPTH):
+           depth: int = DEFAULT_DEPTH, budget: float = DEFAULT_BUDGET):
     """(text, state) for what to do now, or (reasons, None)."""
     from ..search import expectimax
 
@@ -120,7 +135,8 @@ def advise(frame, readings, snapshot=None, objective=None,
     state = result.state
     objective = objective or objectives.DEFAULT
     _value, action = expectimax.best_action_iterative(
-        state, depth=depth, objective=objective)
+        state, depth=depth, objective=objective,
+        epsilon=DEFAULT_EPSILON, time_budget=budget)
     if action is None:
         return ["no legal move -- nothing left to throw"], state
     return [_render(action, state)], state
@@ -147,8 +163,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--objective", default="balanced",
                         help="one of " + ", ".join(sorted(objectives.PRESETS)))
     parser.add_argument("--depth", type=int, default=DEFAULT_DEPTH,
-                        help=f"search depth (default {DEFAULT_DEPTH}; "
-                             f"3 runs for minutes on a full loadout)")
+                        help=f"maximum search depth (default {DEFAULT_DEPTH})")
+    parser.add_argument("--budget", type=float, default=DEFAULT_BUDGET,
+                        help=f"seconds per search; the deepest pass that "
+                             f"finishes wins (default {DEFAULT_BUDGET})")
     parser.add_argument("--interval", type=float, default=0.5)
     parser.add_argument("--once", action="store_true",
                         help="read a single frame and stop")
@@ -161,13 +179,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 2
 
     watcher = BattleWatcher()
-    print(f"advising with the '{objective.name}' objective "
-          f"at depth {args.depth}; Ctrl-C to stop")
+    print(f"advising with the '{objective.name}' objective, up to depth "
+          f"{args.depth} within {args.budget}s per search; Ctrl-C to stop")
 
     if args.once:
         frame = watcher.capture.grab()
         readings = watcher.read_frame(frame)
-        _report(frame, readings, objective, args.depth)
+        _report(frame, readings, objective, args.depth, budget=args.budget)
         watcher.close()
         return 0
 
@@ -198,8 +216,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             if any(e.kind in RECOMPUTE_ON for e in events):
                 # Hand the frame to the search and carry on polling; a
                 # nine-second think must not stall the eye.
-                thinker.submit(watcher.capture.grab(), list(watcher.view.cogs),
-                               None, objective, args.depth)
+                thinker.submit(watcher.capture.grab(),
+                               list(watcher.view.cogs), None, objective,
+                               args.depth, args.budget)
             time.sleep(max(0.0, args.interval - (time.time() - cycle)))
     except KeyboardInterrupt:
         pass
@@ -208,8 +227,10 @@ def main(argv: Optional[List[str]] = None) -> int:
 
 
 def _report(frame, readings, objective, depth,
-            last_problems: Optional[List[str]] = None) -> List[str]:
-    lines, state = advise(frame, readings, objective=objective, depth=depth)
+            last_problems: Optional[List[str]] = None,
+            budget: float = DEFAULT_BUDGET) -> List[str]:
+    lines, state = advise(frame, readings, objective=objective, depth=depth,
+                          budget=budget)
     if state is None:
         # Don't repeat the same complaint every poll.
         if lines != last_problems:

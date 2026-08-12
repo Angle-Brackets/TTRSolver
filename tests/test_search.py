@@ -260,3 +260,49 @@ class TestSearchMechanics(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TimeBudgetTest(unittest.TestCase):
+    """Anytime search: bounded latency, deepest pass that finished.
+
+    Predicting the next ply's cost from the previous one does not work
+    here -- depth 1 to 2 on a three-cog position jumps from 0.01s to 28s
+    -- so the budget is enforced inside the search and an abandoned pass
+    is thrown away whole.
+    """
+
+    def position(self):
+        from solver import data
+        from solver.state import BattleState, CogState, ToonState, Track
+        counts = {(Track.THROW, lvl): 5 for lvl in (3, 4, 5)}
+        counts.update({(Track.SQUIRT, lvl): 5 for lvl in (3, 4, 5)})
+        toon = ToonState(60, 60, {Track.THROW: 6, Track.SQUIRT: 6}, counts)
+        cogs = [CogState("downsizer", "bossbot", 8, data.cog_max_hp(8),
+                         data.cog_max_hp(8)) for _ in range(3)]
+        return BattleState(toon=toon, cogs=cogs)
+
+    def test_a_budget_is_respected(self):
+        import time
+        started = time.monotonic()
+        expectimax.best_action_iterative(self.position(), depth=9,
+                                         time_budget=1.0)
+        self.assertLess(time.monotonic() - started, 3.0)
+
+    def test_a_move_is_returned_even_on_a_tiny_budget(self):
+        """Depth 1 always finishes, so there is always an answer."""
+        _v, action = expectimax.best_action_iterative(
+            self.position(), depth=9, time_budget=0.001)
+        self.assertIsNotNone(action)
+
+    def test_no_budget_still_searches_to_the_requested_depth(self):
+        v1, _ = expectimax.best_action_iterative(self.position(), depth=1)
+        v2, _ = expectimax.best_action_iterative(self.position(), depth=2)
+        self.assertNotEqual(v1, v2)
+
+    def test_a_generous_budget_matches_an_unbudgeted_search(self):
+        state = self.position()
+        want, want_move = expectimax.best_action_iterative(state, depth=2)
+        got, got_move = expectimax.best_action_iterative(
+            state, depth=2, time_budget=600.0)
+        self.assertEqual(got_move, want_move)
+        self.assertAlmostEqual(got, want, places=6)
