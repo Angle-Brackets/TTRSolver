@@ -23,8 +23,10 @@ ALL_TRACKS = DAMAGE_TRACKS + (Track.TOON_UP, Track.LURE)
 
 # The complete inventory of values the audit could NOT confirm. Both are
 # genuine three-way source conflicts, documented in data/gags.py.
+# Trapdoor's organic damage used to be here. It was resolved to 83-94 by
+# applying the organic rule rather than by choosing between the wiki's
+# three disagreeing statements of it -- see solver/data/gags.py.
 EXPECTED_MISSING = {
-    ("organic_damage", Track.TRAP, 5),   # Trapdoor organic
     ("heal", Track.TOON_UP, 3),          # Lipstick minimum heal
 }
 
@@ -92,7 +94,7 @@ class TestRegistryShape(unittest.TestCase):
 
 
 class TestMissingCellInventory(unittest.TestCase):
-    def test_missing_values_are_exactly_the_two_known_conflicts(self):
+    def test_missing_values_are_exactly_the_known_conflicts(self):
         found = set()
         for gag in gags.GAGS:
             if gag.track == Track.LURE:
@@ -109,8 +111,29 @@ class TestMissingCellInventory(unittest.TestCase):
     def test_accessors_raise_rather_than_default(self):
         with self.assertRaises(NotImplementedError):
             g(Track.TOON_UP, 3).heal_at()
-        with self.assertRaises(NotImplementedError):
-            g(Track.TRAP, 5).damage_at(organic=True)
+
+    def test_trapdoor_organic_was_resolved_by_the_organic_rule(self):
+        """It used to be blank: the wiki says 83-94, 84-94 and 83-93 in
+        three different places. Organic damage follows
+        ceil(base * (100 + bonus)/100), which reproduces 67 of the 68
+        transcribed organic values, and Trap's bonus is 10% on an agreed
+        base of 75-85 -- so 83-94, which is the Trap page's table."""
+        gag = g(Track.TRAP, 5)
+        self.assertEqual(gag.organic_damage, (83, 94))
+        self.assertEqual(gags.organic_value(Track.TRAP, 75), 83)
+        self.assertEqual(gags.organic_value(Track.TRAP, 85), 94)
+
+    def test_the_organic_rule_reproduces_the_transcribed_values(self):
+        """One exception, deliberately left as transcribed: Seltzer Bottle
+        is recorded at 22 where the 15% rule gives 21."""
+        mismatches = []
+        for gag in gags.GAGS:
+            if not (gag.damage and gag.organic_damage):
+                continue
+            for base, organic in zip(gag.damage, gag.organic_damage):
+                if gags.organic_value(gag.track, base) != organic:
+                    mismatches.append((gag.display, base, organic))
+        self.assertEqual([m[0] for m in mismatches], ["Seltzer Bottle"])
 
 
 class TestWikiValues(unittest.TestCase):

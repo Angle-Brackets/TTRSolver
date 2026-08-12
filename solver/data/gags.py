@@ -120,7 +120,7 @@ GAGS: Tuple[Gag, ...] = (
     Gag(Track.TRAP, 2, 'Rake', accuracy=0, group=False, damage=(18, 20), organic_damage=(20, 22), min_carry=5, max_carry=25),
     Gag(Track.TRAP, 3, 'Marbles', accuracy=0, group=False, damage=(30, 35), organic_damage=(33, 39), min_carry=5, max_carry=20),
     Gag(Track.TRAP, 4, 'Quicksand', accuracy=0, group=False, damage=(45, 50), organic_damage=(50, 55), min_carry=5, max_carry=15),
-    Gag(Track.TRAP, 5, 'Trapdoor', accuracy=0, group=False, damage=(75, 85), organic_damage=None, min_carry=3, max_carry=7),
+    Gag(Track.TRAP, 5, 'Trapdoor', accuracy=0, group=False, damage=(75, 85), organic_damage=(83, 94), min_carry=3, max_carry=7),
     Gag(Track.TRAP, 6, 'TNT', accuracy=0, group=False, damage=(90, 180), organic_damage=(99, 198), min_carry=3, max_carry=3),
     Gag(Track.TRAP, 7, 'Railroad', accuracy=0, group=True, damage=(200, 200), organic_damage=(220, 220), min_carry=1, max_carry=1),
 
@@ -170,14 +170,34 @@ GAGS: Tuple[Gag, ...] = (
     Gag(Track.DROP, 7, 'Toontanic', accuracy=50, group=True, damage=(180, 180), organic_damage=(207, 207), min_carry=1, max_carry=1),
 )
 
-# Two cells no source settles, kept None rather than picked:
-#   Trap 5 (Trapdoor) organic damage -- the Trap page says 83-94, the
-#     Organic gags page and the Trapdoor infobox say 84-94, and the Trap
-#     page's own 3.0.0 changelog says 83-93. Base 75-85 is agreed.
+# Trap 5 (Trapdoor) organic damage: RESOLVED to 83-94 by derivation, not
+# by preferring one page over another. The wiki disagrees with itself --
+# the Trap page table says 83-94, the Organic gags page and the Trapdoor
+# infobox say 84-94, and the Trap page's own 3.0.0 changelog says 83-93 --
+# but organic damage follows a rule, and the rule settles it:
+#
+#     organic = ceil(base * (100 + ORGANIC_BONUS_PCT[track]) / 100)
+#
+# That reproduces 67 of the 68 organic damage values transcribed here
+# (the exception is noted below). Trap's bonus is 10%, base is 75-85 and
+# agreed by every source, so ceil(75*1.1)=83 and ceil(85*1.1)=94.
+#
+# The 84-94 sources have the minimum wrong; the changelog has the maximum
+# wrong. Independently, the Organic gags page states that "a level 8 Cog
+# can be defeated with an organic Trapdoor" -- a level 8 has 90 hp, and
+# 94 clears it.
+#
+# One cell no source settles, kept None rather than picked:
 #   Toon-Up 3 (Lipstick) heal -- Toon-Up and Organic gags pages say 27-30,
 #     the Lipstick infobox says minheal 25. Organic 30-36 is agreed, and
 #     ceil(1.2 * 25) = 30 while ceil(1.2 * 27) = 33, which points at 25 --
 #     against the majority. Left open.
+#
+# One transcribed value contradicts the organic rule and is NOT resolved
+# here: Squirt 4 (Seltzer Bottle) base 18 is recorded as organic 22, where
+# the 15% rule gives ceil(18*1.15)=21. Either the transcription is wrong or
+# Seltzer is a genuine exception; nothing checked so far distinguishes
+# those, so the table keeps what the wiki says.
 
 _BY_KEY: Dict[Tuple[Track, int], Gag] = {g.key: g for g in GAGS}
 
