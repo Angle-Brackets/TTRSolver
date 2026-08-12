@@ -192,13 +192,22 @@ def _merge(boxes, gap):
     return merged
 
 
-def find_plates(frame: np.ndarray) -> List[Plate]:
+def find_plates(frame: np.ndarray,
+                reference_area: Optional[int] = None) -> List[Plate]:
     """Every cog plate in a battle frame, left to right.
 
     `frame` is an (H, W, 3) or (H, W, 4) array of uint8 RGB.
+
+    `reference_area` overrides the frame area the size thresholds are
+    computed from. It matters when searching a small crop of a larger
+    frame: the thresholds are deliberately fractions of the frame, so on
+    a 90x70 cut-out they collapse to almost nothing and antialiased
+    pixels at the slot's edge start counting, moving the box by a few
+    pixels. Since every plate region is a multiple of that box, a few
+    pixels is enough to shift the health track and clip a digit.
     """
     height, width = frame.shape[:2]
-    area = width * height
+    area = reference_area if reference_area else width * height
 
     runs = _runs(teal_mask(frame))
     if not runs:
@@ -453,6 +462,59 @@ def read_department(frame: np.ndarray,
     if len(scored) < 2:
         return (scored[0][1], 0.0) if scored else (None, 0.0)
     return scored[0][1], scored[0][0] - scored[1][0]
+
+
+# How much to shrink the frame when hunting for plates from scratch. The
+# teal slot is 66x45 at 1080p, so a quarter-size frame still leaves a
+# 16x11 block -- comfortably above what the detector needs, since it
+# finds 30x20 slots at 854x480. Every threshold in this module is a
+# fraction of the frame rather than a pixel count, so they survive the
+# change of scale without adjustment.
+COARSE_DIVISOR = 4
+
+
+# Teal in a quarter-size frame below this fraction of its pixels is
+# treated as none at all. A single slot survives subsampling as tens of
+# pixels, well clear of stray scenery.
+COARSE_PRESENCE_FRAC = 0.00012
+
+
+def any_plates(frame: np.ndarray,
+               divisor: int = COARSE_DIVISOR) -> bool:
+    """Whether the frame plausibly contains a cog plate.
+
+    A cheap yes/no on a subsampled copy. It is deliberately *not* used to
+    enumerate plates: subsampling drops the thin strips of backdrop
+    beside a wide cog head, so a quarter-size scan finds one plate and
+    misses its neighbour -- observed at 720p and 1440p on a two-cog
+    frame. As a presence test that does not matter, because any one
+    surviving plate is enough to trigger the exact scan.
+    """
+    if divisor <= 1:
+        return bool(find_plates(frame))
+    small = frame[::divisor, ::divisor]
+    return bool(teal_mask(small).sum()
+                >= max(12, small.shape[0] * small.shape[1]
+                       * COARSE_PRESENCE_FRAC))
+
+
+def locate_plates(frame: np.ndarray,
+                  divisor: int = COARSE_DIVISOR) -> List[Plate]:
+    """Find plates anywhere in the frame, skipping obviously empty ones.
+
+    While no battle is running there is nothing to narrow the search to,
+    so every poll would otherwise pay for a whole-frame scan: ~70ms at
+    1080p, ~124ms at 1440p, forever, just to keep answering "no cogs".
+    A subsampled presence test answers that in a few milliseconds, and
+    the exact scan runs only once something teal shows up -- which is
+    the first frame of a battle, after which the row band takes over.
+
+    Plates it does return are found at full resolution, so their boxes
+    are pixel-accurate; every plate region is a multiple of that box.
+    """
+    if not any_plates(frame, divisor):
+        return []
+    return find_plates(frame)
 
 
 def health_fraction(frame: np.ndarray, plate: Plate) -> float:

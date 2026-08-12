@@ -15,12 +15,20 @@ changes how it presents its window.
 
 COST
 ----
-A full-screen scan is the expensive part: about 70ms at 1080p and 280ms
-at 4K, against 33ms to grab the frame. Since plates barely move once a
-battle starts, the scan is restricted to a padded band around where they
-were last seen, and only falls back to the whole screen when that band
-comes up empty. In a steady fight that turns a ~300ms cycle into a ~40ms
-one.
+Scanning every pixel is the expensive part -- ~70ms at 1080p, ~280ms at
+4K, against 33ms to grab the frame -- so it is avoided in both of the
+states the watcher spends its time in.
+
+During a battle, plates barely move, so the scan is confined to a padded
+band of rows around where they were last seen: 1080p 75ms -> 19ms, 4K
+281ms -> 75ms, with one full scan instead of eight.
+
+Between battles there are no plates to narrow to, and that is the state
+the watcher is in almost always. A subsampled presence test answers "is
+there any teal at all" for a fraction of the cost and the exact scan
+runs only once something shows up: 1440p 110ms -> 6.7ms, ~17x. See
+`vision.locate_plates` for why the coarse pass is only ever a yes/no and
+never an enumeration.
 
 STABILITY
 ---------
@@ -41,7 +49,7 @@ import numpy as np
 from .catalogue import HeadCatalogue, candidates
 from .vision import (
     MIN_DEPARTMENT_MARGIN, Plate, find_plates, health_fraction,
-    read_department, read_level,
+    locate_plates, read_department, read_level,
 )
 
 MIN_LEVEL_SCORE = 0.55
@@ -134,6 +142,12 @@ class Capture:
             self._sct = None
 
 
+def _shift(plate: Plate, offset: int) -> Plate:
+    """Move a plate found in a band back into full-frame coordinates."""
+    x0, y0, x1, y1 = plate.slot
+    return Plate(slot=(x0, y0 + offset, x1, y1 + offset), filled=plate.filled)
+
+
 def _roi(slots: Sequence[Tuple[int, int, int, int]], shape) -> Tuple[int, int]:
     """Vertical band to search, given where plates were last seen.
 
@@ -172,9 +186,8 @@ class BattleWatcher:
     # -- reading ---------------------------------------------------------
 
     def read_frame(self, frame: np.ndarray) -> List[CogReading]:
-        plates, offset = self._locate(frame)
         readings = []
-        for i, plate in enumerate(plates):
+        for i, plate in enumerate(self._locate(frame)):
             dept, margin = read_department(frame, plate)
             if margin < MIN_DEPARTMENT_MARGIN:
                 dept = None
@@ -183,28 +196,40 @@ class BattleWatcher:
                 level = None
             match = self.catalogue.match(frame, plate,
                                          among=candidates(dept, level))
-            slot = (plate.slot[0], plate.slot[1] + offset,
-                    plate.slot[2], plate.slot[3] + offset)
             readings.append(CogReading(
                 index=i, department=dept, level=level,
                 health=health_fraction(frame, plate),
                 cog=match.cog if match and match.confident else None,
-                slot=slot))
+                slot=plate.slot))
         return readings
 
-    def _locate(self, frame: np.ndarray) -> Tuple[List[Plate], int]:
-        """Plates in the frame, preferring the band they were last in."""
+    def _locate(self, frame: np.ndarray) -> List[Plate]:
+        """Plates in the frame, preferring the band they were last in.
+
+        Always returns full-frame coordinates. Handing back band-relative
+        slots and expecting callers to add the offset is what the first
+        version did, and every reader then sampled the full frame with a
+        box short by the band's top edge -- silently, and on the path
+        that runs for the whole of every battle.
+        """
         self.frames += 1
         if self._band is not None:
             top, bottom = self._band
-            plates = find_plates(frame[top:bottom])
-            if plates:
-                return plates, top
+            # reference_area keeps the size thresholds those of the whole
+            # frame; on a band roughly an eighth of the frame they would
+            # otherwise collapse and drift the boxes by a few pixels.
+            found = find_plates(frame[top:bottom],
+                                reference_area=frame.shape[0] * frame.shape[1])
+            if found:
+                return [_shift(p, top) for p in found]
         self.full_scans += 1
-        plates = find_plates(frame)
+        # locate_plates, not find_plates: between battles there is
+        # nothing to narrow to, so this path runs on every poll and its
+        # cost is the idle cost of the whole watcher.
+        plates = locate_plates(frame)
         self._band = _roi([p.slot for p in plates], frame.shape) if plates \
             else None
-        return plates, 0
+        return plates
 
     # -- change detection ------------------------------------------------
 

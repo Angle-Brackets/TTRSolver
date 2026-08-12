@@ -152,6 +152,35 @@ class WatcherTest(unittest.TestCase):
         self.assertEqual(w.frames, 6)
         self.assertLess(w.full_scans, 3)
 
+    def test_the_roi_path_reports_the_same_box_as_a_full_scan(self):
+        """The band path runs for the whole of every battle, so a box it
+        shifts is a box every reading is taken from. The first version
+        returned band-relative slots and let the readers sample the full
+        frame with them, putting every region short by the band's top
+        edge; nothing caught it because the counts still looked right.
+        """
+        one = frame_with([(300, 120)])
+        w = self.watcher([one], agree=1)
+        w.poll()
+        self.assertEqual(w.full_scans, 1)
+        from_full = [c.slot for c in w.view.cogs]
+
+        w.poll()
+        self.assertEqual(w.full_scans, 1)          # the band was used
+        self.assertEqual([c.slot for c in w.view.cogs], from_full)
+
+    def test_the_roi_box_matches_a_direct_full_frame_scan(self):
+        """And the box must equal what find_plates says about the whole
+        frame -- the band is an eighth of the frame, so thresholds
+        expressed as fractions of it would drift the edges."""
+        from solver.live.vision import find_plates
+
+        one = frame_with([(300, 120)])
+        w = self.watcher([one], agree=1)
+        w.poll(); w.poll()
+        self.assertEqual([c.slot for c in w.view.cogs],
+                         [p.slot for p in find_plates(one)])
+
 
 class DamageTest(unittest.TestCase):
 
