@@ -197,6 +197,29 @@ class TestBestLine(unittest.TestCase):
         top = bridge.expand_decision(state_dict, depth=2)[0]
         self.assertEqual(line[0]["action"], top["action"])
 
+    def test_plays_all_the_way_to_the_end(self):
+        """The plan must finish the fight. It used to stop a move short --
+        the step cap was a round number rather than anything to do with the
+        position, so a five-move plan under a six-step cap looked complete
+        while a longer one silently truncated."""
+        cfg = dict(CFG, cogs=[{"type": "flunky", "level": 4},
+                              {"type": "pencil_pusher", "level": 5}],
+                   gags=[["throw", 3, 4], ["throw", 4, 2], ["sound", 4, 2]])
+        state_dict = bridge.state_to_dict(bridge.build_state(cfg))
+        line = bridge.best_line(state_dict, depth=1)
+        self.assertTrue(line)
+        self.assertIsNotNone(
+            line[-1]["terminal"],
+            "plan stopped before the battle ended: "
+            + " -> ".join(s["label"] for s in line))
+
+    def test_step_cap_defaults_to_the_pouch(self):
+        """No line can outlast the gags, so that is the honest bound."""
+        cfg = dict(CFG, gags=[["throw", 3, 2]])
+        state_dict = bridge.state_to_dict(bridge.build_state(cfg))
+        line = bridge.best_line(state_dict, depth=1)
+        self.assertLessEqual(len(line), 3)
+
     def test_stops_at_a_terminal_state(self):
         cfg = dict(CFG, cogs=[{"type": "flunky", "level": 1}])
         state_dict = bridge.state_to_dict(bridge.build_state(cfg))

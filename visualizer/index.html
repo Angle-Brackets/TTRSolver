@@ -563,6 +563,7 @@ function App({solver, catalogue}) {
   const [, bump] = useState(0);
   const [busyId, setBusyId] = useState(null);
   const [refining, setRefining] = useState(false);
+  const [planSummary, setPlanSummary] = useState(null);
   const [zoom, setZoom] = useState(1);
   const [preset, setPreset] = useState("balanced");
   const [gagCost, setGagCost] = useState(null);   // null = the preset's own
@@ -645,6 +646,7 @@ function App({solver, catalogue}) {
   const rebuild = async () => {
     setErr(null);
     solver.supersede();                     // drop anything still in flight
+    setPlanSummary(null);
     const gags = Object.entries(pouch)
       .map(([k, n]) => [k.split("/")[0], +k.split("/")[1], n]);
     const cfg = {laff, cogs: cogs.map(c => ({...c, department: dept})), gags};
@@ -698,8 +700,17 @@ function App({solver, catalogue}) {
 
     setBusyId(root.id);
     const spine = [];
+
+    // The walk visits one node per step and the spine alternates
+    // decision -> action, so a fight of N rounds is 2N nodes. The old cap of
+    // 8 was 4 rounds, which cut a 5-round plan off one move from the end and
+    // made the solver look like it stopped short of winning. Bound it by
+    // what the pouch allows instead: no line can outlast the gags.
+    const gagsLeft = Object.values(pouch).reduce((a, b) => a + b, 0);
+    const maxNodes = 2 * (gagsLeft + 1) + 2;
+
     let node = root, guard = 0;
-    while (node && guard++ < 8) {
+    while (node && guard++ < maxNodes) {
       node.onPath = true;
       node.pathOnly = true;     // show only the plan; siblings collapse
       spine.push(node);
@@ -790,7 +801,9 @@ the solver stops burning big gags for small gains.">
         </label>
         <span className="hint">
           {refining ? "refining in the background…"
-                    : "Click a node to expand it · gold spine = the solver's plan"}
+            : planSummary
+              ? <span>plan: <b style={{color:"var(--path)"}}>{planSummary}</b></span>
+              : "Click a node to expand it · gold spine = the solver's plan"}
         </span>
         {err && <span className="err">{err}</span>}
       </header>

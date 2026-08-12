@@ -264,7 +264,8 @@ def expand_decision(state_dict: Dict[str, Any], depth: int,
 
 
 def best_line(state_dict: Dict[str, Any], depth: int,
-               steps: int = 6, objective=None) -> List[Dict[str, Any]]:
+               steps: Optional[int] = None,
+               objective=None) -> List[Dict[str, Any]]:
     """The principal variation: what the solver plays from here, following
     its own recommendation and then the single most likely outcome of it.
 
@@ -274,6 +275,11 @@ def best_line(state_dict: Dict[str, Any], depth: int,
     doesn't say on its own.
     """
     state = state_from_dict(state_dict)
+    # Default to what the pouch allows rather than a round number: every
+    # action spends a gag, so no line can run longer than that, and a fixed
+    # cap silently truncates plans that need one more move than it allows.
+    if steps is None:
+        steps = sum(n for n in state.toon.gag_counts.values() if n > 0) + 1
     line = []
 
     for _ in range(steps):
