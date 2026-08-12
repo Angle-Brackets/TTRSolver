@@ -192,6 +192,37 @@ beats 78%. Most of the available win is probably here: the current
 weights were chosen by hand, not fitted, and the feature set is missing
 obvious terms.
 
+### Stage 1 measured: not yet worth it
+
+Five models on the same 500 labels, scored on the same 97 larger
+hold-out positions:
+
+| model | params | train MAE | hold-out MAE |
+|---|---|---|---|
+| linear (shipping) | 15 | 15.2 | **18.9** |
+| quadratic | 135 | 9.0 | 21.9 |
+| MLP-16 | 273 | 9.4 | 19.3 |
+| MLP-32 | 545 | 8.1 | **18.5** |
+| MLP-64 | 1089 | 7.2 | 22.3 |
+
+Every nonlinear model fits the training set far better and none of it
+survives to the hold-out; MLP-64 halves training error and is the worst
+of the five. The best, MLP-32, beats the line by 0.4 MAE on 97
+positions, which is noise.
+
+That gap between train and hold-out is data starvation, not a ceiling on
+capacity: 500 examples cannot constrain 545 parameters. It does not
+contradict the conjunction argument above -- interactions are real, and
+the linear model only sees `trapped x lure` because the product was
+written out by hand -- but a net needs enough examples to tell a real
+interaction from a coincidence, and 500 is not enough.
+
+The experiment that settles it is simply more data. Labelling now runs
+at roughly 500 positions per 46s, so 5,000 is about eight minutes; refit
+all five and see whether the MLP pulls away or the curves stay flat.
+The hard limit is that exact labels exist only for small positions, so
+the data can grow in quantity but not much in size.
+
 **Stage 1 — small MLP,** only if Stage 0 plateaus below what the exact
 labels suggest is reachable. Train offline with torch; **ship the weights
 as an `.npz` and run inference in numpy**, so the runtime keeps its
