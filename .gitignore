@@ -11,3 +11,6 @@ visualizer/assets/
 solver/live/_ttr_cache/
 
 solver/live/_cog_heads/
+
+# Labelled positions cached by tools/fit_heuristic.py
+.heuristic_labels.json
