@@ -32,7 +32,7 @@ GROUP_TRACKS = {Track.TOON_UP, Track.SOUND, Track.LURE}  # can hit all cogs
 # Throw/Squirt only go multi-target at level 7 (Wedding Cake / Geyser).
 
 
-@dataclass
+@dataclass(slots=True)
 class ToonState:
     laff: int
     max_laff: int
@@ -51,7 +51,7 @@ class ToonState:
         return self.gag_counts.get((track, level), 0) > 0
 
 
-@dataclass
+@dataclass(slots=True)
 class CogStatus:
     lured: bool = False
 
@@ -130,7 +130,7 @@ class CogStatus:
         )
 
 
-@dataclass
+@dataclass(slots=True)
 class CogState:
     cog_type: str          # key into data/ cog tables, e.g. "flunky"
     department: str        # "bossbot" | "sellbot" | "cashbot" | "lawbot"
@@ -145,7 +145,7 @@ class CogState:
                         status=self.status.copy())
 
 
-@dataclass
+@dataclass(slots=True)
 class BattleState:
     toon: ToonState
     cogs: List[CogState]
@@ -165,8 +165,20 @@ class BattleState:
             toon=ToonState(
                 laff=self.toon.laff,
                 max_laff=self.toon.max_laff,
-                track_exp=dict(self.toon.track_exp),
-                gag_counts=dict(self.toon.gag_counts),
+                # Both dicts are SHARED, not copied. Cloning is the single
+                # most expensive thing the search does -- 586,000 clones
+                # for one three-cog depth-2 position -- and copying these
+                # two was most of it.
+                #
+                # track_exp is the toon's training level per track. It is
+                # fixed for the whole battle; nothing mutates it.
+                #
+                # gag_counts does change, but only in
+                # simulator.apply_toon_action, which copies before
+                # writing. Sharing here plus copying there costs one dict
+                # copy per action instead of one per outcome branch.
+                track_exp=self.toon.track_exp,
+                gag_counts=self.toon.gag_counts,
             ),
             cogs=[c.copy() for c in self.cogs],
             round_num=self.round_num,

@@ -78,13 +78,13 @@ def perturbed_cog_accuracy(offset: int):
     real = cogs_mod.COG_DEPARTMENTS
     cogs_mod.COG_DEPARTMENTS = perturbed
     data_pkg.COG_DEPARTMENTS = perturbed
-    outcomes_mod._attack_outcomes.cache_clear()
+    outcomes_mod.clear_caches()
     try:
         yield
     finally:
         cogs_mod.COG_DEPARTMENTS = real
         data_pkg.COG_DEPARTMENTS = real
-        outcomes_mod._attack_outcomes.cache_clear()
+        outcomes_mod.clear_caches()
 
 
 def _action_key(action) -> Optional[Tuple]:

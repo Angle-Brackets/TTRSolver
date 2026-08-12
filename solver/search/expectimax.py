@@ -51,6 +51,17 @@ Values match exactly in every case, and the gain grows with the position,
 which is the right shape -- the crowded fights are the ones that needed
 it. Set `prune=False` to measure against.
 
+Four further passes since, none of them algorithmic: caching the damage
+distribution, a merge key that omits the gag counts (identical across one
+action's outcomes), sharing `track_exp` and copy-on-write `gag_counts` in
+`BattleState.clone`, and `__slots__` on the battle dataclasses. Depth 2
+end to end:
+
+    position   before    after
+    2 cogs     11.80s    0.47s     25x
+    3 cogs     50.90s    4.57s     11x
+    4 cogs     95.20s   13.64s      7x
+
 WHY A FULL SOLVE IS POSSIBLE
 ----------------------------
 Every action consumes exactly one gag, so gags-remaining strictly decreases
@@ -310,11 +321,9 @@ def max_round_damage(state: BattleState) -> int:
         if cog.status.is_dead:
             continue
         try:
-            damages = outcomes_mod.cog_damage_distribution(cog)
+            total += outcomes_mod.worst_case_damage(cog)
         except NotImplementedError:
             return 10 ** 6              # unknown: assume the worst
-        if damages:
-            total += max(damages)
     return total
 
 

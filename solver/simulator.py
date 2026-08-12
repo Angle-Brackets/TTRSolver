@@ -123,7 +123,16 @@ def apply_toon_action(state: BattleState, action: Action,
     toon = state.toon
     targets = _targets_for(state, action)
 
-    toon.gag_counts[(action.track, action.level)] -= 1
+    # Copy-on-write. `BattleState.clone` shares this dict rather than
+    # copying it, because a clone happens once per outcome branch -- tens
+    # of times per action -- while the counts change exactly once, here.
+    # Copying at the point of change instead turns ~55 dict copies per
+    # action into one. This is the ONLY place gag_counts is mutated; if
+    # that ever stops being true, every sibling state silently shares the
+    # edit. tests/test_state.py pins the invariant.
+    counts = dict(toon.gag_counts)
+    counts[(action.track, action.level)] -= 1
+    toon.gag_counts = counts
 
     healed = 0
     dealt = 0

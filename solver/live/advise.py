@@ -47,16 +47,20 @@ RECOMPUTE_ON = {"battle_started", "cog_joined", "cog_defeated", "damage"}
 # on a crowded battle or under-searches an easy one.
 #
 # The budget comes from the game rather than from taste: Toontown runs a
-# countdown of about thirty seconds for choosing a gag, so ten is a third
-# of the time available and still leaves the answer on screen long before
-# it is needed. What that buys, with pruning on and epsilon 0.03:
+# countdown of about thirty seconds for choosing a gag, so fifteen is
+# half the time available and still leaves the answer on screen well
+# before it is needed. What that buys, with pruning on and epsilon 0.03:
 #
-#     1 cog    depth 3
-#     2 cogs   depth 3
-#     3 cogs   depth 2   (8.0s)
-#     4 cogs   depth 1   (depth 2 is 27s)
+#     1 cog    depth 3   (0.78s)
+#     2 cogs   depth 2   (0.48s)
+#     3 cogs   depth 2   (4.76s)
+#     4 cogs   depth 2   (13.6s)
+#
+# Fifteen rather than ten specifically so four cogs clear depth 2, which
+# is the hardest case the game routinely produces and the one where a
+# ply matters most.
 DEFAULT_DEPTH = 4
-DEFAULT_BUDGET = 10.0
+DEFAULT_BUDGET = 15.0
 
 # Dropped probability mass per chance node. Checked against an exact
 # search on four positions: at 0.03 every one picks the same move while

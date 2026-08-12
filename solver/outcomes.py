@@ -137,11 +137,51 @@ def cog_damage_distribution(cog: CogState) -> Dict[int, float]:
 
     The merged form of `cog_attack_outcomes` -- which attack landed doesn't
     affect the next state, only the number does, so the search collapses
-    them."""
+    them.
+
+    DO NOT MUTATE the returned dict. It is shared, not rebuilt per call:
+    the distribution depends only on the cog's department, type and level,
+    and a three-cog depth-2 search asked for it 1.1 million times.
+    """
+    return _damage_distribution(cog.department, cog.cog_type, cog.level)
+
+
+@lru_cache(maxsize=None)
+def _damage_distribution(department: str, cog_type: str,
+                          level: int) -> Dict[int, float]:
     dist: Dict[int, float] = {}
-    for prob, _name, dmg, _hit in cog_attack_outcomes(cog):
+    for prob, _name, dmg, _hit in _attack_outcomes(department, cog_type,
+                                                    level):
         dist[dmg] = dist.get(dmg, 0.0) + prob
     return dist
+
+
+@lru_cache(maxsize=None)
+def _worst_damage(department: str, cog_type: str, level: int) -> int:
+    dist = _damage_distribution(department, cog_type, level)
+    return max(dist) if dist else 0
+
+
+def worst_case_damage(cog: CogState) -> int:
+    """The most this cog could deal in one round, over all its attacks.
+
+    Cached on the same key as the distribution: the search's value bounds
+    ask for this once per node, which was 367,000 times on a three-cog
+    depth-2 position.
+    """
+    return _worst_damage(cog.department, cog.cog_type, cog.level)
+
+
+def clear_caches() -> None:
+    """Drop every memo derived from the cog tables.
+
+    Anything that edits `data.COG_DEPARTMENTS` underneath us -- the
+    sensitivity analysis does exactly that -- has to call this, or the
+    perturbed numbers are computed once and then ignored.
+    """
+    _attack_outcomes.cache_clear()
+    _damage_distribution.cache_clear()
+    _worst_damage.cache_clear()
 
 
 def lure_end_probability(cog: CogState) -> float:
@@ -276,7 +316,7 @@ def _accumulate(results, prob, state_after, laff_lost, action,
         laff_lost, action.track, action.level,
         won=state_after.is_win(), lost=state_after.toon.laff <= 0)
 
-    key = state_key(state_after)
+    key = merge_key(state_after)
     existing = results.get(key)
     if existing is None:
         results[key] = [prob, state_after, reward]
@@ -339,6 +379,30 @@ def cog_phase_summary(state: BattleState) -> List[Dict]:
     return summary
 
 
+def _cog_key(state: BattleState) -> Tuple:
+    return tuple((c.cog_type, c.department, c.level, c.hp, c.status.is_dead,
+                  c.status.lured, c.status.lure_rounds_remaining,
+                  c.status.lure_acc_before_bonus, c.status.lure_level,
+                  c.status.trapped, c.status.trap_level)
+                 for c in state.cogs)
+
+
+def merge_key(state: BattleState) -> Tuple:
+    """Identity of a state *within one action's outcome set*.
+
+    Deliberately omits the gag counts, which `state_key` includes. Every
+    outcome of a single action spent the same gag from the same pouch, so
+    the counts are identical across all of them and hashing a
+    twenty-element frozenset of them per outcome is pure overhead --
+    measured at 11.8 million generator steps on a three-cog depth-2
+    search, for a value that never varies within the comparison.
+
+    Only for merging siblings. Use `state_key` for the transposition
+    table, where states genuinely differ in what has been spent.
+    """
+    return (state.toon.laff, _cog_key(state))
+
+
 def state_key(state: BattleState) -> Tuple:
     """Hashable identity for a state, for outcome merging and solver
     memoization. `round_num` is deliberately excluded -- nothing in the
@@ -362,9 +426,5 @@ def state_key(state: BattleState) -> Tuple:
         state.toon.laff,
         frozenset((t, lvl, n)
                   for (t, lvl), n in state.toon.gag_counts.items() if n > 0),
-        tuple((c.cog_type, c.department, c.level, c.hp, c.status.is_dead,
-               c.status.lured, c.status.lure_rounds_remaining,
-               c.status.lure_acc_before_bonus, c.status.lure_level,
-               c.status.trapped, c.status.trap_level)
-              for c in state.cogs),
+        _cog_key(state),
     )
