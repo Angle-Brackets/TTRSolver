@@ -55,17 +55,18 @@
   label { display:inline-flex; gap:5px; align-items:center;
           color:var(--muted); font-size:11px; }
 
-  .node { position:absolute; width:320px; border:1px solid var(--line);
-          border-radius:6px; background:var(--panel); padding:4px 9px;
-          cursor:pointer; transition:border-color .12s, box-shadow .12s; }
+  .node { position:absolute; width:96px; height:50px; border:1px solid var(--line);
+          border-radius:7px; background:var(--panel); padding:3px 4px;
+          cursor:pointer; display:flex; flex-direction:column;
+          align-items:center; justify-content:center; gap:1px;
+          transition:border-color .12s, box-shadow .12s; }
   .node:hover { border-color:var(--muted); }
   .node.sel { box-shadow:0 0 0 2px var(--text) inset; }
   .node.path { border-color:var(--path); }
-  .node .top { display:flex; align-items:center; gap:6px; }
-  .node .title { font-size:12px; font-weight:600; white-space:nowrap;
-                 overflow:hidden; text-overflow:ellipsis; }
-  .node .sub { color:var(--muted); font-size:11px; margin-top:1px;
-               white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .node .top { display:flex; align-items:center; gap:3px; max-width:100%; }
+  .node .title { font-size:10px; font-weight:600; white-space:nowrap;
+                 overflow:hidden; text-overflow:ellipsis; max-width:84px; }
+  .node .sub { color:var(--muted); font-size:10px; white-space:nowrap; }
   .dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
   /* Artwork is optional -- assets/ is gitignored and only appears once
      tools/fetch_icons.py has run, so every icon hides itself on error and
@@ -74,9 +75,9 @@
           image-rendering:auto; }
   .icon.sm { width:16px; height:16px; }
   .icon.lg { width:30px; height:30px; }
-  .cogstrip { display:inline-flex; gap:2px; align-items:center;
-              margin-left:6px; vertical-align:middle; }
-  .cogstrip img { width:15px; height:15px; object-fit:contain; }
+  .cogstrip { display:inline-flex; gap:1px; align-items:center;
+              margin-left:3px; vertical-align:middle; }
+  .cogstrip img { width:12px; height:12px; object-fit:contain; }
   .cogstrip img.dead { opacity:.25; filter:grayscale(1); }
   .chev { color:var(--dim); font-size:10px; margin-left:auto; }
 
@@ -134,14 +135,16 @@ const {useState, useEffect, useRef, useCallback} = React;
 // bounded by depth alone (9 levels x 24px + a card), and expanding anything
 // just makes the page taller, which is the scroll direction that costs
 // nothing.
-const NODE_W = 340, CARD_H = 44;
-// A small indent, and it stops growing after a few levels. Depth still
-// reads -- the guide rails and the elbow do that work -- but the trunk no
-// longer staircases off to the right as the plan gets longer, which is
-// what made a nine-deep line look like it was travelling sideways.
-const INDENT = 13, INDENT_MAX_DEPTH = 4;
-const ROW_H = 52, PAD_X = 14, PAD_Y = 14;
-const indentFor = (depth) => Math.min(depth, INDENT_MAX_DEPTH) * INDENT;
+// Classic tree: root on top, children fanning out below it.
+//
+// The reason the earlier attempt at this had to be abandoned was card size,
+// not topology -- 340px-wide cards fanning eight ways is 2700px per level.
+// Nodes here are small tiles (icon + one number), like the circles in a
+// textbook tree diagram, and the detail lives in the inspector. Eight
+// children is now ~830px, which fits. Wide trees are still possible if you
+// expand everything, so there is a zoom control.
+const NODE_W = 96, CARD_H = 50;
+const COL_W = 104, ROW_H = 96, PAD_X = 20, PAD_Y = 16;
 
 const KIND = {
   more:     {color:"var(--bucket)",   name:"Collapsed"},
@@ -212,22 +215,27 @@ function shown(node) {
   return [...on, node._more];
 }
 
-/** One row per visible node, in pre-order; depth is an indent.
- *
- *  Nothing centres over anything, so adding children never widens the
- *  canvas -- it only makes it taller. */
+/** Tidy tree: depth sets the row, leaves take the next column, and every
+ *  parent centres over its children. Grows downward and outward, like a
+ *  tree diagram. */
 function layout(root) {
-  let row = 0, maxDepth = 0;
+  let col = 0, maxDepth = 0, maxX = 0;
   const walk = (node, depth) => {
-    node.x = PAD_X + indentFor(depth);
-    node.y = PAD_Y + row * ROW_H;
+    node.y = PAD_Y + depth * ROW_H;
     node.depth = depth;
-    row += 1;
     maxDepth = Math.max(maxDepth, depth);
-    shown(node).forEach(c => walk(c, depth + 1));
+    const kids = shown(node);
+    if (kids.length) {
+      kids.forEach(c => walk(c, depth + 1));
+      node.x = (kids[0].x + kids[kids.length - 1].x) / 2;
+    } else {
+      node.x = PAD_X + col * COL_W;
+      col += 1;
+    }
+    maxX = Math.max(maxX, node.x);
   };
   walk(root, 0);
-  return {rows: row, maxDepth};
+  return {maxDepth, maxX};
 }
 
 const visibleEdges = (root) => {
@@ -247,33 +255,47 @@ function NodeCard({node, selected, busy, onSelect}) {
   const color = lost ? "var(--loss)" : style.color;
   const cls = "node" + (selected ? " sel" : "") + (node.onPath ? " path" : "");
 
+  // A tile is 96px wide, so it gets an icon and one number. The label, the
+  // full EV, the outcome breakdown and the cog forecast are all one click
+  // away in the inspector -- crowding them in here is what forced the wide
+  // cards that made a fanning layout impossible.
+  const headline =
+    node.ev != null ? `${node.ev > 0 ? "+" : ""}${node.ev.toFixed(0)}`
+    : node.prob != null ? pct(node.prob)
+    : null;
+
   return (
-    <div className={cls} data-nodeid={node.id} style={{left:node.x, top:node.y}}
+    <div className={cls} data-nodeid={node.id}
+         style={{left:node.x, top:node.y}}
+         title={[node.label,
+                 node.ev != null && `EV ${node.ev.toFixed(2)}`,
+                 node.gap != null && `+${node.gap.toFixed(2)} over next`,
+                 node.prob != null && `p ${pct(node.prob)}`,
+                 node.laff_lost > 0 && `-${node.laff_lost} laff`,
+                 ...(node.cogs || [])].filter(Boolean).join(String.fromCharCode(10))}
          onClick={(e) => { e.stopPropagation(); onSelect(node); }}>
       <div className="top">
-        {node.icon ? <Icon name={node.icon} title={node.label} />
-                   : <span className="dot" style={{background:color}} />}
-        <span className="title">{node.label}</span>
-        {busy && <span className="chev">…</span>}
-        {!busy && node.kind !== "terminal" && node.kind !== "bucket" &&
-          <span className="chev">{node.open ? "−" : "+"}</span>}
+        {node.icon
+          ? <Icon name={node.icon} />
+          : node.cog_icons && node.cog_icons.length
+            ? <span className="cogstrip">
+                {node.cog_icons.map((ic, i) => (
+                  <Icon key={i} name={ic}
+                        cls={node.state && node.state.cogs[i] &&
+                             node.state.cogs[i].dead ? "dead" : ""} />
+                ))}
+              </span>
+            : <span className="dot" style={{background:color}} />}
+        {busy && <span className="sub">…</span>}
       </div>
-      <div className="sub mono">
-        {node.ev != null && <span style={{color}}>EV {node.ev > 0 ? "+" : ""}{node.ev.toFixed(1)} </span>}
-        {node.gap != null && <span>(+{node.gap.toFixed(1)}) </span>}
-        {node.prob != null && <span>p {pct(node.prob)} </span>}
-        {node.laff_lost > 0 && <span style={{color:"var(--loss)"}}>−{node.laff_lost} laff</span>}
-        {node.laff_lost === 0 && node.prob != null && <span>no damage</span>}
-        {node.cog_icons && node.cog_icons.length > 0 &&
-          <span className="cogstrip">
-            {node.cog_icons.map((ic, i) => (
-              <Icon key={i} name={ic}
-                    cls={node.state && node.state.cogs[i] &&
-                         node.state.cogs[i].dead ? "dead" : ""}
-                    title={node.cogs && node.cogs[i]} />
-            ))}
-          </span>}
-      </div>
+      {headline &&
+        <div className="sub mono"
+             style={{color: node.ev != null ? color : "var(--muted)"}}>
+          {headline}
+          {node.laff_lost > 0 &&
+            <span style={{color:"var(--loss)"}}> −{node.laff_lost}</span>}
+        </div>}
+      {node.kind === "more" && <div className="sub">{node.label}</div>}
     </div>
   );
 }
@@ -500,6 +522,7 @@ function App({bridge, catalogue}) {
   const [selected, setSelected] = useState(null);
   const [, bump] = useState(0);
   const [busyId, setBusyId] = useState(null);
+  const [zoom, setZoom] = useState(1);
   const [focusId, setFocusId] = useState(null);
   const [err, setErr] = useState(null);
   const canvasRef = useRef(null);
@@ -613,10 +636,10 @@ function App({bridge, catalogue}) {
 
   if (!root) return <div id="boot">Building tree…</div>;
 
-  const {rows, maxDepth} = layout(root);
+  const {maxDepth, maxX} = layout(root);
   const edges = visibleEdges(root);
-  const width = PAD_X + indentFor(maxDepth) + NODE_W + 40;
-  const height = PAD_Y + rows * ROW_H + 40;
+  const width = maxX + NODE_W + 60;
+  const height = PAD_Y + (maxDepth + 1) * ROW_H + 60;
 
   return (
     <div id="shell">
@@ -630,8 +653,13 @@ function App({bridge, catalogue}) {
           {showCfg ? "Hide setup" : "Setup"}</button>
         <label>Depth
           <select value={depth} onChange={e => setDepth(+e.target.value)}>
-            {[1,2,3].map(d => <option key={d} value={d}>{d}</option>)}
+            {[1,2,3,4].map(d => <option key={d} value={d}>{d}</option>)}
           </select>
+        </label>
+        <label>Zoom
+          <input type="range" min="40" max="100" value={zoom * 100}
+                 style={{width:80}}
+                 onChange={e => setZoom(+e.target.value / 100)} />
         </label>
         <span className="hint">
           Click a node to expand it · gold spine = the solver's plan
@@ -683,17 +711,19 @@ function App({bridge, catalogue}) {
 
       <main>
         <div id="canvas" ref={canvasRef} onClick={() => setSelected(root)}>
-          <div style={{position:"relative", width, height}}>
+          <div style={{position:"relative", width: width * zoom,
+                       height: height * zoom}}>
+           <div style={{position:"absolute", left:0, top:0, width, height,
+                        transform:`scale(${zoom})`, transformOrigin:"0 0"}}>
             <svg width={width} height={height}
                  style={{position:"absolute", left:0, top:0, pointerEvents:"none"}}>
               {edges.map(([a, b], i) => {
-                const rail = a.x + 7;               // parent's left rail
-                const y1 = a.y + CARD_H;
-                const y2 = b.y + CARD_H / 2;
+                const x1 = a.x + NODE_W / 2, y1 = a.y + CARD_H;
+                const x2 = b.x + NODE_W / 2, y2 = b.y;
+                const mid = (y1 + y2) / 2;
                 const lit = a.onPath && b.onPath;
-                const stub = b.x - rail;
                 return <path key={i}
-                  d={`M${rail},${y1} V${y2 - 7} Q${rail},${y2} ${rail + stub},${y2}`}
+                  d={`M${x1},${y1} C${x1},${mid} ${x2},${mid} ${x2},${y2}`}
                   fill="none" stroke={lit ? "var(--path)" : "var(--line)"}
                   strokeWidth={lit ? 2.2 : 1.2} />;
               })}
@@ -710,6 +740,7 @@ function App({bridge, catalogue}) {
               walk(root);
               return out;
             })()}
+           </div>
           </div>
         </div>
         <aside><Inspector node={selected} bridge={bridge} depth={depth} /></aside>

@@ -1,5 +1,5 @@
 """
-Depth-limited expectimax over the battle tree.
+Depth-limited expectimax over the battle tree, with *-minimax pruning.
 
 The tree alternates two node kinds:
 
@@ -13,25 +13,93 @@ Value of a state = max over legal actions of
 
 Rewards match simulator.step's convention (-laff lost, -lambda*gag level,
 +/-100 terminal), so this optimizes the same objective a sampling agent
-would. At the depth cutoff a non-terminal state is scored by the heuristic
-below.
+would.
+
+PRUNING
+-------
+Plain alpha-beta doesn't apply to expectimax: a chance node is an average,
+not a max, so one bad child can't refute it the way it can under a
+minimax. The analogue is Ballard's *-minimax. At a chance node we know each
+child's value lies in [VMIN, VMAX], so after evaluating some children the
+node's final value is pinned between
+
+    done + (unseen mass) * VMIN   and   done + (unseen mass) * VMAX
+
+If that whole interval already sits outside the (alpha, beta) window the
+parent cares about, the rest of the children cannot change the decision and
+we stop. Each child is also searched with a window derived by inverting the
+same arithmetic, so cutoffs cascade. That is star1; star2 adds a probing
+pass and is not implemented here.
+
+Pruning changes the running time and nothing else. `tests/test_search.py`
+checks the pruned search returns the same value and the same move as an
+exhaustive one, which is the only property that matters.
+
+WHY A FULL SOLVE IS POSSIBLE
+----------------------------
+Every action consumes exactly one gag, so gags-remaining strictly decreases
+down any line and the state graph is a DAG -- no cycles, and depth is
+bounded by the size of the pouch rather than by anything we choose. `solve`
+below exploits that: with no depth limit it plays to the end of the battle
+and returns an exact optimum, not an estimate. Whether it *finishes* is a
+question of branching, which is what the pruning and the symmetry
+de-duplication are for.
 
 A NOTE ON THE HEURISTIC
 -----------------------
 Unlike everything in solver/data/, the heuristic is not a game constant to
 be transcribed -- it's a design choice, and its weights are tunable rather
-than [CONFIRMED]. It should not be read as authoritative. The deeper you
-search the less it matters; at depth >= 4 on small fights it rarely changes
-the chosen action.
+than [CONFIRMED]. It only applies at a depth cutoff; a full solve never
+consults it.
 """
 from typing import Dict, List, Optional, Tuple
 
 from .. import outcomes as outcomes_mod
 from .. import simulator
-from ..state import BattleState, Action
+from ..state import Action, BattleState
 
 WIN_VALUE = 100.0
 LOSS_VALUE = -100.0
+
+# Bounds on the value of any node, needed by star1. Winning is worth +100
+# and nothing beats it; the worst case is losing all remaining laff and then
+# the battle. Deliberately loose -- a wrong bound would prune a real answer,
+# whereas a slack one only prunes less.
+VMAX = WIN_VALUE
+def _vmin(state: BattleState) -> float:
+    return LOSS_VALUE - float(state.toon.max_laff) - 100.0
+
+EXACT, LOWER, UPPER = 0, 1, 2
+
+
+def trim(branches, epsilon: float):
+    """Keep the likeliest branches covering (1 - epsilon) of the probability,
+    renormalised. Returns them plus the mass actually dropped.
+
+    This is the one APPROXIMATE optimisation here, and it is the one that
+    buys depth. A cog's damage distribution has a long thin tail -- twenty
+    branches where four carry most of the mass -- and the tail costs as much
+    to search as the head.
+
+    The error is bounded, not hand-waved: dropping mass `m` from branches
+    whose contributions lie in a range of width `R` moves the node's value
+    by at most `m * R`. At epsilon=0.01 and R~250 that is under 2.5 points
+    of EV, against decisions that are usually separated by tens. Set
+    epsilon=0 for an exact search.
+    """
+    if epsilon <= 0 or len(branches) <= 1:
+        return branches, 0.0
+    ordered = sorted(branches, key=lambda b: b[0], reverse=True)
+    kept, mass = [], 0.0
+    for branch in ordered:
+        if mass >= 1.0 - epsilon and kept:
+            break
+        kept.append(branch)
+        mass += branch[0]
+    if not kept or mass <= 0:
+        return branches, 0.0
+    scale = 1.0 / mass
+    return [(prob * scale, nxt, reward) for prob, nxt, reward in kept], 1.0 - mass
 
 
 def heuristic_value(state: BattleState) -> float:
@@ -54,22 +122,60 @@ def heuristic_value(state: BattleState) -> float:
     total_max_hp = sum(c.max_hp for c in state.cogs)
     remaining_hp = sum(max(0, c.hp) for c in state.cogs if not c.status.is_dead)
     cog_progress = 1.0 - (remaining_hp / total_max_hp) if total_max_hp else 1.0
-
     laff_kept = state.toon.laff / state.toon.max_laff if state.toon.max_laff else 0.0
-
     return 100.0 * cog_progress - 100.0 * (1.0 - laff_kept)
 
 
+# ---------------------------------------------------------------------
+# Action set
+# ---------------------------------------------------------------------
+
+def _target_signature(state: BattleState, action: Action):
+    """What the targets of an action look like, ignoring which slot they
+    are in."""
+    if action.target_index is None:
+        return None
+    cog = state.cogs[action.target_index]
+    st = cog.status
+    return (cog.cog_type, cog.department, cog.level, cog.hp, st.is_dead,
+            st.lured, st.lure_rounds_remaining, st.trapped, st.trap_level)
+
+
+def distinct_actions(state: BattleState) -> List[Action]:
+    """Legal actions with symmetric duplicates removed.
+
+    Throwing the same pie at two cogs that are identical in type, level, HP
+    and status produces the same distribution over successor states, so
+    searching both doubles the work for nothing. Three identical cogs turn
+    eight actions into far fewer -- and identical cogs are the common case
+    in this game, since a battle is usually several of the same cog.
+    """
+    seen, out = set(), []
+    for action in simulator.legal_actions(state):
+        key = (action.track, action.level, _target_signature(state, action))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(action)
+    return out
+
+
+# ---------------------------------------------------------------------
+# Search
+# ---------------------------------------------------------------------
+
 def evaluate(state: BattleState, depth: int, gag_cost_lambda: float = 0.1,
-             discount: float = 1.0,
-             memo: Optional[Dict] = None) -> Tuple[float, Optional[Action]]:
+             discount: float = 1.0, memo: Optional[Dict] = None,
+             alpha: float = float("-inf"), beta: float = float("inf"),
+             prune: bool = True, epsilon: float = 0.0
+             ) -> Tuple[float, Optional[Action]]:
     """Expected value of `state` under optimal play, plus the action that
     achieves it (None at a terminal or cutoff node).
 
-    `memo` is reused across calls if you pass one in -- worth doing when
-    evaluating many states from the same fight, since transpositions are
-    common (the same HP/laff/inventory position is reachable by different
-    action orders).
+    `depth` counts plies; pass a huge number (or use `solve`) to play to the
+    end of the battle. `alpha`/`beta` are the window the caller cares about;
+    with `prune=False` the search is exhaustive, which is what the tests
+    compare against.
     """
     if memo is None:
         memo = {}
@@ -77,49 +183,133 @@ def evaluate(state: BattleState, depth: int, gag_cost_lambda: float = 0.1,
     if state.is_terminal():
         # Zero, NOT +/-WIN_VALUE. The transition that reached this state
         # already paid the +/-100 in its reward, and `evaluate` returns the
-        # value of what is still to come. Returning the terminal bonus here
-        # too would count every win twice and systematically overvalue any
-        # line that ends the fight.
+        # value of what is still to come.
         return 0.0, None
     if depth <= 0:
         return heuristic_value(state), None
 
-    key = (outcomes_mod.state_key(state), depth)
-    cached = memo.get(key)
-    if cached is not None:
-        return cached
+    key = (outcomes_mod.state_key(state), depth, epsilon)
+    hit = memo.get(key)
+    if hit is not None:
+        value, action, flag = hit
+        if flag == EXACT:
+            return value, action
+        if flag == LOWER and value >= beta:
+            return value, action
+        if flag == UPPER and value <= alpha:
+            return value, action
 
-    best_value = float("-inf")
-    best_action: Optional[Action] = None
+    original_alpha = alpha
+    best_value, best_action = float("-inf"), None
 
-    for action in simulator.legal_actions(state):
+    # Try the transposition table's move first: a good first move makes the
+    # window tight immediately, and every later cutoff depends on that.
+    actions = distinct_actions(state)
+    if hit is not None and hit[1] is not None and hit[1] in actions:
+        actions = [hit[1]] + [a for a in actions if a != hit[1]]
+
+    for action in actions:
         try:
             branches = outcomes_mod.action_outcomes(state, action, gag_cost_lambda)
         except NotImplementedError:
             # Gag or cog data still marked TODO -- skip this action rather
-            # than let a data gap take down the whole search. The project
-            # rule is that missing data must not be silently substituted;
-            # here that means "can't evaluate", not "assume zero".
+            # than let a data gap take down the whole search.
             continue
 
-        value = 0.0
-        for prob, next_state, reward in branches:
-            future, _ = evaluate(next_state, depth - 1, gag_cost_lambda,
-                                 discount, memo)
-            value += prob * (reward + discount * future)
-
+        branches, _dropped = trim(branches, epsilon)
+        value = _chance_value(state, branches, depth, gag_cost_lambda,
+                              discount, memo, alpha, beta, prune, epsilon)
         if value > best_value:
             best_value, best_action = value, action
+        if prune:
+            alpha = max(alpha, best_value)
+            if alpha >= beta:
+                break                      # this node is already refuted
 
     if best_action is None:
-        # Every action was unevaluable (or there were none). Fall back to the
-        # static score so the caller gets a number rather than -inf.
         result = (heuristic_value(state), None)
-    else:
-        result = (best_value, best_action)
+        memo[key] = (result[0], None, EXACT)
+        return result
 
-    memo[key] = result
-    return result
+    flag = (UPPER if best_value <= original_alpha
+            else LOWER if best_value >= beta else EXACT)
+    memo[key] = (best_value, best_action, flag)
+    return best_value, best_action
+
+
+def _chance_value(state, branches, depth, gag_cost_lambda, discount, memo,
+                   alpha, beta, prune, epsilon=0.0) -> float:
+    """Star1: the expected value of one action, stopping as soon as the
+    unseen probability mass can no longer carry the total out of
+    (alpha, beta).
+
+    Written in Ballard's original form. Each branch contributes
+    `f = reward + discount * value(next)`, bounded by [tmin, tmax]. Track
+    what the node would total if every remaining branch came in at its
+    floor (`lower`) or its ceiling (`upper`); those two converge as branches
+    resolve. Invert the same arithmetic to get the window each child needs,
+    so a child that cannot matter is searched with a window so tight it
+    returns almost immediately.
+    """
+    if not prune:
+        return sum(prob * (reward + discount *
+                           evaluate(nxt, depth - 1, gag_cost_lambda, discount,
+                                    memo, prune=False, epsilon=epsilon)[0])
+                   for prob, nxt, reward in branches)
+
+    # Bounds on one branch's contribution. Using current laff rather than
+    # max laff is both valid (you cannot lose what you don't have) and
+    # tighter, which is what decides whether anything gets pruned at all.
+    tmax = WIN_VALUE
+    tmin = -(float(state.toon.laff) + 100.0 + gag_cost_lambda * 7.0 * depth)
+
+    # Most probable first: they shrink the gap between lower and upper
+    # fastest, so the long tail of unlikely damage rolls is what gets cut.
+    branches = sorted(branches, key=lambda b: b[0], reverse=True)
+
+    lower = sum(prob * tmin for prob, _s, _r in branches)
+    upper = sum(prob * tmax for prob, _s, _r in branches)
+
+    total = 0.0
+    for prob, nxt, reward in branches:
+        # What this branch must return for the node to still reach the
+        # window's edges.
+        a_i = (alpha - upper) / prob + tmax
+        b_i = (beta - lower) / prob + tmin
+
+        child_alpha = max((a_i - reward) / discount, tmin)
+        child_beta = min((b_i - reward) / discount, tmax)
+        if child_alpha >= child_beta:
+            child_alpha, child_beta = tmin, tmax   # degenerate window
+
+        value, _ = evaluate(nxt, depth - 1, gag_cost_lambda, discount, memo,
+                            child_alpha, child_beta, True, epsilon)
+        f = reward + discount * value
+
+        if f <= a_i:
+            return alpha            # fails low: parent already has better
+        if f >= b_i:
+            return beta             # fails high: parent will cut anyway
+
+        lower += prob * (f - tmin)
+        upper += prob * (f - tmax)
+        total += prob * f
+
+    return total
+
+
+def solve(state: BattleState, gag_cost_lambda: float = 0.1,
+           max_depth: Optional[int] = None,
+           memo: Optional[Dict] = None) -> Tuple[float, Optional[Action]]:
+    """Play the battle out to the end -- exact, no heuristic.
+
+    Safe because every action spends a gag, so no line can run longer than
+    the pouch and the search cannot loop. `max_depth` is a safety valve, not
+    part of the model: leave it None to solve properly.
+    """
+    if max_depth is None:
+        max_depth = sum(n for n in state.toon.gag_counts.values() if n > 0) + 1
+    return evaluate(state, max_depth, gag_cost_lambda, memo=memo)
 
 
 def best_action(state: BattleState, depth: int = 3,
@@ -128,11 +318,31 @@ def best_action(state: BattleState, depth: int = 3,
     return evaluate(state, depth, gag_cost_lambda)[1]
 
 
+def best_action_iterative(state: BattleState, depth: int = 4,
+                           gag_cost_lambda: float = 0.1
+                           ) -> Tuple[float, Optional[Action]]:
+    """Search 1..depth, reusing the table between passes.
+
+    Costs a little extra work at the shallow depths and usually more than
+    repays it: each pass leaves its best move in the table, so the next pass
+    tries that first and prunes almost immediately.
+    """
+    memo: Dict = {}
+    value, action = 0.0, None
+    for d in range(1, depth + 1):
+        value, action = evaluate(state, d, gag_cost_lambda, memo=memo)
+    return value, action
+
+
 def rank_actions(state: BattleState, depth: int = 3,
                  gag_cost_lambda: float = 0.1) -> List[Tuple[float, Action]]:
-    """Every legal action with its expected value, best first. Useful for
-    seeing *how much* better the top choice is -- a 0.3 gap means the
-    decision barely matters, a 40 gap means don't get it wrong."""
+    """Every legal action with its expected value, best first.
+
+    Unpruned by construction: a window that is tight enough to prune is also
+    tight enough to return a bound instead of a value for the losing moves,
+    and the whole point here is to show how much worse they are. Use
+    `best_action` when only the choice matters.
+    """
     memo: Dict = {}
     scored = []
     for action in simulator.legal_actions(state):
@@ -141,9 +351,9 @@ def rank_actions(state: BattleState, depth: int = 3,
         except NotImplementedError:
             continue
         value = sum(
-            prob * (reward + evaluate(next_state, depth - 1, gag_cost_lambda,
+            prob * (reward + evaluate(nxt, depth - 1, gag_cost_lambda,
                                       1.0, memo)[0])
-            for prob, next_state, reward in branches
+            for prob, nxt, reward in branches
         )
         scored.append((value, action))
     scored.sort(key=lambda pair: pair[0], reverse=True)

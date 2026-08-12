@@ -52,34 +52,52 @@ group attacks.
   min/max interpolation in `calc_toon_damage` with the real formula. The
   gag infoboxes' `prevexp`/`nextexp` fields are the likely source.
 
-## 3. Make the search fast enough to go deeper
+## 3. Search speed
 
-Where it stands: a depth-2 evaluation on a three-cog fight is ~1.0s, and
-the 24-fight benchmark runs in 9s across 12 cores where it used to take 45.
+Where it stands on a three-cog fight: depth 2 ~1.0s, depth 3 ~11s exact or
+~7s at epsilon 0.05. A **full exact solve to the end of the battle** runs in
+seconds for small fights (2 cogs / 10 gags: 2.5s; 3 cogs / 8 gags: 8.3s) and
+does not finish in ten minutes at 3 cogs / 11 gags.
 
-What got it there, in order of how much it bought:
+What's implemented, and what each was worth:
 
-- **`copy.deepcopy` was 91% of runtime.** `BattleState.clone()` took a
-  depth-2 search from 35s to 1.3s. The lesson worth keeping: profile first.
-  The algorithmic suspect was not the problem either time.
-- **Caching attack distributions.** `cog_attack_outcomes` depends only on
-  (department, type, level), and a depth-2 search called it 11,111 times
-  for three distinct cogs. 1.34s -> 1.03s.
-- **Parallel fights.** Benchmarks and sweeps play independent fights, so
-  `solver/search/parallel.py` spreads them over cores: ~5x on 12 cores
-  (not 12x -- the random policy is nearly free, so half the batch is
-  trivial, and 24 fights over 12 workers is coarse).
+- **`BattleState.clone()` over `copy.deepcopy`** -- 35s to 1.3s at depth 2.
+  The one that mattered, and it was not the algorithmic suspect.
+- **Caching attack distributions** by (department, type, level) -- 1.34s to
+  1.03s.
+- **Symmetry de-duplication** -- targeting cogs identical in type, level, HP
+  and status is the same move, so `distinct_actions` collapses them. Three
+  identical cogs: 8 actions become 4. Free, exact, and identical cogs are
+  the common case in a real battle.
+- **Star1 (`*`-minimax) pruning** -- the alpha-beta analogue for chance
+  nodes. Exact, verified against an exhaustive search, but only ~1-2x here.
+  It works best when the utility range is narrow relative to the search
+  window, and ours is wide (a branch can range over ~250 points), so the
+  bounds stay loose and cuts come late.
+- **Transposition table with bound flags** and TT-move-first ordering.
+  Iterative deepening is wired up (`best_action_iterative`) but currently
+  runs *slower* -- the extra shallow passes don't repay while star1 is
+  cutting so little.
+- **Epsilon trimming** (approximate, off by default) -- drop the thin tail
+  of the outcome distribution and renormalise. 1.7x at epsilon 0.05 for
+  about 5 points of EV drift, same move chosen. Error is bounded by
+  `dropped mass x value range`, so it is quantifiable rather than a guess.
 
-Left to try, cheapest first: prune outcome branches below an epsilon
-probability (the damage distribution has a long, nearly irrelevant tail);
-order actions by a static score so an alpha-beta-style cutoff has something
-to work with; and only then consider splitting a single search at the root,
-which `parallel.rank_actions` does but which loses to the serial version
-unless you already have a warm pool -- workers can't share the memo, so they
-redo each other's transpositions.
+Worth trying next, roughly in order of expected payoff:
 
-**None of this helps the visualizer.** Pyodide is single-threaded and has no
-`multiprocessing`; the page's per-node latency needs web workers instead.
+1. **Tighter value bounds.** Star1 lives or dies on them. A cheap admissible
+   bound per state -- something like "cogs left x their max damage" for the
+   floor -- would narrow the window far more than any amount of reordering.
+2. **Star2**, which probes one child before committing, and needs those
+   bounds anyway.
+3. **Bucketing near-identical damage outcomes** (merge states differing by
+   a point or two of laff). Attacks the branching factor itself, which is
+   the actual cost driver, at the price of a coarser state space.
+4. **Parallel root search** with a warm pool -- `parallel.rank_actions` is
+   there, and the memo duplication it costs matters less at depth 4+.
+
+**None of this helps the visualizer**, which runs single-threaded under
+Pyodide with no `multiprocessing`; that would need web workers.
 
 ## 4. Validate the solver's advice against real play
 
