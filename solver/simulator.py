@@ -139,10 +139,24 @@ def apply_toon_action(state: BattleState, action: Action,
         return healed, dealt
 
     if action.track == Track.TRAP:
-        cog = targets[0]
-        cog.status.trapped = True
-        cog.status.trap_track = action.track
-        cog.status.trap_level = action.level
+        # Every target, not just the first. Railroad is a group gag -- it
+        # lays a trap in front of all of them -- and arming only one cog
+        # quietly turned the best trap in the game into a single-target one,
+        # which made the Railroad+Lure combo look far weaker than it is.
+        #
+        # A lured cog is skipped: you cannot place a trap under a cog that
+        # has already been pulled off its square, which is the same rule
+        # legal_actions applies to single-target traps. An existing trap is
+        # overwritten -- [CONFIRMED] TTR 3.0.0, "if there are active Trap
+        # gags on Cogs, and a Railroad gag is placed in a subsequent round
+        # by itself, it will override the previously placed Trap gags
+        # rather than fizzling out".
+        for cog in targets:
+            if cog.status.lured:
+                continue
+            cog.status.trapped = True
+            cog.status.trap_track = action.track
+            cog.status.trap_level = action.level
 
     elif action.track == Track.LURE:
         # Snapshot the accuracy this Lure landed with, BEFORE any bonus and

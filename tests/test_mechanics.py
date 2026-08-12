@@ -322,6 +322,56 @@ class TestLureLanding(unittest.TestCase):
         self.assertEqual(state.cogs[1].status.lure_rounds_remaining, 1)
 
 
+class TestGroupTrap(unittest.TestCase):
+    """Railroad is a group gag: it arms every cog, not just the first.
+
+    Arming only targets[0] made the best trap in the game behave like a
+    single-target one, so the Railroad+Lure combo -- which should clear a
+    field outright -- looked weaker than a plain pie and no strategy would
+    take it."""
+
+    def _field(self):
+        toon = ToonState(laff=45, max_laff=45,
+                         track_exp={Track.TRAP: 7, Track.LURE: 7},
+                         gag_counts={(Track.TRAP, 7): 1, (Track.LURE, 2): 2})
+        cogs = [CogState(cog_type="flunky", department="bossbot", level=lvl,
+                         hp=data.cog_max_hp(lvl), max_hp=data.cog_max_hp(lvl))
+                for lvl in (4, 5)]
+        return BattleState(toon=toon, cogs=cogs)
+
+    def test_railroad_arms_every_cog(self):
+        state = self._field()
+        state, _r, _d = simulator.step(
+            state, Action(track=Track.TRAP, level=7, target_index=None))
+        self.assertTrue(all(c.status.trapped for c in state.cogs))
+
+    def test_a_single_target_trap_arms_only_its_target(self):
+        state = self._field()
+        state.toon.gag_counts[(Track.TRAP, 3)] = 1
+        state, _r, _d = simulator.step(
+            state, Action(track=Track.TRAP, level=3, target_index=0))
+        self.assertTrue(state.cogs[0].status.trapped)
+        self.assertFalse(state.cogs[1].status.trapped)
+
+    def test_railroad_then_lure_clears_the_field(self):
+        state = self._field()
+        state, _r, _d = simulator.step(
+            state, Action(track=Track.TRAP, level=7, target_index=None))
+        state, _r, done = simulator.step(
+            state, Action(track=Track.LURE, level=2, target_index=None))
+        self.assertTrue(all(c.status.is_dead for c in state.cogs))
+        self.assertTrue(done)
+
+    def test_a_lured_cog_cannot_be_trapped(self):
+        """Same rule legal_actions applies to single-target traps."""
+        state = self._field()
+        state.cogs[0].status.apply_lure(110, 2, 2)
+        state, _r, _d = simulator.step(
+            state, Action(track=Track.TRAP, level=7, target_index=None))
+        self.assertFalse(state.cogs[0].status.trapped)
+        self.assertTrue(state.cogs[1].status.trapped)
+
+
 class TestLuredRatioBonus(unittest.TestCase):
     """bonus term: luredRatio = (lured cogs / total cogs) * 100."""
 
