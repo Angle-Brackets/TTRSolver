@@ -57,6 +57,47 @@ POLL_INTERVAL = 0.5
 ADVICE_LINGER = 4.0
 
 
+# Shortest believable gap between two rounds. The gag menu is what the
+# turn count is derived from, and a momentary misread of it would
+# otherwise count a round; nothing in Toontown resolves a round and
+# offers the menu again inside a few seconds.
+MIN_TURN_GAP = 4.0
+
+
+class TurnCounter:
+    """Which round the battle is on, near enough to display.
+
+    Nothing reports this. The Local API does not know a battle is
+    happening and the plates do not say, so it is inferred from the gag
+    menu: it opens once per round to take your choice, so a rising edge
+    is a new round.
+
+    An estimate, and labelled as one wherever it is shown. It cannot see
+    a round the menu was never opened for -- if you sit out the timer
+    the game picks for you and this misses it -- and it restarts at zero
+    with each battle rather than trying to recover a count it lost.
+    """
+
+    def __init__(self) -> None:
+        self.turn = 0
+        self._menu_was_up = False
+        self._last_turn_at = 0.0
+
+    def observe(self, in_battle: bool, menu_visible: bool,
+                now: Optional[float] = None) -> int:
+        now = time.time() if now is None else now
+        if not in_battle:
+            self.turn, self._menu_was_up = 0, False
+            return 0
+        rising = menu_visible and not self._menu_was_up
+        if rising and (self.turn == 0
+                       or now - self._last_turn_at >= MIN_TURN_GAP):
+            self.turn += 1
+            self._last_turn_at = now
+        self._menu_was_up = menu_visible
+        return self.turn
+
+
 @dataclass
 class Model:
     """What the window shows, and what it will let you press.
@@ -79,6 +120,7 @@ class Model:
     cogs: List[str] = field(default_factory=list)
     problems: List[str] = field(default_factory=list)
     thinking: bool = False
+    turn: int = 0
 
     @property
     def in_battle(self) -> bool:
@@ -115,10 +157,26 @@ class Model:
         return "see: " + ", ".join(seen)
 
     @property
+    def can_advise(self) -> bool:
+        """May "work it out now" be pressed?
+
+        The search otherwise runs only when the battle *changes* -- a
+        cog dying, damage landing -- which leaves no way to retry the
+        common failures. The gag menu opening after the fight started,
+        or a cog being labelled mid-battle, both leave a stale problem
+        on screen that nothing would recompute until something died.
+
+        Withheld only while a search is already running, and when there
+        is no battle to search.
+        """
+        return self.in_battle and not self.thinking
+
+    @property
     def status(self) -> str:
         if self.in_battle:
             where = "confirmed" if self.forced else "detected"
-            return f"in a battle ({where})"
+            turn = f", turn ~{self.turn}" if self.turn else ""
+            return f"in a battle ({where}{turn})"
         return "waiting for a battle"
 
     def advice_text(self, now: Optional[float] = None) -> str:
@@ -152,6 +210,8 @@ class Worker(threading.Thread):
         self._forced: Optional[bool] = None
         self._lock = threading.Lock()
         self._stop = threading.Event()
+        self._asked = threading.Event()
+        self.turns = TurnCounter()
         self.model = Model()
 
     # -- called from the UI thread --------------------------------------
@@ -163,6 +223,14 @@ class Worker(threading.Thread):
     def forced(self) -> Optional[bool]:
         with self._lock:
             return self._forced
+
+    def ask_now(self) -> None:
+        """Run the search on the next poll, whatever the battle did.
+
+        An Event rather than a direct call: the search must start on the
+        worker thread, and the button is pressed on Tk's.
+        """
+        self._asked.set()
 
     def stop(self) -> None:
         self._stop.set()
@@ -190,7 +258,13 @@ class Worker(threading.Thread):
                 model.detected_battle = watcher.view.active
                 model.forced = self.forced()
                 model.cogs = [_describe_reading(r) for r in watcher.view.cogs]
-                if any(e.kind in advise_mod.RECOMPUTE_ON for e in events):
+                model.turn = self.turns.observe(model.in_battle,
+                                                model.menu_visible)
+                asked = self._asked.is_set()
+                if asked:
+                    self._asked.clear()
+                if asked or any(e.kind in advise_mod.RECOMPUTE_ON
+                                for e in events):
                     model.thinking = True
                     thinker.submit(frame, list(watcher.view.cogs), None,
                                    self.objective, self.depth, self.budget,
@@ -261,7 +335,7 @@ class Overlay:
         self.root.configure(bg=BG)
         self.root.attributes("-topmost", True)
         self.root.geometry(self._corner_of_game())
-        self.root.minsize(320, 150)
+        self.root.minsize(340, 160)
 
         self.status = tk.Label(self.root, text="", bg=BG, fg=DIM,
                                font=("Segoe UI", 9), anchor="w")
@@ -277,12 +351,22 @@ class Overlay:
                                justify="left", wraplength=380)
         self.detail.pack(fill="x", padx=10)
 
-        self.button = tk.Button(self.root, text="I'm in a fight",
+        row = tk.Frame(self.root, bg=BG)
+        row.pack(fill="x", padx=10, pady=(6, 2))
+        self.button = tk.Button(row, text="I'm in a fight",
                                 command=self._toggle, font=("Segoe UI", 9),
                                 relief="flat", bg="#1d2732", fg=FG,
                                 activebackground="#27343f",
                                 disabledforeground="#4a5560")
-        self.button.pack(fill="x", padx=10, pady=(6, 2))
+        self.button.pack(side="left", fill="x", expand=True)
+        self.advise_button = tk.Button(row, text="Work it out",
+                                       command=self.worker.ask_now,
+                                       font=("Segoe UI", 9), relief="flat",
+                                       bg="#1d2732", fg=FG,
+                                       activebackground="#27343f",
+                                       disabledforeground="#4a5560")
+        self.advise_button.pack(side="left", fill="x", expand=True,
+                                padx=(6, 0))
 
         self.why = tk.Label(self.root, text="", bg=BG, fg=DIM,
                             font=("Segoe UI", 8), anchor="w")
@@ -298,9 +382,9 @@ class Overlay:
 
         rect = game_rect()
         if rect is None:
-            return "380x170+40+40"
+            return "400x180+40+40"
         left, top, right, _bottom = rect
-        return f"380x170+{max(0, right - 400)}+{top + 20}"
+        return f"400x180+{max(0, right - 420)}+{top + 20}"
 
     def _toggle(self) -> None:
         # Tri-state underneath, two-state to press: confirming a fight
@@ -336,6 +420,9 @@ class Overlay:
         self.button.configure(
             text="Fight is over" if model.in_battle else "I'm in a fight",
             state="normal" if model.can_confirm else "disabled")
+        self.advise_button.configure(
+            text="thinking..." if model.thinking else "Work it out",
+            state="normal" if model.can_advise else "disabled")
         self.why.configure(text=model.evidence,
                            fg=DIM if model.can_confirm else WARN)
 

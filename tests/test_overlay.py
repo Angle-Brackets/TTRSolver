@@ -12,7 +12,7 @@ guessing, arrived at by a different route.
 """
 import unittest
 
-from solver.live.overlay import ADVICE_LINGER, Model
+from solver.live.overlay import ADVICE_LINGER, Model, TurnCounter
 
 
 class ConfirmButtonTest(unittest.TestCase):
@@ -101,6 +101,90 @@ class AdviceTextTest(unittest.TestCase):
         model = Model(detected_battle=True, cogs=["Flunky  lvl 4  100%"],
                       problems=["stale"])
         self.assertEqual(model.detail_lines(), ["Flunky  lvl 4  100%"])
+
+
+class TurnCounterTest(unittest.TestCase):
+    """Rounds are inferred from the gag menu; nothing reports them."""
+
+    def test_no_battle_means_no_turn(self):
+        c = TurnCounter()
+        self.assertEqual(c.observe(False, True, now=0.0), 0)
+
+    def test_the_menu_opening_is_the_first_turn(self):
+        c = TurnCounter()
+        self.assertEqual(c.observe(True, False, now=0.0), 0)
+        self.assertEqual(c.observe(True, True, now=1.0), 1)
+
+    def test_the_menu_staying_open_is_still_one_turn(self):
+        """It is on screen for the whole time you are choosing."""
+        c = TurnCounter()
+        c.observe(True, True, now=0.0)
+        for t in range(1, 20):
+            c.observe(True, True, now=float(t))
+        self.assertEqual(c.turn, 1)
+
+    def test_it_counts_again_when_the_menu_comes_back(self):
+        c = TurnCounter()
+        c.observe(True, True, now=0.0)          # turn 1
+        c.observe(True, False, now=5.0)         # animation
+        self.assertEqual(c.observe(True, True, now=10.0), 2)
+
+    def test_a_flicker_is_not_a_round(self):
+        """A momentary misread of the menu would otherwise count one.
+        Nothing in Toontown resolves a round that fast."""
+        c = TurnCounter()
+        c.observe(True, True, now=0.0)
+        c.observe(True, False, now=0.4)         # one bad frame
+        self.assertEqual(c.observe(True, True, now=0.8), 1)
+
+    def test_it_restarts_with_each_battle(self):
+        c = TurnCounter()
+        c.observe(True, True, now=0.0)
+        c.observe(True, False, now=6.0)
+        c.observe(True, True, now=12.0)
+        self.assertEqual(c.turn, 2)
+        self.assertEqual(c.observe(False, False, now=20.0), 0)
+        self.assertEqual(c.observe(True, True, now=30.0), 1)
+
+    def test_the_status_line_marks_it_as_an_estimate(self):
+        self.assertIn("~3", Model(detected_battle=True, turn=3).status)
+
+    def test_and_omits_it_before_the_first_menu(self):
+        self.assertNotIn("turn", Model(detected_battle=True, turn=0).status)
+
+
+class AdviseOnDemandTest(unittest.TestCase):
+    """Asking for a prediction, rather than waiting for one.
+
+    The search otherwise runs only when the battle *changes*. Both of
+    the common failures -- the gag menu opening after the fight started,
+    a cog labelled mid-battle -- leave a stale problem that nothing
+    would recompute until something died.
+    """
+
+    def test_offered_during_a_battle(self):
+        self.assertTrue(Model(detected_battle=True).can_advise)
+
+    def test_not_offered_when_there_is_no_battle(self):
+        self.assertFalse(Model(detected_battle=False).can_advise)
+
+    def test_not_offered_while_a_search_is_already_running(self):
+        self.assertFalse(Model(detected_battle=True, thinking=True).can_advise)
+
+    def test_offered_on_a_confirmed_battle_too(self):
+        self.assertTrue(Model(detected_battle=False, forced=True).can_advise)
+
+    def test_the_request_is_a_flag_the_worker_picks_up(self):
+        """Pressed on Tk's thread, acted on by the worker's."""
+        import threading
+
+        from solver.live.overlay import Worker
+
+        w = Worker.__new__(Worker)
+        w._asked = threading.Event()
+        self.assertFalse(w._asked.is_set())
+        w.ask_now()
+        self.assertTrue(w._asked.is_set())
 
 
 class WorkerWiringTest(unittest.TestCase):
