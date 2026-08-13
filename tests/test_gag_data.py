@@ -378,3 +378,20 @@ class TestToonUpMiss(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestLureOrganicAccuracy(unittest.TestCase):
+    """Lure is the one track where organic buys accuracy, not damage."""
+
+    def test_every_lure_gains_a_flat_ten_points(self):
+        for level in range(1, 8):
+            gag = g(Track.LURE, level)
+            with self.subTest(gag=gag.display):
+                self.assertEqual(gag.organic_accuracy - gag.accuracy, 10)
+
+    def test_presentation_is_100_despite_the_prose_saying_95(self):
+        """The Organic gags page contradicts itself: its prose carves out
+        Presentation at +5, its own table says 100, and the Presentation
+        infobox says 100. Tables win, and it makes no difference in play
+        -- a maxed toon is at the 95 cap before organic applies."""
+        self.assertEqual(g(Track.LURE, 7).organic_accuracy, 100)

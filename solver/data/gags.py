@@ -202,6 +202,20 @@ GAGS: Tuple[Gag, ...] = (
 #     ceil(1.2 * 25) = 30 while ceil(1.2 * 27) = 33, which points at 25 --
 #     against the majority. Left open.
 #
+# Lure 7 (Presentation) organic accuracy: 100, and the Organic gags page
+# contradicts ITSELF about it. Its prose says Lure gains "a flat increase
+# of 10% (except for Presentation, which increases by 5%)", which would
+# make it 95 -- while the table further down that same page, and the
+# Presentation infobox, both say 100. Two statements to one, and the
+# project's standing rule is that tables win, so 100 stands.
+#
+# It is also moot in play. A maxed toon reaches the 95 accuracy cap on
+# Presentation before organic is applied at all -- 90 base + 60 trackExp
+# - 55 tgtDef against a level 12 cog is already 95 -- so 95 and 100 give
+# an identical hit chance at every cog level checked. Recorded because
+# the prose carve-out is specific enough that somebody will read it and
+# assume this table is wrong.
+
 # Squirt 4 (Seltzer Bottle) is a real exception to the organic rule, not a
 # transcription slip: base 18-21 -> organic 22-25 is stated identically by
 # the Seltzer infobox, the Squirt page table and the Organic gags table,
