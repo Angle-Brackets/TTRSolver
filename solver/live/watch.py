@@ -112,10 +112,20 @@ class Event:
 
 
 class Capture:
-    """Screen frames as RGB arrays, from mss when present."""
+    """Frames of the game as RGB arrays, from mss when present.
 
-    def __init__(self, monitor: int = 1):
+    Of *the game*, not of the screen, whenever the game's window can be
+    found -- see `window.game_rect`. Played windowed, a full-screen grab
+    hands the plate reader the whole desktop, and the teal mask has no
+    way to tell a portrait slot from a blue-green wallpaper. On a real
+    desktop that cost every read: one wallpaper blob outscored both
+    actual plates. Falls back to the whole screen when the window is not
+    found, which is the old behaviour.
+    """
+
+    def __init__(self, monitor: int = 1, follow_window: bool = True):
         self.monitor = monitor
+        self.follow_window = follow_window
         self._sct = None
         try:
             import mss
@@ -127,14 +137,35 @@ class Capture:
         except Exception:
             self._sct = None
 
+    def region(self) -> Optional[Tuple[int, int, int, int]]:
+        """(left, top, right, bottom) to grab, or None for everything.
+
+        Looked up per grab rather than cached: the window can be moved,
+        resized or alt-tabbed between frames, and a stale rectangle
+        would silently read the wrong part of the screen. The lookup is
+        a single FindWindow and costs far less than the grab.
+        """
+        if not self.follow_window:
+            return None
+        from .window import game_rect
+
+        return game_rect()
+
     def grab(self) -> np.ndarray:
+        box = self.region()
         if self._sct is not None:
-            shot = self._sct.grab(self._region)
+            if box is not None:
+                left, top, right, bottom = box
+                shot = self._sct.grab({"left": left, "top": top,
+                                       "width": right - left,
+                                       "height": bottom - top})
+            else:
+                shot = self._sct.grab(self._region)
             # mss hands back BGRA; the readers expect RGB.
             return np.asarray(shot)[:, :, :3][:, :, ::-1]
         from PIL import ImageGrab
 
-        return np.asarray(ImageGrab.grab().convert("RGB"))
+        return np.asarray(ImageGrab.grab(bbox=box).convert("RGB"))
 
     def close(self) -> None:
         if self._sct is not None:

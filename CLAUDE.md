@@ -72,8 +72,20 @@ client rather than from documentation:
   `solver/live/watch.py` polls it live; `solver/live/read_battle.py`
   reads one screenshot and labels new cogs.
 
-Plates are found by their teal portrait slot, so nothing needs a window
-handle or the platform's window API. Do not add one.
+**Read the game's window, not the screen.** This file used to say the
+opposite — that the teal portrait slot was distinctive enough that
+nothing needed a window handle. That holds inside the game and fails
+across a desktop. Played windowed on a 2560x1440 screen with a
+blue-green wallpaper, a wallpaper blob (319x190) outscored both real
+plates (65x45, 68x47) and every read came back `level unreadable`.
+Scoped to the window, the same frame reads level 6 Bossbot at 99% and
+level 8 Lawbot at 96%.
+
+`solver/live/window.py` asks the window manager where the window titled
+"Toontown Rewritten" is and `Capture` grabs only that. It is Windows-only
+and returns None elsewhere, where the caller falls back to the full
+screen. It reads no memory and touches no game process. The rect is
+looked up per grab, never cached — the window moves.
 
 **Teal plates alone do not mean a battle.** The slot colour is not
 unique to plates outside a battle screenshot — in Donald's Dreamland

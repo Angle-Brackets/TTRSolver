@@ -244,6 +244,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 2
 
     watcher = BattleWatcher()
+    # Say what is being looked at. Reading the whole screen instead of
+    # the game is silently wrong rather than loudly broken -- it reports
+    # cogs off wallpaper -- so it should never be a thing you have to
+    # go and discover.
+    from .window import describe as describe_window
+
+    print(describe_window())
     print(f"advising with the '{objective.name}' objective, up to depth "
           f"{args.depth} within {args.budget}s per search; Ctrl-C to stop")
 
