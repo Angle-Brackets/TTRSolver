@@ -68,15 +68,28 @@ FEATURE_NAMES: List[str] = [
 def _best_damage(state: BattleState) -> int:
     """Most damage a single gag in the pouch can do to one cog.
 
-    The low end of each gag's range, so this never over-promises: a gag
-    counted as lethal here really is lethal.
+    Uses `trained_fraction=1.0` and the toon's organic tracks -- that is,
+    exactly what `simulator.apply_toon_action` will actually deal. This
+    read `damage_at(0.0)`, the low end of the range, on the reasoning
+    that a conservative estimate never over-promises. That was wrong: the
+    simulator does not roll within the range, it always deals the maxed
+    value, so the "conservative" figure was simply a different number
+    from the one the game uses -- 36 against 40 for a Whole Cream Pie,
+    75 against 85 for a Trapdoor.
+
+    It matters because this feeds `killable_ratio`, and a kill is a
+    threshold. Undercounting damage by a tenth turns "this gag removes
+    that cog" into "it does not", which is the single distinction the
+    feature exists to capture.
     """
+    toon = state.toon
     best = 0
-    for (track, level), count in state.toon.gag_counts.items():
+    for (track, level), count in toon.gag_counts.items():
         if count <= 0 or track in (Track.TOON_UP, Track.LURE, Track.TRAP):
             continue
         try:
-            damage = data.gag(track, level).damage_at(0.0)
+            damage = data.gag(track, level).damage_at(
+                1.0, organic=toon.is_organic(track))
         except (NotImplementedError, ValueError):
             continue
         if damage and damage > best:

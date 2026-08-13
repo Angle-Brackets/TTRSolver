@@ -59,6 +59,29 @@ from visualizer import bridge                              # noqa: E402
 
 CACHE = Path(__file__).resolve().parents[1] / ".heuristic_labels.json"
 
+# Files whose contents determine what an exact label means. The cache key
+# includes a digest of them, so changing the rules invalidates the labels
+# instead of silently reusing values computed under the old ones.
+#
+# This is not hypothetical. Trap damage was being taken from the wrong end
+# of its range; fixing it moved 1.75% of the cached labels by up to 10
+# points, and nothing would have noticed -- the key was only the sample
+# parameters.
+RULE_FILES = [
+    "solver/simulator.py", "solver/mechanics.py", "solver/outcomes.py",
+    "solver/data/gags.py", "solver/data/cogs.py", "solver/data/accuracy.py",
+]
+
+
+def rules_digest() -> str:
+    import hashlib
+
+    root = Path(__file__).resolve().parents[1]
+    h = hashlib.sha256()
+    for name in RULE_FILES:
+        h.update((root / name).read_bytes())
+    return h.hexdigest()[:12]
+
 KINDS = [("flunky", 1, 5), ("pencil_pusher", 2, 6), ("yesman", 3, 7),
          ("micromanager", 4, 8)]
 GAGS = [(Track.THROW, 3), (Track.THROW, 4), (Track.THROW, 5),
@@ -238,7 +261,8 @@ def main():
     args = parser.parse_args()
 
     cache = {} if args.refresh else load_cache()
-    key = f"{args.seed}:{args.positions}:{args.holdout_big}:{args.budget}"
+    key = (f"{args.seed}:{args.positions}:{args.holdout_big}:{args.budget}"
+           f":{rules_digest()}")
     entry = cache.get(key)
 
     if entry:
@@ -247,6 +271,9 @@ def main():
         train_labels = [(d, v) for d, v in entry["train"]]
         holdout_labels = [(d, v) for d, v in entry["holdout"]]
     else:
+        if cache:
+            print(f"{CACHE.name} holds labels for other rule versions; "
+                  f"the game rules have changed, so re-labelling")
         started = time.time()
         print(f"labelling {args.positions} train positions "
               f"with exact solve()...")
