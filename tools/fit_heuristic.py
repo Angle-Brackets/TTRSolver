@@ -70,6 +70,13 @@ CACHE = Path(__file__).resolve().parents[1] / ".heuristic_labels.json"
 RULE_FILES = [
     "solver/simulator.py", "solver/mechanics.py", "solver/outcomes.py",
     "solver/data/gags.py", "solver/data/cogs.py", "solver/data/accuracy.py",
+    # state.py decides when a battle is over and objective.py decides what
+    # a round is worth. Both were missing here, which is worse than the
+    # Trap-damage case above that prompted the digest: `can_still_damage`
+    # turns a whole class of position from an estimate into a loss, so a
+    # cache surviving that change would be full of labels for a different
+    # game.
+    "solver/state.py", "solver/search/objective.py",
 ]
 
 

@@ -69,14 +69,21 @@ class TestPresets(unittest.TestCase):
         test harder to write and is not itself a regression, so what
         matters is that *some* position still separates the presets.
         """
-        toon = ToonState(laff=50, max_laff=50,
-                         track_exp={Track.SOUND: 7, Track.LURE: 7,
-                                    Track.THROW: 7},
-                         gag_counts={(Track.SOUND, 7): 1, (Track.LURE, 2): 3,
-                                     (Track.THROW, 5): 2})
-        cogs = [CogState(cog_type="flunky", department="bossbot", level=4,
-                         hp=data.cog_max_hp(4), max_hp=data.cog_max_hp(4))
-                for _ in range(2)]
+        # Found by sweeping random positions for maximum disagreement.
+        # It separates them three ways: `survive` lures to stop the
+        # incoming damage, `conserve` spends the cheapest gag that still
+        # kills something, and the rest take the group Sound. A toon on
+        # 17 laff against a healthy level-5 is the shape of position
+        # where what you are optimising for actually shows.
+        counts = {(Track.DROP, 3): 2, (Track.LURE, 2): 2,
+                  (Track.TRAP, 3): 2, (Track.SOUND, 4): 3}
+        toon = ToonState(laff=17, max_laff=50,
+                         track_exp={t: 7 for t, _l in counts},
+                         gag_counts=counts)
+        cogs = [CogState(cog_type="flunky", department="bossbot", level=5,
+                         hp=36, max_hp=data.cog_max_hp(5)),
+                CogState(cog_type="flunky", department="bossbot", level=2,
+                         hp=11, max_hp=data.cog_max_hp(2))]
         state = BattleState(toon=toon, cogs=cogs)
 
         moves = {name: str(expectimax.best_action(state, 2, objective=preset))

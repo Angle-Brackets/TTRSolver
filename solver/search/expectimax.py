@@ -51,6 +51,18 @@ Values match exactly in every case, and the gain grows with the position,
 which is the right shape -- the crowded fights are the ones that needed
 it. Set `prune=False` to measure against.
 
+That floor is only as tight as the evaluator lets it be, and the fitted
+evaluator has since given some of it back. The depth-aware argument
+bounds how much *laff* the horizon can take, which bounds the leaf only
+if the leaf's value is a function of laff -- true of the hand-written
+form, false of a model carrying `cannot_finish`, which scores a full-laff
+toon at -98 when its pouch cannot finish the fight. The floor now asks
+the evaluator for its own minimum (`heuristic_floor`) instead of assuming
+one. Pruning survives it: on the same two- and three-cog positions the
+fitted evaluator cuts leaves 2.0x against exhaustive, where the
+hand-written form manages 1.3-1.4x, because a sharper evaluator orders
+moves better and that is the other half of what makes a cut fire.
+
 Four further passes since, none of them algorithmic: caching the damage
 distribution, a merge key that omits the gag counts (identical across one
 action's outcomes), sharing `track_exp` and copy-on-write `gag_counts` in
@@ -199,10 +211,12 @@ def hand_written_value(state: BattleState) -> float:
     The terminal branches below are for callers scoring a position directly;
     `evaluate` never reaches them, because it returns 0 for terminal states
     (the reward that got there already carried the win/loss value).
+    `is_terminal` covers having no way left to damage a cog as well as
+    running out of laff -- see `BattleState.can_still_damage`.
     """
     if state.is_win():
         return WIN_VALUE
-    if state.toon.laff <= 0:
+    if state.is_terminal():
         return LOSS_VALUE
 
     total_max_hp = sum(c.max_hp for c in state.cogs)
@@ -416,6 +430,32 @@ def _next_plies(exact_plies: Optional[int]) -> Optional[int]:
     return None if exact_plies is None else exact_plies - 1
 
 
+def heuristic_floor(state: BattleState, at_risk: float = 0.0) -> float:
+    """Lowest value `heuristic_value` can return for `state`.
+
+    Must track whichever evaluator is installed. `_value_bounds` needs it
+    to stay admissible, and an admissible bound is a correctness
+    requirement for star1 rather than a tuning knob: the cut assumes an
+    unseen child cannot fall below the floor.
+
+    `at_risk` is how much laff the horizon can still take, which lets the
+    hand-written form give a much tighter answer than its global minimum.
+    The fitted form gets no such help -- it can call a position lost on
+    evidence that has nothing to do with laff, which is the whole reason
+    it is better, and the price is a looser bound.
+    """
+    from . import fitted
+
+    if fitted.is_fitted():
+        return fitted.value_floor(state)
+    max_laff = float(state.toon.max_laff) or 1.0
+    laff = float(state.toon.laff)
+    # Cog progress is at worst zero, so the hand-written form bottoms out
+    # at the laff term alone, evaluated at the least laff the horizon can
+    # leave behind.
+    return -100.0 * (1.0 - max(0.0, laff - at_risk) / max_laff)
+
+
 def _value_bounds(state: BattleState, depth: int,
                    objective: float) -> Tuple[float, float]:
     """Admissible [floor, ceiling] on the value of a state.
@@ -460,10 +500,16 @@ def _value_bounds(state: BattleState, depth: int,
     # available in it can actually reach zero laff.
     lethal = loss_penalty if reachable >= laff else 0.0
 
-    # And the cutoff itself scores the leaf. heuristic_value floors at
-    # -100 * (1 - laff_kept) with cog progress at worst zero, and laff at
-    # the leaf is at least what is left after `at_risk` is taken.
-    leaf = -100.0 * (1.0 - max(0.0, laff - at_risk) / max_laff)
+    # And the cutoff itself scores the leaf, so the bound has to cover
+    # whatever the *installed* evaluator can return -- see
+    # `heuristic_floor`. This read `-100 * (1 - laff_kept)`, which is the
+    # hand-written form's own floor written out as if it were a property
+    # of the search. It is not, and once the fitted evaluator learned to
+    # say "full laff, but this pouch cannot finish the fight" it returned
+    # -98 at a node this bound put at [0, 100]; star1 then cut branches
+    # it had no warrant to cut and pruned and exhaustive search returned
+    # different values. tests/test_search.py pins them equal.
+    leaf = heuristic_floor(state, at_risk)
 
     floor = -(laff_weight * at_risk + lethal
               + (worst_gag + turn_cost) * depth) + min(0.0, leaf)

@@ -37,11 +37,34 @@ count unrelated to the trap.
 `one_hit_from_death` is the other kind of thing a ratio cannot say: laff
 is a smooth slide right up until one round of incoming damage can end
 the fight, which is a step.
+
+WHAT A PROXY LOOKS LIKE WHEN YOU FIND ONE
+-----------------------------------------
+`gags_ratio` -- gags carried over 20 -- came back from the first fit on
+exact labels with a weight of **244** on a scale where winning is 100.
+A feature that has to shout is usually standing in for a question it
+cannot answer, and this one was: "will this pouch finish this fight?"
+depends on how hard the gags hit and how much cog is left, neither of
+which a count knows.
+
+`damage_budget_ratio` and `cannot_finish` ask it directly. Adding them
+took hold-out MAE from 50.6 to 25.6 and correlation from 0.69 to 0.86,
+and `gags_ratio` fell to 12.75 -- it had been carrying the other two on
+its back. They exist because running out of usable gags is now a *loss*
+(`BattleState.can_still_damage`) rather than a position the search would
+guess at, so the continuous version of that question is worth asking a
+few rounds before it becomes terminal.
+
+It is also the feature that cost something. A model that can say "full
+laff, but doomed" returns large negative values where the hand-written
+form cannot go below zero, which broke the depth-aware pruning floor
+that assumed otherwise -- see `expectimax.heuristic_floor`.
 """
 from typing import Dict, List
 
 from .. import data
 from .. import outcomes as outcomes_mod
+from .. import simulator
 from ..state import BattleState, Track
 
 # Feature order is part of the fitted model's contract: the weights in
@@ -62,7 +85,47 @@ FEATURE_NAMES: List[str] = [
     "has_group_gag",
     "laff_after_worst_ratio",
     "cog_hp_x_laff",
+    "damage_budget_ratio",
+    "cannot_finish",
 ]
+
+
+def _damage_budget(state: BattleState) -> int:
+    """Total damage the whole pouch can still deal, if every gag lands.
+
+    Deliberately optimistic -- every gag hits, every group gag hits
+    every cog -- because it is a *budget*, and the useful thing to know
+    is whether the ceiling clears the remaining cog HP at all. A toon
+    whose entire pouch cannot out-damage what is left on the field has
+    lost; that is now a terminal condition rather than a value judgement
+    (`BattleState.can_still_damage`), and this is the continuous version
+    of the same question, for positions a few rounds short of it.
+
+    Trap counts only when a Lure is carried, matching the terminal rule:
+    a trap with nothing to spring it deals nothing.
+    """
+    toon = state.toon
+    n_alive = len(state.active_cogs()) or 1
+    has_lure = any(n > 0 for (t, _l), n in toon.gag_counts.items()
+                   if t == Track.LURE)
+    total = 0
+    for (track, level), count in toon.gag_counts.items():
+        if count <= 0 or track in (Track.TOON_UP, Track.LURE):
+            continue
+        if track == Track.TRAP and not has_lure:
+            continue
+        if toon.track_exp.get(track, 0) <= 0:
+            continue
+        try:
+            damage = data.gag(track, level).damage_at(
+                1.0, organic=toon.is_organic(track))
+        except (NotImplementedError, ValueError):
+            continue
+        if not damage:
+            continue
+        reach = n_alive if simulator.is_group_action(track, level) else 1
+        total += damage * count * reach
+    return total
 
 
 def _best_damage(state: BattleState) -> int:
@@ -123,6 +186,7 @@ def extract(state: BattleState) -> List[float]:
         except NotImplementedError:
             pass
 
+    budget = _damage_budget(state)
     lured = sum(1 for c in alive if c.status.lured)
     trapped = sum(1 for c in alive if c.status.trapped)
     n_alive = len(alive)
@@ -153,6 +217,15 @@ def extract(state: BattleState) -> List[float]:
         1.0 if group else 0.0,
         max(0.0, (toon.laff - incoming)) / max_laff,
         cog_hp_ratio * laff_ratio,
+        # What `gags_ratio` was standing in for. A raw gag count knows
+        # nothing about how hard the gags hit or how much cog is left,
+        # and the fit leaned on it hard enough (weight 244 on a +/-100
+        # scale) to suggest it was carrying a question it could not
+        # actually answer.
+        min(2.0, budget / remaining_hp) if remaining_hp else 2.0,
+        # The threshold, stated separately, because losing is a step and
+        # not a slope: below 1.0 the pouch cannot finish the fight.
+        1.0 if remaining_hp and budget < remaining_hp else 0.0,
     ]
 
 

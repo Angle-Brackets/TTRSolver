@@ -39,36 +39,64 @@ from . import features
 # Set by tools/fit_heuristic.py. None means "not fitted yet", and
 # `value` falls back to the hand-written heuristic so the solver always
 # has something to score with.
-# Fitted by tools/fit_heuristic.py on 500 positions labelled with exact
-# solve(), validated against 200 larger hold-out positions:
+# Fitted by tools/fit_heuristic.py on 5,000 positions labelled with exact
+# solve(), validated against 526 larger hold-out positions:
 #
-#                       bias     MAE   ordering
-#     hand-written     -81.7    88.2
-#     fitted            +2.6    25.6        88%
+#                       bias     MAE      r   ordering
+#     hand-written     -51.0    95.9   0.07       52%
+#     fitted            +0.9    25.6   0.86       91%
 #
-# Note trapped_with_lure at 10.86 against trapped_without_lure at 1.21 --
-# the conjunction was learned from data rather than asserted.
+# These replace a set fitted before `can_still_damage` existed, when a
+# line that ran the pouch dry was scored by the heuristic instead of
+# being a loss -- so those weights were fitted partly to their own
+# output. Re-solving 400 positions under three different evaluators
+# (including a deliberately absurd one) now moves 0% of the labels,
+# where it moved 83% before, so these are fitted to ground truth.
+#
+# Two things worth reading off the numbers. `trapped_with_lure` at 30.49
+# against `trapped_without_lure` at -2.00 -- the conjunction was learned
+# from data rather than asserted. And `gags_ratio` fell from 244.15 to
+# 12.75 when `damage_budget_ratio` and `cannot_finish` were added: a raw
+# gag count had been standing in for "can this pouch actually finish the
+# fight", which it cannot answer, and was being leaned on hard because
+# nothing else could. Hold-out MAE went 50.6 -> 25.6 on that change
+# alone.
 WEIGHTS: Optional[List[float]] = [
-        89.35447,   # bias
-       114.29601,   # laff_ratio
-       -35.41613,   # cog_hp_ratio
-        -6.31769,   # cogs_alive
-       123.70781,   # gags_ratio
-        10.99404,   # killable_ratio
-         6.01656,   # best_gag_over_weakest_cog
-      -241.42101,   # incoming_ratio
-       -28.90460,   # one_hit_from_death
-        10.28524,   # lured_ratio
-        10.85692,   # trapped_with_lure
-         1.20922,   # trapped_without_lure
-         5.05708,   # has_group_gag
-      -118.68309,   # laff_after_worst_ratio
-        22.45269,   # cog_hp_x_laff
+         6.09791,   # bias
+        50.26370,   # laff_ratio
+       -13.59214,   # cog_hp_ratio
+       -20.79878,   # cogs_alive
+        12.75310,   # gags_ratio
+        12.26483,   # killable_ratio
+        -5.58024,   # best_gag_over_weakest_cog
+       -96.63270,   # incoming_ratio
+       -10.17342,   # one_hit_from_death
+        14.34086,   # lured_ratio
+        30.49091,   # trapped_with_lure
+        -2.00390,   # trapped_without_lure
+        -0.89792,   # has_group_gag
+       -58.60173,   # laff_after_worst_ratio
+        17.60506,   # cog_hp_x_laff
+        60.42902,   # damage_budget_ratio
+       -70.43923,   # cannot_finish
 ]
 
 
 def is_fitted() -> bool:
     return WEIGHTS is not None and len(WEIGHTS) == len(features.FEATURE_NAMES)
+
+
+def value_floor(state: BattleState) -> float:
+    """The lowest number `value` can return for `state`.
+
+    This is the clamp floor below, and it has to stay in step with it:
+    `expectimax._value_bounds` uses it to keep star1's pruning
+    admissible, so a `value` that can dip below what this promises makes
+    the search cut branches it should have looked at.
+    """
+    from .expectimax import LOSS_VALUE
+
+    return LOSS_VALUE - float(state.toon.max_laff)
 
 
 def value(state: BattleState) -> float:
@@ -101,9 +129,14 @@ def value(state: BattleState) -> float:
     # search itself returns 0 for terminal nodes before ever asking, so
     # this only bites callers scoring a position directly -- which is
     # exactly what makes it easy to miss.
+    #
+    # `is_terminal` and not `laff <= 0`: a toon with no way left to
+    # damage a cog has also lost, and that is the case a linear model
+    # extrapolates worst -- it still has laff, and may still have a
+    # pocketful of Lures, so every feature here reads healthy.
     if state.is_win():
         return WIN_VALUE
-    if state.toon.laff <= 0:
+    if state.is_terminal():
         return LOSS_VALUE
 
     total = 0.0

@@ -204,6 +204,57 @@ alone, which only decreases if a pass requires a lured cog.
 `solve()` is exact again, so the weights can be refitted against labels
 that are actually ground truth.
 
+## The refit
+
+Verified first, rather than assumed: 400 positions re-solved under three
+evaluators — the shipped weights, the hand-written form, and a
+deliberately absurd one with a −500 intercept — moved **0%** of labels,
+against 83% before. Wall-clock was identical for all three, which is the
+other tell that the evaluator is never consulted in an exact solve.
+
+Two holes turned up while setting that up, both the same shape as the
+original bug — a rule change that some other component was not told
+about:
+
+* `RULE_FILES`, which keys the label cache, listed neither `state.py`
+  nor `objective.py`. A change to *what counts as a loss* would not have
+  invalidated the cache.
+* `fitted.value` and `hand_written_value` both short-circuited terminal
+  states with `laff <= 0`. A dead-end position went to the linear model
+  instead, and it is the worst case for extrapolation: full laff, gags in
+  the pouch, every feature reading healthy.
+
+Fitted on 5,000 exact labels, validated on 526 larger hold-out positions:
+
+| | bias | MAE | r | ordering |
+| --- | --- | --- | --- | --- |
+| hand-written | −51.0 | 95.9 | 0.07 | 52% |
+| refit, 15 features | +10.1 | 50.6 | 0.69 | 90% |
+| refit, + budget features | **+0.9** | **25.6** | **0.86** | **91%** |
+
+The middle row is the honest apples-to-apples refit. The third adds
+`damage_budget_ratio` and `cannot_finish`, prompted by `gags_ratio`
+coming back with a weight of 244 on a ±100 scale — a proxy shouting
+because it was carrying a question it could not answer. Adding the two
+that answer it directly halved hold-out MAE and dropped `gags_ratio` to
+12.75.
+
+### What it cost
+
+A model that can say "full laff, but this pouch cannot finish the fight"
+returns values the hand-written form never could, and the depth-aware
+pruning floor had that form's shape written into it. The new evaluator
+returned −98 at a node the bound put at [0, 100], `*`-minimax cut
+branches it had no warrant to cut, and pruned and exhaustive search
+returned different values — 48.66 against 46.63.
+
+The floor now asks the evaluator for its own minimum rather than
+assuming one (`expectimax.heuristic_floor`). Pruning survives the looser
+bound comfortably: the fitted evaluator cuts leaves 2.0x against
+exhaustive where the hand-written form manages 1.3–1.4x, because a
+sharper evaluator orders moves better, and move ordering is the other
+half of what makes a cut fire.
+
 ## The advantage this was meant to have: exact labels
 
 Most game-playing nets bootstrap from their own estimates. Here we can

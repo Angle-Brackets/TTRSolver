@@ -15,7 +15,7 @@ stdlib unittest only -- pytest is not installed.
 """
 import unittest
 
-from solver import data, simulator
+from solver import data, outcomes, simulator
 from solver.search import expectimax
 from solver.state import Track, CogState, ToonState, BattleState
 
@@ -95,6 +95,44 @@ class TestLeafDispatch(unittest.TestCase):
             self.assertLessEqual(v, ceiling + 1e-9)
             self.assertGreaterEqual(v, floor - 1e-9)
 
+    def test_the_bound_holds_for_a_pouch_that_cannot_finish(self):
+        """The case the sweep above misses, and the one that broke it.
+
+        Those positions all carry enough Throw to be plausibly winnable,
+        so the fitted evaluator never has cause to return a large
+        negative -- and the violation went unnoticed until a real search
+        produced pruned and exhaustive values that disagreed. A leaf is
+        only out of bounds when the model is confident the fight is
+        lost, which needs a pouch that visibly cannot finish it.
+        """
+        import random
+
+        rng = random.Random(17)
+        checked = 0
+        for _ in range(300):
+            level = rng.randint(4, 6)   # Pencil Pusher spans 2-6
+            hp = data.cog_max_hp(level)
+            counts = {(Track.THROW, rng.randint(1, 2)): rng.randint(1, 2)}
+            toon = ToonState(laff=rng.randint(30, 50), max_laff=50,
+                             track_exp={Track.THROW: 6}, gag_counts=counts)
+            state = BattleState(
+                toon=toon,
+                cogs=[CogState(cog_type="pencil_pusher",
+                               department="bossbot", level=level,
+                               hp=hp, max_hp=hp)])
+            if state.is_terminal():
+                continue
+            checked += 1
+            v = expectimax.heuristic_value(state)
+            for depth in (0, 1, 2):
+                floor, ceiling = expectimax._value_bounds(state, depth, None)
+                self.assertLessEqual(v, ceiling + 1e-9)
+                self.assertGreaterEqual(
+                    v, floor - 1e-9,
+                    f"leaf {v:.2f} below floor {floor:.2f} at depth "
+                    f"{depth}: star1 may cut branches it should not")
+        self.assertGreater(checked, 50, "sample degenerated")
+
 
 class TestSearchChoices(unittest.TestCase):
     def test_takes_the_kill(self):
@@ -106,9 +144,23 @@ class TestSearchChoices(unittest.TestCase):
         self.assertEqual(action.track, Track.THROW)
 
     def test_prioritizes_the_more_dangerous_cog(self):
-        """Two cogs, one at 2 HP and one at full, both one-shottable by a
-        Cream Pie Slice. Since the gag kills either way, the tie breaks on
-        which cog would hurt more if left alive -- the level-5 one."""
+        """Two cogs, a level-5 at full HP and a level-2 on 2 HP.
+
+        This used to claim both were one-shottable by a Cream Pie Slice
+        and that the tie broke on which cog hurt more. The premise was
+        simply false -- the Slice deals 17 and the level-5 has 42 HP --
+        so the reasoning never applied, though the answer it asserted
+        happens to be right for a different reason: exactly solved, going
+        after the level-5 is worth +80.017 against +79.088 for finishing
+        the weak one. Chipping the dangerous cog early beats banking a
+        kill that is available for several rounds yet.
+
+        A margin of 0.93 out of 80 is a near-tie, and a depth-2 search is
+        not obliged to find it -- the shipped evaluator does not, and
+        gives up that 0.93. So what is pinned is the exact preference,
+        which is a fact about the game, plus a bound on how much a
+        shallow search may lose here.
+        """
         toon = ToonState(
             laff=50, max_laff=50,
             track_exp={Track.THROW: 7},
@@ -121,11 +173,21 @@ class TestSearchChoices(unittest.TestCase):
                      hp=2, max_hp=data.cog_max_hp(2)),
         ]
         state = BattleState(toon=toon, cogs=cogs)
+        self.assertLess(data.gag(Track.THROW, 3).damage_at(1.0),
+                        cogs[0].hp, "premise check: not a one-shot")
+
+        exact = {}
+        memo = {}
+        for action in simulator.legal_actions(state):
+            exact[action.target_index] = sum(
+                p * (r + expectimax.evaluate(n, 10 ** 6, memo=memo)[0])
+                for p, n, r in outcomes.action_outcomes(state, action))
+        self.assertGreater(exact[0], exact[1])
+
         ranked = expectimax.rank_actions(state, depth=2)
         self.assertTrue(ranked)
-        # The level-5 cog hits harder, so with both one-shottable the search
-        # should not prefer leaving it alive.
-        self.assertEqual(ranked[0][1].target_index, 0)
+        regret = max(exact.values()) - exact[ranked[0][1].target_index]
+        self.assertLess(regret, 2.0)
 
     def test_rank_actions_is_sorted_and_complete(self):
         state = single_flunky_fight()
@@ -412,12 +474,92 @@ class ValueBoundsTest(unittest.TestCase):
                         self.assertGreaterEqual(ceiling, value - 1e-9)
 
     def test_the_floor_is_tighter_than_assuming_total_loss(self):
-        """The point of the depth-aware floor. If it were not tighter it
-        would buy nothing, and pruning would go back to never firing."""
-        state = single_flunky_fight(level=2)
-        floor, _ = expectimax._value_bounds(state, 1, None)
+        """The point of the depth-aware floor, for the evaluator it was
+        written for.
+
+        The floor has to cover whatever the installed evaluator can
+        return, and the hand-written form cannot score a full-laff toon
+        below zero, which is what makes the bound tight. The fitted form
+        can -- see the next test -- so the tightness is a property of the
+        pair, not of the search, and this pins it with the hand-written
+        one installed.
+        """
+        from solver.search import fitted
+
+        saved = fitted.WEIGHTS
+        fitted.WEIGHTS = None
+        try:
+            state = single_flunky_fight(level=2)
+            floor, _ = expectimax._value_bounds(state, 1, None)
+        finally:
+            fitted.WEIGHTS = saved
         naive = -(float(state.toon.laff) + 100.0 + 0.1 * 7.0)
         self.assertGreater(floor, naive)
+
+    def test_a_fitted_evaluator_widens_the_floor_but_pruning_still_fires(self):
+        """The trade the budget features bought, stated as a test.
+
+        A fitted evaluator can call a position lost on evidence that has
+        nothing to do with laff -- "full bar, but this pouch cannot
+        finish the fight" -- which is exactly why it is better and
+        exactly why the tight floor above stops being admissible for it.
+        It returned -98 at a node the old bound put at [0, 100], and
+        star1 cut branches it had no warrant to cut.
+
+        Widening the floor is the price. It does not cost the speedup,
+        because a more discriminating evaluator orders moves better, so
+        this asserts the cut still does work rather than that the bound
+        is tight.
+
+        Measured on a two-cog fight, not a one-cog one. With a single cog
+        the pruned search evaluates *more* leaves than the exhaustive one
+        (243 against 158) because a cut stores a bound rather than an
+        exact transposition entry, so nodes get re-searched. That is
+        expected, and it is why the cheap position is the wrong place to
+        look for evidence that pruning works.
+        """
+        from solver.search import fitted
+
+        if not fitted.is_fitted():
+            self.skipTest("no weights fitted")
+
+        counts = {(Track.THROW, 4): 3, (Track.SQUIRT, 4): 3,
+                  (Track.LURE, 3): 2, (Track.TRAP, 3): 2}
+        toon = ToonState(laff=40, max_laff=50,
+                         track_exp={t: 6 for t, _l in counts},
+                         gag_counts=dict(counts))
+        state = BattleState(
+            toon=toon,
+            cogs=[CogState(cog_type="flunky", department="bossbot",
+                           level=level, hp=data.cog_max_hp(level),
+                           max_hp=data.cog_max_hp(level))
+                  for level in (4, 3)])
+        floor, _ = expectimax._value_bounds(state, 1, None)
+        self.assertLessEqual(floor, fitted.value_floor(state),
+                             "floor must cover what the evaluator can say")
+
+        leaves = []
+        real = expectimax.heuristic_value
+
+        def counting(st):
+            leaves.append(1)
+            return real(st)
+
+        expectimax.heuristic_value = counting
+        try:
+            outcomes.clear_caches()
+            leaves.clear()
+            expectimax.evaluate(state, 2, memo={})
+            pruned = len(leaves)
+            outcomes.clear_caches()
+            leaves.clear()
+            expectimax.evaluate(state, 2, memo={}, prune=False)
+            exhaustive = len(leaves)
+        finally:
+            expectimax.heuristic_value = real
+        self.assertLess(pruned, exhaustive,
+                        f"pruning evaluated {pruned} leaves against "
+                        f"{exhaustive} exhaustive -- the cut stopped firing")
 
     def test_max_round_damage_is_an_over_estimate(self):
         """It has to be: it bounds how bad a round can get."""
