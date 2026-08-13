@@ -132,24 +132,87 @@ What this does and does not invalidate:
   trap/lure conjunction are real distinctions regardless of how the
   targets were computed.
 * The **specific weights** do not. They are fitted to partly circular
-  targets and should be refitted once out-of-gags positions have a
-  defined value.
+  targets and must be refitted -- see below, the hole they were fitted
+  through is now closed.
 * The **MAE and agreement figures** are measured against a reference that
   is not ground truth, so they overstate how well the model matches
   optimal play.
 
-The fix is a modelling decision rather than a bug fix. A toon with no
-gags cannot win, so an out-of-gags position is worth a loss, or the value
-of fleeing, or whatever continuing the cog phase to defeat yields. That
-choice belongs to whoever owns the game model, and is deliberately left
-open here rather than guessed at.
+The fix was a modelling decision rather than a bug fix, and it has since
+been made.
+
+## RESOLVED: running out of options is a loss
+
+Nothing restocks a pouch mid-fight in this model -- SOS cards, Unites and
+Fires are not modelled -- so gags only ever run down. A position with no
+remaining way to damage a cog therefore ends the battle exactly as surely
+as running out of laff, and `BattleState.is_terminal` now says so, via
+`can_still_damage()`.
+
+"No way to damage a cog" is narrower than "no attack gags", and the
+narrowness is the whole content of the rule:
+
+| pouch | verdict |
+| --- | --- |
+| empty | loss |
+| 80 Lures, no attacks | loss -- a long fight is still a lost one |
+| Toon-Up and/or Trap only | loss solo; nothing springs the trap |
+| Trap **and** Lure | not a loss; the pair works where neither half does |
+| Lure only, cog already trapped | not a loss; the trap is on the board |
+| a gag in an untrained track | loss; it is not a usable option |
+
+Two things follow. Labels stop depending on the heuristic: the same
+out-of-gags position that scored **+47.6** now scores a terminal 0 with
+the loss penalty already paid on the transition into it, and re-solving
+it under different weights gives the same answer. And the search gets
+faster, because a dead end is a cutoff rather than a subtree. Measured on
+positions where dead ends are reachable within the horizon:
+
+| position | before | after | |
+| --- | --- | --- | --- |
+| Toon-Up + Trap only, 1 cog | +87.8 | 0.0 | 400x |
+| Toon-Up + Trap only, 2 cogs | +55.9 | 0.0 | 260x |
+| Lure-heavy, no attacks | +99.4 | 0.0 | 2200x |
+| Throw runs out mid-line | +53.3 | **-101.8** | 4x |
+| mixed, no dead end in horizon | +83.5 | +83.5 | 1.2x |
+
+The fourth row is the one that matters for play quality rather than
+speed: two Throws cannot finish a level-6 cog and the rest of the pouch
+is Toon-Up and Trap, so the fight is lost -- and the old evaluator called
+it a win in progress. The last row shows the rule costs nothing where it
+does not apply.
+
+### The exception: passing
+
+There are positions with nothing to do that are *not* losses. With Trap
+and Lure left against an already-lured cog, Trap will not go on a lured
+cog and a Lure only refreshes a timer the toon wants to run down -- but
+waiting for the lure to lapse, then trapping and re-luring, wins. So
+`Action(track=None)` is a real move. On that fight, exact search goes
+from **-100.6** (burn Lures until the pouch is dry) to **+94.3**, playing
+pass, pass, pass, Trap, Lure.
+
+It is offered only when a cog is lured *and* no other action is
+productive, which is narrower than the game's own rule, for two reasons
+given in full in `simulator.legal_actions`. Briefly: a pass while lured
+costs no laff and no gag, so at a search horizon it looks free when it is
+not, and offered unconditionally it swung a depth-2 search off a killing
+blow and onto a Lure. And termination now rests on the lexicographic
+measure (gags remaining, total lure rounds remaining) rather than on gags
+alone, which only decreases if a pass requires a lured cog.
+
+`solve()` is exact again, so the weights can be refitted against labels
+that are actually ground truth.
 
 ## The advantage this was meant to have: exact labels
 
 Most game-playing nets bootstrap from their own estimates. Here we can
-generate ground truth. Every action spends a gag, so gags-remaining
+generate ground truth. Every action either spends a gag or, if it is a
+pass, burns a round of lure, so (gags remaining, lure rounds remaining)
 strictly decreases, the state graph is a DAG, and `solve()` plays to the
 end of the battle exactly — see the module docstring in `expectimax`.
+That was aspirational when this section was written and is true now;
+the section above is the correction it went through in between.
 
 So training targets are true values, not TD estimates. That removes the
 usual instability entirely.

@@ -55,8 +55,8 @@ def run_random_policy(seed: int = 0, max_rounds: int = MAX_ROUNDS) -> None:
             print("Every remaining action depends on [TODO] data, stopping.")
             break
 
-        print(f"round={state.round_num:2d}  action={action.track.value}/{action.level} "
-              f"-> target={action.target_index}  reward={reward:+.1f}  "
+        print(f"round={state.round_num:2d}  action={action.describe():<22} "
+              f"reward={reward:+.1f}  "
               f"toon laff={state.toon.laff}  "
               f"cogs hp={[_cog_str(c) for c in state.cogs]}")
         if done:

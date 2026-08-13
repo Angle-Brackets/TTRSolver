@@ -62,35 +62,38 @@ end to end:
     3 cogs     50.90s    4.57s     11x
     4 cogs     95.20s   13.64s      7x
 
-WHY A FULL SOLVE TERMINATES -- AND WHY IT IS NOT EXACT
-------------------------------------------------------
-Every action consumes exactly one gag, so gags-remaining strictly decreases
-down any line and the state graph is a DAG -- no cycles, and depth is
-bounded by the size of the pouch rather than by anything we choose. `solve`
-exploits that and always terminates.
+WHY A FULL SOLVE TERMINATES, AND IS EXACT
+-----------------------------------------
+Almost every action consumes a gag, so gags-remaining decreases down any
+line, and depth is bounded by the size of the pouch rather than by
+anything we choose. The exception is the pass, which spends nothing; it
+is legal only while a cog is lured, and a lured cog's rounds tick down
+during the cog phase. So the measure is lexicographic -- (gags
+remaining, total lure rounds remaining) -- it strictly decreases either
+way, the state graph is a DAG, and `solve` always terminates.
 
-**It does not, however, always reach the end of the battle**, and this
-module claimed for a long time that it did. A line ends when the pouch is
-empty, which is not the same as the fight being over: if cogs are still
-standing there are no legal actions, `best_action` is None, and the value
-returned is `heuristic_value(state)` -- an estimate, at the exact place
-the search was supposed to stop estimating.
+It also reaches the end of the battle, but only since the out-of-gags
+rule landed. **This module claimed exactness for a long time while a
+hole in it made the claim false**, and the shape of that hole is worth
+keeping in mind whenever a new terminal condition is considered. A line
+used to end when the pouch emptied, which is not the same as the fight
+being over: with cogs still standing there were no legal actions,
+`best_action` was None, and the value returned was `heuristic_value`
+-- an estimate, at the exact place the search was supposed to stop
+estimating.
 
-That matters far more than it sounds. Re-solving 300 cached training
+It mattered far more than it sounds. Re-solving 300 cached training
 positions under two different heuristics changed **83% of the answers**,
-by 3.7 points on average. Anything calling `solve` a source of ground
-truth is therefore only correct for positions with enough gags to finish
-the fight, and `tools/fit_heuristic.py` was labelling with the fitted
-heuristic installed -- fitting a model partly to its own output.
+by 3.7 points on average, and `tools/fit_heuristic.py` was labelling
+with the fitted heuristic installed -- fitting a model partly to its own
+output. It surfaced as a *negative* regret figure, which is
+arithmetically impossible when both sides are exact.
 
-Two consequences worth stating plainly:
-
-  * A value from `solve` is exact only if no line in it runs the pouch
-    dry with cogs alive.
-  * Two `solve` results are comparable only if the same heuristic was
-    installed for both. A regret metric that computes one side with
-    weights and the other without will produce negative regret, which is
-    how this was found.
+The rule that closed it is in `BattleState.can_still_damage`: nothing
+restocks a pouch mid-fight, so having no way left to damage a cog ends
+the battle as surely as running out of laff. `heuristic_value` is now
+reached only at a depth cutoff, never at a dead end, and two `solve`
+results are comparable regardless of which heuristic was installed.
 
 Fixing it means deciding what an out-of-gags position is worth. The toon
 cannot win from there -- no gags, no damage -- so the honest options are

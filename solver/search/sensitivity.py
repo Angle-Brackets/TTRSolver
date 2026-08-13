@@ -90,7 +90,8 @@ def perturbed_cog_accuracy(offset: int):
 def _action_key(action) -> Optional[Tuple]:
     if action is None:
         return None
-    return (action.track.value, action.level, action.target_index)
+    track = None if action.is_pass else action.track.value
+    return (track, action.level, action.target_index)
 
 
 def sample_states(scenario: str, depth: int, seed: int,

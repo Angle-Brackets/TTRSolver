@@ -168,6 +168,8 @@ def _panel_with_training(frame, snapshot):
 
 
 def _render(action, state) -> str:
+    if action.is_pass:
+        return "pass -- wait for the lure to lapse"
     gag = data.gag(action.track, action.level)
     if action.target_index is None:
         return f"{gag.display} on all cogs"

@@ -488,47 +488,111 @@ class CollapseGateTest(unittest.TestCase):
         self.assertEqual(exact, collapsed)
 
 
-class SolveIsNotExactWhenGagsRunOutTest(unittest.TestCase):
-    """`solve` terminates but does not always finish the battle.
+class RunningOutOfGagsIsALossTest(unittest.TestCase):
+    """A position with no way left to damage a cog is a loss.
 
-    A line ends when the pouch empties. If cogs are still alive there are
-    no legal actions, and `evaluate` returns `heuristic_value` -- an
+    This class used to pin the *opposite*, because that is what the code
+    did: a line ended when the pouch emptied, there were no legal
+    actions, and `evaluate` fell through to `heuristic_value` -- an
     estimate at the exact point the search was meant to stop estimating.
-    This is pinned because the module claimed the opposite for a long
-    time, and because everything built on "exact labels" depends on
-    knowing when they are not.
+    A hopeless position scored +47.6 that way, and because the labels
+    used to fit the heuristic were themselves produced by `solve`, the
+    heuristic partly fit its own output.
+
+    Nothing restocks a pouch mid-fight in the model: SOS cards, Unites
+    and Fires are not modelled, so gags only ever run down. That makes
+    "no way to damage anything" as final as running out of laff.
+
+    What counts as *no way* is narrower than "no attack gags", and the
+    difference is the interesting part -- see the cases below.
     """
 
-    def out_of_gags(self):
+    def state(self, counts, exp=None, cogs=None, **kw):
         from solver.state import BattleState, CogState, ToonState, Track
+        if exp is None:
+            exp = {track: 6 for track, _level in counts}
+        if cogs is None:
+            cogs = [CogState("yesman", "bossbot", 4, 28, 30)]
+        for cog in cogs:
+            for attr, value in kw.items():
+                setattr(cog.status, attr, value)
         return BattleState(
-            toon=ToonState(30, 50, {Track.THROW: 6}, {(Track.THROW, 3): 0}),
-            cogs=[CogState("yesman", "bossbot", 4, 28, 30)])
+            toon=ToonState(30, 50, exp, dict(counts)), cogs=cogs)
 
-    def test_an_empty_pouch_is_not_a_terminal_state(self):
-        state = self.out_of_gags()
-        self.assertFalse(state.is_terminal())
+    def test_an_empty_pouch_is_terminal(self):
+        from solver.state import Track
+        state = self.state({(Track.THROW, 3): 0})
+        self.assertTrue(state.is_terminal())
+        self.assertFalse(state.is_win())
         self.assertEqual(simulator.legal_actions(state), [])
 
-    def test_its_value_is_the_heuristic_not_a_played_out_result(self):
-        state = self.out_of_gags()
+    def test_a_single_throw_is_not(self):
+        from solver.state import Track
+        self.assertFalse(self.state({(Track.THROW, 3): 1}).is_terminal())
+
+    def test_lure_alone_cannot_win_however_much_of_it_there_is(self):
+        """80 lures and no attacks is a loss, not a long fight."""
+        from solver.state import Track
+        self.assertTrue(self.state({(Track.LURE, 3): 80}).is_terminal())
+
+    def test_toon_up_and_trap_alone_cannot_win_solo(self):
+        """Neither one damages a cog without a Lure to spring the trap."""
+        from solver.state import Track
+        state = self.state({(Track.TOON_UP, 3): 5, (Track.TRAP, 3): 5})
+        self.assertTrue(state.is_terminal())
+
+    def test_trap_plus_lure_is_a_winning_pouch(self):
+        """The pair works even though neither half does alone."""
+        from solver.state import Track
+        state = self.state({(Track.TRAP, 3): 5, (Track.LURE, 3): 5})
+        self.assertFalse(state.is_terminal())
+
+    def test_lure_alone_still_works_against_an_already_trapped_cog(self):
+        """The trap is on the board, so the Lure has something to spring."""
+        from solver.state import Track
+        state = self.state({(Track.LURE, 3): 1}, trapped=True)
+        self.assertFalse(state.is_terminal())
+
+    def test_an_untrained_track_does_not_count_as_a_way_to_damage(self):
+        """Carrying a gag the toon has no experience in is not an option."""
+        from solver.state import Track
+        state = self.state({(Track.THROW, 3): 5}, exp={Track.THROW: 0})
+        self.assertTrue(state.is_terminal())
+
+    def test_the_value_of_a_hopeless_position_is_not_the_heuristic(self):
+        """It is terminal, so it is worth 0 and the estimate never runs."""
+        from solver.state import Track
+        state = self.state({(Track.THROW, 3): 0})
         value, action = expectimax.evaluate(state, 10 ** 6, memo={})
         self.assertIsNone(action)
-        self.assertAlmostEqual(value, expectimax.heuristic_value(state),
-                               places=9)
+        self.assertEqual(value, 0.0)
 
-    def test_so_solve_depends_on_which_heuristic_is_installed(self):
-        """The property that makes `solve` unusable as ground truth."""
+    def test_and_no_longer_depends_on_which_heuristic_is_installed(self):
+        """The property that made `solve` unusable as ground truth."""
         from solver.search import fitted
+        from solver.state import Track
 
-        state = self.out_of_gags()
+        state = self.state({(Track.THROW, 3): 0})
         saved = fitted.WEIGHTS
         try:
-            fitted.WEIGHTS = saved
             with_weights, _ = expectimax.evaluate(state, 10 ** 6, memo={})
             fitted.WEIGHTS = None
             without, _ = expectimax.evaluate(state, 10 ** 6, memo={})
         finally:
             fitted.WEIGHTS = saved
-        if saved is not None:
-            self.assertNotAlmostEqual(with_weights, without, places=3)
+        self.assertAlmostEqual(with_weights, without, places=9)
+
+    def test_spending_the_last_useful_gag_pays_the_loss_penalty(self):
+        """Reaching the dead end costs the same as being knocked out."""
+        from solver import outcomes
+        from solver.state import Action, Track
+        # One throw that cannot possibly finish a 200hp cog.
+        state = self.state({(Track.THROW, 1): 1},
+                           cogs=[CogState("yesman", "bossbot", 11, 200, 200)])
+        branches = outcomes.action_outcomes(
+            state, Action(Track.THROW, 1))
+        self.assertTrue(branches)
+        for _p, after, reward in branches:
+            self.assertTrue(after.is_terminal())
+            self.assertFalse(after.is_win())
+            self.assertLess(reward, -50.0)

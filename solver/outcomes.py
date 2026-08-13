@@ -314,7 +314,12 @@ def _accumulate(results, prob, state_after, laff_lost, action,
 
     reward = objective.step_reward(
         laff_lost, action.track, action.level,
-        won=state_after.is_win(), lost=state_after.toon.laff <= 0)
+        won=state_after.is_win(),
+        # Not just "laff hit zero". A toon that can no longer damage a cog
+        # has lost the battle just as surely -- see
+        # BattleState.can_still_damage -- and the search has to be told,
+        # or it scores a hopeless position with the heuristic instead.
+        lost=state_after.is_terminal() and not state_after.is_win())
 
     key = merge_key(state_after)
     existing = results.get(key)

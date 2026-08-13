@@ -91,7 +91,9 @@ def state_from_dict(d: Dict[str, Any]) -> BattleState:
 
 
 def action_to_dict(a: Action) -> Dict[str, Any]:
-    return {"track": a.track.value, "level": a.level, "target": a.target_index}
+    # A pass has no track; the front end keys off `track: null`.
+    return {"track": None if a.is_pass else a.track.value,
+            "level": a.level, "target": a.target_index}
 
 
 def action_from_dict(d: Dict[str, Any]) -> Action:
@@ -126,6 +128,8 @@ def department_icon(department: str) -> str:
 
 
 def describe_action(action: Action) -> str:
+    if action.is_pass:
+        return "pass (wait out the lure)"
     name = gag_name(action.track, action.level)
     where = "all cogs" if action.target_index is None else f"cog {action.target_index + 1}"
     return f"{name} -> {where}"

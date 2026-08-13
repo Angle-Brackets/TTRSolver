@@ -55,7 +55,15 @@ class Objective:
     loss_penalty: float = 100.0
 
     def gag_price(self, track: Track, level: int) -> float:
-        """What spending one of this gag costs the objective."""
+        """What spending one of this gag costs the objective.
+
+        `track=None` is a pass, which spends no gag and so is free. It is
+        not free overall -- `turn_cost` still applies, and the cogs get
+        their round -- but there is nothing out of the pouch to charge
+        for.
+        """
+        if track is None:
+            return 0.0
         price = self.gag_cost * float(level)
         if self.scarcity_cost:
             limit = data.gag(track, level).max_carry or 1

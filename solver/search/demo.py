@@ -65,6 +65,8 @@ SCENARIOS = {
 
 
 def _describe(action) -> str:
+    if action.is_pass:
+        return "pass"
     target = "all" if action.target_index is None else f"cog {action.target_index}"
     return f"{action.track.value}/{action.level} -> {target}"
 

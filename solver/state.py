@@ -206,17 +206,76 @@ class BattleState:
         return [c for c in self.cogs if not c.status.is_dead]
 
     def is_terminal(self) -> bool:
-        return self.toon.laff <= 0 or len(self.active_cogs()) == 0
+        return (self.toon.laff <= 0
+                or len(self.active_cogs()) == 0
+                or not self.can_still_damage())
 
     def is_win(self) -> bool:
         return self.toon.laff > 0 and len(self.active_cogs()) == 0
 
+    def can_still_damage(self) -> bool:
+        """Whether any sequence of remaining gags can hurt a cog.
+
+        A solo toon that cannot damage cogs cannot win, however much laff
+        or however many gags it is holding -- there is no restocking
+        mid-fight, since SOS cards, Unites and Fires are not modelled. So
+        this is the real losing condition, and "the pouch is empty" is
+        only its most obvious case.
+
+        Damage is possible from an attack track outright, or from Trap,
+        which deals its damage only when a Lure drags a cog onto it. That
+        gives the awkward cases their answers:
+
+          * eighty Lures and no attack gags -- lost, nothing can deal
+            damage
+          * Toon-Up and Trap only -- lost, Toon-Up heals and the Trap can
+            never be sprung
+          * Trap plus Lure -- NOT lost, even with every cog currently
+            lured and the Trap unplayable this round; the lure runs out
+            and the combo wins from there. That case needs `pass`, which
+            `simulator.legal_actions` supplies.
+          * a cog already trapped, holding only Lure -- NOT lost, the
+            Lure springs the existing trap
+        """
+        counts = self.toon.gag_counts
+        held = {track for (track, _level), n in counts.items() if n > 0
+                and self.toon.track_exp.get(track, 0) > 0}
+        if held & {Track.THROW, Track.SQUIRT, Track.SOUND, Track.DROP}:
+            return True
+        if Track.LURE in held:
+            if Track.TRAP in held:
+                return True
+            if any(c.status.trapped for c in self.active_cogs()):
+                return True
+        return False
+
 
 @dataclass
 class Action:
-    """A solo toon's choice for one round."""
-    track: Track
-    level: int
+    """A solo toon's choice for one round.
+
+    `track=None` is the pass: the toon does nothing and lets the round
+    go by. It is a real choice and occasionally the only winning one --
+    see `simulator.legal_actions` for when it is offered and why it is
+    not offered more often.
+    """
+    track: Optional[Track]
+    level: int = 0
     # target_index: index into state.cogs, or None for a track that hits
     # all active cogs (Toon-Up, Sound, Lure, or level-7 Throw/Squirt/Drop/Trap)
     target_index: Optional[int] = None
+
+    @property
+    def is_pass(self) -> bool:
+        return self.track is None
+
+    def describe(self) -> str:
+        if self.is_pass:
+            return "pass"
+        target = "all" if self.target_index is None else self.target_index
+        return f"{self.track.value}/{self.level} -> {target}"
+
+
+# The one pass action. Actions are compared by value, so this is a
+# convenience rather than a singleton anything depends on.
+PASS = Action(track=None, level=0, target_index=None)

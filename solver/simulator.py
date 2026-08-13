@@ -44,6 +44,39 @@ def is_group_action(track: Track, level: int) -> bool:
 
 
 def legal_actions(state: BattleState) -> List[Action]:
+    """Every action the toon may take this round, pass included.
+
+    WHEN PASS IS OFFERED
+    --------------------
+    Only when a cog is lured *and* nothing productive can be done -- the
+    situation where passing is the only move, not merely a legal one.
+    Two separate reasons for a rule this narrow.
+
+    The first is that a pass is not the free move it looks like at a
+    search horizon. A lured cog does not attack, so passing while the
+    battle is lured costs no laff and no gag: the leaf evaluator sees a
+    round that cost nothing, and a shallow search will happily lure and
+    then coast. The cost is real but it is off the horizon -- the lure
+    lapses and no progress was made. Offered unconditionally, this
+    swung a depth-2 search off a Cream Pie that killed a cog outright
+    and onto a Lure. Exact play was never fooled; shallow play was, and
+    shallow play is what ships.
+
+    The second is termination. `solve()` terminates because every action
+    spends a gag, so the gag count strictly decreases and the state
+    graph is a DAG. A pass spends nothing, so an always-legal pass would
+    let the search walk pass -> pass -> pass forever. Requiring a lured
+    cog keeps a measure that still decreases: a lured cog's
+    `lure_rounds_remaining` ticks down during the cog phase, and nothing
+    but a fresh Lure gag puts rounds back. The measure is lexicographic,
+    (gags remaining, total lure rounds remaining), and well-founded.
+
+    The move this exists for: trap and lure left, cogs already lured. A
+    trap cannot be placed on a lured cog, so the only gag action is to
+    burn a Lure re-luring a cog that is already lured. Waiting for the
+    lure to lapse, then trapping and re-luring, wins fights that
+    otherwise run the pouch dry. tests/test_pass.py plays one out.
+    """
     actions = []
     toon = state.toon
     active = state.active_cogs()
@@ -68,7 +101,36 @@ def legal_actions(state: BattleState) -> List[Action]:
                     continue  # can't trap an already-trapped or lured cog
             actions.append(Action(track=track, level=level, target_index=i))
 
+    if (any(cog.status.lured for cog in active)
+            and not any(is_productive(state, a) for a in actions)):
+        actions.append(Action(track=None, level=0, target_index=None))
+
     return actions
+
+
+def is_productive(state: BattleState, action: Action) -> bool:
+    """Does this action advance the battle at all?
+
+    Only used to decide whether the toon is stuck and should be offered
+    a pass, so "no" needs to mean *nothing whatsoever*, not "poor
+    value". Choosing between productive moves is the search's job.
+    """
+    if action.is_pass:
+        return False
+    if action.track == Track.TOON_UP:
+        return state.toon.laff < state.toon.max_laff
+    targets = [c for c in _targets_for(state, action) if not c.status.is_dead]
+    if action.track == Track.LURE:
+        # Re-luring a cog that is already lured only refreshes a timer
+        # the toon is trying to run down. A group Lure over a mixed
+        # battle still counts -- it catches the ones that are loose.
+        return any(not cog.status.lured for cog in targets)
+    if action.track == Track.DROP:
+        # Drop always misses a lured cog, so a Drop with no un-lured
+        # target is a gag thrown away.
+        return any(not cog.status.lured for cog in targets)
+    # Trap arms something, and the damage tracks damage something.
+    return bool(targets)
 
 
 def _targets_for(state: BattleState, action: Action) -> List[CogState]:
@@ -112,7 +174,12 @@ def toon_action_accuracy(state: BattleState, action: Action) -> int:
 
     Passes all_cogs (not just the targets) so the luredRatio half of `bonus`
     sees the whole battle -- its denominator is every cog in play.
+
+    A pass always "hits": it has one outcome, so the search should not
+    split a chance node over it.
     """
+    if action.is_pass:
+        return 100
     return mechanics.calc_toon_accuracy(
         action.track, action.level, state.toon,
         _targets_for(state, action), all_cogs=state.cogs,
@@ -130,6 +197,11 @@ def apply_toon_action(state: BattleState, action: Action,
     Anything added here reaches the solver automatically -- don't fork it.
     """
     toon = state.toon
+    if action.is_pass:
+        # Nothing spent, nothing dealt. The round still happens -- the
+        # caller runs the cog phase, which is the entire point of
+        # passing: it is how lure rounds get burned.
+        return 0, 0
     targets = _targets_for(state, action)
 
     # Copy-on-write. `BattleState.clone` shares this dict rather than
@@ -316,7 +388,12 @@ def step(state: BattleState, action: Action, gag_cost_lambda: float = 0.1
     reward = -float(laff_lost) - gag_cost_lambda * float(action.level)
     if next_state.is_win():
         reward += 100.0
-    elif next_state.toon.laff <= 0:
+    elif next_state.is_terminal():
+        # Any terminal state that is not a win is a loss, which now
+        # includes running out of ways to damage a cog and not only
+        # running out of laff. Kept identical to outcomes._accumulate so
+        # the sampler and the enumerator stay comparable --
+        # test_matches_sampled_step checks exactly that.
         reward -= 100.0
 
     return next_state, reward, next_state.is_terminal()

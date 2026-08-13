@@ -109,6 +109,32 @@ Search cost, measured on a real endgame loadout (20 distinct gags, 30
 root actions, two cogs): depth 1 = 0.01s, depth 2 = 9.3s, depth 3 = many
 minutes. The default is 2 and the search runs off the polling thread.
 
+## What ends a battle
+
+Three things, and the third is easy to forget when adding rules:
+
+1. Laff hits zero.
+2. Every cog is dead.
+3. **The toon has no remaining way to damage a cog**
+   (`BattleState.can_still_damage`). Nothing restocks a pouch mid-fight
+   — SOS cards, Unites and Fires are not modelled — so this is as final
+   as (1). 80 Lures and no attacks is a loss; so is Toon-Up and/or Trap
+   alone; so is a gag in a track the toon has no experience in. Trap
+   *with* Lure is not, nor is Lure alone against an already-trapped cog.
+
+Before this existed, a hopeless position fell through to
+`heuristic_value` and scored **+47.6**, and because training labels came
+from `solve()`, the evaluator was partly fit to its own output. If you
+add a way for a position to have no moves, give it a value here rather
+than letting the search estimate one.
+
+The pass (`Action(track=None)`) is the exception that keeps (3) honest:
+Trap + Lure against an already-lured cog has nothing useful to do but is
+still winnable by waiting. It is deliberately offered *only* when a cog
+is lured and nothing else is productive — widening it breaks both
+shallow play and the termination argument. `simulator.legal_actions`
+explains why; don't widen it without reading that.
+
 ## Gag pouch
 
 Level 7 gags do **not** count against the pouch (`POUCH_EXEMPT_LEVEL`).
