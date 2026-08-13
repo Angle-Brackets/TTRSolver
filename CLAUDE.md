@@ -173,8 +173,29 @@ explains why; don't widen it without reading that.
 
 Level 7 gags do **not** count against the pouch (`POUCH_EXEMPT_LEVEL`).
 The gag menu's "Total gags" label counts only levels 1–6, which makes it
-a free checksum on anything reading counts off the screen — compare it
-against `GagPanel.pouch_total()`.
+a free checksum on anything reading counts off the screen.
+
+That checksum is now taken, not merely available. `read_pouch_label`
+reads the label and `GagPanel.checksum_problem` compares it against
+`pouch_total()`; `build_state` refuses to build a state when they
+disagree. The two readings deliberately share no machinery — the cells
+are white digits on blue, the label near-black on yellow — because two
+readings that share a bug agree while both being wrong.
+
+The very first real frame the suite ever saw was off by one: a Trap
+level-5 cell holding 6 read as 5, totalling 66 against a label of 67.
+**That digit confusion is still there**; what changed is that it is
+caught rather than handed to the solver. A wrong count is the quietest
+possible failure — it does not look like an error downstream, it looks
+like a toon carrying one fewer gag.
+
+The label reader declines rather than guesses: it requires one to three
+confident digits either side of a single unmatched glyph, and rejects
+`carried > capacity`. That last rule earns its place — at one scale the
+leading digit of 67 reads as an 8 with enough confidence to pass, and
+the arithmetic is what rejects it. When the label cannot be read the
+checksum does not run, which is a hole in the net rather than a
+failure: it stays silent instead of raising a false alarm.
 
 `TTRGame.vlt` (the game's Python) is encrypted, 8.0 bits/byte. The
 `phase_*.mf` files are plain Panda3D multifiles and are readable.

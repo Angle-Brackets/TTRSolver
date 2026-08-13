@@ -104,6 +104,9 @@ class GagPanel:
 
     cells: List[PanelCell]
     panel: Tuple[int, int, int, int]
+    # (carried, capacity) off the menu's own "Total gags" line, when it
+    # could be read. This is the checksum -- see `checksum_problem`.
+    label: Optional[Tuple[int, int]] = None
 
     def counts(self) -> Dict[Tuple[Track, int], int]:
         """As `ToonState.gag_counts` wants it: only what is carried."""
@@ -140,6 +143,33 @@ class GagPanel:
 
         return sum(c.carried for c in self.cells
                    if c.level < POUCH_EXEMPT_LEVEL)
+
+    def checksum_problem(self) -> Optional[str]:
+        """Why this read cannot be trusted, or None if it adds up.
+
+        The menu prints its own total, and the cells have to sum to it.
+        For a long time this was described as a free checksum and never
+        actually taken: `pouch_total` existed, nothing read the label,
+        and nothing compared them. The first real frame the suite ever
+        saw was off by one -- a Trap cell holding 6 read as 5 -- which
+        is exactly the failure the check is for and exactly the kind
+        that is invisible without it. A misread count does not look
+        wrong downstream; it looks like a toon with one fewer gag, and
+        the solver plans confidently around it.
+
+        Returns a message rather than raising, because the caller
+        (`session.build_state`) collects reasons a state cannot be
+        built and shows them all at once.
+        """
+        if self.label is None:
+            return None                  # unread, not disagreeing
+        carried, capacity = self.label
+        counted = self.pouch_total()
+        if counted == carried:
+            return None
+        return (f"gag counts do not add up: the cells total {counted} but "
+                f"the menu says {carried}/{capacity}. A digit was misread, "
+                f"so the pouch is wrong -- no advice from it")
 
 
 def _row_bands(frame: np.ndarray) -> Dict[Track, int]:
@@ -245,7 +275,114 @@ def read_panel(frame: np.ndarray,
 
     bottom = max(bands.values()) + row_height
     return GagPanel(cells=cells,
-                    panel=(left, min(bands.values()), left + width, bottom))
+                    panel=(left, min(bands.values()), left + width, bottom),
+                    label=read_pouch_label(frame, located=located))
+
+
+# The "Total gags" note, as fractions of the panel's own width so the
+# same numbers hold from 480p to 4K. It sits to the right of the grid on
+# a bright yellow sticky note.
+NOTE_SEARCH_FRAC = 0.60          # of panel width, rightwards from its edge
+NOTE_YELLOW = (180, 170, 140, 70)  # min red, min green, max blue, min r-b
+LABEL_INK_MAX = 130              # the text is near-black on the yellow
+# Well above what letters score against digit templates by accident --
+# measured 0.70-0.76 for the real digits against 0.31-0.61 for the
+# letters of "Total gags" on the line above.
+MIN_LABEL_DIGIT_SCORE = 0.55
+MAX_LABEL_DIGITS = 3
+
+
+def read_pouch_label(frame: np.ndarray,
+                     located=None) -> Optional[Tuple[int, int]]:
+    """(carried, capacity) from the menu's "Total gags N / M" line.
+
+    Read separately from the cells and by a different route, which is
+    the entire point: two readings of the same quantity that share no
+    machinery disagree when one of them is wrong. The cells are white
+    digits on blue and this is near-black on yellow, so they do not even
+    share an ink threshold.
+
+    The line is picked out by its shape rather than its position:
+    exactly one glyph in it fails to match any digit -- the slash --
+    with one to three confident digits either side. The label sits under
+    "Total gags", whose letters do match digit templates, but loosely
+    and in the wrong arrangement.
+    """
+    from .vision import _components, _normalise, _overlap
+
+    located = located or find_panel(frame)
+    if located is None:
+        return None
+    left, width, bands, row_height = located
+    tops = sorted(bands.values())
+
+    x0 = left + width
+    x1 = min(frame.shape[1], x0 + int(width * NOTE_SEARCH_FRAC))
+    y0 = max(0, tops[0] - row_height)
+    y1 = min(frame.shape[0], tops[-1] + 2 * row_height)
+    side = frame[y0:y1, x0:x1, :3].astype(int)
+    if side.size == 0:
+        return None
+
+    red, green, blue = side[:, :, 0], side[:, :, 1], side[:, :, 2]
+    min_r, min_g, max_b, min_rb = NOTE_YELLOW
+    yellow = ((red > min_r) & (green > min_g) & (blue < max_b)
+              & ((red - blue) > min_rb))
+    patches = _components(yellow)
+    if not patches:
+        return None
+    nx0, ny0, nx1, ny1 = max(patches,
+                             key=lambda b: (b[2] - b[0]) * (b[3] - b[1]))
+    note = side[ny0:ny1, nx0:nx1]
+    if note.size == 0:
+        return None
+
+    ink = ((note[:, :, 0] < LABEL_INK_MAX) & (note[:, :, 1] < LABEL_INK_MAX)
+           & (note[:, :, 2] < LABEL_INK_MAX))
+    blobs = [b for b in _components(ink)
+             if (b[3] - b[1]) >= 3 and (b[2] - b[0]) >= 2]
+
+    # Group glyphs into text lines by vertical overlap.
+    lines: List[dict] = []
+    for box in sorted(blobs, key=lambda b: b[1]):
+        for line in lines:
+            if box[1] < line["y1"] and line["y0"] < box[3]:
+                line["y0"] = min(line["y0"], box[1])
+                line["y1"] = max(line["y1"], box[3])
+                line["boxes"].append(box)
+                break
+        else:
+            lines.append({"y0": box[1], "y1": box[3], "boxes": [box]})
+
+    templates = digit_templates()
+    for line in sorted(lines, key=lambda ln: -ln["y0"]):
+        groups: List[str] = [""]
+        ok = True
+        for bx0, by0, bx1, by1 in sorted(line["boxes"]):
+            glyph = _normalise(ink[by0:by1, bx0:bx1])
+            best, score = None, 0.0
+            for value, template in templates.items():
+                overlap = _overlap(glyph, template)
+                if overlap > score:
+                    best, score = value, overlap
+            if score >= MIN_LABEL_DIGIT_SCORE:
+                groups[-1] += str(best)
+            elif len(groups) == 1 and groups[0]:
+                groups.append("")            # the slash
+            else:
+                ok = False                   # a second non-digit: not it
+                break
+        if not ok or len(groups) != 2:
+            continue
+        carried, capacity = groups
+        if not carried or not capacity:
+            continue
+        if len(carried) > MAX_LABEL_DIGITS or len(capacity) > MAX_LABEL_DIGITS:
+            continue
+        if int(carried) > int(capacity):
+            continue
+        return int(carried), int(capacity)
+    return None
 
 
 def _read_cell(patch: np.ndarray, track: Track, level: int) -> PanelCell:

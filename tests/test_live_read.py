@@ -33,7 +33,7 @@ try:
 except ImportError as exc:                   # numpy/pillow are extras
     raise unittest.SkipTest(f"live reading needs numpy+pillow: {exc}") from None
 
-FIXTURE = Path(__file__).with_name("fixtures") / "battle_1280x720.png"
+FIXTURE = Path(__file__).with_name("fixtures") / "battle_1921x1081.png"
 
 
 @unittest.skipUnless(FIXTURE.is_file(), f"missing {FIXTURE.name}")
@@ -91,23 +91,67 @@ class RealBattleFrameTest(unittest.TestCase):
             {Track.TRAP, Track.LURE, Track.SOUND, Track.THROW,
              Track.SQUIRT, Track.DROP})
 
-    @unittest.expectedFailure
-    def test_the_pouch_checksum_matches_the_menus_own_label(self):
-        """KNOWN FAILURE: one cell misreads, and this is how we know.
+    def test_the_menus_own_total_reads(self):
+        """Read by a different route from the cells, on purpose: white
+        digits on blue against near-black on yellow. Two readings that
+        share no machinery disagree when one is wrong."""
+        self.assertEqual(gagpanel.read_pouch_label(self.frame), (67, 70))
 
-        The menu prints "Total gags 67 / 70" and level 7s are carried
-        outside the pouch, so `pouch_total()` must equal 67. It returns
-        66: the Trap level-5 cell holds 6 and reads as 5.
+    def test_an_implausible_label_is_declined_not_returned(self):
+        """A checksum that can be wrong is worse than no checksum.
 
-        Marked expected-failure rather than deleted or loosened, because
-        the number it is comparing against is not yet read off the
-        screen either -- wiring that up is what turns this from a
-        hand-checked observation into the checksum CLAUDE.md describes.
-        A digit reader that confuses 5 and 6 will quietly hand the
-        solver a pouch it does not have.
+        Resampled to 1600x900 the leading digit of "67" reads as an 8,
+        confidently enough (0.61) to clear the digit threshold. The
+        structure still parses, so what rejects it is the arithmetic:
+        a pouch cannot hold 87 of a maximum 70. The reader returns None
+        and the checksum simply does not run, rather than reporting a
+        mismatch against a total that was itself misread.
+        """
+        from PIL import Image as PILImage
+
+        small = np.asarray(PILImage.fromarray(self.frame)
+                           .resize((1600, 900), PILImage.LANCZOS))
+        self.assertIsNone(gagpanel.read_pouch_label(small))
+
+    def test_an_unread_label_does_not_raise_a_false_alarm(self):
+        panel = gagpanel.GagPanel(cells=[], panel=(0, 0, 1, 1), label=None)
+        self.assertIsNone(panel.checksum_problem())
+
+    def test_the_checksum_catches_the_misread_cell(self):
+        """The cells total 66 and the menu says 67 -- the Trap level-5
+        cell holds 6 and reads as 5.
+
+        Asserting the failure rather than the fix. The digit confusion
+        is still there; what changed is that it is now caught instead
+        of being handed to the solver as a pouch the toon does not
+        have. When the reader is fixed this test should be inverted,
+        not deleted.
         """
         panel = gagpanel.read_panel(self.frame)
-        self.assertEqual(panel.pouch_total(), 67)
+        self.assertEqual(panel.label, (67, 70))
+        self.assertEqual(panel.pouch_total(), 66)
+        problem = panel.checksum_problem()
+        self.assertIsNotNone(problem)
+        self.assertIn("66", problem)
+        self.assertIn("67", problem)
+
+    def test_a_failed_checksum_blocks_the_state(self):
+        """No advice is better than advice from an invented pouch."""
+        from solver.live.session import build_state
+
+        class FakeSnapshot:
+            laff, max_laff = 95, 95
+            def track_exp(self):
+                from solver.state import Track
+                return {t: 7 for t in Track}
+            def organic_tracks(self):
+                return []
+
+        panel = gagpanel.read_panel(self.frame)
+        result = build_state(snapshot=FakeSnapshot(), panel=panel,
+                             readings=[])
+        self.assertIsNone(result.state)
+        self.assertTrue(any("do not add up" in p for p in result.problems))
 
 
 if __name__ == "__main__":

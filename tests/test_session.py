@@ -16,11 +16,21 @@ except ImportError as exc:                   # numpy is an optional extra
 
 
 class FakePanel:
-    def __init__(self, counts):
+    def __init__(self, counts, problem=None):
         self._counts = counts
+        self._problem = problem
 
     def counts(self):
         return self._counts
+
+    def checksum_problem(self):
+        """Why the read cannot be trusted, or None.
+
+        A real panel cross-checks its cells against the "Total gags"
+        label the menu prints; these fakes are hand-built and add up by
+        construction, so they say None unless a test wants otherwise.
+        """
+        return self._problem
 
 
 def snapshot(laff=95):
@@ -116,6 +126,28 @@ class BuildStateTest(unittest.TestCase):
                              readings=[])
         self.assertFalse(result)
         self.assertTrue(any("cog plates" in p for p in result.problems))
+
+    def test_a_pouch_that_does_not_add_up_is_refused(self):
+        """The gag menu prints its own total and the cells must sum to
+        it. A misread digit is the quietest possible failure -- it does
+        not look like an error, it looks like a toon carrying one fewer
+        gag -- so it has to block rather than warn."""
+        panel = FakePanel({(Track.THROW, 3): 2},
+                          problem="gag counts do not add up: the cells "
+                                  "total 66 but the menu says 67/70")
+        result = build_state(snapshot=snapshot(), panel=panel,
+                             readings=[reading()])
+        self.assertFalse(result)
+        self.assertTrue(any("do not add up" in p for p in result.problems))
+
+    def test_every_problem_is_reported_at_once(self):
+        """Not just the first. Being told one reason, fixing it and
+        being told the next is a worse experience than being told all
+        of them, and the contract is 'a state or the reasons'."""
+        panel = FakePanel({(Track.THROW, 3): 2}, problem="counts are wrong")
+        result = build_state(snapshot=None, panel=panel, readings=[])
+        self.assertFalse(result)
+        self.assertGreaterEqual(len(result.problems), 3)
 
     def test_no_gag_menu_is_refused_rather_than_assumed_empty(self):
         """An empty pouch and an unread pouch are different states, and

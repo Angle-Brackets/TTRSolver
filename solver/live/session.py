@@ -101,6 +101,21 @@ def build_state(snapshot=None, panel=None, readings: Sequence = (),
     if not readings:
         problems.append("no cog plates on screen")
 
+    if panel is None:
+        problems.append(
+            "no gag menu on screen: carrying nothing until it is read "
+            "(press the gag key so the menu is visible)")
+    else:
+        # The menu prints its own total and the cells have to sum to it.
+        # A misread count is the quietest way to be wrong here: it does
+        # not look like an error downstream, it looks like a toon
+        # carrying one fewer gag, and the solver plans confidently
+        # around it. Blocking is the right response for the same reason
+        # an unknown cog blocks -- see this module's docstring.
+        bad = panel.checksum_problem()
+        if bad:
+            problems.append(bad)
+
     cogs: List[CogState] = []
     for reading in readings:
         cog, why = cog_from_reading(reading)
@@ -108,20 +123,16 @@ def build_state(snapshot=None, panel=None, readings: Sequence = (),
         if cog is not None:
             cogs.append(cog)
 
+    # Every reason at once. Collecting them and returning here, rather
+    # than bailing at the first, is the difference between "fix this,
+    # run again, fix the next one" and being told what is wrong.
     if snapshot is None or problems:
         return BuildResult(None, problems)
 
     track_exp = snapshot.track_exp()
-    if panel is not None:
-        # The panel sees training too, but the API states it; only take
-        # counts from the screen.
-        gag_counts: Dict[Tuple[Track, int], int] = panel.counts()
-    else:
-        gag_counts = {}
-        problems.append(
-            "no gag menu on screen: carrying nothing until it is read "
-            "(press the gag key so the menu is visible)")
-        return BuildResult(None, problems)
+    # The panel sees training too, but the API states it; only take
+    # counts from the screen.
+    gag_counts: Dict[Tuple[Track, int], int] = panel.counts()
 
     toon = ToonState(laff=snapshot.laff, max_laff=snapshot.max_laff,
                      track_exp=track_exp, gag_counts=gag_counts,
