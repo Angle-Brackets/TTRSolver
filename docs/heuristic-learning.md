@@ -101,7 +101,50 @@ A small net is affordable **unbatched**. Batching would require
 restructuring a depth-first search to collect a frontier, and the
 numbers say not to bother.
 
-## The unusual advantage: exact labels
+## CORRECTION: the labels are not exact
+
+This document was built on `solve()` playing a position to the end of
+the battle. **It does not.** A line ends when the pouch empties, which is
+not the same as the fight finishing: with cogs still standing there are
+no legal actions, and the value returned is `heuristic_value` -- an
+estimate, at the exact point the search was supposed to stop estimating.
+
+Measured: re-solving 300 cached training positions under two different
+heuristics changed **83% of the labels**, by 3.7 points on average. Under
+genuinely exact labelling none would move at all.
+
+So the fitting was partly circular. `tools/fit_heuristic.py` labels with
+whatever heuristic is installed, and by the time the 5,000-position set
+was built that was the fitted model -- a model being trained on its own
+output wherever a line ran out of gags.
+
+It is also how the problem surfaced. A regret metric computed the
+reference value with weights installed and the comparison value without,
+and reported *negative* regret, which is arithmetically impossible if
+both sides are exact.
+
+What this does and does not invalidate:
+
+* The **calibration** finding stands. The hand-written heuristic was
+  ~100 points below any plausible value scale, and that gap is far larger
+  than the 3.7-point label noise.
+* The **feature** work stands. Kill thresholds, gags remaining and the
+  trap/lure conjunction are real distinctions regardless of how the
+  targets were computed.
+* The **specific weights** do not. They are fitted to partly circular
+  targets and should be refitted once out-of-gags positions have a
+  defined value.
+* The **MAE and agreement figures** are measured against a reference that
+  is not ground truth, so they overstate how well the model matches
+  optimal play.
+
+The fix is a modelling decision rather than a bug fix. A toon with no
+gags cannot win, so an out-of-gags position is worth a loss, or the value
+of fleeing, or whatever continuing the cog phase to defeat yields. That
+choice belongs to whoever owns the game model, and is deliberately left
+open here rather than guessed at.
+
+## The advantage this was meant to have: exact labels
 
 Most game-playing nets bootstrap from their own estimates. Here we can
 generate ground truth. Every action spends a gag, so gags-remaining

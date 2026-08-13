@@ -486,3 +486,49 @@ class CollapseGateTest(unittest.TestCase):
         _v0, exact = expectimax.evaluate(state, 2, memo={})
         _v1, collapsed = expectimax.evaluate(state, 2, memo={}, exact_plies=0)
         self.assertEqual(exact, collapsed)
+
+
+class SolveIsNotExactWhenGagsRunOutTest(unittest.TestCase):
+    """`solve` terminates but does not always finish the battle.
+
+    A line ends when the pouch empties. If cogs are still alive there are
+    no legal actions, and `evaluate` returns `heuristic_value` -- an
+    estimate at the exact point the search was meant to stop estimating.
+    This is pinned because the module claimed the opposite for a long
+    time, and because everything built on "exact labels" depends on
+    knowing when they are not.
+    """
+
+    def out_of_gags(self):
+        from solver.state import BattleState, CogState, ToonState, Track
+        return BattleState(
+            toon=ToonState(30, 50, {Track.THROW: 6}, {(Track.THROW, 3): 0}),
+            cogs=[CogState("yesman", "bossbot", 4, 28, 30)])
+
+    def test_an_empty_pouch_is_not_a_terminal_state(self):
+        state = self.out_of_gags()
+        self.assertFalse(state.is_terminal())
+        self.assertEqual(simulator.legal_actions(state), [])
+
+    def test_its_value_is_the_heuristic_not_a_played_out_result(self):
+        state = self.out_of_gags()
+        value, action = expectimax.evaluate(state, 10 ** 6, memo={})
+        self.assertIsNone(action)
+        self.assertAlmostEqual(value, expectimax.heuristic_value(state),
+                               places=9)
+
+    def test_so_solve_depends_on_which_heuristic_is_installed(self):
+        """The property that makes `solve` unusable as ground truth."""
+        from solver.search import fitted
+
+        state = self.out_of_gags()
+        saved = fitted.WEIGHTS
+        try:
+            fitted.WEIGHTS = saved
+            with_weights, _ = expectimax.evaluate(state, 10 ** 6, memo={})
+            fitted.WEIGHTS = None
+            without, _ = expectimax.evaluate(state, 10 ** 6, memo={})
+        finally:
+            fitted.WEIGHTS = saved
+        if saved is not None:
+            self.assertNotAlmostEqual(with_weights, without, places=3)

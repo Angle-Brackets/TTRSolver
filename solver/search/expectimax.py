@@ -62,15 +62,41 @@ end to end:
     3 cogs     50.90s    4.57s     11x
     4 cogs     95.20s   13.64s      7x
 
-WHY A FULL SOLVE IS POSSIBLE
-----------------------------
+WHY A FULL SOLVE TERMINATES -- AND WHY IT IS NOT EXACT
+------------------------------------------------------
 Every action consumes exactly one gag, so gags-remaining strictly decreases
 down any line and the state graph is a DAG -- no cycles, and depth is
 bounded by the size of the pouch rather than by anything we choose. `solve`
-below exploits that: with no depth limit it plays to the end of the battle
-and returns an exact optimum, not an estimate. Whether it *finishes* is a
-question of branching, which is what the pruning and the symmetry
-de-duplication are for.
+exploits that and always terminates.
+
+**It does not, however, always reach the end of the battle**, and this
+module claimed for a long time that it did. A line ends when the pouch is
+empty, which is not the same as the fight being over: if cogs are still
+standing there are no legal actions, `best_action` is None, and the value
+returned is `heuristic_value(state)` -- an estimate, at the exact place
+the search was supposed to stop estimating.
+
+That matters far more than it sounds. Re-solving 300 cached training
+positions under two different heuristics changed **83% of the answers**,
+by 3.7 points on average. Anything calling `solve` a source of ground
+truth is therefore only correct for positions with enough gags to finish
+the fight, and `tools/fit_heuristic.py` was labelling with the fitted
+heuristic installed -- fitting a model partly to its own output.
+
+Two consequences worth stating plainly:
+
+  * A value from `solve` is exact only if no line in it runs the pouch
+    dry with cogs alive.
+  * Two `solve` results are comparable only if the same heuristic was
+    installed for both. A regret metric that computes one side with
+    weights and the other without will produce negative regret, which is
+    how this was found.
+
+Fixing it means deciding what an out-of-gags position is worth. The toon
+cannot win from there -- no gags, no damage -- so the honest options are
+a loss, or the value of fleeing, or continuing the cog phase until the
+toon is defeated. That is a modelling decision, not a bug fix, and it is
+deliberately left open rather than guessed at.
 
 A NOTE ON THE HEURISTIC
 -----------------------
