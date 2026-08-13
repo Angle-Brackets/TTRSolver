@@ -133,15 +133,55 @@ class WatcherTest(unittest.TestCase):
         events = w.poll()
         self.assertEqual([e.kind for e in events], ["cog_defeated"])
 
-    def test_losing_every_plate_ends_the_battle(self):
+    def test_losing_every_plate_does_not_immediately_end_the_battle(self):
+        """The plates go away for the whole of an attack animation.
+
+        TTR cuts the camera to the cog being hit and takes the gag menu
+        and every plate with it. Reading that as the end reported a
+        battle starting and ending several times per fight, and each
+        re-entry re-ran the search on what was the same battle.
+        """
+        one = frame_with([(300, 120)])
+        blank = frame_with([])
+        w = self.watcher([one, one, blank, blank, blank], agree=2)
+        w.poll(); w.poll()
+        self.assertTrue(w.view.active)
+        self.assertEqual(w.poll(), [])
+        self.assertEqual(w.poll(), [])
+        self.assertTrue(w.view.active, "still the same fight")
+
+    def test_plates_staying_away_long_enough_does_end_it(self):
+        import solver.live.watch as watch_mod
+
         one = frame_with([(300, 120)])
         blank = frame_with([])
         w = self.watcher([one, one, blank, blank], agree=2)
         w.poll(); w.poll()
+        # Older than any animation can be.
+        w._plates_at -= watch_mod.BATTLE_GRACE + 1
         w.poll()
         events = w.poll()
         self.assertEqual([e.kind for e in events], ["battle_ended"])
         self.assertFalse(w.view.active)
+
+    def test_something_that_knows_can_end_it_sooner(self):
+        """The Local API's merit total ticks up the moment a fight pays
+        out. That is proof the battle finished and it arrives at once,
+        so it short-circuits the timer -- but it only fires for a
+        department whose suit the toon owns, so it can confirm an end
+        and never rule one out."""
+        one = frame_with([(300, 120)])
+        blank = frame_with([])
+        paid_out = {"yes": False}
+        w = BattleWatcher(catalogue=self.empty,
+                          capture=ScriptedCapture([one, one, blank, blank]),
+                          agree=2, collect=False, panel_present=ALWAYS,
+                          battle_over=lambda: paid_out["yes"])
+        w.poll(); w.poll()
+        self.assertEqual(w.poll(), [])          # timer still running
+        paid_out["yes"] = True
+        events = w.poll()
+        self.assertEqual([e.kind for e in events], ["battle_ended"])
 
     def test_a_new_plate_reports_a_join(self):
         one = frame_with([(300, 120)])

@@ -23,7 +23,7 @@ class SlowThinker(A.Thinker):
         self.started = threading.Event()
 
     def _run(self, token, frame, readings, snapshot, objective, depth,
-             budget=None):
+             budget=None, ignore_checksum=False):
         self.started.set()
         time.sleep(self.delay)
         with self._lock:

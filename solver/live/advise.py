@@ -95,19 +95,31 @@ class Thinker:
         self._lock = threading.Lock()
 
     def submit(self, frame, readings, snapshot, objective, depth,
-               budget=DEFAULT_BUDGET) -> None:
+               budget=DEFAULT_BUDGET, ignore_checksum=False) -> None:
         with self._lock:
             token = next(self._generation)
             self._current = token
         threading.Thread(target=self._run, daemon=True,
                          args=(token, frame, readings, snapshot, objective,
-                               depth, budget)).start()
+                               depth, budget, ignore_checksum)).start()
 
     def _run(self, token, frame, readings, snapshot, objective, depth,
-             budget):
-        lines, state = advise(frame, readings, snapshot=snapshot,
-                              objective=objective, depth=depth,
-                              budget=budget)
+             budget, ignore_checksum=False):
+        try:
+            lines, state = advise(frame, readings, snapshot=snapshot,
+                                  objective=objective, depth=depth,
+                                  budget=budget,
+                                  ignore_checksum=ignore_checksum)
+        except Exception as exc:            # noqa: BLE001 -- see below
+            # A search that dies takes its thread with it and nothing
+            # else notices: no advice appears, which looks exactly like
+            # a search still running. Report it as the reason there is
+            # no state, which is the channel the caller already reads.
+            import traceback
+
+            lines = [f"the search failed: {exc.__class__.__name__}: {exc}",
+                     *traceback.format_exc().strip().splitlines()[-3:]]
+            state = None
         with self._lock:
             superseded = token != self._current
         if not superseded:
@@ -173,6 +185,36 @@ def _snapshot(force: bool = False):
     return snap
 
 
+def _paid_out() -> bool:
+    """Has a fight just paid out, per the Local API?
+
+    The toon's merit totals tick up the moment a battle resolves, so a
+    rise is proof the fight is over and arrives immediately -- far
+    sooner than the watcher's timer, which has to wait out the longest
+    animation it might be looking at.
+
+    It is a one-way signal. Merits only move for a department whose suit
+    the toon already owns and only for that department's cogs, so this
+    confirms an end and can never rule one out. `False` means "no news",
+    never "still fighting".
+    """
+    global _LAST_MERITS
+
+    snap = _snapshot()
+    if snap is None:
+        return False
+    merits = dict(snap.merits)
+    previous, _LAST_MERITS = _LAST_MERITS, merits
+    if previous is None:
+        return False
+    return any(current > previous.get(dept, (0, 0))[0]
+               for dept, (current, _target) in merits.items()
+               if dept in previous)
+
+
+_LAST_MERITS = None
+
+
 def _panel(frame):
     from .gagpanel import read_panel
 
@@ -180,7 +222,8 @@ def _panel(frame):
 
 
 def advise(frame, readings, snapshot=None, objective=None,
-           depth: int = DEFAULT_DEPTH, budget: float = DEFAULT_BUDGET):
+           depth: int = DEFAULT_DEPTH, budget: float = DEFAULT_BUDGET,
+           ignore_checksum: bool = False):
     """(text, state) for what to do now, or (reasons, None)."""
     from ..search import expectimax
 
@@ -190,7 +233,8 @@ def advise(frame, readings, snapshot=None, objective=None,
         # Entitlements from the API, counts from the screen.
         panel = _panel_with_training(frame, snapshot)
 
-    result = build_state(snapshot=snapshot, panel=panel, readings=readings)
+    result = build_state(snapshot=snapshot, panel=panel, readings=readings,
+                         ignore_checksum=ignore_checksum)
     if not result:
         return result.problems, None
 
@@ -235,6 +279,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--interval", type=float, default=0.5)
     parser.add_argument("--once", action="store_true",
                         help="read a single frame and stop")
+    parser.add_argument("--ignore-checksum", action="store_true",
+                        help="advise even when the gag counts disagree "
+                             "with the menu's own total. UNSAFE: the "
+                             "pouch is known wrong, so the advice is for "
+                             "a slightly different fight")
     args = parser.parse_args(argv)
 
     try:
@@ -243,7 +292,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(exc)
         return 2
 
-    watcher = BattleWatcher()
+    watcher = BattleWatcher(battle_over=_paid_out)
     # Say what is being looked at. Reading the whole screen instead of
     # the game is silently wrong rather than loudly broken -- it reports
     # cogs off wallpaper -- so it should never be a thing you have to
@@ -251,6 +300,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     from .window import describe as describe_window
 
     print(describe_window())
+    if args.ignore_checksum:
+        print("  !! --ignore-checksum: gag counts that disagree with the "
+              "menu's own total will be used anyway. The pouch may be "
+              "wrong, and so may the advice.")
     print(f"advising with the '{objective.name}' objective, up to depth "
           f"{args.depth} within {args.budget}s per search; Ctrl-C to stop")
 
@@ -262,7 +315,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         # positives were first mistaken for a real read.
         if not watcher.in_battle(frame, bool(readings)):
             readings = []
-        _report(frame, readings, objective, args.depth, budget=args.budget)
+        _report(frame, readings, objective, args.depth, budget=args.budget,
+                ignore_checksum=args.ignore_checksum)
         watcher.close()
         return 0
 
@@ -295,7 +349,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                 # nine-second think must not stall the eye.
                 thinker.submit(watcher.capture.grab(),
                                list(watcher.view.cogs), None, objective,
-                               args.depth, args.budget)
+                               args.depth, args.budget,
+                               args.ignore_checksum)
             time.sleep(max(0.0, args.interval - (time.time() - cycle)))
     except KeyboardInterrupt:
         pass
@@ -305,9 +360,10 @@ def main(argv: Optional[List[str]] = None) -> int:
 
 def _report(frame, readings, objective, depth,
             last_problems: Optional[List[str]] = None,
-            budget: float = DEFAULT_BUDGET) -> List[str]:
+            budget: float = DEFAULT_BUDGET,
+            ignore_checksum: bool = False) -> List[str]:
     lines, state = advise(frame, readings, objective=objective, depth=depth,
-                          budget=budget)
+                          budget=budget, ignore_checksum=ignore_checksum)
     if state is None:
         # Don't repeat the same complaint every poll.
         if lines != last_problems:

@@ -59,8 +59,9 @@ class RealBattleFrameTest(unittest.TestCase):
 
         levels = []
         for plate in vision.find_plates(self.frame):
-            level, score = vision.read_level(self.frame, plate)
+            level, score, margin = vision.read_level(self.frame, plate)
             self.assertGreaterEqual(score, MIN_LEVEL_SCORE)
+            self.assertGreaterEqual(margin, vision.MIN_LEVEL_MARGIN)
             levels.append(level)
         self.assertEqual(levels, [6, 8])
 

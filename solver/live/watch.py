@@ -4,14 +4,23 @@ Reading one screenshot proves the vision works; it does not help anyone
 mid-fight. This polls instead, so the solver sees the battle as the
 player does.
 
-WHY THIS NEEDS NO WINDOW HANDLE
--------------------------------
-Plates are found by their teal portrait slot, which appears nowhere else
-in Toontown's palette, so the search does not care where the game window
-is. Borderless, windowed, moved to a second monitor, resized mid-session
--- all the same. There is no window enumeration here and no dependency on
-the platform's window API, which also means nothing to break when TTR
-changes how it presents its window.
+WHAT COUNTS AS A BATTLE
+-----------------------
+Two mistakes were made here, in opposite directions, and both looked
+like the vision failing.
+
+Teal plates are not sufficient. The slot colour is not unique outside a
+battle screenshot, and a blue-green desktop wallpaper produced plates
+all day -- so entering a battle also requires the gag menu
+(`in_battle`), and the frame is cropped to the game window before any
+of this runs (`window.game_rect`, `Capture`).
+
+Teal plates are not necessary either, which is the subtler one. When a
+round resolves, TTR cuts the camera to show the attack and takes the
+menu and every plate with it for the length of the animation. Absence
+therefore means nothing until it outlasts one -- see `BATTLE_GRACE` and
+`_battle_is_over`. Before that, a single fight reported itself starting
+and ending once per round.
 
 COST
 ----
@@ -49,10 +58,19 @@ import numpy as np
 from .catalogue import HeadCatalogue, candidates
 from .vision import (
     MIN_DEPARTMENT_MARGIN, Plate, find_plates, health_fraction,
-    locate_plates, read_department, read_level,
+    locate_plates, read_department, read_level, MIN_LEVEL_MARGIN,
 )
 
 MIN_LEVEL_SCORE = 0.55
+
+# How long the plates may be absent before the battle counts as over.
+# They vanish for the whole of an attack animation -- TTR cuts the camera
+# to the cog being hit and takes the gag menu and every plate with it --
+# so anything shorter reports the fight ending and restarting once per
+# round. A crowded battle animates several attacks back to back, which is
+# where the upper end of this comes from. Erring long costs only a
+# delayed "battle_ended"; erring short costs the identity of the fight.
+BATTLE_GRACE = 20.0
 
 # How much of the frame around the last known plates to re-scan. Plates
 # drift as cogs are knocked about; a quarter of the band's own size in
@@ -197,7 +215,8 @@ class BattleWatcher:
 
     def __init__(self, catalogue: Optional[HeadCatalogue] = None,
                  capture: Optional[Capture] = None, agree: int = 2,
-                 collect: bool = True, panel_present=None):
+                 collect: bool = True, panel_present=None,
+                 battle_over=None):
         self.catalogue = catalogue if catalogue is not None else HeadCatalogue()
         self.capture = capture or Capture()
         self.agree = agree
@@ -215,8 +234,29 @@ class BattleWatcher:
         self._pending: Optional[List[CogReading]] = None
         self._pending_count = 0
         self._band: Optional[Tuple[int, int]] = None
+        self._plates_at = 0.0
+        self.battle_over = battle_over
         self.frames = 0
         self.full_scans = 0
+
+    def _battle_is_over(self) -> bool:
+        """Has the fight actually finished, rather than paused?
+
+        Two ways to know, and the cheap one is only a timer. Plates are
+        absent for the whole of an attack animation, so their absence
+        means nothing until it has outlasted one; `BATTLE_GRACE` is that
+        bound.
+
+        `battle_over` is the shortcut, for a caller that knows something
+        the screen does not. The Local API's merit totals tick up the
+        moment a fight pays out, which is proof the battle finished and
+        arrives immediately -- but only for a department whose suit the
+        toon already owns, so it confirms an end and can never rule one
+        out. Hence: either signal ends the battle, neither is required.
+        """
+        if self.battle_over is not None and self.battle_over():
+            return True
+        return (time.time() - self._plates_at) > BATTLE_GRACE
 
     # -- reading ---------------------------------------------------------
 
@@ -226,8 +266,13 @@ class BattleWatcher:
             dept, margin = read_department(frame, plate)
             if margin < MIN_DEPARTMENT_MARGIN:
                 dept = None
-            level, score = read_level(frame, plate)
-            if score < MIN_LEVEL_SCORE:
+            level, score, level_margin = read_level(frame, plate)
+            # Both gates. A low score means the region holds nothing
+            # legible; a low margin means it holds something legible
+            # that could equally be another digit. The second is the
+            # dangerous one -- a live plate reading "Level 8" was read
+            # as 6 at score 0.709, over a runner-up of 0.670.
+            if score < MIN_LEVEL_SCORE or level_margin < MIN_LEVEL_MARGIN:
                 level = None
             match = self.catalogue.match(frame, plate,
                                          among=candidates(dept, level))
@@ -317,6 +362,9 @@ class BattleWatcher:
             # the same non-cogs instead of falling back to a full scan.
             self._band = None
 
+        if readings:
+            self._plates_at = time.time()
+
         if self._pending is not None and _matches(readings, self._pending):
             self._pending_count += 1
         else:
@@ -325,6 +373,23 @@ class BattleWatcher:
             return []
 
         events = self._diff(self.view.cogs, readings)
+
+        # PLATES GOING AWAY IS NOT THE BATTLE ENDING.
+        #
+        # When a round resolves, TTR cuts the camera to show the attack,
+        # and the gag menu and every plate go with it for the length of
+        # the animation. Treating that as the end reported a battle
+        # starting and ending several times per fight, and each
+        # re-entry re-ran the search on what was the same battle.
+        #
+        # Absence is only evidence once it has outlasted an animation.
+        # The agreement count above is deliberately left to accumulate
+        # meanwhile, so the end fires on the first poll after the grace
+        # expires rather than needing another `agree` frames of a thing
+        # that has already been stable for twenty seconds.
+        if (any(e.kind == "battle_ended" for e in events)
+                and not self._battle_is_over()):
+            return []
         if self.collect:
             self._collect(frame, readings)
         if events:

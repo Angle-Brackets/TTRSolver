@@ -24,6 +24,7 @@ from .catalogue import HeadCatalogue, candidates
 from .vision import (
     MIN_DEPARTMENT_MARGIN, find_plates, health_fraction, read_department,
     read_level,
+    MIN_LEVEL_MARGIN,
 )
 
 MIN_LEVEL_SCORE = 0.55
@@ -53,9 +54,9 @@ def describe(frame, catalogue: HeadCatalogue) -> List[dict]:
         dept, margin = read_department(frame, plate)
         if margin < MIN_DEPARTMENT_MARGIN:
             dept = None                      # too close to call
-        level, score = read_level(frame, plate)
-        if score < MIN_LEVEL_SCORE:
-            level = None
+        level, score, level_margin = read_level(frame, plate)
+        if score < MIN_LEVEL_SCORE or level_margin < MIN_LEVEL_MARGIN:
+            level = None                     # illegible, or too close to call
         pool = candidates(dept, level)
         match = catalogue.match(frame, plate, among=pool)
         out.append({"plate": plate, "department": dept,

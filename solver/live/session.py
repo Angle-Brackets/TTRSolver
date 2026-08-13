@@ -86,11 +86,18 @@ def cog_from_reading(reading) -> Tuple[Optional[CogState], List[str]]:
 
 
 def build_state(snapshot=None, panel=None, readings: Sequence = (),
-                round_num: int = 0) -> BuildResult:
+                round_num: int = 0,
+                ignore_checksum: bool = False) -> BuildResult:
     """Assemble a BattleState from whatever the readers have produced.
 
     `snapshot` is a `ttr_local.Snapshot`, `panel` a `gagpanel.GagPanel`,
     `readings` the `watch.CogReading`s for the cogs on screen.
+
+    `ignore_checksum` builds a state from gag counts that do not match
+    the menu's own total. It exists to exercise the rest of the pipeline
+    while a known digit misread is outstanding, and it is a deliberate
+    violation of this module's whole premise -- the caller is expected
+    to say so out loud. Never set it by default.
     """
     problems: List[str] = []
 
@@ -113,7 +120,7 @@ def build_state(snapshot=None, panel=None, readings: Sequence = (),
         # around it. Blocking is the right response for the same reason
         # an unknown cog blocks -- see this module's docstring.
         bad = panel.checksum_problem()
-        if bad:
+        if bad and not ignore_checksum:
             problems.append(bad)
 
     cogs: List[CogState] = []

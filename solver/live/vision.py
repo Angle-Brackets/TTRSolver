@@ -383,30 +383,60 @@ def level_templates(levels=range(1, 13)) -> Dict[int, np.ndarray]:
     return _LEVEL_TEMPLATES
 
 
-def read_level(frame: np.ndarray, plate: Plate) -> Tuple[Optional[int], float]:
-    """The cog's level, and how well it matched (0..1).
+# How far the best level template must beat the runner-up. Same idea and
+# same value as MIN_DEPARTMENT_MARGIN, and it exists for the same reason:
+# an absolute score says the region holds a legible digit, and says
+# nothing about whether it is *this* digit.
+#
+# The evidence, from three reads of plates whose levels are legible in
+# the image:
+#
+#     truth  read  score  runner-up  margin
+#       6      6   0.793   8 @0.720   0.073
+#       8      8   0.832   6 @0.726   0.106
+#       8      6   0.709   8 @0.670   0.039   <- wrong
+#
+# The wrong one cleared MIN_LEVEL_SCORE comfortably; what it did not do
+# is beat its runner-up by anything. Every confusion in the set is 6
+# against 8, which are the two that survive `_normalise` looking most
+# alike. Three samples is thin, so this is set to reject the observed
+# failure with room and no more -- and it fails towards "unreadable",
+# which blocks a state, rather than towards a confident wrong level,
+# which produces a plan for a different cog with different HP.
+MIN_LEVEL_MARGIN = 0.05
 
-    Returns (None, 0.0) when the region holds no legible text, which
+
+def read_level(frame: np.ndarray,
+               plate: Plate) -> Tuple[Optional[int], float, float]:
+    """The cog's level, how well it matched, and by how much it won.
+
+    Returns (level, score, margin). `margin` is the gap to the
+    second-best template, and a caller that ignores it will eventually
+    act on a level that was a coin toss -- see MIN_LEVEL_MARGIN.
+
+    (None, 0.0, 0.0) when the region holds no legible text, which
     happens while the plate is fading in.
     """
     x0, y0, x1, y1 = plate.region("level")
     patch = frame[max(0, y0):y1, max(0, x0):x1, :3]
     if patch.size == 0:
-        return None, 0.0
+        return None, 0.0, 0.0
     mask = _ink(patch.mean(axis=2))
     if mask is None or mask.shape[0] < 4:
-        return None, 0.0
+        return None, 0.0, 0.0
     digits = _digits_only(mask)
     if digits is None or digits.shape[0] < 4:
-        return None, 0.0
+        return None, 0.0, 0.0
 
     observed = _normalise(digits)
-    best, score = None, 0.0
-    for level, template in level_templates().items():
-        overlap = _overlap(observed, template)
-        if overlap > score:
-            best, score = level, overlap
-    return best, score
+    scored = sorted(((_overlap(observed, template), level)
+                     for level, template in level_templates().items()),
+                    reverse=True)
+    if not scored:
+        return None, 0.0, 0.0
+    score, best = scored[0]
+    runner_up = scored[1][0] if len(scored) > 1 else 0.0
+    return best, score, score - runner_up
 
 
 # How much the emblem's colour counts against its shape. The four
