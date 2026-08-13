@@ -143,6 +143,40 @@ Search cost, measured on a real endgame loadout (20 distinct gags, 30
 root actions, two cogs): depth 1 = 0.01s, depth 2 = 9.3s, depth 3 = many
 minutes. The default is 2 and the search runs off the polling thread.
 
+## Parties
+
+`BattleState.toons` is a list. **Only the rules are party-aware** — the
+search, the evaluator and the live readers are all still solo, and the
+line between them is worth knowing before extending either side.
+
+`toons[0]` is the toon being advised, and `state.toon` is a property for
+it, so existing solo code reads unchanged.
+
+What became team-shaped, because the solo and party answers genuinely
+differ:
+
+- `is_terminal` / `is_win` — a sad toon leaves the battle, it does not
+  end it. Terminal is *every* toon sad.
+- `can_still_damage` — pools the party's gags. Eighty Lures and no
+  attacks loses solo and is a fine support pouch in a party; Trap on one
+  toon and Lure on another wins although neither pouch could alone.
+  A sad toon's gags don't count — they aren't throwing them.
+- `outcomes.state_key` / `merge_key` — key on every toon, in order.
+  Toons are not interchangeable, so this must not be a frozenset, and
+  keying on `toons[0]` alone would let the memo answer about one party
+  with another's value.
+
+Still solo and **must not be quietly generalised**:
+
+- Every feature in `search/features.py` reads one toon and one pouch.
+  `cannot_finish` and `damage_budget_ratio` are wrong for a party in the
+  same way `can_still_damage` was.
+- `mechanics.pick_cog_target` raises for a party. The wiki only says
+  single attacks favour whoever dealt the most damage, gives no
+  weighting, and `CogStatus` tracks no per-toon damage. Returning 0
+  would mean every cog attacks the lead toon forever.
+- `simulator.legal_actions` enumerates one toon's moves.
+
 ## What ends a battle
 
 Three things, and the third is easy to forget when adding rules:

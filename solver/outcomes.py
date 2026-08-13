@@ -457,8 +457,15 @@ def merge_key(state: BattleState) -> Tuple:
 
     Only for merging siblings. Use `state_key` for the transposition
     table, where states genuinely differ in what has been spent.
+
+    The fast path is one toon, because that is every searched position
+    today; the tuple form is only built for a party. Laff is per toon
+    and ORDER MATTERS -- toons are not interchangeable, they hold
+    different pouches, so this must not be a frozenset.
     """
-    return (state.toon.laff, _cog_key(state))
+    if len(state.toons) == 1:
+        return (state.toon.laff, _cog_key(state))
+    return (tuple(t.laff for t in state.toons), _cog_key(state))
 
 
 def state_key(state: BattleState) -> Tuple:
@@ -479,10 +486,24 @@ def state_key(state: BattleState) -> Tuple:
     The gag counts are a frozenset rather than a sorted tuple. Both are
     canonical, but a frozenset needs no comparisons, and this key is only
     ever hashed -- never ordered, never serialised.
+
+    A party keys on every toon, in order. Keying on `toons[0]` alone
+    would let the memo answer a question about one party with the value
+    of a different one -- same lead toon, different teammates -- which
+    is the quietest possible way for a transposition table to be wrong.
     """
+    if len(state.toons) == 1:
+        toon = state.toon
+        return (
+            toon.laff,
+            frozenset((t, lvl, n)
+                      for (t, lvl), n in toon.gag_counts.items() if n > 0),
+            _cog_key(state),
+        )
     return (
-        state.toon.laff,
-        frozenset((t, lvl, n)
-                  for (t, lvl), n in state.toon.gag_counts.items() if n > 0),
+        tuple((t.laff,
+               frozenset((tr, lvl, n)
+                         for (tr, lvl), n in t.gag_counts.items() if n > 0))
+              for t in state.toons),
         _cog_key(state),
     )

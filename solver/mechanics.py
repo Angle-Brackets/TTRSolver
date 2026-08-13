@@ -368,12 +368,40 @@ def pick_cog_attack(cog: CogState) -> str:
 
 
 def pick_cog_target(cog: CogState, toons) -> int:
-    """Solo-toon stub: always the lone toon. For multi-toon, the source
-    algorithm weights toons by (damage they've dealt to this cog / total
-    damage dealt to this cog), sampled the same cumulative-frequency way
-    as pick_cog_attack, with a uniform-random fallback if no damage has
-    been dealt yet or the sample falls through."""
-    return 0
+    """Which toon a cog's single-target attack hits.
+
+    With one toon there is no choice and this is exact. With more, it is
+    [TODO], and raises rather than guessing.
+
+    What the wiki gives is only a direction: "It is more likely that a
+    Cog's single attack may target a Toon whose gags dealt the most
+    damage to them, though this may not always be the case and the Cog
+    can target other Toons in battle." That confirms the mechanism is
+    damage-weighted and confirms no numbers at all -- not the weighting,
+    not the floor for a toon who has dealt none.
+
+    The QED1224 doc does give a formula (weight by damage dealt to this
+    cog over total damage dealt to it, cumulative-frequency sampled,
+    uniform fallback), and it is consistent with the above. It is also
+    Toontown Online, which this project has caught wrong repeatedly, and
+    "consistent with a qualitative sentence" is not confirmation.
+
+    Two things are needed before this can be finished, and the second is
+    the reason it is not merely a lookup: the wiki formula, and per-toon
+    damage tracking on CogStatus, which nothing records yet because a
+    solo toon deals all of it.
+
+    Returning 0 for a party would mean every cog attacks the lead toon
+    forever -- a party that never spreads damage, whose support toons are
+    invulnerable. That is a worse answer than no answer.
+    """
+    if len(toons) <= 1:
+        return 0
+    raise NotImplementedError(
+        "[TODO] cog target selection for a party: the wiki says single "
+        "attacks favour whoever dealt the most damage but gives no "
+        "weighting, and CogStatus does not track damage per toon. See "
+        "the docstring.")
 
 
 def cog_attack_damage_and_accuracy(cog: CogState, attack_name: str) -> Tuple[int, int]:

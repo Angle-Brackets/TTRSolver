@@ -164,9 +164,48 @@ class CogState:
 
 @dataclass(slots=True)
 class BattleState:
-    toon: ToonState
+    """A battle: one to four toons against one to four cogs.
+
+    ONE TOON IS STILL THE ONLY SEARCHED CASE. The state holds a list so
+    the rules can be written once and be correct for a party, but the
+    search, the evaluator and the live readers are all still solo. What
+    changes here is that the *rules* stop assuming a lone toon -- the
+    losing condition especially, which is a statement about the team and
+    was written as a statement about one toon.
+
+    `toons[0]` is the toon being advised. `toon` is kept as a property
+    for it, because every caller in the project refers to it that way
+    and rewriting them all would bury the parts of this change that
+    matter.
+    """
+
+    toons: List[ToonState]
     cogs: List[CogState]
     round_num: int = 0
+
+    def __init__(self, cogs: List[CogState], toon: Optional[ToonState] = None,
+                 toons: Optional[List[ToonState]] = None,
+                 round_num: int = 0):
+        if (toon is None) == (toons is None):
+            raise ValueError("pass exactly one of `toon` or `toons`")
+        self.toons = list(toons) if toons is not None else [toon]
+        self.cogs = cogs
+        self.round_num = round_num
+
+    @property
+    def toon(self) -> ToonState:
+        """The toon being advised. Multi-toon code should say which."""
+        return self.toons[0]
+
+    @toon.setter
+    def toon(self, value: ToonState) -> None:
+        self.toons[0] = value
+
+    def active_toons(self) -> List[ToonState]:
+        """Toons still standing. A sad toon leaves the battle; the fight
+        carries on without them, which is why the losing condition is
+        about the team rather than about you."""
+        return [t for t in self.toons if t.laff > 0]
 
     def clone(self) -> "BattleState":
         """A deep-enough copy: every mutable field is fresh, and the shared
@@ -179,9 +218,9 @@ class BattleState:
         Extend it whenever you add a mutable field to any battle dataclass.
         """
         return BattleState(
-            toon=ToonState(
-                laff=self.toon.laff,
-                max_laff=self.toon.max_laff,
+            toons=[ToonState(
+                laff=t.laff,
+                max_laff=t.max_laff,
                 # Both dicts are SHARED, not copied. Cloning is the single
                 # most expensive thing the search does -- 586,000 clones
                 # for one three-cog depth-2 position -- and copying these
@@ -194,10 +233,10 @@ class BattleState:
                 # simulator.apply_toon_action, which copies before
                 # writing. Sharing here plus copying there costs one dict
                 # copy per action instead of one per outcome branch.
-                track_exp=self.toon.track_exp,
-                gag_counts=self.toon.gag_counts,
-                organic_tracks=self.toon.organic_tracks,
-            ),
+                track_exp=t.track_exp,
+                gag_counts=t.gag_counts,
+                organic_tracks=t.organic_tracks,
+            ) for t in self.toons],
             cogs=[c.copy() for c in self.cogs],
             round_num=self.round_num,
         )
@@ -206,12 +245,12 @@ class BattleState:
         return [c for c in self.cogs if not c.status.is_dead]
 
     def is_terminal(self) -> bool:
-        return (self.toon.laff <= 0
+        return (not self.active_toons()
                 or len(self.active_cogs()) == 0
                 or not self.can_still_damage())
 
     def is_win(self) -> bool:
-        return self.toon.laff > 0 and len(self.active_cogs()) == 0
+        return bool(self.active_toons()) and len(self.active_cogs()) == 0
 
     def can_still_damage(self) -> bool:
         """Whether any sequence of remaining gags can hurt a cog.
@@ -237,9 +276,16 @@ class BattleState:
           * a cog already trapped, holding only Lure -- NOT lost, the
             Lure springs the existing trap
         """
-        counts = self.toon.gag_counts
-        held = {track for (track, _level), n in counts.items() if n > 0
-                and self.toon.track_exp.get(track, 0) > 0}
+        # Pooled across the team, not per toon, and that is the whole
+        # difference between the solo rule and the party one. Eighty
+        # Lures and no attacks loses solo; in a party it is a perfectly
+        # good support loadout, because the damage is somebody else's
+        # job. Asking this toon-by-toon would call a winnable fight lost
+        # the moment one member ran out of attacks.
+        held = set()
+        for toon in self.active_toons():
+            held |= {track for (track, _level), n in toon.gag_counts.items()
+                     if n > 0 and toon.track_exp.get(track, 0) > 0}
         if held & {Track.THROW, Track.SQUIRT, Track.SOUND, Track.DROP}:
             return True
         if Track.LURE in held:
