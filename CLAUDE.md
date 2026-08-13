@@ -218,10 +218,21 @@ readings that share a bug agree while both being wrong.
 
 The very first real frame the suite ever saw was off by one: a Trap
 level-5 cell holding 6 read as 5, totalling 66 against a label of 67.
-**That digit confusion is still there**; what changed is that it is
-caught rather than handed to the solver. A wrong count is the quietest
-possible failure — it does not look like an error downstream, it looks
-like a toon carrying one fewer gag.
+**The digit reader still cannot read it** — 5 scored 0.594 with 8
+second at 0.583 and the true digit nowhere, so no threshold recovers
+it. The label does. `_repair_with_label` solves for a single doubtful
+cell: exactly one cell uncertain, everything else confident, and the
+total pins its value with nothing left to choose.
+
+That is the only case it fires in. Two doubtful cells make the split
+ambiguous, a negative remainder or one past the gag's carry limit means
+something else is wrong, and a level-7 cell is outside the pouch
+entirely — each declines and the checksum refuses the state as before.
+Detection became correction without anything being guessed.
+
+Doubt is measured, not assumed: `MIN_DIGIT_MARGIN` gates on the gap to
+the runner-up. Across all 41 digits of a real panel the median margin
+is 0.128, the worst *correct* read 0.063, and the one wrong read 0.011.
 
 The label reader declines rather than guesses: it requires one to three
 confident digits either side of a single unmatched glyph, and rejects

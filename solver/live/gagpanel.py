@@ -85,6 +85,18 @@ WHITE_FLOOR = 150
 # absolute figure.
 MIN_DIGIT_SCORE = 0.30
 
+# How far the winning digit must beat the runner-up. A score says the
+# blob is a digit; only the margin says which. Measured over all 41
+# digits on a real panel: the median margin is 0.128, the worst *correct*
+# read is 0.063, and the single wrong read -- a 6 misread as a 5 -- sits
+# at 0.011, with the true digit not even second. So this separates the
+# one bad read from every good one with a 5.7x gap on either side.
+#
+# It cannot fix the read. What it does is turn a confident wrong number
+# into a known-doubtful one, which is what lets the pouch label repair it
+# -- see `_repair_with_label`.
+MIN_DIGIT_MARGIN = 0.04
+
 
 @dataclass(frozen=True)
 class PanelCell:
@@ -92,6 +104,10 @@ class PanelCell:
     level: int                   # 1-7
     count: Optional[int]         # None when the gag is not unlocked
     unlocked: bool
+    # The digits were legible but close to another digit -- see
+    # MIN_DIGIT_MARGIN. The count is this cell's best guess and should
+    # not be trusted on its own.
+    uncertain: bool = False
 
     @property
     def carried(self) -> int:
@@ -274,9 +290,63 @@ def read_panel(frame: np.ndarray,
             cells.append(_read_cell(patch, track, level))
 
     bottom = max(bands.values()) + row_height
+    label = read_pouch_label(frame, located=located)
+    cells = _repair_with_label(cells, label)
     return GagPanel(cells=cells,
                     panel=(left, min(bands.values()), left + width, bottom),
-                    label=read_pouch_label(frame, located=located))
+                    label=label)
+
+
+def _repair_with_label(cells: List[PanelCell],
+                       label: Optional[Tuple[int, int]]) -> List[PanelCell]:
+    """Recover a single doubtful count from the menu's own total.
+
+    The checksum was built to *detect* a misread. It can also fix one,
+    in the case where the answer is forced rather than guessed: if
+    exactly one pouch cell is uncertain, every other cell is confident,
+    and the label says the pouch holds N, then that cell holds N minus
+    the rest. There is nothing to choose.
+
+    This is worth doing because the digit reader cannot be fixed by
+    thresholds alone. On the frame this was built from, the misread 6
+    scored 0.594 as a 5 with an 8 second at 0.583 -- the correct digit
+    did not place at all, so no tightening of the match recovers it.
+    The label does, exactly.
+
+    Deliberately narrow. Two uncertain cells make the split ambiguous
+    and it declines; a difference that is negative or larger than the
+    gag's carry limit means something else is wrong and it declines. In
+    every declining case the checksum still fails afterwards and the
+    state is still refused, which is the behaviour this replaces rather
+    than weakens.
+
+    Level 7 gags are outside the pouch and absent from the label, so an
+    uncertain level-7 cell can never be solved this way.
+    """
+    from .. import data
+    from ..data.gags import POUCH_EXEMPT_LEVEL
+
+    if label is None:
+        return cells
+    doubtful = [c for c in cells
+                if c.uncertain and c.level < POUCH_EXEMPT_LEVEL]
+    if len(doubtful) != 1:
+        return cells
+    target = doubtful[0]
+    rest = sum(c.carried for c in cells
+               if c.level < POUCH_EXEMPT_LEVEL and c is not target)
+    missing = label[0] - rest
+    if missing < 0:
+        return cells
+    try:
+        limit = data.gag(target.track, target.level).max_carry
+    except (KeyError, ValueError, NotImplementedError):
+        limit = None
+    if limit is not None and missing > limit:
+        return cells
+    return [PanelCell(c.track, c.level, missing, c.unlocked, uncertain=False)
+            if c is target else c
+            for c in cells]
 
 
 # The "Total gags" note, as fractions of the panel's own width so the
@@ -393,16 +463,24 @@ def _read_cell(patch: np.ndarray, track: Track, level: int) -> PanelCell:
         # grey does not reach here -- see the digit check below.
         return PanelCell(track, level, 0, unlocked=True)
 
-    count = _read_count(patch)
+    count, margin = _read_count(patch)
     if count is None:
         # Blue-ish but with no digit at all: the slot the panel draws
         # where a gag has not been unlocked. Not the same as zero.
         return PanelCell(track, level, None, unlocked=False)
-    return PanelCell(track, level, count, unlocked=True)
+    return PanelCell(track, level, count, unlocked=True,
+                     uncertain=margin < MIN_DIGIT_MARGIN)
 
 
-def _read_count(patch: np.ndarray) -> Optional[int]:
-    """The white number in a cell's lower-right corner."""
+def _read_count(patch: np.ndarray) -> Tuple[Optional[int], float]:
+    """The white number in a cell's lower-right corner, and how clearly.
+
+    Returns (value, margin), where margin is the smallest gap between a
+    digit and its runner-up across the glyphs read. A caller that looks
+    only at the value will eventually act on a coin toss: on a real
+    panel a 6 was read as a 5 at a margin of 0.011, with the true digit
+    not even placing second.
+    """
     height, width = patch.shape[:2]
     x0, y0, x1, y1 = DIGIT_REGION
     corner = patch[int(y0 * height):int(y1 * height),
@@ -412,7 +490,7 @@ def _read_count(patch: np.ndarray) -> Optional[int]:
     hi, lo = corner.max(axis=2), corner.min(axis=2)
     ink = (lo > WHITE_FLOOR) & ((hi - lo) < 45)
     if ink.sum() < 6:
-        return None
+        return None, 0.0
 
     from .vision import _components, _normalise, _overlap
 
@@ -424,18 +502,24 @@ def _read_count(patch: np.ndarray) -> Optional[int]:
              if (b[3] - b[1]) >= 3 and (b[2] - b[0]) < 0.8 * ink.shape[1]]
 
     digits = ""
+    margin = 1.0
     for x0b, y0b, x1b, y1b in _merge_columns(blobs):
         if (x1b - x0b) < 2 or (y1b - y0b) < 5:
             continue
         glyph = _normalise(ink[y0b:y1b, x0b:x1b])
-        best, score = None, 0.0
-        for value, template in digit_templates().items():
-            overlap = _overlap(glyph, template)
-            if overlap > score:
-                best, score = value, overlap
-        if best is not None and score > MIN_DIGIT_SCORE:
+        ranked = sorted(((_overlap(glyph, template), value)
+                         for value, template in digit_templates().items()),
+                        reverse=True)
+        if not ranked:
+            continue
+        score, best = ranked[0]
+        if score > MIN_DIGIT_SCORE:
             digits += str(best)
-    return int(digits) if digits else None
+            runner_up = ranked[1][0] if len(ranked) > 1 else 0.0
+            margin = min(margin, score - runner_up)
+    if not digits:
+        return None, 0.0
+    return int(digits), margin
 
 
 def _merge_columns(boxes):

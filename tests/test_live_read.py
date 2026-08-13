@@ -118,41 +118,87 @@ class RealBattleFrameTest(unittest.TestCase):
         panel = gagpanel.GagPanel(cells=[], panel=(0, 0, 1, 1), label=None)
         self.assertIsNone(panel.checksum_problem())
 
-    def test_the_checksum_catches_the_misread_cell(self):
-        """The cells total 66 and the menu says 67 -- the Trap level-5
-        cell holds 6 and reads as 5.
+    def test_the_label_repairs_the_misread_cell(self):
+        """The inversion this test was written expecting.
 
-        Asserting the failure rather than the fix. The digit confusion
-        is still there; what changed is that it is now caught instead
-        of being handed to the solver as a pouch the toon does not
-        have. When the reader is fixed this test should be inverted,
-        not deleted.
+        It used to assert the mismatch: the cells totalled 66 against a
+        label of 67, because the Trap level-5 cell holds 6 and read as
+        5. The digit reader still cannot read it -- 5 scored 0.594 and 8
+        second at 0.583, with the true digit not placing at all -- so no
+        threshold recovers it.
+
+        What recovers it is the label. Exactly one cell is uncertain, so
+        its value is forced: 67 minus the confident rest. Detection
+        became correction without anything having to be guessed.
         """
         panel = gagpanel.read_panel(self.frame)
         self.assertEqual(panel.label, (67, 70))
-        self.assertEqual(panel.pouch_total(), 66)
-        problem = panel.checksum_problem()
-        self.assertIsNotNone(problem)
-        self.assertIn("66", problem)
-        self.assertIn("67", problem)
+        self.assertEqual(panel.pouch_total(), 67)
+        self.assertIsNone(panel.checksum_problem())
+        trap5 = next(c for c in panel.cells
+                     if c.track.value == "trap" and c.level == 5)
+        self.assertEqual(trap5.count, 6)
+        self.assertFalse(trap5.uncertain)
 
-    def test_a_failed_checksum_blocks_the_state(self):
-        """No advice is better than advice from an invented pouch."""
-        from solver.live.session import build_state
-
-        class FakeSnapshot:
-            laff, max_laff = 95, 95
-            def track_exp(self):
-                from solver.state import Track
-                return {t: 7 for t in Track}
-            def organic_tracks(self):
-                return []
-
+    def test_only_one_cell_was_ever_in_doubt(self):
+        """The repair is only sound because the ambiguity is isolated.
+        Across all 41 digits on this panel the median margin is 0.128
+        and the worst correct read is 0.063; one sits at 0.011."""
         panel = gagpanel.read_panel(self.frame)
-        result = build_state(snapshot=FakeSnapshot(), panel=panel,
-                             readings=[])
-        self.assertIsNone(result.state)
-        self.assertTrue(any("do not add up" in p for p in result.problems))
+        self.assertEqual([c for c in panel.cells if c.uncertain], [])
+
+
+class RepairDeclinesTest(unittest.TestCase):
+    """When the answer is not forced, it must not be invented.
+
+    The repair is only legitimate because the value is determined:
+    exactly one cell in doubt, everything else confident, and a label
+    that pins the total. Every case where that fails has to fall
+    through to the checksum refusing the state -- which is the
+    behaviour the repair replaces, not weakens.
+    """
+
+    def cell(self, level, count, uncertain=False):
+        from solver.state import Track
+
+        return gagpanel.PanelCell(Track.THROW, level, count,
+                                  unlocked=True, uncertain=uncertain)
+
+    def test_one_doubtful_cell_is_solved(self):
+        cells = [self.cell(1, 5), self.cell(2, 9, uncertain=True)]
+        fixed = gagpanel._repair_with_label(cells, (11, 70))
+        self.assertEqual([c.count for c in fixed], [5, 6])
+        self.assertFalse(any(c.uncertain for c in fixed))
+
+    def test_two_doubtful_cells_are_left_alone(self):
+        """The label constrains their sum and not the split."""
+        cells = [self.cell(1, 5, uncertain=True),
+                 self.cell(2, 9, uncertain=True)]
+        self.assertEqual(gagpanel._repair_with_label(cells, (11, 70)), cells)
+
+    def test_no_doubtful_cell_is_left_alone(self):
+        """A disagreement with everything confident is a different
+        failure, and guessing which cell to move would be a guess."""
+        cells = [self.cell(1, 5), self.cell(2, 9)]
+        self.assertEqual(gagpanel._repair_with_label(cells, (11, 70)), cells)
+
+    def test_a_negative_remainder_is_refused(self):
+        cells = [self.cell(1, 40), self.cell(2, 9, uncertain=True)]
+        self.assertEqual(gagpanel._repair_with_label(cells, (11, 70)), cells)
+
+    def test_a_remainder_past_the_carry_limit_is_refused(self):
+        """No pouch holds ninety Cupcakes; something else is wrong."""
+        cells = [self.cell(1, 0), self.cell(2, 1, uncertain=True)]
+        self.assertEqual(gagpanel._repair_with_label(cells, (90, 90)), cells)
+
+    def test_an_unread_label_repairs_nothing(self):
+        cells = [self.cell(1, 5), self.cell(2, 9, uncertain=True)]
+        self.assertEqual(gagpanel._repair_with_label(cells, None), cells)
+
+    def test_a_level_seven_cell_cannot_be_solved_this_way(self):
+        """Level 7s are outside the pouch and absent from the label."""
+        cells = [self.cell(1, 5), self.cell(7, 9, uncertain=True)]
+        self.assertEqual(gagpanel._repair_with_label(cells, (5, 70)), cells)
 
 
 if __name__ == "__main__":
