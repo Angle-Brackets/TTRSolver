@@ -216,7 +216,7 @@ class BattleWatcher:
     def __init__(self, catalogue: Optional[HeadCatalogue] = None,
                  capture: Optional[Capture] = None, agree: int = 2,
                  collect: bool = True, panel_present=None,
-                 battle_over=None):
+                 battle_over=None, force_battle=None):
         self.catalogue = catalogue if catalogue is not None else HeadCatalogue()
         self.capture = capture or Capture()
         self.agree = agree
@@ -236,6 +236,10 @@ class BattleWatcher:
         self._band: Optional[Tuple[int, int]] = None
         self._plates_at = 0.0
         self.battle_over = battle_over
+        # () -> True (in a fight), False (not), or None (no opinion).
+        # The overlay's confirm button. Automatic detection is evidence
+        # about the screen; this is the player, who can simply see.
+        self.force_battle = force_battle
         self.frames = 0
         self.full_scans = 0
 
@@ -254,6 +258,9 @@ class BattleWatcher:
         toon already owns, so it confirms an end and can never rule one
         out. Hence: either signal ends the battle, neither is required.
         """
+        forced = self.force_battle() if self.force_battle else None
+        if forced is not None:
+            return not forced
         if self.battle_over is not None and self.battle_over():
             return True
         return (time.time() - self._plates_at) > BATTLE_GRACE
@@ -337,6 +344,17 @@ class BattleWatcher:
         slides away while attack animations play. Requiring it every
         frame would flap the battle on and off mid-fight.
         """
+        forced = self.force_battle() if self.force_battle else None
+        if forced is False:
+            return False
+        if forced:
+            # The player says they are fighting. That overrides the gag
+            # menu, which is the *evidence* for a battle and not the
+            # battle itself, but it cannot conjure cogs: plates are
+            # still what the readers read, so a forced battle with
+            # nothing on screen is still no cogs.
+            return plates_seen
+
         if not plates_seen:
             return False
         if self.view.active:
