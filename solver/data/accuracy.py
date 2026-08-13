@@ -187,7 +187,10 @@ PREV_HITS_MAX_PRIOR_HITS = 3   # 3 x 25 = 75, consistent with the above
 #   3. Lure's PrevHits from Trap persists across rounds while Trap is present.
 #   4. Trap successfully activated by Lure grants +50 PrevHits regardless of
 #      how many Traps activated (4.0.5 raised this from 30).
-# NOT MODELLED: mechanics.calc_prev_hits_bonus returns 0 unconditionally.
+# Rules 1-3 ARE modelled -- see mechanics.calc_prev_hits_bonus, which is
+# where the cross-round Trap -> Lure bonus is applied. Rule 4 is not: it
+# pays attacks landing after the trap goes off in the same round, and a
+# solo toon has none.
 TRAP_LURE_ACCURACY_BONUS = 10
 TRAP_EXTRA_LURE_ACCURACY_BONUS = 5      # per extra trap, group Lure only
 TRAP_ACTIVATION_PREV_HITS = 50

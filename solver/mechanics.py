@@ -5,12 +5,17 @@ on the underlying numbers.
 
 SOLO-TOON SIMPLIFICATIONS (read before extending to multi-toon parties):
 
-1. PrevHits ("stun") bonus is a same-ROUND bonus between different toons'
-   (or a multi-target attack's) sequential hits. A solo toon only takes
-   one action per round, so there is no "previous attack this round" to
-   inherit a bonus from -- calc_prev_hits_bonus() always returns 0 here.
-   This is correct for solo play, NOT a placeholder. Re-enable it if you
-   extend to multiple toons acting in the same round.
+1. PrevHits ("stun") bonus is mostly a same-ROUND bonus between different
+   toons' (or a multi-target attack's) sequential hits. A solo toon takes
+   one action per round, so that half has nothing to inherit from and
+   stays 0 until there are other toons.
+
+   TRAP IS THE EXCEPTION, and this said otherwise for a long time. The
+   wiki is explicit that Lure's PrevHits from Trap "remain across
+   multiple rounds, as long as Trap is present", so a solo toon that
+   traps and then lures collects +10 -- see calc_prev_hits_bonus. That
+   is the commonest solo line there is and it was being rolled ten
+   points short of what the game gives it.
 
    The OTHER half of the `bonus` term, luredRatio, is not a same-round
    effect and does apply to a solo toon -- see calc_lured_ratio_bonus().
@@ -84,10 +89,50 @@ def calc_tgt_def(track: Track, target_cogs) -> int:
     return data.tgt_def(strongest.level, cog_rank(strongest))
 
 
-def calc_prev_hits_bonus(track: Track) -> int:
-    """PrevHits half of the `bonus` term. See module docstring: always 0
-    for a solo toon acting once per round. Extend for party play."""
-    return 0
+def calc_prev_hits_bonus(track: Track, level: int = 0, all_cogs=None) -> int:
+    """PrevHits half of the `bonus` term.
+
+    THE SOLO CASE IS NOT ALWAYS ZERO, WHICH THIS SAID FOR A LONG TIME.
+    The same-round part is: a solo toon acts once per round, so there is
+    no previous attack this round to inherit a bonus from, and that half
+    stays 0 until there are other toons.
+
+    But Trap's contribution is explicitly cross-round. [CONFIRMED] TTR
+    wiki (Accuracy#PrevHits):
+
+      1. "The first Trap gag that is placed grants +10 to PrevHits, but
+         only for Lure."
+      2. "Further Trap gag placements grant an additional +5 to a group
+         Lure gag."
+      3. "The PrevHits for Lure remain across multiple rounds, as long as
+         Trap is present."
+
+    Point 3 is the one that makes this a solo rule. A toon who traps in
+    one round and lures in the next is the commonest solo line there is
+    -- it is the line `simulator.legal_actions` offers the pass action
+    for -- and it was being rolled at 10 points less accuracy than the
+    game gives it.
+
+    Rule 4, "+50 PrevHits when Trap is activated by Lure", is left at 0:
+    it is a bonus to attacks landing *after* the trap goes off in the
+    same round, and a solo toon has none.
+
+    `all_cogs` is every cog in the battle; without it there is no trap
+    state to read and this returns 0, matching the old behaviour for
+    callers that pass nothing.
+    """
+    if track != Track.LURE or not all_cogs:
+        return 0
+    traps = sum(1 for cog in all_cogs
+                if not cog.status.is_dead and cog.status.trapped)
+    if not traps:
+        return 0
+    bonus = data.TRAP_LURE_ACCURACY_BONUS
+    if level and data.gag(Track.LURE, level).group:
+        # Rule 2 is specific to group Lure; a single-target Lure gets the
+        # first trap's +10 and nothing for the rest.
+        bonus += data.TRAP_EXTRA_LURE_ACCURACY_BONUS * (traps - 1)
+    return bonus
 
 
 def gets_lured_ratio(track: Track, level: int) -> bool:
@@ -141,7 +186,7 @@ def calc_bonus(track: Track, level: int, all_cogs=None) -> int:
     Deliberately NOT defaulted to the attack's targets: for a single-target
     attack that would compute the ratio over one cog and read 100.
     """
-    return (calc_prev_hits_bonus(track)
+    return (calc_prev_hits_bonus(track, level, all_cogs)
             + calc_lured_ratio_bonus(track, level, all_cogs))
 
 
@@ -261,12 +306,35 @@ def calc_kb_bonus(track: Track, target_lured: bool, total_damage: int) -> float:
     return total_damage * KB_BONUS_MULTIPLIER
 
 
-def calc_hp_bonus(total_damage: int) -> float:
-    """[CONFIRMED] hpBonus = ceil(totalDmgs * 0.20), applied when multiple
-    gags of the SAME track hit the SAME target in the same round. A solo
-    toon uses one gag per round, so this is always 0 here -- kept for
-    party play. Does not apply to Lure or Trap."""
-    return 0.0
+def calc_hp_bonus(total_damage: int, gags_on_target: int = 1) -> int:
+    """The same-track damage bonus, for `gags_on_target` gags of one
+    track landing on one cog in one round.
+
+    [CONFIRMED] TTR wiki (Gags): "When two or more of the same gag type
+    (excluding Lure, Trap, and Toon-Up) are used on a Cog simultaneously,
+    a 20% damage bonus applies." The exclusion list is the wiki's; this
+    function is only ever called for damage tracks, and callers must not
+    call it for Lure or Trap.
+
+    This is the whole reason coordinating a party is worth anything, and
+    it returned 0 unconditionally until multi-toon work began. A search
+    over the old rules could not see any value in two toons hitting the
+    same cog, so it would have rated four toons stacking Throw exactly
+    level with four toons hitting four different cogs.
+
+    `gags_on_target` defaults to 1, which is the solo case and yields 0,
+    so nothing about solo play changes.
+
+    ROUNDING IS NOT WIKI-CONFIRMED. The wiki says "a 20% damage bonus"
+    and does not say how it rounds; `ceil` comes from the QED1224 source
+    doc, which describes Toontown Online. It is kept because a bonus has
+    to resolve to a whole number of hit points somehow, and ceil is the
+    only reading with a source behind it -- but it is the first thing to
+    check if party damage ever reads a point low.
+    """
+    if gags_on_target < 2:
+        return 0
+    return math.ceil(total_damage * 0.20)
 
 
 def gag_damage_from_exp(exp: int, max_exp: int, min_exp_for_gag: int,

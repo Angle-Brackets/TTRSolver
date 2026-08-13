@@ -449,7 +449,110 @@ class TestKnockbackBonus(unittest.TestCase):
             self.assertEqual(mechanics.calc_kb_bonus(track, True, 20), 0.0)
 
     def test_hp_bonus_is_zero_for_a_solo_toon(self):
-        self.assertEqual(mechanics.calc_hp_bonus(100), 0.0)
+        """One gag on a target is not "two or more"."""
+        self.assertEqual(mechanics.calc_hp_bonus(100), 0)
+        self.assertEqual(mechanics.calc_hp_bonus(100, 1), 0)
+
+    def test_hp_bonus_is_a_fifth_of_the_combined_damage(self):
+        """[CONFIRMED] TTR wiki (Gags): "When two or more of the same gag
+        type (excluding Lure, Trap, and Toon-Up) are used on a Cog
+        simultaneously, a 20% damage bonus applies."
+
+        This is the entire reason coordinating a party is worth
+        anything, and it returned 0 unconditionally until now -- so a
+        search over the old rules rated four toons stacking Throw on one
+        cog exactly level with four toons hitting four different cogs.
+        """
+        self.assertEqual(mechanics.calc_hp_bonus(100, 2), 20)
+        self.assertEqual(mechanics.calc_hp_bonus(100, 4), 20)
+
+    def test_hp_bonus_is_of_the_total_not_per_gag(self):
+        """Three gags do not earn 60%. They earn 20% of a larger total,
+        which is where the extra comes from."""
+        self.assertEqual(mechanics.calc_hp_bonus(150, 3), 30)
+
+    def test_hp_bonus_rounds_up(self):
+        """Rounding is NOT wiki-confirmed -- the wiki says "a 20% damage
+        bonus" and not how it rounds. `ceil` comes from the QED1224
+        source doc, which describes Toontown Online. Pinned so that a
+        change to it is a decision rather than a drift."""
+        self.assertEqual(mechanics.calc_hp_bonus(11, 2), 3)     # 2.2 -> 3
+
+
+class PrevHitsFromTrapTest(unittest.TestCase):
+    """Trap's contribution to accuracy, which is a solo rule.
+
+    `calc_prev_hits_bonus` returned 0 unconditionally, on the reasoning
+    that PrevHits is a same-round bonus between different toons and a
+    solo toon acts once per round. That is right about the same-round
+    half and wrong about Trap, which the wiki says explicitly persists:
+
+      "The first Trap gag that is placed grants +10 to PrevHits, but
+       only for Lure."
+      "Further Trap gag placements grant an additional +5 to a group
+       Lure gag."
+      "The PrevHits for Lure remain across multiple rounds, as long as
+       Trap is present."
+
+    Trap in one round then Lure in the next is the commonest solo line
+    there is, and it was being rolled ten points short.
+    """
+
+    def cogs(self, n, trapped=0):
+        from solver import data
+        from solver.state import CogState
+
+        out = []
+        for i in range(n):
+            cog = CogState("flunky", "bossbot", 3,
+                           data.cog_max_hp(3), data.cog_max_hp(3))
+            if i < trapped:
+                cog.status.trapped = True
+                cog.status.trap_level = 3
+                cog.status.trap_track = Track.TRAP
+            out.append(cog)
+        return out
+
+    def test_no_trap_no_bonus(self):
+        self.assertEqual(
+            mechanics.calc_prev_hits_bonus(Track.LURE, 1, self.cogs(2)), 0)
+
+    def test_the_first_trap_is_worth_ten_to_a_lure(self):
+        self.assertEqual(
+            mechanics.calc_prev_hits_bonus(Track.LURE, 1,
+                                           self.cogs(2, trapped=1)), 10)
+
+    def test_only_lure_collects_it(self):
+        """"but only for Lure" -- a Throw at a trapped cog gets nothing."""
+        for track in (Track.THROW, Track.SQUIRT, Track.SOUND, Track.DROP,
+                      Track.TRAP, Track.TOON_UP):
+            self.assertEqual(
+                mechanics.calc_prev_hits_bonus(track, 1,
+                                               self.cogs(2, trapped=1)), 0)
+
+    def test_further_traps_add_five_to_a_group_lure(self):
+        for traps, want in ((1, 10), (2, 15), (3, 20)):
+            self.assertEqual(
+                mechanics.calc_prev_hits_bonus(Track.LURE, 2,
+                                               self.cogs(3, trapped=traps)),
+                want, f"{traps} traps")
+
+    def test_but_not_to_a_single_target_lure(self):
+        """The wiki scopes the extra +5 to a group Lure gag."""
+        self.assertEqual(
+            mechanics.calc_prev_hits_bonus(Track.LURE, 1,
+                                           self.cogs(3, trapped=3)), 10)
+
+    def test_a_dead_cogs_trap_is_not_on_the_field(self):
+        cogs = self.cogs(2, trapped=1)
+        cogs[0].status.is_dead = True
+        self.assertEqual(
+            mechanics.calc_prev_hits_bonus(Track.LURE, 1, cogs), 0)
+
+    def test_no_battle_state_means_no_opinion(self):
+        """Callers that pass nothing keep the old behaviour."""
+        self.assertEqual(mechanics.calc_prev_hits_bonus(Track.LURE), 0)
+        self.assertEqual(mechanics.calc_prev_hits_bonus(Track.LURE, 1, []), 0)
 
     def test_throw_at_a_lured_cog_deals_the_bonus(self):
         base = mechanics.calc_toon_damage(Track.THROW, 3)     # 17
