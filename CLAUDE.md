@@ -75,6 +75,28 @@ client rather than from documentation:
 Plates are found by their teal portrait slot, so nothing needs a window
 handle or the platform's window API. Do not add one.
 
+**Teal plates alone do not mean a battle.** The slot colour is not
+unique to plates outside a battle screenshot — in Donald's Dreamland
+2.1% of a live frame matched the mask and two blobs passed both the size
+and aspect filters, so the watcher announced a battle and then a stream
+of cog defeats as the player walked around. `find_plates` finds
+plate-shaped teal and nothing more.
+
+`BattleWatcher.in_battle` is the decision, and it needs the gag menu as
+well. That costs nothing, because gag counts come only from the screen
+so no advice is possible without it anyway. Entry is strict (plates
+*and* menu), continuation is lenient (plates alone) — the menu slides
+away during attack animations, and requiring it every frame flaps the
+battle on and off mid-fight. The tell for this class of bug is a read
+where every cog is `level unreadable / unidentified`: scenery shaped
+like a plate has no level to read.
+
+**Never call `ttr_local.discover()` in a loop.** It builds fresh
+clients, and the game pops its consent dialog for each one — polling it
+per advice cycle made the prompt unusable. `advise._snapshot` keeps one
+session and caches the result for `SNAPSHOT_TTL`; laff moves during a
+fight but gag training and organic do not move at all.
+
 Department and level alone do not name a cog: only 8 of 48 pairs are
 unique, the rest allow up to five. The head render in the plate is the
 remaining evidence, and there is no shipped per-cog icon to match it

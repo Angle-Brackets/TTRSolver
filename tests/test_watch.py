@@ -35,6 +35,14 @@ class ScriptedCapture:
         pass
 
 
+# The scripted frames below draw cog plates but no gag menu, and the
+# watcher now requires both to *enter* a battle. These tests are about
+# what changed between frames, not about telling a battle from scenery,
+# so they assert the panel is there; PanelGateTest covers the gate.
+def ALWAYS(_frame):
+    return True
+
+
 def frame_with(slots, size=(1280, 720)):
     """A frame holding a plate slot per (x, y) given."""
     img = np.zeros((size[1], size[0], 3), dtype=np.uint8)
@@ -83,7 +91,7 @@ class WatcherTest(unittest.TestCase):
     def build(self, frames, agree=2):
         return BattleWatcher(catalogue=HeadCatalogue.__new__(HeadCatalogue),
                              capture=ScriptedCapture(frames), agree=agree,
-                             collect=False)
+                             collect=False, panel_present=ALWAYS)
 
     def setUp(self):
         # A catalogue with no entries and no disk access.
@@ -93,7 +101,7 @@ class WatcherTest(unittest.TestCase):
     def watcher(self, frames, agree=2):
         w = BattleWatcher(catalogue=self.empty,
                           capture=ScriptedCapture(frames), agree=agree,
-                          collect=False)
+                          collect=False, panel_present=ALWAYS)
         return w
 
     def test_a_single_frame_is_not_enough_to_report_a_battle(self):
@@ -191,7 +199,7 @@ class DamageTest(unittest.TestCase):
     def watcher(self):
         return BattleWatcher(catalogue=self.empty,
                              capture=ScriptedCapture([frame_with([])]),
-                             agree=1, collect=False)
+                             agree=1, collect=False, panel_present=ALWAYS)
 
     def test_a_health_drop_is_reported_as_damage(self):
         w = self.watcher()

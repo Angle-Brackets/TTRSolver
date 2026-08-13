@@ -15,8 +15,16 @@ things were tried and two rejected:
   with the camera, the cog's position, and how many cogs are present.
 - The metal plate itself. Brushed grey has poor contrast against
   cobblestone, pavement and Cog HQ interiors, which is most of the game.
-- The teal slot. A desaturated blue-green that appears nowhere else in
-  Toontown's high-key palette. This one works.
+- The teal slot. A desaturated blue-green, and the best anchor of the
+  three. It is *not* unique to plates, though this said so for a long
+  time: the claim was checked against battle screenshots, where it
+  holds, and not against the rest of the game, where it does not.
+  Standing in Donald's Dreamland, 2.1% of a 1440p frame matched the
+  mask and two blobs cleared both the size and the aspect filter.
+
+  So `find_plates` finds plate-*shaped* teal and nothing more. Deciding
+  whether a frame is a battle needs a second signal and belongs to the
+  caller -- `watch.BattleWatcher.in_battle` requires the gag menu too.
 
 NOTHING HERE IS IN ABSOLUTE PIXELS
 ----------------------------------

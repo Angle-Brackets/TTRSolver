@@ -166,11 +166,15 @@ class BattleWatcher:
 
     def __init__(self, catalogue: Optional[HeadCatalogue] = None,
                  capture: Optional[Capture] = None, agree: int = 2,
-                 collect: bool = True):
+                 collect: bool = True, panel_present=None):
         self.catalogue = catalogue if catalogue is not None else HeadCatalogue()
         self.capture = capture or Capture()
         self.agree = agree
         self.collect = collect
+        # How to tell a battle from teal scenery -- see `in_battle`.
+        # Injectable so tests of the change detection can drive it with
+        # scripted plate frames without also having to draw a gag menu.
+        self.panel_present = panel_present
         self.view = BattleView()
         # None means "nothing seen yet", which is not the same as an
         # empty list meaning "seen, and there are no cogs". Conflating
@@ -233,10 +237,54 @@ class BattleWatcher:
 
     # -- change detection ------------------------------------------------
 
+    def in_battle(self, frame: np.ndarray, plates_seen: bool) -> bool:
+        """Is this frame a battle, as opposed to teal-coloured scenery?
+
+        Teal plates alone are not enough evidence and never were. The
+        claim in `vision`'s docstring that the slot colour "appears
+        nowhere else in Toontown's high-key palette" was validated on
+        battle screenshots only, and it is false in the wider game:
+        standing in Donald's Dreamland, 2.1% of the frame matched the
+        teal mask and two blobs cleared both the size and the aspect
+        filter, so the watcher called a battle, then called cogs
+        defeated as the player walked around and the blobs came and
+        went. Every reading it produced was `level unreadable /
+        unidentified`, which is what a false positive looks like from
+        the inside -- plate-shaped scenery has no level to read.
+
+        The gag menu is the honest signal, and it is free: nothing can
+        be advised without it anyway, because gag counts come only from
+        the screen. `find_panel` returns None on the same overworld
+        frame that fools the plate detector.
+
+        Entry is strict and continuation is lenient, because the menu
+        slides away while attack animations play. Requiring it every
+        frame would flap the battle on and off mid-fight.
+        """
+        if not plates_seen:
+            return False
+        if self.view.active:
+            return True                 # already in one: plates suffice
+
+        check = self.panel_present
+        if check is None:
+            from .gagpanel import find_panel
+
+            def check(f):
+                return find_panel(f) is not None
+        return bool(check(frame))
+
     def poll(self) -> List[Event]:
         """Grab one frame and return whatever changed because of it."""
         frame = self.capture.grab()
         readings = self.read_frame(frame)
+        if not self.in_battle(frame, bool(readings)):
+            readings = []
+            # Drop the search band too. It was set from whatever the
+            # plate detector matched, and if that was scenery the band
+            # is wrong -- `_locate` prefers it and would keep finding
+            # the same non-cogs instead of falling back to a full scan.
+            self._band = None
 
         if self._pending is not None and _matches(readings, self._pending):
             self._pending_count += 1

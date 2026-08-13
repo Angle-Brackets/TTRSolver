@@ -118,15 +118,59 @@ class Thinker:
         return False
 
 
-def _snapshot():
-    """Local API state, or None with the reason printed."""
+# The Local API session, discovered once and kept. `discover()` probes
+# six ports and builds fresh clients; calling it per advice cycle made
+# the game pop its "allow this app to connect?" consent dialog over and
+# over, several times a second, which is unusable. The session is also
+# not re-discovered on a whim -- only after a failure, and not more
+# often than REDISCOVER_AFTER seconds.
+_SESSION = {"client": None, "snapshot": None, "taken": 0.0, "tried": 0.0}
+SNAPSHOT_TTL = 5.0          # seconds; laff and training move slowly
+REDISCOVER_AFTER = 15.0     # seconds between attempts when not connected
+
+
+def reset_session() -> None:
+    """Forget the cached client, for tests and for a restarted game."""
+    _SESSION.update(client=None, snapshot=None, taken=0.0, tried=0.0)
+
+
+def _snapshot(force: bool = False):
+    """Local API state, cached, or None.
+
+    Returns the cached snapshot unless it is older than SNAPSHOT_TTL.
+    Nothing here changes fast: laff moves during a fight, but the gag
+    training and organic flags that set accuracy do not change at all
+    mid-battle, and laff is worth one request every few seconds rather
+    than one every poll.
+    """
     from .ttr_local import LocalAPIError, discover
 
+    now = time.time()
+    if not force and _SESSION["snapshot"] is not None \
+            and now - _SESSION["taken"] < SNAPSHOT_TTL:
+        return _SESSION["snapshot"]
+
+    if _SESSION["client"] is None:
+        if now - _SESSION["tried"] < REDISCOVER_AFTER:
+            return _SESSION["snapshot"]
+        _SESSION["tried"] = now
+        try:
+            sessions = discover()
+        except LocalAPIError:
+            return None
+        if not sessions:
+            return None
+        _SESSION["client"] = sessions[0]
+
     try:
-        sessions = discover()
-        return sessions[0].snapshot() if sessions else None
+        snap = _SESSION["client"].snapshot()
     except LocalAPIError:
+        # The game may have closed or the toon logged out. Drop the
+        # client so the next attempt rediscovers, after the backoff.
+        _SESSION["client"] = None
         return None
+    _SESSION.update(snapshot=snap, taken=now)
+    return snap
 
 
 def _panel(frame):
@@ -206,6 +250,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.once:
         frame = watcher.capture.grab()
         readings = watcher.read_frame(frame)
+        # Same gate as the polling path. Without it `--once` reported
+        # cogs off any teal-ish scenery, which is how the false
+        # positives were first mistaken for a real read.
+        if not watcher.in_battle(frame, bool(readings)):
+            readings = []
         _report(frame, readings, objective, args.depth, budget=args.budget)
         watcher.close()
         return 0
