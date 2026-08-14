@@ -18,6 +18,22 @@ been caught wrong on Lure durations, Lure accuracy, which Lure levels are
 group gags, and the luredRatio rule. Do not treat it as confirmation for
 anything; at most use it as a lead to verify against the wiki.
 
+**Open Toontown** (the published open-source TTO reimplementation) is a
+better lead than the guide, because it is the algorithm rather than
+someone's description of one — but it is the same lineage and carries
+the same warning. Tag anything from it `[OPEN TOONTOWN SOURCE]`, never
+`[CONFIRMED]`, and say what the wiki does and does not corroborate.
+`mechanics.pick_cog_target` is the worked example: the wiki gives the
+shape ("more likely… though this may not always be the case") and the
+source supplies the 75/25 split and the proportional weighting.
+
+Where that source is visibly buggy, implement what it *means*. Two
+functions behind cog targeting look wrong — one clobbers a dict with a
+list, one probably does integer division on a ratio — and reproducing
+them would model a twenty-year-old implementation's accidents rather
+than the game. Record the discrepancy so a disagreement with observed
+play has somewhere to start.
+
 The wiki blocks ordinary page fetches (HTTP 403) but serves its MediaWiki
 API:
 
@@ -210,10 +226,6 @@ the team. Treat any party number the evaluator produces as untested.
 
 Still solo and **must not be quietly generalised**:
 
-- `mechanics.pick_cog_target` raises for a party. The wiki only says
-  single attacks favour whoever dealt the most damage, gives no
-  weighting, and `CogStatus` tracks no per-toon damage. Returning 0
-  would mean every cog attacks the lead toon forever.
 - `simulator.legal_actions` enumerates one toon's moves.
 - The live readers see one toon: the Local API reports the client's own
   laff and training, and nothing reads a teammate's laff meter off the

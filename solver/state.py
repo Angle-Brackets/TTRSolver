@@ -97,6 +97,21 @@ class CogStatus:
 
     is_dead: bool = False
 
+    # Damage this cog has taken, per toon index, for cog target
+    # selection -- a cog prefers to hit back at whoever hurt it most.
+    # None while solo, where there is only one toon to attack and
+    # nothing to weigh, so the common case allocates nothing and
+    # `copy` stays as cheap as it was. See mechanics.pick_cog_target.
+    damage_by_toon: Optional[Dict[int, int]] = None
+
+    def record_damage(self, toon_index: int, amount: int) -> None:
+        if amount <= 0:
+            return
+        if self.damage_by_toon is None:
+            self.damage_by_toon = {}
+        self.damage_by_toon[toon_index] = (
+            self.damage_by_toon.get(toon_index, 0) + amount)
+
     def apply_lure(self, acc_before_bonus: int, rounds: int,
                     level: Optional[int] = None) -> bool:
         """A Lure lands on this cog. Returns whether it did anything.
@@ -144,6 +159,8 @@ class CogStatus:
             trap_level=self.trap_level,
             trap_organic=self.trap_organic,
             is_dead=self.is_dead,
+            damage_by_toon=(dict(self.damage_by_toon)
+                            if self.damage_by_toon else None),
         )
 
 

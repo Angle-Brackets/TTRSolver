@@ -367,41 +367,77 @@ def pick_cog_attack(cog: CogState) -> str:
     return spec.modeled_attacks[0].name
 
 
-def pick_cog_target(cog: CogState, toons) -> int:
+# [OPEN TOONTOWN SOURCE] The chance a cog hits back at someone who has
+# damaged it, rather than picking at random. From
+# BattleCalculatorAI.__calcSuitTarget: `random.randint(0, 99) < 75`.
+REVENGE_CHANCE = 75
+
+
+def pick_cog_target(cog: CogState, toons, rng=random) -> int:
     """Which toon a cog's single-target attack hits.
 
-    With one toon there is no choice and this is exact. With more, it is
-    [TODO], and raises rather than guessing.
+    With one toon there is no choice. With more:
 
-    What the wiki gives is only a direction: "It is more likely that a
-    Cog's single attack may target a Toon whose gags dealt the most
-    damage to them, though this may not always be the case and the Cog
-    can target other Toons in battle." That confirms the mechanism is
-    damage-weighted and confirms no numbers at all -- not the weighting,
-    not the floor for a toon who has dealt none.
+      * `REVENGE_CHANCE` per cent of the time, if anyone has damaged
+        this cog, pick among those who have, weighted by their share of
+        the damage.
+      * Otherwise, uniformly among the toons still standing.
 
-    The QED1224 doc does give a formula (weight by damage dealt to this
-    cog over total damage dealt to it, cumulative-frequency sampled,
-    uniform fallback), and it is consistent with the above. It is also
-    Toontown Online, which this project has caught wrong repeatedly, and
-    "consistent with a qualitative sentence" is not confirmation.
+    PROVENANCE, WHICH IS WEAKER THAN [CONFIRMED]. The wiki gives only a
+    direction -- "It is more likely that a Cog's single attack may
+    target a Toon whose gags dealt the most damage to them, though this
+    may not always be the case" -- and no numbers. The 75/25 split and
+    the proportional weighting come from Open Toontown's
+    `BattleCalculatorAI.__calcSuitTarget`, which is Toontown *Online*
+    code, the same lineage this project distrusts the QED1224 guide for.
+    It is a much better lead than a prose description, because it is the
+    algorithm rather than someone's account of it, and the wiki
+    corroborates its shape exactly. It is still not TTR.
 
-    Two things are needed before this can be finished, and the second is
-    the reason it is not merely a lookup: the wiki formula, and per-toon
-    damage tracking on CogStatus, which nothing records yet because a
-    solo toon deals all of it.
+    TWO ODDITIES IN THAT SOURCE, DELIBERATELY NOT COPIED. What is
+    implemented is what the code evidently means.
 
-    Returning 0 for a party would mean every cog attacks the lead toon
-    forever -- a party that never spreads damage, whose support toons are
-    invulnerable. That is a worse answer than no answer.
+    `__rememberToonAttack` writes `self.SuitAttackers[suitId] = [toonId,
+    damage]` when a later hit is at least as large as an earlier one,
+    replacing the per-cog dictionary with a two-element list -- which
+    then breaks the `.keys()` calls in the selector. That one looks
+    simply wrong.
+
+    The weights are `damage / totalDamage * 100`, and the file is
+    Python 2 (it calls `has_key`). If those values are integers that is
+    integer division, every term with two or more attackers floors to
+    zero, and selection falls through to uniform random -- but the
+    operand types were inferred from the arithmetic rather than traced,
+    so treat that as a reading and not a finding.
+
+    Either way this implements the intent, on the judgement that TTR has
+    most likely fixed anything of the sort in the twenty years since,
+    and that reproducing another implementation's accidents would be
+    modelling the accident rather than the game. The discrepancy is
+    recorded so that a future disagreement with observed play has
+    somewhere obvious to start.
     """
     if len(toons) <= 1:
         return 0
-    raise NotImplementedError(
-        "[TODO] cog target selection for a party: the wiki says single "
-        "attacks favour whoever dealt the most damage but gives no "
-        "weighting, and CogStatus does not track damage per toon. See "
-        "the docstring.")
+    standing = [i for i, toon in enumerate(toons) if toon.laff > 0]
+    if not standing:
+        return 0
+
+    damage = cog.status.damage_by_toon or {}
+    hurt = {i: d for i, d in damage.items() if i in standing and d > 0}
+    if not hurt or rng.randint(0, 99) >= REVENGE_CHANCE:
+        return rng.choice(standing)
+
+    # Cumulative-frequency sample over shares of the damage dealt, which
+    # is `pickFromFreqList` with the division done in floating point.
+    total = float(sum(hurt.values()))
+    roll = rng.randint(0, 99)
+    running = 0.0
+    for index in sorted(hurt):
+        running += hurt[index] / total * 100.0
+        if roll < running:
+            return index
+    return standing[-1]         # rounding shortfall; the source rerolls
 
 
 def cog_attack_damage_and_accuracy(cog: CogState, attack_name: str) -> Tuple[int, int]:
