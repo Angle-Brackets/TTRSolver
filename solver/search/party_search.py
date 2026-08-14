@@ -141,12 +141,50 @@ def plans(state: BattleState, mode: Mode = Mode.PICKUP,
     # Ranking is one deterministic all-hit round: damage that lands,
     # minus what it costs. Crude, and only deciding which plans are
     # worth sampling properly.
-    scored = []
+    # Stratify the slots by which tracks the plan uses, then fill from
+    # the best of each stratum, rather than taking a global top-N.
+    #
+    # This is the same lesson as PER_TRACK, learned again one level up.
+    # `_quick_score` plays one round with everything HITTING, so a
+    # Trap+Lure plan is scored as though the lure never misses and is
+    # paid nothing for the risk. On a maxed four-toon position it ranked
+    # every such plan at 1081-1089 and the known-best Sound line at 988,
+    # and with a global cut the 60 surviving plans contained 59 Lure+Trap
+    # combos and NOT ONE all-Sound plan. The best line was not outranked,
+    # it was deleted before it could be sampled.
+    #
+    # Stratifying does not make `_quick_score` any less optimistic -- it
+    # just stops one track family monopolising the shortlist, so the
+    # real sampled evaluation gets to see each family's best offering
+    # and decide between them on merit.
+    strata: Dict[tuple, List] = {}
     for combo in combos:
-        if _playable(state, combo):
-            scored.append((_quick_score(state, combo), list(combo)))
-    scored.sort(key=lambda row: -row[0])
-    return [plan for _s, plan in scored[:max_plans]]
+        if not _playable(state, combo):
+            continue
+        signature = tuple(sorted({a.track for a in combo if a is not None},
+                                 key=lambda t: t.name))
+        strata.setdefault(signature, []).append(
+            (_quick_score(state, combo), list(combo)))
+
+    for rows in strata.values():
+        rows.sort(key=lambda row: -row[0])
+
+    out: List[Sequence[Optional[Action]]] = []
+    order = sorted(strata, key=lambda sig: -strata[sig][0][0])
+    depth_in_stratum = 0
+    while len(out) < max_plans and order:
+        progressed = False
+        for signature in order:
+            rows = strata[signature]
+            if depth_in_stratum < len(rows):
+                out.append(rows[depth_in_stratum][1])
+                progressed = True
+                if len(out) >= max_plans:
+                    break
+        if not progressed:
+            break
+        depth_in_stratum += 1
+    return out
 
 
 def _quick_score(state: BattleState, plan) -> float:
@@ -252,11 +290,73 @@ def _spent(before: BattleState, after: BattleState):
     return out
 
 
+# Rounds a rollout will play before giving up and calling the position
+# unresolved. A real battle ends well inside this; the cap only stops a
+# pathological position (mutual inability to finish) spinning forever.
+ROLLOUT_ROUNDS = 12
+
+
+def rollout_value(state: BattleState, objective, rng,
+                  model: Optional[TeammateModel] = None,
+                  max_rounds: int = ROLLOUT_ROUNDS) -> float:
+    """Value of `state` from playing it out, instead of estimating it.
+
+    WHY THIS EXISTS, AND WHY IT IS THE DEFAULT HERE
+    ----------------------------------------------
+    `expectimax.heuristic_value` cannot rank party positions. Its
+    features pool over the toons, so four maxed pouches pin
+    `damage_budget_ratio` at its cap and everything scores near the
+    ceiling. Measured over the successor states of three plans on a
+    maxed four-toon position, 60 rollouts each:
+
+        2 trap + group lure + group throw   leaf 98.03   87% ended
+        2 Foghorn + 2 Aoogah                leaf 98.96   98% ended
+        4 Foghorn                           leaf 96.73   95% ended
+
+    A 2.3-point spread across positions differing by eleven points of
+    *did you actually win*. At depth 1 that leaf is a constant, so the
+    ranking falls entirely to `round_reward` and no continuation is
+    visible -- which is fatal for exactly the strategies worth searching
+    for, since Lure's whole payoff is in later rounds.
+
+    A rollout cannot saturate, because it does not estimate anything: it
+    plays until the battle is over and adds up what happened. The cost
+    is that it is noisy and it measures the value of the position *under
+    the rollout policy* -- `SensiblePrior`, a guess about people -- not
+    under best play. That is a real limitation, but a noisy signal beats
+    a constant.
+
+    It also needs no clamping. `fitted.value` is clamped into
+    `expectimax._value_bounds` to keep star1 admissible; this search does
+    not prune, so there is nothing to keep admissible and nothing is
+    given up by letting the number run past +/-100.
+    """
+    current = state
+    total = 0.0
+    for _ in range(max_rounds):
+        if current.is_terminal():
+            break
+        mine = None
+        if current.active_toons():
+            mine = (model or party_mod.DEFAULT_MODEL).sample(current, 0, rng)
+        nxt, _healed, _done = party_mod.step(
+            current, mine, mode=Mode.PICKUP, model=model, rng=rng)
+        laff_lost = sum(max(0, before.laff - after.laff)
+                        for before, after in zip(current.toons, nxt.toons))
+        total += round_reward(
+            objective, laff_lost, _spent(current, nxt),
+            won=nxt.is_win(),
+            lost=nxt.is_terminal() and not nxt.is_win())
+        current = nxt
+    return total
+
+
 def evaluate(state: BattleState, depth: int = 1,
              mode: Mode = Mode.PICKUP,
              model: Optional[TeammateModel] = None,
              objective=None, samples: int = SAMPLES,
              per_track: int = PER_TRACK, max_plans: int = MAX_PLANS,
+             leaf: str = "rollout",
              rng=random) -> Tuple[float, Optional[Sequence]]:
     """Estimated value of `state`, and the plan that achieves it.
 
@@ -268,6 +368,8 @@ def evaluate(state: BattleState, depth: int = 1,
     if state.is_terminal():
         return 0.0, None
     if depth <= 0:
+        if leaf == "rollout":
+            return rollout_value(state, objective, rng, model), None
         return expectimax.heuristic_value(state), None
 
     best_value, best_plan = float("-inf"), None
@@ -286,12 +388,14 @@ def evaluate(state: BattleState, depth: int = 1,
                 won=nxt.is_win(),
                 lost=nxt.is_terminal() and not nxt.is_win())
             future, _p = evaluate(nxt, depth - 1, mode, model, objective,
-                                  samples, per_track, max_plans, rng)
+                                  samples, per_track, max_plans, leaf, rng)
             total += reward + future
         value = total / samples
         if value > best_value:
             best_value, best_plan = value, plan
     if best_plan is None:
+        if leaf == "rollout":
+            return rollout_value(state, objective, rng, model), None
         return expectimax.heuristic_value(state), None
     return best_value, best_plan
 

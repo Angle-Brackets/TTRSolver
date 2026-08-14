@@ -121,11 +121,15 @@ for the reason in the next section.
   the ranking falls entirely to `round_reward` — laff and gag price —
   and the search cannot see a continuation at all.
 
-  It shows: asked the maxed position, the search returns *2 trap +
-  group lure + group throw* at +93.3, but played to the end that line
-  scores **84.1** against 2 Foghorn + 2 Aoogah's **91.6**. The search's
-  own numbers are not calibrated and must not be quoted as results.
-  Every table in this document comes from playing the battle out. Every number here comes from playing
+  The leaf is therefore a rollout now, not the evaluator
+  (`party_search.rollout_value`). A rollout cannot saturate, because it
+  does not estimate: it plays to the end and adds up what happened. It
+  is noisy and it measures value *under `SensiblePrior`* rather than
+  under best play, which is a real limit — but a noisy signal beats a
+  constant.
+
+  Swapping the leaf changed almost nothing on its own, and that turned
+  out to be the useful clue. See below. Every number here comes from playing
   the battle out instead. A party search must not lean on the evaluator
   until its features are refitted against party positions, and there
   are no party labels to refit against, because exact `solve()` cannot
@@ -154,3 +158,70 @@ top left instead of centring them turned a "Level 8" plate into a
 confident 6. In both cases the machinery was right and the thing
 feeding it was quietly wrong, and in both cases the output looked
 entirely reasonable.
+
+
+## The shortlist was deleting the answer, again
+
+Swapping the saturated evaluator for a rollout leaf barely moved the
+maxed position's answer. The reason it barely moved is that on that
+position the battle **ends in round one** 87–98% of the time, so
+`evaluate` returns at the terminal check and the leaf almost never
+fires. The leaf was never the binding constraint.
+
+The binding constraint was `plans()`. Asked for its shortlist on the
+maxed position:
+
+| | |
+| --- | --- |
+| `_quick_score` of 2 Foghorn + 2 Aoogah | **988** |
+| `_quick_score` range of the 60 plans returned | **1081–1089** |
+| all-Sound plans on the shortlist | **none** |
+
+59 of the 60 were Lure+Trap combinations. The best known line was not
+outranked by the search — it was **removed before the search could
+sample it**.
+
+`_quick_score` plays one round with *everything hitting*, and adds a
+flat +25 per cog lured. Under that rule a group Lure never misses and
+is charged nothing for the risk, so luring four cogs is +100 free and
+Sound's reliability is invisible. The optimism is tolerable; the
+optimism plus a global top-N cut is not.
+
+The fix is the one `PER_TRACK` already encodes one level down: **give
+each track family its own slots** rather than taking a global top-N.
+That does not make `_quick_score` honest, it stops the dishonesty being
+fatal — each family's best offering reaches the sampled evaluation and
+is judged there.
+
+Sound in the winning plan, six seeds per row, before and after:
+
+| samples | before | after |
+| --- | --- | --- |
+| 16 | 0/6 | 6/6 |
+| 48 | 0/6 | 6/6 |
+| 96 | 0/6 | 6/6 |
+| 160 | 0/6 | 6/6 |
+
+The exact mix still wobbles between pure Sound, Lure+Sound and
+Sound+Trap. That wobble is honest: the exhaustive sweep had its top
+four lines within 0.6 of each other.
+
+### Fourth time
+
+This is now the fourth occasion in this work that a *reduction* quietly
+deleted the right answer, and they all look identical in the output —
+a confident, plausible, wrong recommendation:
+
+1. `PER_TRACK = 2` — Sound offered only levels 7 and 6, so every
+   mixed-level Sound plan was unreachable.
+2. Mask padding to the top-left instead of centring — a "Level 8" plate
+   read as a confident 6.
+3. `max_plans` taking a lexicographic prefix — the first 60 joint plans
+   were all arrangements of one Trap.
+4. `max_plans` taking a *global* top-N over an optimistic score — one
+   track family took all 60 slots.
+
+The lesson each time: the machinery was right and the thing feeding it
+was quietly wrong. Keep an invariant a truncation cannot satisfy by
+accident — for (3) it was *coordinated ≥ pickup*; for (4) it is
+`test_no_family_takes_more_than_its_share`.

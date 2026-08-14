@@ -95,6 +95,55 @@ class PlanGenerationTest(unittest.TestCase):
         self.assertFalse(ps._playable(state, [group, group]))
 
 
+class StratifiedShortlistTest(unittest.TestCase):
+    """One track family must not monopolise the shortlist.
+
+    `_quick_score` plays one round with everything HITTING, so it scores
+    a Trap+Lure plan as though the lure never misses and charges nothing
+    for the risk. With a global top-N cut that optimism deleted an
+    entire family: on the maxed position it ranked Trap+Lure plans at
+    1081-1089 and the known-best Sound line at 988, so all 60 surviving
+    plans were Lure+Trap and the best line was never sampled.
+
+    Stratifying does not make `_quick_score` honest. It stops the
+    dishonesty being fatal, by guaranteeing each family a slot so the
+    real sampled evaluation can choose between them.
+    """
+
+    def maxed_position(self):
+        counts = {}
+        for track, levels in [(Track.THROW, (4, 5, 6, 7)),
+                              (Track.SQUIRT, (4, 5, 6, 7)),
+                              (Track.SOUND, (4, 5, 6, 7)),
+                              (Track.LURE, (4, 5, 6)),
+                              (Track.TRAP, (4, 5, 6))]:
+            for level in levels:
+                counts[(track, level)] = 2
+        toons = [ToonState(137, 137, {t: 7 for t, _l in counts}, dict(counts))
+                 for _ in range(4)]
+        cogs = [CogState("loan_shark", "cashbot", level,
+                         data.cog_max_hp(level), data.cog_max_hp(level))
+                for level in (10, 10, 10, 11)]
+        return BattleState(toons=toons, cogs=cogs)
+
+    def test_an_all_sound_plan_survives_truncation(self):
+        shortlist = ps.plans(self.maxed_position(), Mode.COORDINATED)
+        self.assertTrue(
+            any(all(a is not None and a.track == Track.SOUND for a in plan)
+                for plan in shortlist),
+            "no all-Sound plan on the shortlist -- the stratification "
+            "that keeps one track family from monopolising it has gone")
+
+    def test_no_family_takes_more_than_its_share(self):
+        shortlist = ps.plans(self.maxed_position(), Mode.COORDINATED)
+        counts = {}
+        for plan in shortlist:
+            sig = tuple(sorted({a.track.name for a in plan if a is not None}))
+            counts[sig] = counts.get(sig, 0) + 1
+        self.assertLess(max(counts.values()), len(shortlist) // 2,
+                        f"one family dominates the shortlist: {counts}")
+
+
 class SearchTest(unittest.TestCase):
 
     def test_a_terminal_position_is_worth_nothing_more(self):
@@ -104,13 +153,54 @@ class SearchTest(unittest.TestCase):
         self.assertEqual(value, 0.0)
         self.assertIsNone(plan)
 
-    def test_depth_zero_falls_back_to_the_evaluator(self):
+    def test_depth_zero_with_the_fitted_leaf_asks_the_evaluator(self):
         from solver.search import expectimax
 
         state = party()
-        value, plan = ps.evaluate(state, depth=0)
+        value, plan = ps.evaluate(state, depth=0, leaf="fitted")
         self.assertAlmostEqual(value, expectimax.heuristic_value(state))
         self.assertIsNone(plan)
+
+    def test_depth_zero_plays_the_position_out_by_default(self):
+        """The default leaf is a rollout, not the fitted evaluator.
+
+        The evaluator cannot rank party positions -- pooled over four
+        maxed pouches its features pin at their caps, and three plans
+        whose outcomes differed by eleven points of "did you win" scored
+        96.73, 98.03 and 98.96. A rollout cannot saturate because it
+        does not estimate: it plays to the end and adds up what happened.
+        """
+        state = party()
+        value, plan = ps.evaluate(state, depth=0, rng=random.Random(0))
+        self.assertIsNone(plan)
+        self.assertNotAlmostEqual(
+            value, ps.evaluate(state, depth=0, leaf="fitted")[0])
+
+    def test_a_rollout_prefers_the_position_that_is_winning(self):
+        """Sanity that the rollout carries signal at all.
+
+        Averaged, and that is the point rather than an implementation
+        detail. A single playout of these two positions ranked the
+        nearly-dead party ABOVE the healthy one, which is just variance
+        -- one rollout is a sample of size one. Over 200 the gap is
+        91.2 against 78.7, with the hurt party losing 6.5% of the time
+        and the healthy one never. Anything reading `rollout_value` for
+        a decision has to average it too.
+        """
+        from solver.search import objective as objective_mod
+
+        obj = objective_mod.BALANCED
+        healthy = party(2)
+        hurt = party(2)
+        for t in hurt.toons:
+            t.laff = 5
+
+        def mean(state, seed, n=40):
+            rng = random.Random(seed)
+            return sum(ps.rollout_value(state, obj, rng)
+                       for _ in range(n)) / n
+
+        self.assertGreater(mean(healthy, 1), mean(hurt, 1))
 
     def test_it_returns_a_plan_for_every_toon(self):
         _v, plan = ps.evaluate(party(3), depth=1, mode=Mode.COORDINATED,
