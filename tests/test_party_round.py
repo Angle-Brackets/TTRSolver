@@ -287,3 +287,80 @@ class ToonUpCostTest(unittest.TestCase):
         simulator.apply_party_round(state, [Action(Track.TOON_UP, 1, None)],
                                     hits=[True])
         self.assertEqual(state.toons[0].gag_counts[(Track.TOON_UP, 1)], 2)
+
+
+class SharedAccuracyIsTheBestGagTest(unittest.TestCase):
+    """When gags share a roll, the strongest one sets the odds.
+
+    Moot for every track but Lure and Toon-Up: propAcc is uniform within
+    a track, so a Cupcake and a Birthday Cake are both 75 and it makes
+    no difference which is read. Lure is where it matters -- 60/55/70/
+    65/80/75/90 by level -- and a stronger Lure carries a weaker one
+    thrown at the same cog.
+
+    [UNVERIFIED] for Lure: play knowledge, not the wiki, which gives the
+    per-gag accuracies and says nothing about two Lures on one cog.
+    """
+
+    def test_throw_accuracies_are_uniform_so_the_question_is_moot(self):
+        accuracies = {data.gag(Track.THROW, lvl).prop_accuracy()
+                      for lvl in range(1, 8)}
+        self.assertEqual(len(accuracies), 1)
+
+    def test_but_lure_accuracies_are_not(self):
+        accuracies = {data.gag(Track.LURE, lvl).prop_accuracy()
+                      for lvl in range(1, 8)}
+        self.assertGreater(len(accuracies), 1)
+
+    def roll_with(self, state, actions, value):
+        real = mechanics.accuracy_roll
+        mechanics.accuracy_roll = lambda: value
+        try:
+            simulator.apply_party_round(state, actions)
+        finally:
+            mechanics.accuracy_roll = real
+
+    def untrained(self, counts):
+        """Barely trained in Lure, so the gap between gags survives.
+
+        A maxed toon adds +60 trackExp and both Lures pin at the 95 cap,
+        which hides the very difference this is about -- the first
+        version of these tests did exactly that and passed for the wrong
+        reason.
+        """
+        return ToonState(80, 95, {Track.LURE: 1}, dict(counts))
+
+    def lure_accuracy(self, state, level):
+        return simulator.toon_action_accuracy(state, Action(Track.LURE,
+                                                            level, 0))
+
+    def test_the_two_lures_really_do_differ_here(self):
+        """Premise check, because the cap can silently erase it."""
+        state = BattleState(
+            toons=[self.untrained({(Track.LURE, 1): 1, (Track.LURE, 5): 1})],
+            cogs=[cog(level=1, hp=400)])
+        self.assertLess(self.lure_accuracy(state, 1),
+                        self.lure_accuracy(state, 5))
+
+    def test_a_strong_lure_carries_a_weak_one_on_the_same_cog(self):
+        counts = {(Track.LURE, 1): 1, (Track.LURE, 5): 1}
+        state = BattleState(
+            toons=[self.untrained(counts), self.untrained(counts)],
+            cogs=[cog(level=1, hp=400)])
+        between = (self.lure_accuracy(state, 1)
+                   + self.lure_accuracy(state, 5)) // 2
+        self.roll_with(state,
+                       [Action(Track.LURE, 1, 0), Action(Track.LURE, 5, 0)],
+                       value=between)
+        self.assertTrue(state.cogs[0].status.lured)
+
+    def test_a_weak_lure_alone_misses_that_roll(self):
+        """The other half: without the strong Lure beside it, the same
+        roll beats the weak gag."""
+        counts = {(Track.LURE, 1): 1, (Track.LURE, 5): 1}
+        state = BattleState(toons=[self.untrained(counts)],
+                            cogs=[cog(level=1, hp=400)])
+        between = (self.lure_accuracy(state, 1)
+                   + self.lure_accuracy(state, 5)) // 2
+        self.roll_with(state, [Action(Track.LURE, 1, 0)], value=between)
+        self.assertFalse(state.cogs[0].status.lured)

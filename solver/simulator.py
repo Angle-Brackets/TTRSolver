@@ -502,8 +502,22 @@ def apply_party_round(state: BattleState,
         # hedge -- four Throws at one cog would almost surely land
         # *something* -- which is not the game and badly overvalues
         # stacking a track on one target.
-        rolls: Dict[Optional[int], int] = {}
-        resolved = []
+        #
+        # THE BEST GAG SHARING A ROLL SETS THE ACCURACY. For every track
+        # but Lure and Toon-Up this is moot, because propAcc is uniform
+        # within a track -- a Cupcake and a Birthday Cake are both 75, so
+        # it makes no difference which is read. Lure is where it bites:
+        # its accuracies run 60/55/70/65/80/75/90 by level, and a
+        # stronger Lure on a cog carries a weaker one thrown at the same
+        # cog rather than being dragged down by it.
+        #
+        # [UNVERIFIED] for Lure -- play knowledge, not the wiki, which
+        # documents the per-gag accuracies and says nothing about two
+        # Lures on one cog. Applied to every track because taking the
+        # maximum over equal numbers changes nothing, so the uniform
+        # tracks are unaffected either way. Toon-Up (70 up to level 6,
+        # 95 at 7) follows the same rule by analogy and nothing more.
+        prepared = []
         for toon_index in same_track:
             action = actions[toon_index]
             targets = [where[id(c)] for c in _targets_for(state, action)]
@@ -512,15 +526,27 @@ def apply_party_round(state: BattleState,
                 1 for prev_track, prev_group, prev_targets in landed
                 if prev_track != track and prev_track != Track.TRAP
                 and _prev_hits_apply(prev_group, prev_targets, group, targets))
-            bonus = mechanics.calc_same_round_prev_hits(prior)
+            accuracy = min(
+                toon_action_accuracy(state, action)
+                + mechanics.calc_same_round_prev_hits(prior),
+                data.ACCURACY_CAP)
+            key = None if group else action.target_index
+            prepared.append((toon_index, action, targets, group, key,
+                             accuracy))
+
+        best: Dict[Optional[int], int] = {}
+        for _i, _a, _t, _g, key, accuracy in prepared:
+            best[key] = max(best.get(key, 0), accuracy)
+
+        rolls: Dict[Optional[int], int] = {}
+        resolved = []
+        for toon_index, action, targets, group, key, _accuracy in prepared:
             if hits is not None:
                 hit = bool(hits[toon_index])
             else:
-                key = None if group else action.target_index
                 if key not in rolls:
                     rolls[key] = mechanics.accuracy_roll()
-                accuracy = toon_action_accuracy(state, action) + bonus
-                hit = rolls[key] < min(accuracy, data.ACCURACY_CAP)
+                hit = rolls[key] < best[key]
             resolved.append((toon_index, action, targets, group, hit))
             if hit:
                 landed.append((track, group, targets))
