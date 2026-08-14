@@ -224,9 +224,37 @@ against. What the pooling buys is a vector that means something
 sensible instead of one that silently describes `toons[0]` and calls it
 the team. Treat any party number the evaluator produces as untested.
 
+`solver/party.py` has the two modes, and which one is right is a
+question about the players rather than about the search:
+
+- `Mode.PICKUP` — you control one toon, so the others are a **chance
+  node**, the same shape the cog phase already is. Their actions come
+  from a `TeammateModel`.
+- `Mode.COORDINATED` — every toon's action is chosen together, which is
+  the only way to reach the plays that make coordinating worth anything
+  (stacking a track on one cog for `calc_hp_bonus`, holding a Trap for
+  someone else's Lure).
+
+Using the wrong one gives bad advice both ways round. Searching
+teammates as choices you do not have produces "throw a level 1, my
+teammate will throw a level 7 into the same cog"; modelling a
+coordinated team as a distribution throws away the reason they
+coordinated.
+
+**`SensiblePrior` is a guess and must stay labelled as one.** It is a
+model of *people*, not a rule of the game — nothing in the wiki or the
+source can confirm what a stranger throws. Any pickup-mode number rests
+on it. The interface takes a distribution so a model fitted from real
+play can replace it without touching the search.
+
 Still solo and **must not be quietly generalised**:
 
-- `simulator.legal_actions` enumerates one toon's moves.
+- `simulator.legal_actions` enumerates one toon's moves, so no search
+  yet enumerates a party's.
+- Group cog attacks are [TODO]: `_party_cog_phase` treats every cog
+  attack as single-target, so a party takes less damage than it should.
+  The cog tables carry no per-attack group flag, because solo the toon
+  is both the target and the group.
 - The live readers see one toon: the Local API reports the client's own
   laff and training, and nothing reads a teammate's laff meter off the
   screen.
