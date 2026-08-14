@@ -588,6 +588,29 @@ DROP_MISSES_LURED_COGS = None
 # depending on the gag level discrepancies of the additional Lure gags,
 # with the bonus being smaller if low-level Lure gags are used."
 #
+# ELIGIBILITY is now [CONFIRMED] and implemented below in
+# `multi_lure_eligible`; only the MAGNITUDE is still open. From the
+# v4.0.0 patch notes, which spell out what "of the same type" means:
+#
+#     Group Lures paired with another Group Lure yield 'Lure Bonus'
+#     Dollar Bills paired with another Dollar Bill yield 'Lure Bonus'
+#     Group Lures and Dollar Bills used simultaneously do not grant
+#     'Lure Bonus'
+#
+# So it is the targeting class that must match, not the gag: two group
+# Lures qualify, two Bills qualify, one of each does not. In this
+# track's tables the Bills are exactly the single-target gags (levels
+# 1, 3, 5) and the Magnets, Goggles and Presentation the group ones
+# (2, 4, 6, 7), so `Gag.group` already carries the distinction.
+#
+# The same notes settle a neighbouring rule the model happens to get
+# right: "Organic Lure now shifts the base accuracy of Lure by an
+# additional 10% rather than being an additive bonus during the battle
+# calculation". `Gag.prop_accuracy(organic=True)` is a base-accuracy
+# shift of exactly +10 for all seven Lure gags, which is that rule --
+# and it matters beyond accuracy, because the notes add that the shift
+# "better determines who the overriding Lure Gag is".
+#
 # The DIRECTION is now corroborated, the magnitudes still are not.
 # A player's reading is that the bonus is inversely proportional to the
 # level gap between the lures -- same level pays most, a wide gap pays
@@ -629,3 +652,20 @@ DROP_MISSES_LURED_COGS = None
 # play unreachable. Undervalued and reachable beats correctly valued
 # and impossible.
 MULTI_LURE_ACCURACY_BONUS = None
+
+
+def multi_lure_eligible(level_a: int, level_b: int) -> bool:
+    """Would these two Lures, thrown together, earn the Lure Bonus?
+
+    [CONFIRMED] TTR v4.0.0 patch notes: two group Lures qualify, two
+    Dollar Bills qualify, and a group Lure beside a Bill does not. The
+    matching is on targeting class rather than on the gag itself.
+
+    Eligibility only. How MUCH the bonus is worth is
+    `MULTI_LURE_ACCURACY_BONUS`, still [TODO] -- so nothing calls this
+    in the accuracy path yet. It is here so the rule is written down
+    where the magnitude will go, and so the search can be taught the
+    pairing without waiting on the number.
+    """
+    return (data.gag(Track.LURE, level_a).group
+            == data.gag(Track.LURE, level_b).group)
