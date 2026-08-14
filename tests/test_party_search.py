@@ -73,26 +73,83 @@ class PlanGenerationTest(unittest.TestCase):
                      if a is not None and a.track == Track.TRAP]
             self.assertEqual(len(traps), len(set(traps)))
 
-    def test_two_toons_do_not_lure_the_same_cog(self):
-        """Same rule, and it cost more to find.
+    def test_stacked_lure_is_allowed(self):
+        """Two Lures in a round is a real TTR play, not a wasted gag.
 
-        The search answered a maxed four-toon position with two group
-        Lures in one round. Dropping either scored 8.6 higher over 300
-        playouts -- the second lure was simply a thrown-away gag.
+        This test asserts the OPPOSITE of what it used to. There was a
+        rule here refusing a second Lure, by analogy with the Trap rule
+        above. It was wrong. [CONFIRMED] TTR wiki (Lure): "Using
+        multiple Lure gags simultaneously increases the accuracy", and
+        the update notes: "Multiple Lure gags of the same type used
+        simultaneously now grant a bonus (20/15/10)% accuracy depending
+        on the gag level discrepancies of the additional Lure gags."
+
+        The bonus itself is [TODO] -- see
+        `mechanics.MULTI_LURE_ACCURACY_BONUS` -- so stacked Lure is
+        searched at single-Lure accuracy and undervalued. Undervalued
+        and reachable beats correctly valued and unreachable.
         """
-        for plan in ps.plans(party(4), Mode.COORDINATED):
-            lures = [a.target_index for a in plan
-                     if a is not None and a.track == Track.LURE]
-            self.assertEqual(len(lures), len(set(lures)))
-
-    def test_a_group_lure_excludes_every_other_lure(self):
-        """It covers everyone, so it collides in either order."""
         state = party(2)
         group = Action(track=Track.LURE, level=4, target_index=None)
         single = Action(track=Track.LURE, level=4, target_index=0)
-        self.assertFalse(ps._playable(state, [group, single]))
-        self.assertFalse(ps._playable(state, [single, group]))
-        self.assertFalse(ps._playable(state, [group, group]))
+        self.assertTrue(ps._playable(state, [group, group]))
+        self.assertTrue(ps._playable(state, [group, single]))
+        self.assertTrue(ps._playable(state, [single, group]))
+
+    def test_drop_on_a_cog_this_round_lures_is_refused(self):
+        """[CONFIRMED] TTR wiki: "Drop gags always miss on lured Cogs."
+
+        Lure resolves before Drop, so a Drop aimed at anything the same
+        round's Lure catches is a guaranteed miss. Verified on a real
+        recommendation: the Drop and the toon doing nothing at all left
+        an identical board.
+        """
+        state = BattleState(toons=[toon({(Track.LURE, 4): 2}),
+                                   toon({(Track.DROP, 5): 2})],
+                            cogs=[cog(), cog()])
+        group_lure = Action(track=Track.LURE, level=4, target_index=None)
+        drop = Action(track=Track.DROP, level=5, target_index=0)
+        self.assertFalse(ps._playable(state, [group_lure, drop]))
+        # ... but a Drop with no Lure in the round is fine.
+        self.assertTrue(ps._playable(state, [None, drop]))
+
+    def test_drop_on_an_already_lured_cog_is_refused(self):
+        lured, other = cog(), cog()
+        lured.status.lured = True
+        state = BattleState(toons=[toon({(Track.DROP, 5): 2})],
+                            cogs=[lured, other])
+        self.assertFalse(ps._playable(
+            state, [Action(track=Track.DROP, level=5, target_index=0)]))
+        self.assertTrue(ps._playable(
+            state, [Action(track=Track.DROP, level=5, target_index=1)]))
+
+    def test_lure_in_the_same_round_as_sound_is_refused(self):
+        """[CONFIRMED] TTR wiki: "Lured Cogs are awakened by Sound gags
+        without a damage bonus." The Sound wakes what the Lure just
+        caught and does not even collect the lured bonus for it, so the
+        pair is dominated by joining the Sound or throwing an attack."""
+        state = BattleState(toons=[toon({(Track.LURE, 4): 2}),
+                                   toon({(Track.SOUND, 4): 2})],
+                            cogs=[cog(), cog()])
+        lure = Action(track=Track.LURE, level=4, target_index=None)
+        sound = Action(track=Track.SOUND, level=4, target_index=None)
+        self.assertFalse(ps._playable(state, [lure, sound]))
+        self.assertTrue(ps._playable(state, [None, sound]))
+        self.assertTrue(ps._playable(state, [lure, None]))
+
+    def test_holding_is_offered_but_all_holding_is_not(self):
+        """A toon with nothing useful to do must be able to hold.
+
+        Without this the search made a toon on a winning board throw
+        Toon-Up at a teammate on FULL LAFF, because a cheap wasted heal
+        was the least bad thing it was allowed to say. No extra "wasted
+        gag" penalty is needed -- `round_reward` already charges for
+        what is spent, so a useless gag is strictly worse than holding.
+        """
+        state = party(2)
+        self.assertTrue(any(None in plan
+                            for plan in ps.plans(state, Mode.COORDINATED)))
+        self.assertFalse(ps._playable(state, [None, None]))
 
 
 class StratifiedShortlistTest(unittest.TestCase):

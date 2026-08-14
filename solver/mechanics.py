@@ -270,7 +270,7 @@ def calc_toon_accuracy(track: Track, level: int, toon: ToonState,
     return min(acc, data.ACCURACY_CAP)
 
 
-def accuracy_roll() -> int:
+def accuracy_roll(rng=random) -> int:
     """One accuracy die, 0-99.
 
     Separate from `roll_hit` because a roll is sometimes SHARED. Gags of
@@ -278,12 +278,16 @@ def accuracy_roll() -> int:
     group gag rolls once for every target -- so the caller needs the
     number, not just the verdict. `roll_hit` stays for the solo path,
     where one gag means one roll either way.
+
+    `rng` defaults to the global module so every existing caller is
+    unchanged. Pass one to make a search reproducible -- see the note on
+    `party_search.evaluate`.
     """
-    return random.randint(0, 99)
+    return rng.randint(0, 99)
 
 
-def roll_hit(accuracy_pct: int) -> bool:
-    return random.randint(0, 99) < accuracy_pct
+def roll_hit(accuracy_pct: int, rng=random) -> bool:
+    return rng.randint(0, 99) < accuracy_pct
 
 
 # ---------------------------------------------------------------------
@@ -390,10 +394,10 @@ def gag_damage_from_exp(exp: int, max_exp: int, min_exp_for_gag: int,
 # Cog attack selection
 # ---------------------------------------------------------------------
 
-def pick_cog_attack(cog: CogState) -> str:
+def pick_cog_attack(cog: CogState, rng=random) -> str:
     """[CONFIRMED] algorithm: cumulative-frequency sample."""
     spec = data.cog(cog.department, cog.cog_type)
-    rand_num = random.randint(0, 99)
+    rand_num = rng.randint(0, 99)
     count = 0
     for attack in spec.modeled_attacks:
         count += spec.frequency_at(attack.name, cog.level)
@@ -476,7 +480,7 @@ def pick_cog_target(cog: CogState, toons, rng=random) -> int:
     return standing[-1]         # rounding shortfall; the source rerolls
 
 
-def cog_attack_damage_and_accuracy(cog: CogState, attack_name: str) -> Tuple[int, int]:
+def cog_attack_damage_and_accuracy(cog: CogState, attack_name: str, rng=random) -> Tuple[int, int]:
     """Damage and accuracy for one of this cog's attacks at its level.
 
     Raises NotImplementedError naming the cell if either is a documented
@@ -485,7 +489,7 @@ def cog_attack_damage_and_accuracy(cog: CogState, attack_name: str) -> Tuple[int
     """
     spec = data.cog(cog.department, cog.cog_type)
     entry = spec.damage_at(attack_name, cog.level)
-    dmg = entry if isinstance(entry, int) else random.randint(*entry)
+    dmg = entry if isinstance(entry, int) else rng.randint(*entry)
     return dmg, spec.accuracy_at(attack_name, cog.level)
 
 
@@ -529,11 +533,11 @@ def lure_wakeup_chance(atk_acc_before_bonus: int) -> int:
     return 100 - (atk_acc_before_bonus * 2)
 
 
-def lure_wakes_up(atk_acc_before_bonus: int) -> bool:
+def lure_wakes_up(atk_acc_before_bonus: int, rng=random) -> bool:
     """[CONFIRMED] rolled once per round per lured cog:
     `random.randint(0, 99) < wakeupChance`."""
     chance = lure_wakeup_chance(atk_acc_before_bonus)
-    return random.randint(0, 99) < chance
+    return rng.randint(0, 99) < chance
 
 
 # Lure duration and early expiry now come from data/lure.py, which is
@@ -572,3 +576,31 @@ def lure_can_expire_early(level: int, lure_tree_planted: bool = False) -> bool:
 
 LURE_ENDS_ON_DAMAGE = None
 DROP_MISSES_LURED_COGS = None
+
+# [TODO] Multiple Lure gags thrown in the same round raise each other's
+# accuracy, and this is NOT modelled -- a stacked Lure is currently
+# searched at single-Lure accuracy and so is undervalued.
+#
+# [CONFIRMED] that it exists. TTR wiki (Lure), opening paragraph:
+# "Using multiple Lure gags simultaneously increases the accuracy." The
+# same page's update notes give the shape: "Multiple Lure gags of the
+# same type used simultaneously now grant a bonus (20/15/10)% accuracy
+# depending on the gag level discrepancies of the additional Lure gags,
+# with the bonus being smaller if low-level Lure gags are used."
+#
+# NOT confirmed, and the reason this is None rather than a number:
+#   * what "gag level discrepancies" indexes -- the gap between the
+#     lures' levels, or the additional lure's level against the
+#     target's, and which of 20/15/10 a given gap selects;
+#   * whether "of the same type" means the same gag, the same
+#     single/group class, or merely both being Lure;
+#   * how it composes with the Trap+Lure bonus already in
+#     `calc_prev_hits_bonus`.
+# Three plausible readings give three different numbers, so per the
+# no-guessing rule this stays None until the wiki pins it down.
+#
+# The search DOES allow stacked Lure (`party_search._playable` has no
+# rule against it). Rejecting it was a real bug: it made a genuine TTR
+# play unreachable. Undervalued and reachable beats correctly valued
+# and impossible.
+MULTI_LURE_ACCURACY_BONUS = None

@@ -225,3 +225,95 @@ The lesson each time: the machinery was right and the thing feeding it
 was quietly wrong. Keep an invariant a truncation cannot satisfy by
 accident — for (3) it was *coordinated ≥ pickup*; for (4) it is
 `test_no_family_takes_more_than_its_share`.
+
+
+## Rules the shortlist enforces, and one it wrongly enforced
+
+`party_search._playable` refuses plans that waste a gag by construction.
+Each rule below is a wiki fact, not a heuristic:
+
+* **Two Traps on one cog** — a cog takes one trap.
+* **Drop on a cog that is lured, or that this round's Lure will catch.**
+  [CONFIRMED] TTR wiki (Lure): "Drop gags always miss on lured Cogs."
+  Lure resolves before Drop, so the miss is guaranteed. Caught on a real
+  recommendation where the Drop and the toon doing *nothing* left an
+  identical board.
+* **Lure in the same round as Sound.** [CONFIRMED] TTR wiki (Lure):
+  "Lured Cogs are awakened by Sound gags without a damage bonus" — the
+  Sound wakes what the Lure just caught and does not even collect the
+  lured bonus. Niche uses exist; the plan is dominated by joining the
+  Sound or throwing an attack gag.
+* **The whole team holding** — legal, but cannot win, and nothing
+  restocks a pouch.
+
+### Stacked Lure is NOT one of them, and briefly was
+
+A rule refusing a second Lure was added here by analogy with the Trap
+rule, on the evidence that dropping one of two group Lures scored 8.6
+better over 300 playouts. That evidence was real and the conclusion was
+wrong.
+
+[CONFIRMED] TTR wiki (Lure): *"Using multiple Lure gags simultaneously
+increases the accuracy"*, and the update notes: *"Multiple Lure gags of
+the same type used simultaneously now grant a bonus (20/15/10)% accuracy
+depending on the gag level discrepancies of the additional Lure gags,
+with the bonus being smaller if low-level Lure gags are used."*
+
+Stacking Lure is a real TTR play. The playout said otherwise because
+**the bonus is not modelled** (`mechanics.MULTI_LURE_ACCURACY_BONUS` is
+`[TODO]`), so the second Lure was simulated as pure cost with none of
+its benefit — the measurement faithfully reported a defect in the model
+as a fact about the game.
+
+The lesson is narrower than "measure things": a measurement taken
+*through* a model can only be as true as the model. A playout is
+evidence about the simulator first and the game second.
+
+Stacked Lure is now searched at single-Lure accuracy, so it is
+**undervalued but reachable**. That is the right way round — rejecting
+it made a genuine play impossible to find.
+
+## Holding, and why there is no "wasted gag" penalty
+
+Toons may now hold (`None`). Without it the search made a toon on an
+already-winning board throw Toon-Up at a teammate on **full laff**,
+because a cheap wasted heal was the least bad thing it was allowed to
+say.
+
+No separate waste penalty was added and none is needed: `round_reward`
+already charges `objective.gag_price` for whatever is spent, so once
+holding is available a gag that achieves nothing is strictly worse.
+Adding a penalty on top would double-charge, and would need a number
+nothing in the game supports.
+
+This is *not* `simulator.legal_actions`' pass, which stays deliberately
+narrow to protect the solo search's termination argument. This search is
+depth-limited and sampled and has no such argument to protect.
+
+## Does it insist on winning in one round?
+
+No, and nothing in the objective asks it to. `BALANCED` has
+`turn_cost = 0.0` — only `SPEEDRUN` charges per round. The pressure
+toward a one-round wipe is that **every extra round gives the cogs
+another turn to hit you**, and that laff shows up in `round_reward` at
+face value. That is a real cost, not an artificial preference for speed.
+
+What *does* bias against multi-round plans is the horizon. Only the
+first round is chosen; everything after it is `SensiblePrior`, a guess
+about people. A plan whose payoff lands two rounds later is handed to a
+policy that will not follow through, and then scored on the
+follow-through. This is the same root cause as the Lure problem and it
+is not fixed by tuning weights — it needs a deeper coordinated search.
+
+## Reproducibility
+
+Seeded runs were not reproducible: `rng` reached only
+`mechanics.pick_cog_target`, while `roll_hit`, `accuracy_roll`,
+`pick_cog_attack`, the cog damage ranges and the lure wake-up all drew
+from the **global** `random`. Two runs of an identical seeded call gave
+different plans, which quietly undermines every A/B comparison made
+against it.
+
+All of them take an `rng` now, defaulting to the global module so
+existing callers are unchanged. The same seed gives the same plan and
+the same value across processes.

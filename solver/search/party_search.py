@@ -116,9 +116,29 @@ def plans(state: BattleState, mode: Mode = Mode.PICKUP,
         return [[action] + blanks for action in candidates(state, 0,
                                                            per_track)]
 
-    per_toon = [candidates(state, i, per_track)
+    # `None` -- hold this round, spend nothing -- is a real option for a
+    # party and has to be offered, because the alternative is forcing a
+    # toon with nothing useful to do to waste a gag. It did exactly
+    # that: asked a four-toon position where three actions already won
+    # the fight, the search had the fourth toon throw Toon-Up at a
+    # teammate on FULL LAFF, because a cheap wasted heal was the least
+    # bad thing it was allowed to say.
+    #
+    # No separate "wasted gag" penalty is needed once this exists.
+    # `round_reward` already charges `objective.gag_price` for whatever
+    # is spent, so a gag that achieves nothing is strictly worse than
+    # holding, and the search can now see that. Inventing a waste
+    # penalty on top would be double-charging, and would need a number
+    # nothing in the game supports.
+    #
+    # This is NOT the same as `simulator.legal_actions`' pass, which is
+    # deliberately offered only when a cog is lured and nothing else is
+    # productive -- that narrowness protects the solo search's
+    # termination argument. This search is depth-limited and sampled, so
+    # it has no such argument to protect.
+    per_toon = [candidates(state, i, per_track) + [None]
                 for i in range(len(state.toons))]
-    if not all(per_toon):
+    if not any(any(a is not None for a in row) for row in per_toon):
         return []
 
     identical = all(t.gag_counts == state.toons[0].gag_counts
@@ -225,8 +245,15 @@ def _playable(state: BattleState, plan) -> bool:
     gag can land on a toon who has none left -- or twice on a toon
     holding one.
     """
+    from .. import data
+
+    # Everyone holding is legal but cannot win, and it is the one plan a
+    # rollout can spin on. Nothing restocks a pouch, so a round where
+    # the whole team passes only feeds the cogs a free turn.
+    if all(action is None for action in plan):
+        return False
+
     trapped = set()
-    lured = set()
     for toon, action in zip(state.toons, plan):
         if action is None:
             continue
@@ -234,30 +261,72 @@ def _playable(state: BattleState, plan) -> bool:
             return False
         if toon.track_exp.get(action.track, 0) <= 0:
             return False
-        # A cog takes one trap and needs one lure. A second of either on
-        # the same target in the same round is a wasted gag, not a
-        # strategy, and should not be occupying a plan slot.
+        # A cog takes one trap, so a second on the same cog is a wasted
+        # gag rather than a strategy.
         #
-        # Both of these were found the same way and the lure one was
-        # found second, after the trap check was already in: the search
-        # answered a maxed four-toon position with
-        #   trap/5 -> 1, lure/4 -> all, lure/4 -> all, squirt/7 -> all
-        # and dropping either lure scored 8.6 BETTER over 300 playouts.
-        # Redundancy inside a round is one rule, so it gets one check;
-        # target_index None means the group gag, which collides with
-        # itself.
+        # NOTE there is deliberately no matching rule for Lure. There
+        # was one, and it was WRONG. [CONFIRMED] TTR wiki (Lure):
+        # "Using multiple Lure gags simultaneously increases the
+        # accuracy", and the update notes: "Multiple Lure gags of the
+        # same type used simultaneously now grant a bonus (20/15/10)%
+        # accuracy depending on the gag level discrepancies of the
+        # additional Lure gags". Stacking Lure is a real TTR play and
+        # the search must be allowed to find it.
+        #
+        # [TODO] That bonus is not modelled -- see
+        # mechanics.MULTI_LURE_ACCURACY_BONUS -- so a stacked Lure is
+        # currently searched at single-Lure accuracy and is undervalued.
+        # Rejecting it outright was worse: it was unreachable.
         if action.track == Track.TRAP:
             if action.target_index in trapped:
                 return False
             trapped.add(action.target_index)
-        elif action.track == Track.LURE:
-            # A group lure covers everyone, so it collides with any
-            # other lure in the round in either order, not just with
-            # another group lure.
-            if action.target_index in lured or None in lured or (
-                    action.target_index is None and lured):
+
+    # Cogs that will be lured by the time Drop resolves: already lured,
+    # plus anything this plan's Lures catch. ATTACK_ORDER puts Lure
+    # before Drop, so a Drop aimed at one of them is a guaranteed miss.
+    lured_after = {i for i, cog in enumerate(state.cogs)
+                   if cog.status.lured and not cog.status.is_dead}
+    has_lure = has_sound = False
+    for action in plan:
+        if action is None:
+            continue
+        if action.track == Track.LURE:
+            has_lure = True
+            if action.target_index is None:
+                lured_after.update(
+                    i for i, cog in enumerate(state.cogs)
+                    if not cog.status.is_dead)
+            else:
+                lured_after.add(action.target_index)
+        elif action.track == Track.SOUND:
+            has_sound = True
+
+    for action in plan:
+        if action is None or action.track != Track.DROP:
+            continue
+        # [CONFIRMED] TTR wiki (Lure): "Drop gags always miss on lured
+        # Cogs." The simulator already resolves this correctly; the
+        # search was still spending plan slots proposing it, and a
+        # verified example had the Drop and the toon doing NOTHING give
+        # an identical board.
+        if action.target_index is None:
+            if all(i in lured_after for i, cog in enumerate(state.cogs)
+                   if not cog.status.is_dead):
                 return False
-            lured.add(action.target_index)
+        elif action.target_index in lured_after:
+            return False
+
+    # [CONFIRMED] TTR wiki (Lure): "Lured Cogs are awakened by Sound
+    # gags without a damage bonus." Luring in the same round as Sound
+    # therefore buys nothing -- the Sound wakes what the Lure just
+    # caught, and does not even collect the lured damage bonus for it.
+    # There are niche uses, but the plan is dominated by joining the
+    # Sound or throwing an attack gag instead, so it does not earn a
+    # slot on a shortlist this narrow.
+    if has_lure and has_sound:
+        return False
+
     return True
 
 

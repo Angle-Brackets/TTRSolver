@@ -17,6 +17,7 @@ source: `__updateLureTimeouts()` runs once per round before the cog
 attacks are picked, and the wake-up check is itself gated on the cog's
 round counter still being > 0.
 """
+import random
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from . import data
@@ -325,7 +326,7 @@ def _resolve_toon_action(state: BattleState, action: Action) -> Tuple[BattleStat
     return state, healed, dealt
 
 
-def _tick_lure(cog: CogState) -> bool:
+def _tick_lure(cog: CogState, rng=random) -> bool:
     """Resolve one round of lure on a lured cog. Returns True if the lure
     ended (so the cog attacks this same round), False if it holds.
 
@@ -355,7 +356,7 @@ def _tick_lure(cog: CogState) -> bool:
     # so in practice this roll never happens and a lure runs its full
     # duration. Kept as a rule rather than deleted; it's a balance knob.
     if (mechanics.lure_can_expire_early(status.lure_level)
-            and mechanics.lure_wakes_up(status.lure_acc_before_bonus)):
+            and mechanics.lure_wakes_up(status.lure_acc_before_bonus, rng)):
         status.clear_lure()
         return True
     status.lure_rounds_remaining -= 1
@@ -446,7 +447,8 @@ def _prev_hits_apply(prev_group: bool, prev_targets, this_group: bool,
 
 def apply_party_round(state: BattleState,
                       actions: Sequence[Optional[Action]],
-                      hits: Optional[Sequence[bool]] = None) -> List[int]:
+                      hits: Optional[Sequence[bool]] = None,
+                      rng=random) -> List[int]:
     """Resolve every toon's action for one round, in the game's order.
 
     `actions[i]` is `state.toons[i]`'s choice, or None to sit the round
@@ -545,7 +547,7 @@ def apply_party_round(state: BattleState,
                 hit = bool(hits[toon_index])
             else:
                 if key not in rolls:
-                    rolls[key] = mechanics.accuracy_roll()
+                    rolls[key] = mechanics.accuracy_roll(rng)
                 hit = rolls[key] < best[key]
             resolved.append((toon_index, action, targets, group, hit))
             if hit:

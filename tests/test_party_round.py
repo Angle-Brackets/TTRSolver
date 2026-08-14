@@ -228,7 +228,9 @@ class SharedAccuracyRollTest(unittest.TestCase):
             self.value = value
             self.calls = 0
 
-        def __call__(self):
+        def __call__(self, rng=None):
+            # `rng` because accuracy_roll takes one now, so a seeded
+            # search can be reproduced. The stub ignores it.
             self.calls += 1
             return self.value
 
@@ -314,7 +316,7 @@ class SharedAccuracyIsTheBestGagTest(unittest.TestCase):
 
     def roll_with(self, state, actions, value):
         real = mechanics.accuracy_roll
-        mechanics.accuracy_roll = lambda: value
+        mechanics.accuracy_roll = lambda rng=None: value
         try:
             simulator.apply_party_round(state, actions)
         finally:

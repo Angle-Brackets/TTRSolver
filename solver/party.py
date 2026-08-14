@@ -351,7 +351,7 @@ def step(state: BattleState, mine: Optional[Action] = None,
     """
     nxt = state.clone()
     actions = teammate_actions(nxt, mine, mode, model, rng, joint)
-    healed = simulator.apply_party_round(nxt, actions)
+    healed = simulator.apply_party_round(nxt, actions, rng=rng)
 
     if not nxt.is_terminal():
         _party_cog_phase(nxt, healed, rng)
@@ -375,13 +375,13 @@ def _party_cog_phase(state: BattleState, healed: List[int], rng) -> None:
     """
     damage_taken = [0 for _ in state.toons]
     for cog in state.active_cogs():
-        if cog.status.lured and not simulator._tick_lure(cog):
+        if cog.status.lured and not simulator._tick_lure(cog, rng):
             continue    # lure held: cog skips its attack
 
-        attack_name = mechanics.pick_cog_attack(cog)
+        attack_name = mechanics.pick_cog_attack(cog, rng)
         damage, accuracy = mechanics.cog_attack_damage_and_accuracy(
-            cog, attack_name)
-        if not mechanics.roll_hit(accuracy):
+            cog, attack_name, rng)
+        if not mechanics.roll_hit(accuracy, rng):
             continue
         target = mechanics.pick_cog_target(cog, state.toons, rng)
         damage_taken[target] += damage
