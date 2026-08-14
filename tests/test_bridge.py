@@ -19,7 +19,9 @@ import bridge  # noqa: E402
 
 from solver import data, outcomes, simulator  # noqa: E402
 from solver.search import expectimax  # noqa: E402
-from solver.state import Action, Track  # noqa: E402
+from solver.state import (  # noqa: E402
+    Action, BattleState, CogState, ToonState, Track,
+)
 
 CFG = {
     "laff": 45,
@@ -306,3 +308,49 @@ class TestApiSurface(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RoundTripCompletenessTest(unittest.TestCase):
+    """Everything that changes a value has to survive serialisation.
+
+    Organic tracks did not, and a dropped field is invisible rather than
+    broken: the state comes back looking fine, and the only symptom was
+    a Trap-versus-Drop benchmark whose safe and organic columns were
+    identical to the last decimal. Organic is a 10-15% damage change, so
+    every measurement taken across this boundary was of the wrong
+    loadout.
+    """
+
+    def toon(self, organic=(), laff=60):
+        return ToonState(laff, 95, {Track.TRAP: 7}, {(Track.TRAP, 3): 3},
+                         organic_tracks=frozenset(organic))
+
+    def state(self, toons):
+        hp = data.cog_max_hp(4)
+        return BattleState(toons=toons,
+                           cogs=[CogState("flunky", "bossbot", 4, hp, hp)])
+
+    def test_organic_survives(self):
+        st = self.state([self.toon(organic={Track.TRAP})])
+        back = bridge.state_from_dict(bridge.state_to_dict(st))
+        self.assertEqual(back.toon.organic_tracks, frozenset({Track.TRAP}))
+        self.assertTrue(back.toon.is_organic(Track.TRAP))
+
+    def test_no_organic_survives_as_no_organic(self):
+        st = self.state([self.toon()])
+        back = bridge.state_from_dict(bridge.state_to_dict(st))
+        self.assertEqual(back.toon.organic_tracks, frozenset())
+
+    def test_a_party_survives_with_its_toons_distinct(self):
+        st = self.state([self.toon(organic={Track.TRAP}, laff=60),
+                         self.toon(laff=31)])
+        back = bridge.state_from_dict(bridge.state_to_dict(st))
+        self.assertEqual([t.laff for t in back.toons], [60, 31])
+        self.assertEqual([sorted(x.value for x in t.organic_tracks)
+                          for t in back.toons], [["trap"], []])
+
+    def test_a_dict_without_toons_still_loads(self):
+        """The front end writes "toon"; it must keep working."""
+        payload = bridge.state_to_dict(self.state([self.toon()]))
+        payload.pop("toons")
+        self.assertEqual(len(bridge.state_from_dict(payload).toons), 1)

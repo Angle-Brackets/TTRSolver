@@ -62,30 +62,51 @@ def cog_from_dict(d: Dict[str, Any]) -> CogState:
                     status=status)
 
 
+def toon_to_dict(toon: ToonState) -> Dict[str, Any]:
+    return {
+        "laff": toon.laff,
+        "max_laff": toon.max_laff,
+        "track_exp": {t.value: lvl for t, lvl in toon.track_exp.items()},
+        # list of [track, level, count] -- JSON has no tuple keys
+        "gags": [[t.value, lvl, n]
+                 for (t, lvl), n in sorted(toon.gag_counts.items(),
+                                            key=lambda kv: (kv[0][0].value,
+                                                            kv[0][1]))],
+        # Organic tracks were missing here, and a field that is dropped
+        # in serialisation is invisible rather than broken: a state that
+        # went through this round-trip came back safe, and the only
+        # symptom was a benchmark whose organic and non-organic columns
+        # were identical to the last decimal. Organic changes damage by
+        # 10-15%, so anything measured across this boundary was measuring
+        # the wrong loadout.
+        "organic": sorted(t.value for t in toon.organic_tracks),
+    }
+
+
+def toon_from_dict(d: Dict[str, Any]) -> ToonState:
+    return ToonState(
+        laff=d["laff"], max_laff=d["max_laff"],
+        track_exp={Track(k): v for k, v in d["track_exp"].items()},
+        gag_counts={(Track(track), lvl): n for track, lvl, n in d["gags"]},
+        organic_tracks=frozenset(Track(t) for t in d.get("organic", ())),
+    )
+
+
 def state_to_dict(state: BattleState) -> Dict[str, Any]:
     return {
-        "toon": {
-            "laff": state.toon.laff,
-            "max_laff": state.toon.max_laff,
-            "track_exp": {t.value: lvl for t, lvl in state.toon.track_exp.items()},
-            # list of [track, level, count] -- JSON has no tuple keys
-            "gags": [[t.value, lvl, n]
-                     for (t, lvl), n in sorted(state.toon.gag_counts.items(),
-                                                key=lambda kv: (kv[0][0].value, kv[0][1]))],
-        },
+        # "toon" stays for the single-toon front end; "toons" carries the
+        # party. Writing both means an older reader keeps working and a
+        # newer one does not have to guess which it was given.
+        "toon": toon_to_dict(state.toon),
+        "toons": [toon_to_dict(t) for t in state.toons],
         "cogs": [cog_to_dict(c) for c in state.cogs],
         "round": state.round_num,
     }
 
 
 def state_from_dict(d: Dict[str, Any]) -> BattleState:
-    t = d["toon"]
-    toon = ToonState(
-        laff=t["laff"], max_laff=t["max_laff"],
-        track_exp={Track(k): v for k, v in t["track_exp"].items()},
-        gag_counts={(Track(track), lvl): n for track, lvl, n in t["gags"]},
-    )
-    return BattleState(toon=toon,
+    toons = [toon_from_dict(t) for t in d["toons"]] if "toons" in d         else [toon_from_dict(d["toon"])]
+    return BattleState(toons=toons,
                        cogs=[cog_from_dict(c) for c in d["cogs"]],
                        round_num=d["round"])
 
