@@ -387,5 +387,9 @@ def _party_cog_phase(state: BattleState, healed: List[int], rng) -> None:
         damage_taken[target] += damage
 
     for index, toon in enumerate(state.toons):
-        toon.laff = max(0, min(toon.max_laff,
-                               toon.laff + healed[index] - damage_taken[index]))
+        # Heal then damage, in that order -- see the note in
+        # `simulator.step`. One combined clamp let a Toon-Up thrown by a
+        # toon on full laff soak up the round's damage, which is why a
+        # healthy four-toon party was being advised to heal.
+        toon.laff = min(toon.max_laff, toon.laff + healed[index])
+        toon.laff = max(0, toon.laff - damage_taken[index])

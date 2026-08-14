@@ -409,8 +409,15 @@ def step(state: BattleState, action: Action, gag_cost_lambda=None,
     laff_lost = 0
     if not next_state.is_terminal():
         laff_lost = _resolve_cog_phase(next_state)
-        next_state.toon.laff = max(0, min(next_state.toon.max_laff,
-                                            next_state.toon.laff + healed - laff_lost))
+        # Heal FIRST and cap it, THEN take the damage. Not one combined
+        # clamp -- `min(max_laff, laff + healed - lost)` lets a heal on a
+        # toon already at full laff absorb the round's damage, turning
+        # Toon-Up into damage prevention it is not. Toon-Up is first in
+        # ATTACK_ORDER, so it resolves in the toon phase and its excess
+        # is gone before a cog swings.
+        toon = next_state.toon
+        toon.laff = min(toon.max_laff, toon.laff + healed)
+        toon.laff = max(0, toon.laff - laff_lost)
 
     next_state.round_num += 1
 
