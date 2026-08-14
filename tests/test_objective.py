@@ -38,7 +38,12 @@ class TestDefaultMatchesTheSimulator(unittest.TestCase):
         price = 0.1 * 3 + 4.0 / carry          # gag_cost, then scarcity
         for _prob, nxt, reward in outcomes.action_outcomes(state, action):
             laff_lost = state.toon.laff - nxt.toon.laff
-            expected = -float(laff_lost) - price
+            # `turn_cost` is nonzero for every objective now, including
+            # BALANCED. At zero the objective asked neither for speed nor
+            # against stalling, and a party that had lured the board
+            # could hold and burn the lure for free.
+            expected = (-float(laff_lost) - price
+                        - obj.BALANCED.turn_cost)
             if nxt.is_win():
                 expected += 100.0
             elif nxt.is_terminal():
@@ -186,9 +191,20 @@ class TestTurnCost(unittest.TestCase):
             - speedy.step_reward(0, Track.THROW, 3, False, False), 5.0)
 
     def test_laff_weight_scales_damage(self):
-        defensive = obj.Objective(laff_weight=3.0, gag_cost=0.0)
+        # turn_cost pinned to 0 so this measures the laff term alone --
+        # the dataclass default is nonzero now and would otherwise leak
+        # a round charge into the number under test.
+        defensive = obj.Objective(laff_weight=3.0, gag_cost=0.0,
+                                  turn_cost=0.0)
         self.assertAlmostEqual(
             defensive.step_reward(10, Track.THROW, 3, False, False), -30.0)
+
+    def test_every_shipped_objective_charges_for_a_round(self):
+        """Nonzero for all modes, deliberately. A mode that charges
+        nothing per round will happily stall through a lure window."""
+        for name, objective in obj.PRESETS.items():
+            self.assertGreater(objective.turn_cost, 0.0,
+                               f"{name} charges nothing per round")
 
 
 if __name__ == "__main__":

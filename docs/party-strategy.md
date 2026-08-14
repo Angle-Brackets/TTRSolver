@@ -292,8 +292,20 @@ depth-limited and sampled and has no such argument to protect.
 
 ## Does it insist on winning in one round?
 
-No, and nothing in the objective asks it to. `BALANCED` has
-`turn_cost = 0.0` — only `SPEEDRUN` charges per round. The pressure
+No — but `turn_cost` used to be `0.0` for every mode except `SPEEDRUN`,
+and the *second* half of that was the problem. At zero the objective
+asks neither for speed nor against stalling, so a party that has just
+lured the board can hold, spend nothing, and burn a round of the lure
+for free. That is what "overly cautious" looked like on the uneven
+board: three toons holding behind a group Lure.
+
+`turn_cost` now defaults to **1.0** on the dataclass, so every mode
+charges for a round unless it overrides upward. Measured on that board,
+toons held 0.75 times per round at 0.0, 0.38 at 1.0 and 0.00 at 2.0 —
+1.0 rather than 2.0 because holding is sometimes genuinely right, and a
+charge that abolishes the option trades one bad default for another.
+
+The rest of the original note still stands: The pressure
 toward a one-round wipe is that **every extra round gives the cogs
 another turn to hit you**, and that laff shows up in `round_reward` at
 face value. That is a real cost, not an artificial preference for speed.

@@ -84,7 +84,21 @@ class Objective:
     # Flat charge per round. The only term that makes the solver prefer
     # finishing sooner for its own sake; without it, a line that stalls
     # safely forever costs nothing but the gags it spends.
-    turn_cost: float = 0.0
+    # Charged per round, for EVERY mode -- the default is nonzero on
+    # purpose. At zero the objective asks neither for speed nor against
+    # stalling, and the second half of that is the one that bites: a
+    # party that has just lured the board can hold, spend nothing, and
+    # burn a round of the lure for free. Measured on an uneven
+    # three-cog board, toons held 0.75 times per round at 0.0, 0.38 at
+    # 1.0, and 0.00 at 2.0.
+    #
+    # 1.0 rather than 2.0 because holding is sometimes genuinely right
+    # -- a toon whose only remaining gags would be wasted should hold,
+    # and a cost that abolishes the option trades one bad default for
+    # another.
+    #
+    # SPEEDRUN overrides upward; it wants the round charge to dominate.
+    turn_cost: float = 1.0
     # Multiplier on laff lost. Raise it to play defensively.
     laff_weight: float = 1.0
 
