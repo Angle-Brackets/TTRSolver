@@ -124,12 +124,15 @@ def plans(state: BattleState, mode: Mode = Mode.PICKUP,
     # teammate on FULL LAFF, because a cheap wasted heal was the least
     # bad thing it was allowed to say.
     #
-    # No separate "wasted gag" penalty is needed once this exists.
-    # `round_reward` already charges `objective.gag_price` for whatever
-    # is spent, so a gag that achieves nothing is strictly worse than
-    # holding, and the search can now see that. Inventing a waste
-    # penalty on top would be double-charging, and would need a number
-    # nothing in the game supports.
+    # This handles the gag that achieves NOTHING: `round_reward` already
+    # charges `gag_price` for what is spent, so once holding is on the
+    # menu a useless gag is strictly worse than it, with no extra
+    # penalty needed.
+    #
+    # It does NOT handle the gag that achieves something and throws most
+    # of it away -- a Railroad into a five-hit-point cog kills it and
+    # discards the rest, and holding is plainly worse than that. That is
+    # a separate charge; see `waste_penalty`.
     #
     # This is NOT the same as `simulator.legal_actions`' pass, which is
     # deliberately offered only when a cog is lured and nothing else is
@@ -330,6 +333,111 @@ def _playable(state: BattleState, plan) -> bool:
     return True
 
 
+def plan_waste(state: BattleState, plan) -> Tuple[float, float]:
+    """(damage thrown away, gag price of the plan).
+
+    Waste is damage aimed at hit points that are not there -- a Railroad
+    into a five-hit-point cog kills it and discards the rest. The
+    objective charged nothing for that: a gag cost its price whether it
+    was needed or wasted, so nothing distinguished spending a level 7
+    because it was the only thing that would kill the cog from spending
+    it because it was in the pouch.
+
+    Straight algebra: for each cog, the damage aimed at it minus the hit
+    points it has, when that is positive. A cog's hp clamps at zero, so
+    the excess is not readable from the resolved board -- but it does
+    not need to be resolved at all, because both quantities are known
+    before the round.
+
+    The damage has to be totalled per (track, target) first rather than
+    per gag, because `calc_hp_bonus` gives same-track gags on one cog a
+    combo bonus on their combined total. Summing gags independently
+    would understate the damage and so understate the waste.
+
+    Computed from the plan and assuming it lands, so it measures the
+    *choice* rather than the dice. Throwing a Railroad at a nearly-dead
+    cog is the same decision whether or not it hits.
+    """
+    from .. import data
+    from .. import mechanics
+
+    live = [(i, cog) for i, cog in enumerate(state.cogs)
+            if not cog.status.is_dead]
+
+    # (track, target) -> [damage, gag count], mirroring how the
+    # simulator groups a round.
+    groups: Dict[tuple, List[int]] = {}
+    for toon, action in zip(state.toons, plan):
+        if action is None or action.track in (Track.TOON_UP, Track.LURE,
+                                              Track.TRAP):
+            continue
+        try:
+            dmg = mechanics.calc_toon_damage(
+                action.track, action.level,
+                organic=toon.is_organic(action.track))
+        except (NotImplementedError, ValueError):
+            continue
+        targets = ([i for i, _c in live] if action.target_index is None
+                   else [action.target_index])
+        for index in targets:
+            slot = groups.setdefault((action.track, index), [0, 0])
+            slot[0] += dmg
+            slot[1] += 1
+
+    per_cog: Dict[int, int] = {}
+    for (_track, index), (damage, count) in groups.items():
+        total = damage + mechanics.calc_hp_bonus(damage, count)
+        per_cog[index] = per_cog.get(index, 0) + total
+
+    raw = sum(per_cog.values())
+    useful = 0
+    for index, damage in per_cog.items():
+        if 0 <= index < len(state.cogs):
+            useful += min(damage, max(0, state.cogs[index].hp))
+
+    price = 0.0
+    for toon, action in zip(state.toons, plan):
+        if action is None:
+            continue
+        try:
+            limit = data.gag(action.track, action.level).max_carry or 1
+        except (NotImplementedError, ValueError):
+            limit = 1
+        price += 1.0 / limit
+
+    return max(0.0, float(raw - useful)), price
+
+
+def waste_penalty(objective, state: BattleState, plan) -> float:
+    """What this plan is charged for damage it throws away.
+
+    Scaled by the *scarcity* of what was spent, which is the whole
+    point: wasting a level 7 (one per pouch) has to hurt far more than
+    wasting a level 1 (thirty per pouch), and a flat per-damage charge
+    would treat them alike.
+
+    The shape is `weight x wasted_fraction x scarcity`, so a plan whose
+    damage is all needed pays nothing however dear its gags -- which is
+    exactly the "unless it is the only option" case. A level 7 that is
+    the only gag that kills the cog wastes little and is barely touched;
+    the same gag into a nearly-dead cog is charged nearly in full.
+
+    `waste_weight` is a CHOSEN number, like every other weight in
+    `objective` -- nothing in the game states it. It is not a [TODO]
+    standing in for a fact, it is a preference about how to play.
+    """
+    weight = getattr(objective, "waste_weight", 0.0)
+    if not weight:
+        return 0.0
+    wasted, scarcity = plan_waste(state, plan)
+    if wasted <= 0.0 or scarcity <= 0.0:
+        return 0.0
+    total = wasted + sum(
+        cog.hp for cog in state.cogs if not cog.status.is_dead)
+    fraction = wasted / total if total > 0 else 0.0
+    return weight * fraction * scarcity
+
+
 def round_reward(objective, laff_lost: int, spent, won: bool,
                  lost: bool) -> float:
     """What one party round was worth.
@@ -365,6 +473,90 @@ def _spent(before: BattleState, after: BattleState):
 ROLLOUT_ROUNDS = 12
 
 
+def greedy_plan(state: BattleState, objective) -> List[Optional[Action]]:
+    """A decent action for every toon, chosen rather than sampled.
+
+    WHY THIS IS NOT `SensiblePrior`, WHICH IT USED TO BE
+    ----------------------------------------------------
+    `SensiblePrior` is a model of *people* -- what a stranger is likely
+    to throw. That is exactly right for one job and wrong for another,
+    and the two were sharing a policy:
+
+      * PICKUP teammates -- you genuinely cannot control them, so the
+        right object is a distribution over what they might do, and no
+        amount of cleverness replaces it. `SensiblePrior` keeps this job.
+
+      * The ROLLOUT continuation -- here nothing is being predicted. The
+        rollout exists to *estimate the value of a position*, and the
+        value of a position is what it is worth under good play, not
+        under average play. Estimating it with a model of an average
+        stranger systematically undervalues any line whose payoff needs
+        follow-through -- which is every Lure strategy there is, and is
+        the mechanism behind "no Lure strategy ever appears" in
+        docs/party-strategy.md. The plan was scored on a continuation
+        that would not carry it out.
+
+    So this is deliberately not a people-model. It takes the best action
+    it can see one round ahead under the *objective the search is
+    actually optimising*: damage that lands somewhere it is needed, cogs
+    killed, minus what it costs and what it throws away. Greedy and
+    myopic, and still a much better proxy for "played well from here"
+    than a guess about strangers.
+
+    It is not free. A rollout now costs a scan of each toon's candidate
+    list per round instead of one weighted draw, which is the reason
+    `ROLLOUT_ROUNDS` stays modest.
+    """
+    plan: List[Optional[Action]] = [None] * len(state.toons)
+    working = state.clone()
+    for index, toon in enumerate(state.toons):
+        if toon.laff <= 0:
+            continue
+        best, best_score = None, 0.0     # 0.0 => holding is the floor
+        for action in candidates(working, index, per_track=3):
+            trial = [None] * len(state.toons)
+            trial[index] = action
+            score = _greedy_score(working, trial, objective)
+            if score > best_score:
+                best, best_score = action, score
+        plan[index] = best
+        if best is not None:
+            # Later toons see the earlier ones' choices, so the team does
+            # not pile four gags onto a cog the first one already killed.
+            try:
+                simulator.apply_party_round(
+                    working, [a if i == index else None
+                              for i, a in enumerate(plan)],
+                    hits=[i == index and a is not None
+                          for i, a in enumerate(plan)])
+            except (NotImplementedError, ValueError, KeyError):
+                pass
+    return plan
+
+
+def _greedy_score(state: BattleState, trial, objective) -> float:
+    """One action's worth: useful damage and kills, less cost and waste."""
+    wasted, scarcity = plan_waste(state, trial)
+    probe = state.clone()
+    try:
+        simulator.apply_party_round(
+            probe, list(trial), hits=[a is not None for a in trial])
+    except (NotImplementedError, ValueError, KeyError):
+        return float("-inf")
+    landed = sum(before.hp - max(0, after.hp)
+                 for before, after in zip(state.cogs, probe.cogs))
+    killed = sum(1 for before, after in zip(state.cogs, probe.cogs)
+                 if not before.status.is_dead and after.status.is_dead)
+    lured = sum(1 for before, after in zip(state.cogs, probe.cogs)
+                if not before.status.lured and after.status.lured
+                and not after.status.is_dead)
+    price = 0.0
+    for track, level, count in _spent(state, probe):
+        price += count * objective.gag_price(track, level)
+    return (landed + 60.0 * killed + 20.0 * lured
+            - 10.0 * price - 0.25 * wasted * scarcity)
+
+
 def rollout_value(state: BattleState, objective, rng,
                   model: Optional[TeammateModel] = None,
                   max_rounds: int = ROLLOUT_ROUNDS) -> float:
@@ -391,9 +583,8 @@ def rollout_value(state: BattleState, objective, rng,
     A rollout cannot saturate, because it does not estimate anything: it
     plays until the battle is over and adds up what happened. The cost
     is that it is noisy and it measures the value of the position *under
-    the rollout policy* -- `SensiblePrior`, a guess about people -- not
-    under best play. That is a real limitation, but a noisy signal beats
-    a constant.
+    the rollout policy* (`greedy_plan`) rather than under best play.
+    That is a real limitation, but a noisy signal beats a constant.
 
     It also needs no clamping. `fitted.value` is clamped into
     `expectimax._value_bounds` to keep star1 admissible; this search does
@@ -405,11 +596,9 @@ def rollout_value(state: BattleState, objective, rng,
     for _ in range(max_rounds):
         if current.is_terminal():
             break
-        mine = None
-        if current.active_toons():
-            mine = (model or party_mod.DEFAULT_MODEL).sample(current, 0, rng)
+        joint = greedy_plan(current, objective)
         nxt, _healed, _done = party_mod.step(
-            current, mine, mode=Mode.PICKUP, model=model, rng=rng)
+            current, joint[0], mode=Mode.COORDINATED, joint=joint, rng=rng)
         laff_lost = sum(max(0, before.laff - after.laff)
                         for before, after in zip(current.toons, nxt.toons))
         total += round_reward(
@@ -443,6 +632,9 @@ def evaluate(state: BattleState, depth: int = 1,
 
     best_value, best_plan = float("-inf"), None
     for plan in plans(state, mode, per_track, max_plans):
+        # Charged once per plan, not per sample: waste is a property of
+        # the choice, not of how the dice fell.
+        waste = waste_penalty(objective, state, plan)
         total = 0.0
         for _ in range(samples):
             nxt, _healed, _done = party_mod.step(
@@ -459,7 +651,7 @@ def evaluate(state: BattleState, depth: int = 1,
             future, _p = evaluate(nxt, depth - 1, mode, model, objective,
                                   samples, per_track, max_plans, leaf, rng)
             total += reward + future
-        value = total / samples
+        value = total / samples - waste
         if value > best_value:
             best_value, best_plan = value, plan
     if best_plan is None:

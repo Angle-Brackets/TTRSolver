@@ -317,3 +317,84 @@ against it.
 All of them take an `rng` now, defaulting to the global module so
 existing callers are unchanged. The same seed gives the same plan and
 the same value across processes.
+
+
+## SensiblePrior had three jobs and deserved one
+
+It was doing all of these, and only the first is a job for a model of
+*people*:
+
+1. **Predicting pickup teammates.** Legitimate and irreducible — you
+   cannot control a stranger, so the right object is a distribution over
+   what they might throw. `SensiblePrior` keeps this.
+2. **Playing out the rollout.** Wrong. Nothing is being *predicted*
+   here: the rollout exists to estimate what a position is worth, and a
+   position is worth what it is worth **under good play**, not under
+   average play.
+3. **Ranking levels within a track in `candidates`.** A shortlist
+   heuristic; harmless, since it only orders levels inside one track and
+   never decides which track wins.
+
+Job 2 is the one that mattered, and it is the mechanism behind "no Lure
+strategy ever appears". A Lure opening's payoff arrives two rounds later
+and was being handed to a policy that would not follow through — then
+scored on the follow-through. The plan was not being rejected, it was
+being *sabotaged by its own continuation*.
+
+`party_search.greedy_plan` now plays the rollout: for each toon in turn,
+the best action it can see one round ahead under the objective the
+search is actually optimising, with later toons seeing what the earlier
+ones chose so the team does not pile four gags onto a corpse. Greedy and
+myopic, and still far better than a guess about strangers.
+
+Measured on an under-geared four-toon position, mean rollout value over
+five seeds:
+
+| rollout policy | value | cost |
+| --- | --- | --- |
+| `SensiblePrior` (people-model) | 7.60 | 0.1s |
+| `greedy_plan` | **21.49** | 0.3s |
+
+Three times the cost for a policy that plays about three times better,
+which is the right trade for a value estimate.
+
+**This does not make the party numbers validated.** The rollout is still
+an estimate under a myopic policy, and a greedy policy is not a good
+one — it just clears the specific failure where the continuation was
+actively worse than the plan being tested.
+
+## Charging for waste, and why `scarcity_cost` was not enough
+
+`scarcity_cost` prices a gag by how few fit in a pouch. What it cannot
+see is whether the gag was *needed*: a Railroad costs 4.70 whether it
+was the only thing that would kill the cog or a 120-damage answer to a
+cog with 8 hit points left.
+
+`objective.waste_weight` charges the difference, computed as plain
+algebra rather than simulated — damage aimed at a cog minus the hit
+points it has, when positive. (Totalled per (track, target) first,
+because `calc_hp_bonus` gives same-track gags on one cog a combo bonus
+on their combined total; summing gags independently would understate
+both.) The charge scales with the wasted gag's scarcity, so throwing
+away a level 7 costs far more than throwing away a level 1.
+
+The "unless it is the only option" case falls out of the arithmetic
+instead of being special-cased:
+
+| gag | target | wasted |
+| --- | --- | --- |
+| level 7 Throw (120) | 8hp cog | **112** |
+| level 7 Throw (120) | 132hp cog | **0** |
+| level 1 Throw (6) | 8hp cog | 0 |
+
+Over 60 random party positions the plan changes in **48%** of them and
+level 7 choices fall from 5 to 3. Checked that it nudges rather than
+bans, the same check `scarcity_cost` got: given only a level 6 (100) and
+a level 7 (120) against a 110hp cog, the level 7 is still chosen —
+there the overkill really is only 10.
+
+`waste_weight` is **chosen, not derived**, like every weight in
+`objective`. It is consumed only on the party path: the solo search's
+labels come from `solve()` under this objective and `fitted.py`'s
+weights were fitted against those labels, so wiring it into
+`step_reward` would silently invalidate the fitted evaluator.

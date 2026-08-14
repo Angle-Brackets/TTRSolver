@@ -44,6 +44,22 @@ class Objective:
     # pouch, so one-per-pouch gags read as expensive without hard-coding
     # anything about levels.
     scarcity_cost: float = 0.0
+
+    # Charged for damage aimed at hit points that are not there, scaled
+    # by how scarce the wasted gag is -- see
+    # `party_search.waste_penalty`. Wasting a level 7 (one per pouch)
+    # must cost far more than wasting a level 1 (thirty per pouch),
+    # which a flat per-gag price cannot express: before this, a gag cost
+    # the same whether it was the only thing that would kill the cog or
+    # simply the biggest thing in the pouch.
+    #
+    # READ THIS BEFORE WIRING IT INTO `step_reward`. It is consumed ONLY
+    # by the party search. The solo search's labels come from `solve()`
+    # under this objective and `search/fitted.py`'s weights were fitted
+    # against those labels, so changing what `step_reward` returns
+    # silently invalidates the fitted evaluator. Keeping the term on the
+    # party path leaves the solo numbers bit-identical.
+    waste_weight: float = 0.0
     # Flat charge per round. The only term that makes the solver prefer
     # finishing sooner for its own sake; without it, a line that stalls
     # safely forever costs nothing but the gags it spends.
@@ -109,6 +125,29 @@ BALANCED = Objective(
     # only a Geyser one-shots, the Geyser is still chosen at every laff
     # level from 60 down to 8.
     scarcity_cost=4.0,
+
+    # Charged for overkill, scaled by the scarcity of what was thrown.
+    # `scarcity_cost` prices a gag by how few fit in a pouch; it cannot
+    # tell whether the gag was NEEDED. A Railroad is 4.70 whether it was
+    # the only thing that would kill the cog or a 120-damage answer to a
+    # cog with 8 hit points left.
+    #
+    # This charges the difference, and the "unless it is the only
+    # option" case falls out rather than being special-cased: a level 7
+    # into a 132hp cog wastes 0 and pays nothing extra, the same gag
+    # into an 8hp cog wastes 112 and pays nearly in full.
+    #
+    # Swept over 60 random party positions at samples=12: the plan
+    # changes in 48% of them, and level 7 choices fall from 5 to 3.
+    # Checked that it is a nudge and not a ban, the same check
+    # `scarcity_cost` got -- given only a level 6 (100 dmg) and a level 7
+    # (120) against a 110hp cog, the level 7 is still chosen, because
+    # there the overkill really is only 10.
+    #
+    # CHOSEN, not derived. Nothing in the game states it; it is a
+    # preference about how to spend a pouch, like every other weight
+    # here. Consumed only on the party path -- see the field comment.
+    waste_weight=20.0,
 )
 
 SPEEDRUN = Objective(

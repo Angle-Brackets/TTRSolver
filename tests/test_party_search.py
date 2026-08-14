@@ -322,3 +322,86 @@ class RewardTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WasteTest(unittest.TestCase):
+    """Overkill is charged, scaled by how scarce the wasted gag is."""
+
+    def position(self, hp):
+        counts = {(Track.THROW, 1): 2, (Track.THROW, 7): 2}
+        toon = ToonState(100, 100, {Track.THROW: 7}, dict(counts))
+        return BattleState(toons=[toon],
+                           cogs=[CogState("bean_counter", "cashbot", 4,
+                                          hp, data.cog_max_hp(4))])
+
+    def throw(self, level):
+        return Action(track=Track.THROW, level=level, target_index=0)
+
+    def test_a_level_7_into_a_nearly_dead_cog_is_mostly_waste(self):
+        wasted, _scarcity = ps.plan_waste(self.position(8), [self.throw(7)])
+        self.assertGreater(wasted, 100)
+
+    def test_the_same_gag_wastes_nothing_when_it_is_needed(self):
+        """The "unless it is the only option" case, falling out of the
+        arithmetic rather than being special-cased."""
+        wasted, _scarcity = ps.plan_waste(self.position(132), [self.throw(7)])
+        self.assertEqual(wasted, 0.0)
+
+    def test_a_cheap_gag_wasted_is_charged_far_less_than_a_dear_one(self):
+        """Scarcity is the point: one Railroad per pouch, thirty Cupcakes."""
+        from solver.search import objective as objective_mod
+
+        obj = objective_mod.BALANCED
+        dear = ps.waste_penalty(obj, self.position(8), [self.throw(7)])
+        cheap = ps.waste_penalty(obj, self.position(3), [self.throw(1)])
+        self.assertGreater(dear, cheap * 10)
+
+    def test_no_charge_when_the_weight_is_off(self):
+        import dataclasses
+        from solver.search import objective as objective_mod
+
+        off = dataclasses.replace(objective_mod.BALANCED, waste_weight=0.0)
+        self.assertEqual(
+            ps.waste_penalty(off, self.position(8), [self.throw(7)]), 0.0)
+
+
+class GreedyRolloutTest(unittest.TestCase):
+
+    def test_it_plays_better_than_the_people_model(self):
+        """The rollout estimates a position's value, so it wants good
+        play, not average play. `SensiblePrior` models what a STRANGER
+        throws -- right for pickup teammates, wrong here, and it is the
+        mechanism behind multi-round plans never scoring well.
+        """
+        from solver import party as party_mod
+        from solver.search import objective as objective_mod
+
+        obj = objective_mod.BALANCED
+        state = party(3)
+
+        def with_prior(seed):
+            rng = random.Random(seed)
+            cur, total = state.clone(), 0.0
+            for _ in range(12):
+                if cur.is_terminal():
+                    break
+                mine = party_mod.DEFAULT_MODEL.sample(cur, 0, rng)
+                nxt, _h, _d = party_mod.step(cur, mine, rng=rng)
+                lost = sum(max(0, b.laff - a.laff)
+                           for b, a in zip(cur.toons, nxt.toons))
+                total += ps.round_reward(
+                    obj, lost, ps._spent(cur, nxt), nxt.is_win(),
+                    nxt.is_terminal() and not nxt.is_win())
+                cur = nxt
+            return total
+
+        greedy = sum(ps.rollout_value(state, obj, random.Random(s))
+                     for s in range(8)) / 8
+        prior = sum(with_prior(s) for s in range(8)) / 8
+        self.assertGreater(greedy, prior)
+
+    def test_it_gives_every_standing_toon_a_decision(self):
+        plan = ps.greedy_plan(party(3), None.__class__ and
+                              __import__("solver.search.objective",
+                                         fromlist=["x"]).BALANCED)
+        self.assertEqual(len(plan), 3)
