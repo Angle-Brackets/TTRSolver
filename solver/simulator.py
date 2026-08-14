@@ -371,8 +371,31 @@ def _resolve_cog_phase(state: BattleState) -> int:
     return total_dmg
 
 
-def step(state: BattleState, action: Action, gag_cost_lambda: float = 0.1
-          ) -> Tuple[BattleState, float, bool]:
+def step(state: BattleState, action: Action, gag_cost_lambda=None,
+         objective=None) -> Tuple[BattleState, float, bool]:
+    """Sample one round, and score it exactly as the search would.
+
+    The reward is delegated to the objective rather than recomputed
+    here, because it was recomputed here and the two drifted. This
+    function and `outcomes.action_outcomes` are meant to price a round
+    identically -- that is what lets a sampled rollout be compared with
+    a searched line -- and keeping that true by writing the same
+    arithmetic in two places lasted exactly as long as nobody changed
+    an objective. Adding a scarcity term to the balanced preset broke
+    it immediately.
+
+    `gag_cost_lambda` is the old positional float and still works: it
+    builds an objective with that gag cost and nothing else, which is
+    what it always meant.
+    """
+    from .search import objective as objective_mod
+
+    if objective is None:
+        if gag_cost_lambda is None:
+            objective = objective_mod.DEFAULT
+        else:
+            objective = objective_mod.Objective(
+                gag_cost=float(gag_cost_lambda))
     next_state = state.clone()
 
     _, healed, dealt = _resolve_toon_action(next_state, action)
@@ -385,15 +408,13 @@ def step(state: BattleState, action: Action, gag_cost_lambda: float = 0.1
 
     next_state.round_num += 1
 
-    reward = -float(laff_lost) - gag_cost_lambda * float(action.level)
-    if next_state.is_win():
-        reward += 100.0
-    elif next_state.is_terminal():
-        # Any terminal state that is not a win is a loss, which now
-        # includes running out of ways to damage a cog and not only
-        # running out of laff. Kept identical to outcomes._accumulate so
-        # the sampler and the enumerator stay comparable --
-        # test_matches_sampled_step checks exactly that.
-        reward -= 100.0
+    # One implementation of what a round is worth, shared with
+    # outcomes._accumulate. A terminal state that is not a win is a
+    # loss, which includes running out of ways to damage a cog and not
+    # only running out of laff.
+    reward = objective.step_reward(
+        laff_lost, action.track, action.level,
+        won=next_state.is_win(),
+        lost=next_state.is_terminal() and not next_state.is_win())
 
     return next_state, reward, next_state.is_terminal()

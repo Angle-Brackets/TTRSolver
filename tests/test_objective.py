@@ -18,28 +18,76 @@ from solver.testing import two_flunky_fight
 
 
 class TestDefaultMatchesTheSimulator(unittest.TestCase):
-    def test_balanced_reproduces_step_rewards(self):
-        """A sampled rollout and a searched line must optimise the same
-        thing, or the benchmark measures one policy against another's
-        scoring."""
+    """`simulator.step` and `outcomes.action_outcomes` must price a round
+    identically, or a sampled rollout and a searched line are being
+    compared under different scoring.
+
+    They used to hold that by having the same arithmetic written out in
+    both places, which lasted until an objective changed: giving the
+    balanced preset a scarcity term broke it at once. `step` now
+    delegates to the objective, so the two agree by construction and
+    these tests check the convention rather than the copy.
+    """
+
+    def test_balanced_prices_a_round_as_documented(self):
+        from solver import data
+
         state = two_flunky_fight()
         action = Action(track=Track.THROW, level=3, target_index=0)
-        for prob, nxt, reward in outcomes.action_outcomes(state, action):
+        carry = data.gag(Track.THROW, 3).max_carry
+        price = 0.1 * 3 + 4.0 / carry          # gag_cost, then scarcity
+        for _prob, nxt, reward in outcomes.action_outcomes(state, action):
             laff_lost = state.toon.laff - nxt.toon.laff
-            expected = -float(laff_lost) - 0.1 * 3
+            expected = -float(laff_lost) - price
             if nxt.is_win():
                 expected += 100.0
-            elif nxt.toon.laff <= 0:
+            elif nxt.is_terminal():
                 expected -= 100.0
             self.assertAlmostEqual(reward, expected, places=9)
 
+    def test_step_and_action_outcomes_agree(self):
+        """The invariant itself, rather than a restatement of the sum.
+
+        `step` samples one of the outcomes `action_outcomes` enumerates,
+        so whatever it returns must appear among them.
+        """
+        import random
+
+        from solver import simulator
+
+        action = Action(track=Track.THROW, level=3, target_index=0)
+        for seed in range(25):
+            random.seed(seed)
+            state = two_flunky_fight()
+            _nxt, reward, _done = simulator.step(state, action)
+            allowed = [r for _p, _s, r in
+                       outcomes.action_outcomes(two_flunky_fight(), action)]
+            self.assertTrue(
+                any(abs(reward - r) < 1e-9 for r in allowed),
+                f"step scored {reward}, not among {sorted(set(allowed))}")
+
     def test_a_bare_float_still_works(self):
-        """Older callers passed a gag-cost lambda positionally."""
+        """Older callers passed a gag-cost lambda positionally. It means
+        "this gag cost and no other term", which is no longer the same
+        as the balanced preset."""
         state = two_flunky_fight()
         action = Action(track=Track.THROW, level=3, target_index=0)
         a = outcomes.action_outcomes(state, action, 0.1)
-        b = outcomes.action_outcomes(state, action, obj.BALANCED)
+        b = outcomes.action_outcomes(state, action, obj.Objective(gag_cost=0.1))
         self.assertEqual([r for _p, _s, r in a], [r for _p, _s, r in b])
+
+    def test_and_step_accepts_one_too(self):
+        import random
+
+        from solver import simulator
+
+        random.seed(0)
+        _s, cheap, _d = simulator.step(
+            two_flunky_fight(), Action(Track.THROW, 3, 0), 0.0)
+        random.seed(0)
+        _s, dear, _d = simulator.step(
+            two_flunky_fight(), Action(Track.THROW, 3, 0), 1.0)
+        self.assertGreater(cheap, dear)
 
 
 class TestPresets(unittest.TestCase):
@@ -101,9 +149,25 @@ class TestScarcityPricing(unittest.TestCase):
         wedding = conserve.gag_price(Track.THROW, 7)
         self.assertGreater(wedding, cupcake * 5)
 
-    def test_scarcity_is_off_by_default(self):
-        self.assertAlmostEqual(obj.BALANCED.gag_price(Track.THROW, 1), 0.1)
-        self.assertAlmostEqual(obj.BALANCED.gag_price(Track.THROW, 7), 0.7)
+    def test_scarcity_is_off_only_when_asked_for(self):
+        """It used to be off in `balanced`, which meant the default
+        preset balanced laff against speed and not against resources at
+        all -- a one-per-pouch Geyser cost 0.700 against a Seltzer
+        Bottle's 0.400, on a scale where winning is 100."""
+        bare = obj.Objective(gag_cost=0.1)
+        self.assertAlmostEqual(bare.gag_price(Track.THROW, 1), 0.1)
+        self.assertAlmostEqual(bare.gag_price(Track.THROW, 7), 0.7)
+
+    def test_balanced_now_notices_a_level_seven(self):
+        cupcake = obj.BALANCED.gag_price(Track.THROW, 1)
+        wedding = obj.BALANCED.gag_price(Track.THROW, 7)
+        self.assertGreater(wedding, cupcake * 3)
+
+    def test_but_less_sharply_than_conserve(self):
+        """The two must stay distinguishable, or one of them is
+        decoration."""
+        self.assertLess(obj.BALANCED.gag_price(Track.THROW, 7),
+                        obj.CONSERVE.gag_price(Track.THROW, 7))
 
     def test_sound_is_priced_higher_than_throw_at_the_same_level(self):
         """Sound's carry limits are lower across the board, so scarcity

@@ -87,7 +87,28 @@ class Objective:
 
 BALANCED = Objective(
     name="balanced",
-    description="The default. Mild gag cost, damage counted at face value.",
+    description="The default. Mild gag cost, some regard for scarcity, "
+                "damage counted at face value.",
+    # Scarcity was 0 here, which made "balanced" balance laff against
+    # speed and not against resources at all. A Geyser -- one per pouch
+    # -- priced at 0.700 against a Seltzer Bottle's 0.400, on a scale
+    # where winning is worth 100. Effectively free.
+    #
+    # It shows up because the solver optimises ONE battle. Spending an
+    # irreplaceable gag to end a fight now is genuinely optimal inside
+    # that horizon; the cost lands in the next fight, which is not
+    # modelled. `scarcity_cost` is the only lever that stands in for it,
+    # and it was switched off.
+    #
+    # Observed on a real position (Spin Doctor 104, Yesman 72): the
+    # level 7s won by 2.2 points over a Lure that costs almost nothing.
+    # Sweeping this, the choice flips between 1.0 and 2.0, so 4.0 is
+    # past the crossover with room, and far below CONSERVE's 12.
+    #
+    # Checked that it is a nudge and not a ban: against a 90hp cog that
+    # only a Geyser one-shots, the Geyser is still chosen at every laff
+    # level from 60 down to 8.
+    scarcity_cost=4.0,
 )
 
 SPEEDRUN = Objective(
