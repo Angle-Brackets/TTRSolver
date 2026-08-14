@@ -169,14 +169,34 @@ class DamageAttributionTest(unittest.TestCase):
 
 class ToonUpTest(unittest.TestCase):
 
-    def test_healing_goes_to_the_toon_who_threw_it(self):
+    def test_healing_goes_to_a_TEAMMATE_never_the_thrower(self):
+        """This test asserted the exact opposite, and was wrong.
+
+        [CONFIRMED] TTR wiki (Toon-Up): "Toons cannot use Toon-Up gags
+        to restore their own laff" -- they "restore each other's laff".
+        The model credited the heal to the thrower, which is the rule
+        backwards, and it is why a party at full laff kept being advised
+        to heal itself.
+        """
         state = BattleState(
             toons=[toon({(Track.TOON_UP, 1): 1}, laff=40), toon({}, laff=40)],
             cogs=[cog()])
         healed = simulator.apply_party_round(
             state, [Action(Track.TOON_UP, 1, None), None], hits=[True, True])
-        self.assertGreater(healed[0], 0)
-        self.assertEqual(healed[1], 0)
+        self.assertEqual(healed[0], 0, "the thrower healed themselves")
+        self.assertGreater(healed[1], 0, "the teammate was not healed")
+
+    def test_a_solo_toon_heals_nobody(self):
+        """Nobody else in the battle, so the gag is spent for nothing.
+        Solo Toon-Up is a wasted gag in TTR, not a self-heal."""
+        state = BattleState(toons=[toon({(Track.TOON_UP, 1): 1}, laff=40)],
+                            cogs=[cog()])
+        healed = simulator.apply_party_round(
+            state, [Action(Track.TOON_UP, 1, None)], hits=[True])
+        self.assertEqual(healed, [0])
+        self.assertEqual(
+            state.toons[0].gag_counts[(Track.TOON_UP, 1)], 0,
+            "the gag still has to be spent")
 
 
 class SoloEquivalenceTest(unittest.TestCase):

@@ -41,23 +41,27 @@ class HealOrderTest(unittest.TestCase):
         self.assertTrue(any(l < 80 for l in landed),
                         "a full-laff heal absorbed every cog attack")
 
-    def test_a_heal_below_the_cap_still_heals(self):
-        heal = Action(track=Track.TOON_UP, level=5, target_index=0)
-        state = BattleState(toons=[healer(10, 80)], cogs=[cog()])
+    def test_a_heal_below_the_cap_still_heals_the_TEAMMATE(self):
+        """Toon-Up heals someone else -- see test_party_round."""
+        heal = Action(track=Track.TOON_UP, level=5, target_index=1)
+        state = BattleState(toons=[healer(80, 80), healer(10, 80)],
+                            cogs=[cog()])
         nxt, healed, _done = party.step(
-            state, heal, mode=party.Mode.COORDINATED, joint=[heal])
-        self.assertGreater(healed[0], 0)
-        self.assertGreater(nxt.toons[0].laff, 10 - 1)
+            state, heal, mode=party.Mode.COORDINATED, joint=[heal, None])
+        self.assertEqual(healed[0], 0)
+        self.assertGreater(healed[1], 0)
 
     def test_a_heal_never_exceeds_max_laff(self):
-        heal = Action(track=Track.TOON_UP, level=5, target_index=0)
-        state = BattleState(toons=[healer(78, 80)], cogs=[cog()])
+        heal = Action(track=Track.TOON_UP, level=5, target_index=1)
+        state = BattleState(toons=[healer(80, 80), healer(78, 80)],
+                            cogs=[cog()])
         nxt, _healed, _done = party.step(
-            state, heal, mode=party.Mode.COORDINATED, joint=[heal])
-        self.assertLessEqual(nxt.toons[0].laff, 80)
+            state, heal, mode=party.Mode.COORDINATED, joint=[heal, None])
+        self.assertLessEqual(nxt.toons[1].laff, 80)
 
     def test_the_solo_path_agrees(self):
-        """`simulator.step` had the identical combined clamp."""
+        """`simulator.step` had the identical combined clamp -- and solo
+        the heal is zero anyway, since there is nobody else to heal."""
         heal = Action(track=Track.TOON_UP, level=5, target_index=0)
         seen = []
         for _ in range(40):

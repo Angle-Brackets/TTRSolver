@@ -47,10 +47,17 @@ class WhenPassIsOfferedTest(unittest.TestCase):
                                     (Track.THROW, 3): 1})
         self.assertEqual(passes(state), [])
 
-    def test_not_offered_when_toon_up_would_actually_heal(self):
+    def test_offered_even_when_hurt_because_solo_toon_up_heals_nobody(self):
+        """This expected the opposite, on a premise the wiki denies.
+
+        [CONFIRMED] TTR wiki (Toon-Up): "Toons cannot use Toon-Up gags
+        to restore their own laff." A solo toon has no teammate to heal,
+        so Toon-Up is never productive however low their laff -- and the
+        pass is correctly still on offer.
+        """
         state = stuck_fight(counts={(Track.LURE, 3): 2, (Track.TOON_UP, 3): 1},
                             laff=20)
-        self.assertEqual(passes(state), [])
+        self.assertEqual(len(passes(state)), 1)
 
     def test_offered_when_toon_up_is_the_only_gag_and_laff_is_full(self):
         """Healing a toon at full laff is not something to do."""

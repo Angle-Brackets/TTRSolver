@@ -121,7 +121,12 @@ def is_productive(state: BattleState, action: Action) -> bool:
     if action.is_pass:
         return False
     if action.track == Track.TOON_UP:
-        return state.toon.laff < state.toon.max_laff
+        # [CONFIRMED] TTR wiki (Toon-Up): "Toons cannot use Toon-Up gags
+        # to restore their own laff." So a heal is productive only when
+        # somebody ELSE is hurt -- and solo it is never productive at
+        # all, because there is nobody else in the battle.
+        return any(other.laff < other.max_laff and other.laff > 0
+                   for i, other in enumerate(state.toons) if i != 0)
     targets = [c for c in _targets_for(state, action) if not c.status.is_dead]
     if action.track == Track.LURE:
         # Re-luring a cog that is already lured only refreshes a timer
@@ -137,6 +142,13 @@ def is_productive(state: BattleState, action: Action) -> bool:
 
 
 def _targets_for(state: BattleState, action: Action) -> List[CogState]:
+    if action.track == Track.TOON_UP:
+        # A heal has no cog target. `target_index` names a TOON for this
+        # track, so indexing `cogs` with it was wrong twice over: it read
+        # the wrong list, and raised IndexError as soon as the party was
+        # larger than the number of cogs. Who gets healed is decided in
+        # `_apply_track_group`.
+        return []
     if action.target_index is not None:
         return [state.cogs[action.target_index]]
     return state.active_cogs()
@@ -229,7 +241,14 @@ def apply_toon_action(state: BattleState, action: Action,
         # rather, provide 20% of original values that are rounded up." So a
         # missed Toon-Up still heals -- it is the one track where a miss
         # isn't a no-op, which is why this sits above the `if not hit`.
-        return mechanics.calc_toon_heal(action.level, hit), dealt
+        #
+        # But it heals SOMEBODY ELSE. [CONFIRMED] TTR wiki (Toon-Up):
+        # "Toons cannot use Toon-Up gags to restore their own laff" --
+        # they "restore each other's laff". This path is the solo one,
+        # where there is nobody else, so the gag is spent and heals
+        # nothing. It used to return the full value to the thrower,
+        # which made a solo Toon-Up a self-heal the game does not offer.
+        return 0, dealt
 
     if not hit:
         return healed, dealt
@@ -578,7 +597,38 @@ def _apply_track_group(state: BattleState, track: Track, resolved,
             counts = dict(toon.gag_counts)
             counts[(action.track, action.level)] -= 1
             toon.gag_counts = counts
-            healed[toon_index] += mechanics.calc_toon_heal(action.level, hit)
+
+            # [CONFIRMED] TTR wiki (Toon-Up): "Toons cannot use Toon-Up
+            # gags to restore their own laff"; they "restore each
+            # other's laff". This credited the heal to the THROWER,
+            # which is the rule backwards -- and it is why a party at
+            # full laff kept being advised to heal itself.
+            amount = mechanics.calc_toon_heal(action.level, hit)
+            others = [i for i, other in enumerate(state.toons)
+                      if i != toon_index and other.laff > 0]
+            if not others:
+                continue
+
+            if data.gag(Track.TOON_UP, action.level).group:
+                # [CONFIRMED] "Group Toon-Up gags provide laff evenly
+                # between Toons."
+                #
+                # [TODO] Whether the even split rounds up or down, and
+                # whether the denominator counts the thrower, are not
+                # stated. Floor over the other toons is the reading that
+                # cannot overpay; if the wiki pins it down, fix it here.
+                share = amount // len(others)
+                for index in others:
+                    healed[index] += share
+            else:
+                # `target_index` names a TOON for this track. It used to
+                # be read as a cog index, which meant a heal aimed at
+                # teammate 1 indexed cogs[1] and raised IndexError once
+                # there were more toons than cogs.
+                target = action.target_index
+                if target is None or target not in others:
+                    target = others[0]
+                healed[target] += amount
         return
 
     if track in (Track.TRAP, Track.LURE):
