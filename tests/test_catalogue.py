@@ -179,3 +179,81 @@ class UnverifiedMatchTest(unittest.TestCase):
     def test_the_unverified_bar_sits_between_right_and_wrong(self):
         self.assertGreater(MAX_UNVERIFIED_DISTANCE, 0.028)
         self.assertLess(MAX_UNVERIFIED_DISTANCE, 0.132)
+
+
+class EliminationTest(unittest.TestCase):
+    """Deducing a cog the library has never seen.
+
+    The plate narrows to at most five and the library learns them one at
+    a time, so there is a moment in every group where all but one are
+    known. If none of those match, the answer is the remaining one --
+    the same reasoning as reading four names off a list of five.
+
+    It is why the library never has to be finished: the last cog in each
+    group needs no label, and cogs appear at several levels, so one that
+    is unknown in one group is often deducible in another.
+    """
+
+    def setUp(self):
+        self.dir = Path(tempfile.mkdtemp())
+        self.rng = np.random.default_rng(0)
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def noise(self):
+        """A signature nothing on screen will resemble."""
+        sig = self.rng.normal(0, 1, GRID + (4,))
+        sig[:, :, 3] = 1.0
+        return sig
+
+    def catalogue(self, entries):
+        cat = HeadCatalogue.__new__(HeadCatalogue)
+        cat.directory, cat.index_path = self.dir, self.dir / "index.json"
+        cat.entries = dict(entries)
+        return cat
+
+    def frame_and_plate(self):
+        frame = np.zeros((200, 200, 3), dtype=np.uint8)
+        frame[:, :] = (60, 60, 60)
+        frame[40:85, 40:106] = TEAL
+        frame[55:75, 55:90] = (200, 120, 90)     # a "head"
+        return frame, Plate(slot=(40, 40, 106, 85), filled=2000)
+
+    def test_the_last_unknown_is_deduced(self):
+        frame, plate = self.frame_and_plate()
+        pool = ["a_cog", "b_cog", "c_cog"]
+        cat = self.catalogue({"a_cog": self.noise(), "b_cog": self.noise()})
+        self.assertEqual(cat.eliminate(frame, plate, among=pool), "c_cog")
+
+    def test_two_unknowns_leave_a_choice(self):
+        frame, plate = self.frame_and_plate()
+        cat = self.catalogue({"a_cog": self.noise()})
+        self.assertIsNone(
+            cat.eliminate(frame, plate, among=["a_cog", "b_cog", "c_cog"]))
+
+    def test_a_lone_unknown_rules_out_nothing(self):
+        """With no known candidate there is no deduction, only a guess
+        with one option -- which is still a guess."""
+        frame, plate = self.frame_and_plate()
+        cat = self.catalogue({})
+        self.assertIsNone(cat.eliminate(frame, plate, among=["only_cog"]))
+
+    def test_a_known_candidate_that_might_be_it_blocks_the_deduction(self):
+        """If one of the known cogs resembles what is on screen, it has
+        not been ruled out, so nothing has been narrowed."""
+        frame, plate = self.frame_and_plate()
+        cat = self.catalogue({"a_cog": signature(frame, plate),
+                              "b_cog": self.noise()})
+        self.assertIsNone(
+            cat.eliminate(frame, plate, among=["a_cog", "b_cog", "c_cog"]))
+
+    def test_it_records_nothing(self):
+        """A signature is written once and consulted forever, so a wrong
+        entry poisons every later match while a wrong deduction costs
+        one battle. Storing is a human's job."""
+        frame, plate = self.frame_and_plate()
+        cat = self.catalogue({"a_cog": self.noise()})
+        cat.eliminate(frame, plate, among=["a_cog", "b_cog"])
+        self.assertEqual(sorted(cat.entries), ["a_cog"])
+        self.assertFalse((self.dir / "index.json").exists())

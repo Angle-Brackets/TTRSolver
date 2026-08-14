@@ -281,13 +281,19 @@ class BattleWatcher:
             # as 6 at score 0.709, over a runner-up of 0.670.
             if score < MIN_LEVEL_SCORE or level_margin < MIN_LEVEL_MARGIN:
                 level = None
-            match = self.catalogue.match(frame, plate,
-                                         among=candidates(dept, level))
+            pool = candidates(dept, level)
+            match = self.catalogue.match(frame, plate, among=pool)
+            cog = match.cog if match and match.confident else None
+            if cog is None:
+                # Nothing in the library resembles it. It may still be
+                # deducible: if every known candidate is ruled out and
+                # one is left, that is the cog. See
+                # HeadCatalogue.eliminate.
+                cog = self.catalogue.eliminate(frame, plate, among=pool)
             readings.append(CogReading(
                 index=i, department=dept, level=level,
                 health=health_fraction(frame, plate),
-                cog=match.cog if match and match.confident else None,
-                slot=plate.slot))
+                cog=cog, slot=plate.slot))
         return readings
 
     def _locate(self, frame: np.ndarray) -> List[Plate]:

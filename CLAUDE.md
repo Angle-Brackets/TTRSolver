@@ -116,6 +116,30 @@ against — `cogIcons` is the four department emblems, and the per-cog
 files in the phase archives are 3D texture skins. Hence the collected
 library in `solver/live/catalogue.py`.
 
+**`visualizer/assets/cog-*.png` is not a substitute, and this was
+measured rather than assumed.** Matching a plate against that art ranked
+the right cog first for 3 of 4 known plates, which sounds promising
+until you read the margins: 0.001–0.004, against the collected library's
+0.028 correct versus 0.132 wrong. Every candidate scores 0.12–0.15, so
+the art carries essentially no signal and the hits are coin flips — one
+of the four ranked its true cog last. The art is a different pose,
+light and background from the fixed-camera plate render, which is the
+mismatch the collected library exists to avoid. It stays useful for
+showing a human the candidates (`read_battle.comparison_sheet`).
+
+**The library never has to be finished.** `HeadCatalogue.eliminate`
+deduces a cog it has never seen: when every known candidate in the pool
+is ruled out and exactly one is left, that is the cog, by deduction
+rather than resemblance. It needs at least one known candidate (a lone
+unknown rules out nothing) and refuses if two are unknown or if any
+known one might still be it. So the last cog in each group needs no
+label, and since cogs appear at several levels, one that is unknown in
+one group is often deducible in another.
+
+It deliberately does not record what it deduces. A signature is written
+once and consulted forever, so a wrong entry poisons every later match,
+while a wrong deduction costs one battle.
+
 Read confidence is reported and must be honoured. `read_department`
 returns a margin over the runner-up, and a read below
 `MIN_DEPARTMENT_MARGIN` must not be used to narrow candidates —

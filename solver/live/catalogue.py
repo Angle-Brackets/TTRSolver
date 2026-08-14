@@ -223,6 +223,48 @@ class HeadCatalogue:
             return Match(best, best_distance)
         return Match(best, best_distance, ranked[1][1], ranked[1][0])
 
+    def eliminate(self, frame: np.ndarray, plate: Plate,
+                  among: Sequence[str]) -> Optional[str]:
+        """The only cog left, when every known candidate is ruled out.
+
+        The plate narrows a cog to at most five, and the library learns
+        them one at a time -- so there is a moment in every group where
+        all but one are known. If none of those match, the answer is the
+        remaining one, by deduction rather than resemblance. Nothing is
+        being guessed: it is the same reasoning as reading four names off
+        a list of five and taking the fifth.
+
+        This is why the head library does not have to be finished. The
+        last cog in each group never needs labelling, and cogs appear at
+        several levels, so one that is unknown in one group is often
+        deducible in another.
+
+        Refuses unless the deduction is airtight:
+
+        * exactly one candidate unknown -- two leaves a choice
+        * at least one candidate known -- a lone unknown rules out
+          nothing and would be a guess dressed as a deduction
+        * every known candidate genuinely ruled out, at
+          MAX_UNVERIFIED_DISTANCE. Correct matches measure 0.000-0.028
+          and wrong ones 0.132-0.157, so "none of these is it" is a
+          statement the numbers actually support.
+
+        Deliberately does NOT record what it works out. A signature is
+        written once and consulted forever, so a wrong entry poisons
+        every later match, while a wrong deduction costs one battle.
+        `read_battle --label` is where a human turns this into a stored
+        entry.
+        """
+        unknown = [c for c in among if c not in self.entries]
+        known = [c for c in among if c in self.entries]
+        if len(unknown) != 1 or not known:
+            return None
+        sig = signature(frame, plate)
+        for cog in known:
+            if distance(sig, self.entries[cog]) <= MAX_UNVERIFIED_DISTANCE:
+                return None              # one of the known ones may be it
+        return unknown[0]
+
     def missing(self, among: Optional[Iterable[str]] = None) -> List[str]:
         """Cogs with no reference yet."""
         every = among or [c.key for d in data.COG_DEPARTMENTS.values()
