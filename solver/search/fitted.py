@@ -40,11 +40,30 @@ from . import features
 # `value` falls back to the hand-written heuristic so the solver always
 # has something to score with.
 # Fitted by tools/fit_heuristic.py on 5,000 positions labelled with exact
-# solve(), validated against 526 larger hold-out positions:
+# solve(), validated against 406 larger hold-out positions:
 #
 #                       bias     MAE      r   ordering
-#     hand-written     -51.4    95.3   0.07       52%
-#     fitted            +0.9    25.5   0.86       91%
+#     hand-written     -52.6    95.4   0.06       52%
+#     fitted            -0.3    27.3   0.83       91%
+#
+# Refitted again after Toon-Up was corrected: it heals other toons and
+# never the thrower ([CONFIRMED] TTR wiki), so solo Toon-Up heals zero,
+# and the heal is capped before the cogs attack instead of sharing one
+# clamp with their damage. Both change what an exact label means, which
+# is why the cache digest over solver/simulator.py forced a re-label.
+#
+# THE REFIT BARELY MOVED, and that is the useful result. Only 3 of 17
+# weights shifted by more than 1.0, the largest being gags_ratio at
+# -1.40; laff_ratio moved 0.20 and trapped_with_lure 0.37. Scored on the
+# SAME fresh labels, the old and new weights are indistinguishable --
+# train MAE 20.9 for both, hold-out 27.3 for both, ordering within a
+# point. The staleness was real in principle and negligible in practice.
+#
+# The apparent regression from 25.5 to 27.3 is the hold-out SAMPLE, not
+# the model: 406 positions here against 526 before, drawn under changed
+# rules. Both weight sets score 27.3 on this one, which is what makes
+# that readable at all -- comparing a new model's MAE against a number
+# computed on different labels says nothing.
 #
 # Refitted after two rule changes that alter what an exact label means:
 # Trap's +10 accuracy bonus to Lure (calc_prev_hits_bonus, which used to
