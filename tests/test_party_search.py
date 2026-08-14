@@ -462,3 +462,47 @@ class GroupGagWasteTest(unittest.TestCase):
         wasted, _s = ps.plan_waste(
             state, [Action(track=Track.THROW, level=7, target_index=0)])
         self.assertGreater(wasted, 100)
+
+
+class NoOpHealTest(unittest.TestCase):
+    """A heal with nobody to heal must be refused, not merely priced.
+
+    This symptom -- a party at full laff opening with Toon-Up -- survived
+    three separate fixes aimed at it, and the position's value did not
+    move by 0.01 across any of them:
+
+      * holding was added, which made a no-op heal EQUAL to holding
+        rather than worse;
+      * the heal/damage clamp was corrected, which does not bite when
+        nobody is hurt;
+      * the heal was redirected from the thrower to teammates, which on
+        a full-laff party is one no-op replacing another.
+
+    Each was a real bug and none was this one.
+    """
+
+    def test_refused_when_every_teammate_is_at_full_laff(self):
+        state = BattleState(
+            toons=[toon({(Track.TOON_UP, 5): 2}), toon({(Track.THROW, 4): 2})],
+            cogs=[cog()])
+        for t in state.toons:
+            t.laff = t.max_laff
+        heal = Action(track=Track.TOON_UP, level=5, target_index=1)
+        self.assertFalse(ps._playable(state, [heal, None]))
+
+    def test_allowed_when_a_teammate_is_hurt(self):
+        state = BattleState(
+            toons=[toon({(Track.TOON_UP, 5): 2}), toon({(Track.THROW, 4): 2})],
+            cogs=[cog()])
+        state.toons[0].laff = state.toons[0].max_laff
+        state.toons[1].laff = 5
+        heal = Action(track=Track.TOON_UP, level=5, target_index=1)
+        self.assertTrue(ps._playable(state, [heal, None]))
+
+    def test_refused_solo_at_any_laff(self):
+        """Nobody else in the battle, so there is nobody to heal."""
+        state = BattleState(toons=[toon({(Track.TOON_UP, 5): 2})],
+                            cogs=[cog()])
+        state.toons[0].laff = 1
+        self.assertFalse(ps._playable(
+            state, [Action(track=Track.TOON_UP, level=5, target_index=0)]))

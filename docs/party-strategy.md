@@ -425,3 +425,65 @@ because over-investing in one cog *is* the choice being made.
 labels come from `solve()` under this objective and `fitted.py`'s
 weights were fitted against those labels, so wiring it into
 `step_reward` would silently invalidate the fitted evaluator.
+
+
+## What depth found, and the bug underneath it
+
+Run at depth 2 and 3 with the branching trimmed so it terminates:
+
+| position | depth 1 (s=128, 3 seeds) | depth 2 | depth 3 |
+| --- | --- | --- | --- |
+| healthy street group | +94.36 / +93.91 / +93.82, **three different plans** | +93.97 / +94.68 | +94.63 |
+| battered vs tough | +91.82 / +91.69 / +91.47 | **+93.31 / +93.13** | +93.73 |
+
+Two clean readings:
+
+* **Where the fight ends in one round, depth buys nothing.** The healthy
+  position's three depth-1 seeds disagree completely while landing
+  within **0.54** of each other. At that position the search is not
+  choosing, it is tie-breaking on variance, and no amount of depth fixes
+  a genuine tie.
+* **Where the fight lasts, depth is worth about 1.5 points.** The
+  battered position gains consistently at depth 2, and both depth-2
+  settings return the *same plan*: trap one cog, group Lure to spring it
+  and catch the rest, then Throws collecting the +50% lured bonus. That
+  is a recognisable Toontown line arrived at by search.
+
+Depth-1 seeds 1 and 2 on that position also agree exactly, on a plan
+containing a **stacked Lure** — the play banned two commits earlier and
+restored once the wiki was checked.
+
+### Three fixes that were all real and none of which was the bug
+
+Digging deep was worth more for what it exposed than for the numbers. A
+party at **full laff** kept being advised to open with Toon-Up. The
+symptom survived:
+
+1. **Adding the hold option** — which made a no-op heal *equal* to
+   holding rather than worse.
+2. **Fixing the heal/damage clamp.** `min(max_laff, laff + healed -
+   lost)` let a heal thrown at full laff absorb the round's damage. Real
+   bug; does not bite when nobody is hurt.
+3. **Redirecting the heal to teammates.** [CONFIRMED] TTR wiki: *"Toons
+   cannot use Toon-Up gags to restore their own laff."* The model
+   credited every heal to the thrower — the rule exactly backwards. Real
+   bug; on a full-laff party it replaces one no-op with another.
+
+The position's value did not move by **0.01** across any of them. The
+actual fix was to refuse the no-op outright, like a Drop on a lured cog:
+a heal with nobody to heal is not a cheap move, it is not a move. The
+healthy position then went from +93.56 (with Toon-Up) to **+94.63**
+without it — agreeing with what depth 2 and depth 3 had already found.
+
+The lesson worth keeping: *a symptom that survives a correct fix is
+evidence of a second cause, not of the fix being wrong.* Each of those
+three was independently correct, and stopping at any of them would have
+left the advice broken.
+
+### Knock-on
+
+Toon-Up now heals zero for a solo toon — there is nobody else in the
+battle — so it is a spent gag rather than a self-heal. `solve()` values
+move wherever Toon-Up appears, and `search/fitted.py`'s weights were
+fitted against those labels. **Refit before relying on their
+calibration.**

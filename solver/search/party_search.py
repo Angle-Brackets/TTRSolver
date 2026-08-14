@@ -320,6 +320,28 @@ def _playable(state: BattleState, plan) -> bool:
         elif action.target_index in lured_after:
             return False
 
+    # A heal with nobody to heal. [CONFIRMED] TTR wiki (Toon-Up):
+    # "Toons cannot use Toon-Up gags to restore their own laff" -- so if
+    # every OTHER standing toon is already at full laff, the gag is spent
+    # for literally nothing, exactly like a Drop on a lured cog.
+    #
+    # This is what kept a healthy party opening with Toon-Up, and it
+    # survived three fixes aimed at it. Holding was added, which made a
+    # no-op heal merely equal to holding rather than worse; the
+    # heal/damage clamp was corrected, which does not bite when nobody
+    # is hurt; and the heal was redirected to teammates, which on a
+    # full-laff party is one no-op replacing another -- the position's
+    # value did not move by so much as 0.01 across any of them. A no-op
+    # has to be refused outright, not merely priced.
+    for index, action in enumerate(plan):
+        if action is None or action.track != Track.TOON_UP:
+            continue
+        healable = [other for i, other in enumerate(state.toons)
+                    if i != index and other.laff > 0
+                    and other.laff < other.max_laff]
+        if not healable:
+            return False
+
     # [CONFIRMED] TTR wiki (Lure): "Lured Cogs are awakened by Sound
     # gags without a damage bonus." Luring in the same round as Sound
     # therefore buys nothing -- the Sound wakes what the Lure just
