@@ -363,10 +363,29 @@ def plan_waste(state: BattleState, plan) -> Tuple[float, float]:
 
     live = [(i, cog) for i, cog in enumerate(state.cogs)
             if not cog.status.is_dead]
+    if not live:
+        return 0.0, 0.0
+    toughest = max(cog.hp for _i, cog in live)
 
-    # (track, target) -> [damage, gag count], mirroring how the
-    # simulator groups a round.
-    groups: Dict[tuple, List[int]] = {}
+    # Single-target gags are grouped per (track, target); group gags are
+    # grouped per track, and their waste is counted ONCE against the
+    # toughest cog rather than per cog.
+    #
+    # THIS DISTINCTION IS THE WHOLE CORRECTNESS OF THE MEASURE, and the
+    # first version got it wrong. A group gag's damage is uniform by
+    # construction: the overkill it does to a weak cog is not a choice
+    # anyone made, it is what a group gag IS. Charging for it per cog
+    # meant 2 Foghorn + 2 Aoogah -- the known-best line on the maxed
+    # position, sized within 3 damage of the toughest cog -- was billed
+    # for 84 wasted damage and priced out of its own win.
+    #
+    # What a player actually chooses about a group gag is how big a one
+    # to bring, and the binding constraint is the toughest cog it has to
+    # kill. So the waste is `dealt - toughest`, once. 2 Foghorn + 2
+    # Aoogah (159 against 156) now wastes 3; 4 Foghorn (240) wastes 84;
+    # 4 Opera Singer (432) wastes 276. Which is the real ranking.
+    singles: Dict[tuple, List[int]] = {}
+    group: Dict[Track, List[int]] = {}
     for toon, action in zip(state.toons, plan):
         if action is None or action.track in (Track.TOON_UP, Track.LURE,
                                               Track.TRAP):
@@ -377,23 +396,25 @@ def plan_waste(state: BattleState, plan) -> Tuple[float, float]:
                 organic=toon.is_organic(action.track))
         except (NotImplementedError, ValueError):
             continue
-        targets = ([i for i, _c in live] if action.target_index is None
-                   else [action.target_index])
-        for index in targets:
-            slot = groups.setdefault((action.track, index), [0, 0])
-            slot[0] += dmg
-            slot[1] += 1
+        if action.target_index is None:
+            slot = group.setdefault(action.track, [0, 0])
+        else:
+            slot = singles.setdefault((action.track, action.target_index),
+                                      [0, 0])
+        slot[0] += dmg
+        slot[1] += 1
 
-    per_cog: Dict[int, int] = {}
-    for (_track, index), (damage, count) in groups.items():
-        total = damage + mechanics.calc_hp_bonus(damage, count)
-        per_cog[index] = per_cog.get(index, 0) + total
-
-    raw = sum(per_cog.values())
+    raw = 0
     useful = 0
-    for index, damage in per_cog.items():
+    for (_track, index), (damage, count) in singles.items():
+        total = damage + mechanics.calc_hp_bonus(damage, count)
+        raw += total
         if 0 <= index < len(state.cogs):
-            useful += min(damage, max(0, state.cogs[index].hp))
+            useful += min(total, max(0, state.cogs[index].hp))
+    for _track, (damage, count) in group.items():
+        total = damage + mechanics.calc_hp_bonus(damage, count)
+        raw += total
+        useful += min(total, toughest)
 
     price = 0.0
     for toon, action in zip(state.toons, plan):
@@ -435,6 +456,7 @@ def waste_penalty(objective, state: BattleState, plan) -> float:
     total = wasted + sum(
         cog.hp for cog in state.cogs if not cog.status.is_dead)
     fraction = wasted / total if total > 0 else 0.0
+
     return weight * fraction * scarcity
 
 

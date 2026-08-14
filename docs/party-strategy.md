@@ -393,6 +393,33 @@ bans, the same check `scarcity_cost` got: given only a level 6 (100) and
 a level 7 (120) against a 110hp cog, the level 7 is still chosen —
 there the overkill really is only 10.
 
+### The group-gag correction
+
+The first version charged waste per cog, and that was wrong in a way
+worth keeping written down. A group gag's damage is **uniform by
+construction** — the overkill it does to a weak cog is not a choice
+anyone made, it is what a group gag *is*. Billing for it punishes
+exactly the Sound lines the game is built around.
+
+Charged per cog, 2 Foghorn + 2 Aoogah — sized within 3 damage of the
+toughest cog — was billed **84** wasted damage and priced out of its own
+win: the maxed position stopped returning it and answered Geyser + Lure
++ Trap at +88.05 instead.
+
+What a player actually chooses about a group gag is *how big a one to
+bring*, and the binding constraint is the toughest cog it must kill. So
+group waste is counted once, against that:
+
+| plan | dealt | wasted | penalty |
+| --- | --- | --- | --- |
+| 2 Foghorn + 2 Aoogah | 159 | **3** | 0.13 |
+| 4 Foghorn | 240 | 84 | 5.28 |
+| 4 Opera Singer | 432 | 276 | 26.67 |
+
+That is the exhaustive sweep's ordering, and the maxed position returns
+2 Foghorn + 2 Aoogah again at +93.07. Single-target waste stays per cog,
+because over-investing in one cog *is* the choice being made.
+
 `waste_weight` is **chosen, not derived**, like every weight in
 `objective`. It is consumed only on the party path: the solo search's
 labels come from `solve()` under this objective and `fitted.py`'s

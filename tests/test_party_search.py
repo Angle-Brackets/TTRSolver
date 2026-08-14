@@ -405,3 +405,60 @@ class GreedyRolloutTest(unittest.TestCase):
                               __import__("solver.search.objective",
                                          fromlist=["x"]).BALANCED)
         self.assertEqual(len(plan), 3)
+
+
+class GroupGagWasteTest(unittest.TestCase):
+    """A group gag's overkill on a weak cog is not a choice anyone made.
+
+    Its damage is uniform by construction, so charging per cog bills a
+    plan for spread it cannot avoid. What a player chooses is how big a
+    group gag to bring, and the binding constraint is the toughest cog
+    it has to kill -- so the waste is counted ONCE against that.
+
+    Charged per cog, 2 Foghorn + 2 Aoogah (the known-best line on the
+    maxed position, sized within 3 damage of the toughest cog) was
+    billed 84 wasted damage and priced out of its own win.
+    """
+
+    def maxed(self):
+        counts = {(Track.SOUND, level): 2 for level in (4, 5, 6, 7)}
+        toons = [ToonState(137, 137, {Track.SOUND: 7}, dict(counts))
+                 for _ in range(4)]
+        cogs = [CogState("loan_shark", "cashbot", level,
+                         data.cog_max_hp(level), data.cog_max_hp(level))
+                for level in (10, 10, 10, 11)]
+        return BattleState(toons=toons, cogs=cogs)
+
+    def sound(self, level):
+        return Action(track=Track.SOUND, level=level, target_index=None)
+
+    def waste(self, levels):
+        return ps.plan_waste(self.maxed(),
+                             [self.sound(lv) for lv in levels])[0]
+
+    def test_a_well_sized_group_gag_wastes_almost_nothing(self):
+        # 2 Foghorn + 2 Aoogah deals 159 against a toughest cog of 156.
+        self.assertLess(self.waste([6, 6, 4, 4]), 10)
+
+    def test_an_oversized_one_is_still_charged(self):
+        # 4 Foghorn deals 240; 4 Opera Singer deals 432.
+        self.assertGreater(self.waste([6, 6, 6, 6]), 50)
+        self.assertGreater(self.waste([7, 7, 7, 7]), 200)
+
+    def test_the_ordering_matches_the_exhaustive_sweep(self):
+        self.assertLess(self.waste([6, 6, 4, 4]), self.waste([6, 6, 6, 6]))
+        self.assertLess(self.waste([6, 6, 6, 6]), self.waste([7, 7, 7, 7]))
+
+    def test_single_target_waste_is_still_per_cog(self):
+        """The group rule must not leak into single-target gags, where
+        over-investing in one cog IS the choice being made."""
+        counts = {(Track.THROW, 7): 2}
+        state = BattleState(
+            toons=[ToonState(100, 100, {Track.THROW: 7}, dict(counts))],
+            cogs=[CogState("bean_counter", "cashbot", 4, 8,
+                           data.cog_max_hp(4)),
+                  CogState("loan_shark", "cashbot", 9,
+                           data.cog_max_hp(9), data.cog_max_hp(9))])
+        wasted, _s = ps.plan_waste(
+            state, [Action(track=Track.THROW, level=7, target_index=0)])
+        self.assertGreater(wasted, 100)
