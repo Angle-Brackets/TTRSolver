@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import tempfile
 from pathlib import Path
 from typing import List, Optional
 
@@ -102,6 +103,61 @@ def report(records: List[dict]) -> None:
                   f"(score {r['level_score']:.2f} < {MIN_LEVEL_SCORE})")
 
 
+def comparison_sheet(frame, plate, pool: List[str],
+                     out: Optional[Path] = None) -> Optional[Path]:
+    """The head on screen, beside the art of every candidate.
+
+    Labelling from the plate alone is guesswork, and it produced a wrong
+    answer the first time it was tried: the portrait is 65x45 pixels,
+    which is enough to see a shape and not enough to name it. Put it
+    next to `visualizer/assets/cog-<dept>-<name>.png` and the same
+    decision becomes obvious -- a Lawbot read as an Ambulance Chaser was
+    plainly a Spin Doctor once the two were side by side, green head and
+    brown hair against white with a red cross.
+
+    Returns the path written, or None if PIL is missing or no candidate
+    art exists. The caller must stay usable either way: this is an aid
+    to the person answering, not a step in the pipeline.
+    """
+    try:
+        from PIL import Image, ImageDraw
+    except ImportError:                              # pragma: no cover
+        return None
+
+    root = Path(__file__).resolve().parents[2] / "visualizer" / "assets"
+    tiles, labels = [], []
+    x0, y0, x1, y1 = plate.slot
+    import numpy as np
+
+    tiles.append(Image.fromarray(np.asarray(frame)[y0:y1, x0:x1, :3])
+                 .resize((200, 200), Image.LANCZOS))
+    labels.append("ON SCREEN")
+    for key in pool:
+        dept = data.department_of(key)
+        path = root / f"cog-{dept}-{key}.png"
+        if not path.is_file():
+            continue
+        art = Image.open(path).convert("RGB")
+        # Top third: the plate shows a head, not a suit.
+        tiles.append(art.crop((0, 0, art.width, art.height // 3))
+                     .resize((200, 200), Image.LANCZOS))
+        labels.append(key)
+    if len(tiles) < 2:
+        return None
+
+    sheet = Image.new("RGB", (200 * len(tiles), 232), (18, 18, 18))
+    draw = ImageDraw.Draw(sheet)
+    for i, (tile, name) in enumerate(zip(tiles, labels)):
+        sheet.paste(tile, (200 * i, 30))
+        draw.text((200 * i + 6, 9), name, fill=(255, 230, 80))
+    # One file per cog. A single shared name overwrites the sheet for
+    # cog 1 while it may still be open on screen, which is exactly when
+    # it is being looked at.
+    out = out or Path(tempfile.gettempdir()) / "ttr_label_candidates.png"
+    sheet.save(out)
+    return out
+
+
 def label(frame, records: List[dict], catalogue: HeadCatalogue) -> int:
     """Ask about every plate whose cog is not confidently known."""
     added = 0
@@ -116,6 +172,11 @@ def label(frame, records: List[dict], catalogue: HeadCatalogue) -> int:
             continue
         print(f"\n  cog {i + 1}: {r['department'] or '?'} "
               f"level {r['level'] if r['level'] is not None else '?'}")
+        sheet = comparison_sheet(
+            frame, r["plate"], pool,
+            out=Path(tempfile.gettempdir()) / f"ttr_label_cog{i + 1}.png")
+        if sheet is not None:
+            print(f"     compare: {sheet}")
         for n, key in enumerate(pool, 1):
             known = " (already known)" if key in catalogue.entries else ""
             print(f"     {n}. {display(key)}{known}")

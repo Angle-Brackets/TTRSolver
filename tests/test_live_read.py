@@ -203,3 +203,43 @@ class RepairDeclinesTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LabellingAidTest(unittest.TestCase):
+    """Putting the on-screen head beside the candidate art.
+
+    Labelling from the plate alone is guesswork, and the first attempt
+    proved it: a Lawbot read as an Ambulance Chaser was plainly a Spin
+    Doctor once the two were side by side -- green head with brown hair
+    against white with a red cross. The portrait is 65x45 pixels, enough
+    to see a shape and not to name it.
+    """
+
+    @unittest.skipUnless(FIXTURE.is_file(), "needs the battle fixture")
+    def test_a_sheet_is_produced_for_a_real_plate(self):
+        import tempfile
+        from pathlib import Path
+
+        from solver.live.catalogue import candidates
+        from solver.live.read_battle import comparison_sheet
+
+        frame = np.asarray(Image.open(FIXTURE).convert("RGB"))
+        plate = vision.find_plates(frame)[0]
+        out = Path(tempfile.mkdtemp()) / "sheet.png"
+        got = comparison_sheet(frame, plate, candidates("bossbot", 6), out=out)
+        self.assertEqual(got, out)
+        with Image.open(out) as sheet:
+            # The head plus one tile per candidate that has art.
+            self.assertGreaterEqual(sheet.width, 200 * 2)
+            self.assertEqual(sheet.width % 200, 0)
+
+    def test_no_candidates_means_no_sheet(self):
+        """An aid that cannot help must not pretend to."""
+        from solver.live.read_battle import comparison_sheet
+
+        frame = np.zeros((80, 80, 3), dtype=np.uint8)
+
+        class Plate:
+            slot = (0, 0, 40, 30)
+
+        self.assertIsNone(comparison_sheet(frame, Plate(), []))
