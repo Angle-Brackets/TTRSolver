@@ -487,3 +487,60 @@ battle — so it is a spent gag rather than a self-heal. `solve()` values
 move wherever Toon-Up appears, and `search/fitted.py`'s weights were
 fitted against those labels. **Refit before relying on their
 calibration.**
+
+
+## Drop after Sound is a real play
+
+The rule refusing Drop on a lured cog was too strong. [CONFIRMED] TTR
+wiki (Lure): *"Lured Cogs are awakened by Sound gags"*, and
+`ATTACK_ORDER` puts SOUND before DROP — so a Sound this round un-lures
+the cog in time for the Drop to land on it. Every Sound gag is a group
+gag, so one anywhere in the plan covers every cog.
+
+It is a gamble rather than a guarantee: a Sound that misses leaves the
+cog lured and the Drop misses too. That is the line `_playable` draws —
+it refuses what **cannot** work, never what merely might not. Banning
+Drop-after-Sound was the same category of error as banning stacked Lure.
+
+## Making it fast enough to go deep
+
+Profiled on a real battered-party position at depth 1, `samples=64`:
+
+| | before | after |
+| --- | --- | --- |
+| whole search | 22.5s | **9.6s** |
+| `_greedy_score` calls | 117,352 | 53,508 |
+| `plans()` | 7.2s | *off the profile* |
+| `apply_party_round` calls | 188,648 | 75,882 |
+
+Wall clock on the two study positions: depth 1 at `samples=128` went
+8.1s → 2.1s and 12.4s → 7.1s; depth 2 at `plans=16` went 19.4s → 8.8s
+and 45.3s → 18.4s.
+
+Two changes, and both are the same idea — **rank by arithmetic, simulate
+only the survivors**:
+
+* `plans()` was running a simulated `_quick_score` on *every* playable
+  combo, ~50k of them, and then throwing almost all of the results away
+  in the truncation. It now collects first and scores at most
+  `SCORE_BUDGET` per track family. Per family, not globally, for exactly
+  the reason the truncation is per family.
+* `greedy_plan` was simulating a full round for every candidate of every
+  toon on every round of every rollout, to pick one action. It now
+  pre-ranks with `_cheap_score` — pure arithmetic — and simulates only
+  the best `GREEDY_SHORTLIST`. The simulation, which knows about
+  knockback, trap triggers and combo bonuses, still decides between the
+  finalists.
+
+`_cheap_score` gives Lure and Trap explicit credit rather than scoring
+them zero for dealing no damage. A damage-only pre-rank would have
+quietly deleted the Lure strategies for the fifth time.
+
+**The cost is real and small.** Values came down by roughly 0.3–0.4
+(battered depth 2: +93.31 → +92.96), which is inside the noise the same
+position shows across seeds. Plan *shapes* are unchanged — depth 2 still
+returns trap-one-cog, group-Lure, lured-Throws.
+
+Remaining time is 73% in `greedy_plan`, split between `_greedy_score`
+(4.1s) and `candidates` (1.5s, 20k calls rebuilding the same
+shortlists). Caching `candidates` is the next obvious win.

@@ -506,3 +506,34 @@ class NoOpHealTest(unittest.TestCase):
         state.toons[0].laff = 1
         self.assertFalse(ps._playable(
             state, [Action(track=Track.TOON_UP, level=5, target_index=0)]))
+
+
+class DropAfterSoundTest(unittest.TestCase):
+    """Drop on a lured cog is fine if something wakes it first.
+
+    [CONFIRMED] TTR wiki (Lure): "Lured Cogs are awakened by Sound
+    gags", and ATTACK_ORDER puts SOUND before DROP -- so a Sound this
+    round un-lures the cog in time for the Drop to land. Every Sound gag
+    is a group gag, so one anywhere in the plan covers every cog.
+
+    The rule banning Drop-on-lured was refusing this outright.
+    `_playable` exists to refuse what CANNOT work, not what might not: a
+    Sound that misses leaves the cog lured and the Drop misses too, but
+    that is a gamble, not a guarantee.
+    """
+
+    def position(self):
+        lured, other = cog(), cog()
+        lured.status.lured = True
+        return BattleState(
+            toons=[toon({(Track.SOUND, 4): 2}), toon({(Track.DROP, 5): 2})],
+            cogs=[lured, other])
+
+    def test_drop_on_a_lured_cog_is_allowed_when_a_sound_wakes_it(self):
+        sound = Action(track=Track.SOUND, level=4, target_index=None)
+        drop = Action(track=Track.DROP, level=5, target_index=0)
+        self.assertTrue(ps._playable(self.position(), [sound, drop]))
+
+    def test_and_still_refused_without_the_sound(self):
+        drop = Action(track=Track.DROP, level=5, target_index=0)
+        self.assertFalse(ps._playable(self.position(), [None, drop]))

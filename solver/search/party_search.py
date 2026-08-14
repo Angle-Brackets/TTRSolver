@@ -63,6 +63,17 @@ MAX_PLANS = 60
 # Playouts per plan at a chance node.
 SAMPLES = 8
 
+# How many candidate plans in each track family get a simulated
+# `_quick_score`. Everything past this is dropped unscored -- see
+# `plans`. Scoring every playable combo was 28% of the search and its
+# results were almost entirely discarded by the truncation.
+SCORE_BUDGET = 40
+
+# How many of a toon's candidate actions get a simulated `_greedy_score`
+# during a rollout. The rest are ranked by arithmetic alone -- see
+# `greedy_plan`.
+GREEDY_SHORTLIST = 4
+
 
 def candidates(state: BattleState, toon_index: int,
                per_track: int = PER_TRACK) -> List[Action]:
@@ -180,17 +191,32 @@ def plans(state: BattleState, mode: Mode = Mode.PICKUP,
     # just stops one track family monopolising the shortlist, so the
     # real sampled evaluation gets to see each family's best offering
     # and decide between them on merit.
-    strata: Dict[tuple, List] = {}
+    # Collect first, score second, and cap how many combos in each
+    # stratum are worth a simulated `_quick_score`. Scoring every
+    # playable combo meant ~50k round simulations on a real position,
+    # which was 28% of the whole search -- and all but a handful of
+    # those scores were thrown away by the truncation below anyway.
+    #
+    # The cap is per stratum, not global, for the same reason the
+    # truncation is: a global budget would be spent entirely on whichever
+    # family the enumeration happens to reach first. Within a stratum the
+    # order is the prior-ranked candidate order, so the first entries are
+    # the plausible ones rather than an arbitrary slice.
+    buckets: Dict[tuple, List] = {}
     for combo in combos:
         if not _playable(state, combo):
             continue
         signature = tuple(sorted({a.track for a in combo if a is not None},
                                  key=lambda t: t.name))
-        strata.setdefault(signature, []).append(
-            (_quick_score(state, combo), list(combo)))
+        bucket = buckets.setdefault(signature, [])
+        if len(bucket) < SCORE_BUDGET:
+            bucket.append(list(combo))
 
-    for rows in strata.values():
+    strata: Dict[tuple, List] = {}
+    for signature, bucket in buckets.items():
+        rows = [(_quick_score(state, combo), combo) for combo in bucket]
         rows.sort(key=lambda row: -row[0])
+        strata[signature] = rows
 
     out: List[Sequence[Optional[Action]]] = []
     order = sorted(strata, key=lambda sig: -strata[sig][0][0])
@@ -305,20 +331,33 @@ def _playable(state: BattleState, plan) -> bool:
         elif action.track == Track.SOUND:
             has_sound = True
 
-    for action in plan:
-        if action is None or action.track != Track.DROP:
-            continue
-        # [CONFIRMED] TTR wiki (Lure): "Drop gags always miss on lured
-        # Cogs." The simulator already resolves this correctly; the
-        # search was still spending plan slots proposing it, and a
-        # verified example had the Drop and the toon doing NOTHING give
-        # an identical board.
-        if action.target_index is None:
-            if all(i in lured_after for i, cog in enumerate(state.cogs)
-                   if not cog.status.is_dead):
+    # ... unless something in the same round WAKES the cog first.
+    # [CONFIRMED] TTR wiki (Lure): "Lured Cogs are awakened by Sound
+    # gags", and ATTACK_ORDER puts SOUND before DROP -- so a Sound this
+    # round un-lures the cog in time for the Drop to land on it. Every
+    # Sound gag is a group gag, so one anywhere in the plan covers every
+    # cog.
+    #
+    # That makes Sound-then-Drop a real play rather than a wasted gag,
+    # and this rule must not ban it. It is a gamble, not a guarantee --
+    # a Sound that misses leaves the cog lured and the Drop still misses
+    # -- but `_playable` exists to refuse things that CANNOT work, not
+    # things that might not.
+    if not has_sound:
+        for action in plan:
+            if action is None or action.track != Track.DROP:
+                continue
+            # [CONFIRMED] TTR wiki (Lure): "Drop gags always miss on
+            # lured Cogs." The simulator already resolves this
+            # correctly; the search was still spending plan slots
+            # proposing it, and a verified example had the Drop and the
+            # toon doing NOTHING give an identical board.
+            if action.target_index is None:
+                if all(i in lured_after for i, cog in enumerate(state.cogs)
+                       if not cog.status.is_dead):
+                    return False
+            elif action.target_index in lured_after:
                 return False
-        elif action.target_index in lured_after:
-            return False
 
     # A heal with nobody to heal. [CONFIRMED] TTR wiki (Toon-Up):
     # "Toons cannot use Toon-Up gags to restore their own laff" -- so if
@@ -556,8 +595,17 @@ def greedy_plan(state: BattleState, objective) -> List[Optional[Action]]:
     for index, toon in enumerate(state.toons):
         if toon.laff <= 0:
             continue
+        # Rank every candidate by arithmetic, then SIMULATE only the
+        # best few. This was simulating a full round for every candidate
+        # of every toon on every round of every rollout -- 117k
+        # simulations on one depth-1 search, 46% of its runtime -- to
+        # pick one action. The arithmetic gets the shortlist to roughly
+        # the right handful; the simulation, which knows about knockback,
+        # trap triggers and combo bonuses, still decides between them.
+        pool = candidates(working, index, per_track=3)
+        pool.sort(key=lambda a: -_cheap_score(working, index, a))
         best, best_score = None, 0.0     # 0.0 => holding is the floor
-        for action in candidates(working, index, per_track=3):
+        for action in pool[:GREEDY_SHORTLIST]:
             trial = [None] * len(state.toons)
             trial[index] = action
             score = _greedy_score(working, trial, objective)
@@ -576,6 +624,64 @@ def greedy_plan(state: BattleState, objective) -> List[Optional[Action]]:
             except (NotImplementedError, ValueError, KeyError):
                 pass
     return plan
+
+
+def _cheap_score(state: BattleState, index: int, action: Action) -> float:
+    """Rough worth of one action, by arithmetic and no simulation.
+
+    Only ever used to pick which candidates deserve a real
+    `_greedy_score`, so it may be crude -- but it must not be
+    systematically blind to a track, or that track never reaches the
+    shortlist. Hence Lure and Trap get explicit credit instead of
+    scoring zero for dealing no damage, which is the mistake that would
+    quietly delete the Lure strategies again.
+    """
+    from .. import data
+    from .. import mechanics
+
+    live = [cog for cog in state.cogs if not cog.status.is_dead]
+    if not live:
+        return 0.0
+    toon = state.toons[index]
+
+    try:
+        limit = data.gag(action.track, action.level).max_carry or 1
+    except (NotImplementedError, ValueError):
+        limit = 1
+    price = 20.0 / limit + action.level
+
+    if action.track == Track.TOON_UP:
+        missing = sum(other.max_laff - other.laff
+                      for i, other in enumerate(state.toons)
+                      if i != index and other.laff > 0)
+        return min(missing, 40.0) - price
+    if action.track == Track.LURE:
+        caught = (len(live) if action.target_index is None
+                  else 1) if any(not c.status.lured for c in live) else 0
+        return 25.0 * caught - price
+    if action.track == Track.TRAP:
+        return 20.0 - price
+
+    try:
+        damage = mechanics.calc_toon_damage(
+            action.track, action.level, organic=toon.is_organic(action.track))
+    except (NotImplementedError, ValueError):
+        return float("-inf")
+
+    targets = (live if action.target_index is None
+               else [state.cogs[action.target_index]]
+               if 0 <= action.target_index < len(state.cogs) else [])
+    score = 0.0
+    for cog in targets:
+        if action.track == Track.DROP and cog.status.lured:
+            continue        # always misses -- see `_playable`
+        hit = damage
+        if action.track in mechanics.KB_BONUS_TRACKS and cog.status.lured:
+            hit += int(damage * mechanics.KB_BONUS_MULTIPLIER)
+        score += min(hit, max(0, cog.hp))
+        if hit >= cog.hp:
+            score += 60.0
+    return score - price
 
 
 def _greedy_score(state: BattleState, trial, objective) -> float:
