@@ -303,12 +303,34 @@ def _normalise(mask: np.ndarray, height: int = 24) -> np.ndarray:
 
 
 def _overlap(a: np.ndarray, b: np.ndarray) -> float:
-    """Intersection over union of two binary masks, padded to match."""
+    """Intersection over union of two binary masks, centred and padded.
+
+    CENTRED, WHICH IT WAS NOT. Both masks used to be pinned to the top
+    left of the padded box, so a glyph 13 pixels wide compared against a
+    15-pixel template was offset by two -- and these glyphs are 13 to 18
+    pixels tall, so two pixels is most of a stroke.
+
+    It read as a template problem and was an alignment problem. A plate
+    saying "Level 8" scored 6 at 0.701 over 8 at 0.689, twice, on
+    different frames; every confusion in the sample was 6 against 8,
+    which differ chiefly in the top left -- exactly where a horizontal
+    misalignment does its damage. Centring the pad reads all six
+    labelled samples correctly and takes the worst correct margin from
+    0.012 to 0.073.
+
+    A grayscale comparison also fixes them, and separates less well
+    (0.026-0.065 against 0.073-0.407), so this stays binary.
+    """
     h, w = max(a.shape[0], b.shape[0]), max(a.shape[1], b.shape[1])
-    pa = np.zeros((h, w), bool)
-    pb = np.zeros((h, w), bool)
-    pa[:a.shape[0], :a.shape[1]] = a
-    pb[:b.shape[0], :b.shape[1]] = b
+
+    def padded(mask: np.ndarray) -> np.ndarray:
+        out = np.zeros((h, w), bool)
+        top = (h - mask.shape[0]) // 2
+        left = (w - mask.shape[1]) // 2
+        out[top:top + mask.shape[0], left:left + mask.shape[1]] = mask
+        return out
+
+    pa, pb = padded(a), padded(b)
     union = (pa | pb).sum()
     return float((pa & pb).sum()) / float(union) if union else 0.0
 

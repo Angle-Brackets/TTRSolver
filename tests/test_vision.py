@@ -238,3 +238,35 @@ class PlateSizeCeilingTest(unittest.TestCase):
         more than three times that, so a genuine plate may be much
         nearer than any yet captured and still be found."""
         self.assertGreater(V.MAX_SLOT_WIDTH_FRAC, 0.036 * 3)
+
+
+class OverlapAlignmentTest(unittest.TestCase):
+    """Template matching compares centred masks, not top-left ones.
+
+    A glyph 13 pixels wide against a 15-pixel template, both pinned to
+    the top left, is offset by two -- and these glyphs are 13 to 18
+    pixels tall, so two pixels is most of a stroke. It read as a
+    template problem and was an alignment problem: a plate saying
+    "Level 8" scored 6 at 0.701 over 8 at 0.689, on two separate frames.
+    """
+
+    def test_a_shifted_copy_of_a_shape_still_matches_itself(self):
+        small = np.zeros((10, 6), bool)
+        small[2:8, 1:5] = True
+        wide = np.zeros((10, 10), bool)
+        wide[2:8, 3:7] = True             # same blob, centred in a wider box
+        self.assertGreater(V._overlap(small, wide), 0.9)
+
+    def test_identical_masks_are_still_one(self):
+        m = np.zeros((8, 5), bool)
+        m[1:7, 1:4] = True
+        self.assertAlmostEqual(V._overlap(m, m), 1.0)
+
+    def test_disjoint_masks_are_still_zero(self):
+        a = np.zeros((8, 8), bool); a[0:2, 0:2] = True
+        b = np.zeros((8, 8), bool); b[6:8, 6:8] = True
+        self.assertEqual(V._overlap(a, b), 0.0)
+
+    def test_empty_masks_do_not_divide_by_zero(self):
+        z = np.zeros((4, 4), bool)
+        self.assertEqual(V._overlap(z, z), 0.0)
