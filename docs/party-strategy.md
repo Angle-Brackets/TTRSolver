@@ -603,3 +603,76 @@ evidence that the thing does not matter — it can equally mean the test
 cannot see it.** Dropping the simulation entirely, which that sweep
 suggested and which would have been the larger speedup, would have been
 a real regression.
+
+
+## A fifth truncation, this one self-inflicted
+
+Player feedback on four sample positions said the maxed team should not
+be spending a level 7. It was doing so in **9 of 10 seeds**, and the
+line it preferred was worse on both things the objective already
+measures:
+
+| line | gag price | wasted damage |
+| --- | --- | --- |
+| Opera7 + Foghorn6 (chosen) | 7.30 | 12 |
+| 2 Foghorn + 2 Aoogah | 6.80 | 3 |
+
+An `objective.rare_gag_premium` was added for it — level 7s are
+pouch-exempt and restocked on a different scale, which `scarcity_cost`
+cannot express because `1/max_carry` saturates. Sweeping it changed
+**nothing**: level 7 in 5/8 seeds at premium 0, and 5/8 at 4, 8 and 14.
+
+That flat response is the tell. The premium was working perfectly —
+`round_reward` took the level 7 plan from +92.70 to +72.70 — and the
+plan still won, because **2 Foghorn + 2 Aoogah was not on the shortlist
+at all.** No objective term can reach a plan that is not a candidate.
+
+The cause was `SCORE_BUDGET`, added while optimising: it kept the first
+40 combos per stratum, which is a **lexicographic prefix** — the same
+bug `max_plans` had, reintroduced one level down, deleting the same
+line. `combinations_with_replacement` reaches every combo built from
+Sound 7 before it reaches [Foghorn, Foghorn, Aoogah, Aoogah].
+
+Fixed by ranking each stratum with `_cheap_score` — pure arithmetic, no
+simulations — and scoring only the best `SCORE_BUDGET` of them. With
+that in place:
+
+| premium | level 7 in plan | most common plan |
+| --- | --- | --- |
+| 0.0 | 2/8 | SO4 SO4 SO6 SO6 |
+| 4.0 | **0/8** | SO4 SO4 SO6 SO6 |
+| 6.0 | 0/8 | SO4 SO4 SO6 SO6 |
+
+`SO4 SO4 SO6 SO6` is 2 Foghorn + 2 Aoogah. Most of the correction was
+the shortlist fix, not the premium; the premium finishes it. Set to 6.0,
+and it nudges rather than bans — on a toon at 12 laff where only a level
+7 kills the cog, the level 7 is still chosen at premium 0, 6 and 20.
+
+### The count is now five
+
+`PER_TRACK = 2`; top-left mask padding; `max_plans` lexicographic prefix;
+`max_plans` global top-N; and now `SCORE_BUDGET` lexicographic prefix.
+Every one produced confident, plausible, wrong output. The newest was
+introduced by an optimisation whose own benchmark looked clean, because
+the benchmark measured *time* and the plans it compared happened not to
+be the ones that were lost.
+
+## Losing a toon costs only their remaining laff
+
+Feedback on the survival position was that Toon-Up should have been
+thrown as insurance against the Lure missing. Checking, `round_reward`
+charges a toon dropping 6 laff to zero exactly six points — there is no
+term for losing a **combatant**, their pouch, and every action they
+would have taken.
+
+`objective.toon_lost_penalty` exists for it and is **left at 0.0**.
+Swept at 25, 50 and 90, Toon-Up usage on that position stayed at 2/8
+seeds — the plan kills all three cogs in the round, so no toon goes sad
+in the sampled outcomes and the term rarely fires. The gap is real; this
+lever does not close it, and shipping a weight that changes nothing
+measured would just be decoration.
+
+What the feedback is actually asking for is **variance reduction** — pay
+a gag to bound the downside if the Lure misses — and an expected-value
+search does not want that by construction. That is the same missing
+robustness term already recorded above for the 3-damage Sound margin.

@@ -60,6 +60,27 @@ class Objective:
     # silently invalidates the fitted evaluator. Keeping the term on the
     # party path leaves the solo numbers bit-identical.
     waste_weight: float = 0.0
+
+    # Extra charge for a gag that does not count against the pouch --
+    # `data.POUCH_EXEMPT_LEVEL`, i.e. level 7. `scarcity_cost` prices a
+    # gag as `1/max_carry`, which saturates at 1 and so treats a Railroad
+    # exactly like any other capacity-1 gag. It is not: it is exempt from
+    # the pouch and restocked on a different scale entirely.
+    #
+    # Without this the search spends level 7s freely, and rationally so
+    # INSIDE ONE BATTLE, which is the only horizon it has. On a maxed
+    # four-toon position a level 7 appeared in 9 of 10 seeds, beating a
+    # line that was both cheaper (6.80 against 7.30) and less wasteful
+    # (3 damage against 12) -- it was buying accuracy with a gag whose
+    # real cost lands in the next fight, which is not modelled.
+    rare_gag_premium: float = 0.0
+
+    # Charged when a toon goes sad. `laff_weight` alone prices a toon at
+    # 6 laff at six points, when what is actually lost is a combatant,
+    # their whole pouch, and every action they would have taken. Nothing
+    # restocks either, so this is closer to a partial loss than to
+    # damage.
+    toon_lost_penalty: float = 0.0
     # Flat charge per round. The only term that makes the solver prefer
     # finishing sooner for its own sake; without it, a line that stalls
     # safely forever costs nothing but the gags it spends.
@@ -148,6 +169,24 @@ BALANCED = Objective(
     # preference about how to spend a pouch, like every other weight
     # here. Consumed only on the party path -- see the field comment.
     waste_weight=20.0,
+
+    # Level 7s are pouch-exempt and restocked on a different scale, and
+    # `scarcity_cost` cannot see that -- it prices them as "one per
+    # pouch", the same as any capacity-1 gag.
+    #
+    # Swept on the maxed four-toon position, 8 seeds at samples=96:
+    # level 7 appears in 2/8 plans at 0.0 and 0/8 at 4.0 and above, and
+    # the most common plan becomes 2 Foghorn + 2 Aoogah. Set at 6.0, a
+    # little past the crossover.
+    #
+    # Checked that it nudges rather than bans, the same check the other
+    # two weights got: where a level 7 is the only gag that kills the
+    # cog, it is still chosen.
+    #
+    # NOTE most of this effect was not the premium. A shortlist bug was
+    # keeping 2 Foghorn + 2 Aoogah off the candidate list entirely, and
+    # while that held, no value of this changed a single plan.
+    rare_gag_premium=6.0,
 )
 
 SPEEDRUN = Objective(

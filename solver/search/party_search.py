@@ -245,15 +245,37 @@ def plans(state: BattleState, mode: Mode = Mode.PICKUP,
     # family the enumeration happens to reach first. Within a stratum the
     # order is the prior-ranked candidate order, so the first entries are
     # the plausible ones rather than an arbitrary slice.
-    buckets: Dict[tuple, List] = {}
+    # Keep the arithmetically best SCORE_BUDGET per stratum, NOT the
+    # first ones enumerated.
+    #
+    # Taking the first N was a lexicographic prefix, which is the same
+    # bug as the one `max_plans` had, reintroduced one level down while
+    # optimising -- and it deleted the same line. On the maxed position
+    # `combinations_with_replacement` reaches every combo built from
+    # Sound 7 before it reaches [Foghorn, Foghorn, Aoogah, Aoogah], so
+    # the Sound stratum's budget was spent entirely on level 7 plans and
+    # the known-best line was never scored. It was not outranked; it was
+    # not a candidate, and no objective term could reach it -- a
+    # `rare_gag_premium` that correctly took the level 7 plan from +92.70
+    # to +72.70 changed the chosen plan not at all.
+    #
+    # `_cheap_score` is pure arithmetic, so ranking every combo with it
+    # costs no simulations, and only the survivors get a simulated
+    # `_quick_score`.
+    cheap: Dict[tuple, List] = {}
     for combo in combos:
         if not _playable(state, combo):
             continue
         signature = tuple(sorted({a.track for a in combo if a is not None},
                                  key=lambda t: t.name))
-        bucket = buckets.setdefault(signature, [])
-        if len(bucket) < SCORE_BUDGET:
-            bucket.append(list(combo))
+        rough = sum(_cheap_score(state, i, a)
+                    for i, a in enumerate(combo) if a is not None)
+        cheap.setdefault(signature, []).append((rough, list(combo)))
+
+    buckets: Dict[tuple, List] = {}
+    for signature, rows in cheap.items():
+        rows.sort(key=lambda row: -row[0])
+        buckets[signature] = [combo for _r, combo in rows[:SCORE_BUDGET]]
 
     strata: Dict[tuple, List] = {}
     for signature, bucket in buckets.items():
@@ -565,16 +587,23 @@ def waste_penalty(objective, state: BattleState, plan) -> float:
 
 
 def round_reward(objective, laff_lost: int, spent, won: bool,
-                 lost: bool) -> float:
+                 lost: bool, toons_lost: int = 0) -> float:
     """What one party round was worth.
 
     The team's laff and the team's gags, priced by the same objective
     the solo search uses, so a party line and a solo line are at least
     denominated in the same units.
     """
+    from ..data.gags import POUCH_EXEMPT_LEVEL
+
     reward = -objective.laff_weight * float(laff_lost)
     for track, level, count in spent:
         reward -= count * objective.gag_price(track, level)
+        if level >= POUCH_EXEMPT_LEVEL:
+            reward -= count * getattr(objective, "rare_gag_premium", 0.0)
+    # A toon going sad is not just the laff they had left -- it is a
+    # combatant, their pouch, and every action they would have taken.
+    reward -= toons_lost * getattr(objective, "toon_lost_penalty", 0.0)
     reward -= objective.turn_cost
     if won:
         reward += objective.win_bonus
@@ -812,7 +841,9 @@ def rollout_value(state: BattleState, objective, rng,
         total += round_reward(
             objective, laff_lost, _spent(current, nxt),
             won=nxt.is_win(),
-            lost=nxt.is_terminal() and not nxt.is_win())
+            lost=nxt.is_terminal() and not nxt.is_win(),
+            toons_lost=sum(1 for b, a in zip(current.toons, nxt.toons)
+                           if b.laff > 0 and a.laff <= 0))
         current = nxt
     return total
 
@@ -852,10 +883,13 @@ def evaluate(state: BattleState, depth: int = 1,
             laff_lost = sum(
                 max(0, before.laff - after.laff)
                 for before, after in zip(state.toons, nxt.toons))
+            went_sad = sum(1 for before, after in zip(state.toons, nxt.toons)
+                           if before.laff > 0 and after.laff <= 0)
             reward = round_reward(
                 objective, laff_lost, _spent(state, nxt),
                 won=nxt.is_win(),
-                lost=nxt.is_terminal() and not nxt.is_win())
+                lost=nxt.is_terminal() and not nxt.is_win(),
+                toons_lost=went_sad)
             future, _p = evaluate(nxt, depth - 1, mode, model, objective,
                                   samples, per_track, max_plans, leaf, rng)
             total += reward + future
