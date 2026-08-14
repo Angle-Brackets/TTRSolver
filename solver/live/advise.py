@@ -49,16 +49,26 @@ RECOMPUTE_ON = {"battle_started", "cog_joined", "cog_defeated", "damage"}
 # The budget comes from the game rather than from taste: Toontown runs a
 # countdown of about thirty seconds for choosing a gag, so fifteen is
 # half the time available and still leaves the answer on screen well
-# before it is needed. What that buys, with pruning on and epsilon 0.03:
+# before it is needed. What that buys, measured on realistic endgame
+# loadouts with pruning on, epsilon 0.03 and the cog phase collapsed:
 #
-#     1 cog    depth 3   (0.78s)
-#     2 cogs   depth 2   (0.48s)
-#     3 cogs   depth 2   (4.76s)
-#     4 cogs   depth 2   (13.6s)
+#     1 cog    depth 4-7
+#     2 cogs   depth 3-4
+#     3 cogs   depth 3
+#     4 cogs   depth 2-3
 #
-# Fifteen rather than ten specifically so four cogs clear depth 2, which
-# is the hardest case the game routinely produces and the one where a
-# ply matters most.
+# Those replace an older set that said depth 3 for one cog and depth 2
+# for everything else. They were true when written and several rounds
+# of optimisation have since passed; leaving them stale made the search
+# look far weaker than it is, which matters because every argument for
+# replacing the engine is an argument about buying depth.
+#
+# How much depth is worth: on the same positions, going a ply deeper
+# changes the chosen move 15% of the time on two cogs and 40-42% on
+# three and four. That is an upper bound on the benefit -- a changed
+# move is not necessarily a better one, and exact values are not
+# tractable at this size to say which -- but it does mean the crowded
+# fights are where any further depth would earn its keep.
 DEFAULT_DEPTH = 4
 DEFAULT_BUDGET = 15.0
 
