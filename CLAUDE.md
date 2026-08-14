@@ -241,6 +241,13 @@ teammate will throw a level 7 into the same cog"; modelling a
 coordinated team as a distribution throws away the reason they
 coordinated.
 
+`docs/party-strategy.md` records what the first strategic trials found
+and — more usefully — what they cannot yet tell you. Two things to carry
+from it: the party evaluator is **saturated** on a maxed team, so a
+party search must not lean on it; and no result about **Lure** is
+trustworthy yet, because a one-ply coordinated search cannot find a
+multi-round plan and Lure is nothing but one.
+
 **`SensiblePrior` is a guess and must stay labelled as one.** It is a
 model of *people*, not a rule of the game — nothing in the wiki or the
 source can confirm what a stranger throws. Any pickup-mode number rests
