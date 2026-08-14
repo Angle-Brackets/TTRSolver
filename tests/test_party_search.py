@@ -12,7 +12,7 @@ import unittest
 from solver import data
 from solver.party import Mode
 from solver.search import party_search as ps
-from solver.state import BattleState, CogState, ToonState, Track
+from solver.state import Action, BattleState, CogState, ToonState, Track
 
 
 def cog(level=6, hp=None):
@@ -72,6 +72,27 @@ class PlanGenerationTest(unittest.TestCase):
             traps = [a.target_index for a in plan
                      if a is not None and a.track == Track.TRAP]
             self.assertEqual(len(traps), len(set(traps)))
+
+    def test_two_toons_do_not_lure_the_same_cog(self):
+        """Same rule, and it cost more to find.
+
+        The search answered a maxed four-toon position with two group
+        Lures in one round. Dropping either scored 8.6 higher over 300
+        playouts -- the second lure was simply a thrown-away gag.
+        """
+        for plan in ps.plans(party(4), Mode.COORDINATED):
+            lures = [a.target_index for a in plan
+                     if a is not None and a.track == Track.LURE]
+            self.assertEqual(len(lures), len(set(lures)))
+
+    def test_a_group_lure_excludes_every_other_lure(self):
+        """It covers everyone, so it collides in either order."""
+        state = party(2)
+        group = Action(track=Track.LURE, level=4, target_index=None)
+        single = Action(track=Track.LURE, level=4, target_index=0)
+        self.assertFalse(ps._playable(state, [group, single]))
+        self.assertFalse(ps._playable(state, [single, group]))
+        self.assertFalse(ps._playable(state, [group, group]))
 
 
 class SearchTest(unittest.TestCase):

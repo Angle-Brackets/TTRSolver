@@ -188,6 +188,7 @@ def _playable(state: BattleState, plan) -> bool:
     holding one.
     """
     trapped = set()
+    lured = set()
     for toon, action in zip(state.toons, plan):
         if action is None:
             continue
@@ -195,13 +196,30 @@ def _playable(state: BattleState, plan) -> bool:
             return False
         if toon.track_exp.get(action.track, 0) <= 0:
             return False
+        # A cog takes one trap and needs one lure. A second of either on
+        # the same target in the same round is a wasted gag, not a
+        # strategy, and should not be occupying a plan slot.
+        #
+        # Both of these were found the same way and the lure one was
+        # found second, after the trap check was already in: the search
+        # answered a maxed four-toon position with
+        #   trap/5 -> 1, lure/4 -> all, lure/4 -> all, squirt/7 -> all
+        # and dropping either lure scored 8.6 BETTER over 300 playouts.
+        # Redundancy inside a round is one rule, so it gets one check;
+        # target_index None means the group gag, which collides with
+        # itself.
         if action.track == Track.TRAP:
-            # A cog takes one trap. Two toons trapping the same cog is
-            # one wasted gag, and the search should not be spending a
-            # plan slot proposing it.
             if action.target_index in trapped:
                 return False
             trapped.add(action.target_index)
+        elif action.track == Track.LURE:
+            # A group lure covers everyone, so it collides with any
+            # other lure in the round in either order, not just with
+            # another group lure.
+            if action.target_index in lured or None in lured or (
+                    action.target_index is None and lured):
+                return False
+            lured.add(action.target_index)
     return True
 
 

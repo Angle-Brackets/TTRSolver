@@ -99,15 +99,33 @@ lands *inside* the round it is set up in, so it survives a bad
 continuation. LLKR needs three coordinated rounds and is given one.
 
 **Nothing here is evidence for or against Lure.** Testing it needs
-coordinated play sustained over a battle, which is the party tree
-search that does not exist yet.
+coordinated play sustained over a battle. The party tree search now
+exists (`solver/search/party_search.py`) but does not yet settle this,
+for the reason in the next section.
 
 ## What else is not trustworthy yet
 
-* **The party evaluator is saturated.** `fitted.value` is clamped to
-  +100 and, with four maxed pouches pooled, `damage_budget_ratio` pins
-  at its cap — so nearly every plan evaluates to exactly the ceiling
-  and it cannot rank them at all. Every number here comes from playing
+* **The party evaluator is saturated, and this is now measured.**
+  `fitted.value` is clamped to +100 and, with four maxed pouches pooled,
+  `damage_budget_ratio` pins at its cap. Evaluating the successor states
+  of three plans on the maxed position, 60 rollouts each:
+
+  | plan | mean leaf | battles ended | cogs left |
+  | --- | --- | --- | --- |
+  | 2 trap + group lure + group throw | 98.03 | 87% | 0.53 |
+  | 2 Foghorn + 2 Aoogah | 98.96 | 98% | 0.07 |
+  | 4 Foghorn | 96.73 | 95% | 0.20 |
+
+  A **2.3-point spread** across positions that differ by eleven points
+  of "did you actually win". At depth 1 the leaf is a near-constant, so
+  the ranking falls entirely to `round_reward` — laff and gag price —
+  and the search cannot see a continuation at all.
+
+  It shows: asked the maxed position, the search returns *2 trap +
+  group lure + group throw* at +93.3, but played to the end that line
+  scores **84.1** against 2 Foghorn + 2 Aoogah's **91.6**. The search's
+  own numbers are not calibrated and must not be quoted as results.
+  Every table in this document comes from playing the battle out. Every number here comes from playing
   the battle out instead. A party search must not lean on the evaluator
   until its features are refitted against party positions, and there
   are no party labels to refit against, because exact `solve()` cannot
