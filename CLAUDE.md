@@ -190,16 +190,34 @@ differ:
   keying on `toons[0]` alone would let the memo answer about one party
   with another's value.
 
+`search/features.py` pools over the toons still standing — laff, gags,
+the damage budget, the best single gag, and the group-gag flag. A sad
+toon contributes nothing: they have left the battle and their pouch is
+not coming back. `one_hit_from_death` stays per toon rather than per
+team, because a round that removes a toon is a step change and
+averaging it over the party hides it.
+
+**Solo feature vectors are bit-identical** across that change, checked
+over 300 sampled positions, which is what keeps the fitted weights
+valid — they were trained on solo positions and nothing has retrained
+them.
+
+**Party feature values are defined, not validated.** Exact `solve()`
+cannot reach a party position, so there are no labels to fit or check
+against. What the pooling buys is a vector that means something
+sensible instead of one that silently describes `toons[0]` and calls it
+the team. Treat any party number the evaluator produces as untested.
+
 Still solo and **must not be quietly generalised**:
 
-- Every feature in `search/features.py` reads one toon and one pouch.
-  `cannot_finish` and `damage_budget_ratio` are wrong for a party in the
-  same way `can_still_damage` was.
 - `mechanics.pick_cog_target` raises for a party. The wiki only says
   single attacks favour whoever dealt the most damage, gives no
   weighting, and `CogStatus` tracks no per-toon damage. Returning 0
   would mean every cog attacks the lead toon forever.
 - `simulator.legal_actions` enumerates one toon's moves.
+- The live readers see one toon: the Local API reports the client's own
+  laff and training, and nothing reads a teammate's laff meter off the
+  screen.
 
 ## What ends a battle
 

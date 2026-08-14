@@ -134,3 +134,93 @@ class FittedTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PartyFeaturesTest(unittest.TestCase):
+    """Features read the team, not `toons[0]`.
+
+    Two properties matter and they pull against each other. Solo vectors
+    must be unchanged to the bit, because the shipped weights were
+    fitted on solo positions and nothing has retrained them. Party
+    vectors must describe the party, rather than silently describing the
+    lead toon and calling it the team.
+
+    Party values are DEFINED here, not validated: exact solve cannot
+    reach a party position, so there are no labels to fit or check
+    against. What this buys is a vector that means something sensible.
+    """
+
+    def toon(self, laff=50, counts=None):
+        counts = counts or {(Track.THROW, 3): 2}
+        return ToonState(laff, 50, {t: 6 for t, _l in counts}, dict(counts))
+
+    def state(self, toons):
+        hp = data.cog_max_hp(4)
+        return BattleState(toons=toons,
+                           cogs=[CogState("flunky", "bossbot", 4, hp, hp)])
+
+    def named(self, state):
+        return features.as_dict(state)
+
+    def test_a_solo_state_is_unchanged_by_the_party_code(self):
+        """Pinned numerically elsewhere over 300 sampled positions; this
+        is the readable version."""
+        solo = self.named(self.state([self.toon(laff=25)]))
+        self.assertAlmostEqual(solo["laff_ratio"], 0.5)
+
+    def test_laff_is_pooled_over_the_team(self):
+        party = self.named(self.state([self.toon(laff=25),
+                                       self.toon(laff=50)]))
+        self.assertAlmostEqual(party["laff_ratio"], 75 / 100)
+
+    def test_a_sad_toon_contributes_no_laff_and_no_gags(self):
+        """They have left the battle; their pouch is not coming back."""
+        party = self.named(self.state([
+            self.toon(laff=50),
+            self.toon(laff=0, counts={(Track.THROW, 5): 10})]))
+        solo = self.named(self.state([self.toon(laff=50)]))
+        self.assertAlmostEqual(party["laff_ratio"], solo["laff_ratio"])
+        self.assertAlmostEqual(party["gags_ratio"], solo["gags_ratio"])
+
+    def test_gags_are_pooled(self):
+        one = self.named(self.state([self.toon()]))
+        two = self.named(self.state([self.toon(), self.toon()]))
+        self.assertGreater(two["gags_ratio"], one["gags_ratio"])
+
+    def test_the_damage_budget_counts_everybodys_pouch(self):
+        one = self.named(self.state([
+            self.toon(counts={(Track.THROW, 3): 1})]))
+        two = self.named(self.state([
+            self.toon(counts={(Track.THROW, 3): 1}),
+            self.toon(counts={(Track.THROW, 3): 1})]))
+        self.assertGreater(two["damage_budget_ratio"],
+                           one["damage_budget_ratio"])
+
+    def test_a_trap_on_one_toon_pairs_with_a_lure_on_another(self):
+        """The pair is what deals damage, and it does not have to be in
+        one pouch -- the same rule `can_still_damage` follows."""
+        split = self.named(self.state([
+            self.toon(counts={(Track.TRAP, 3): 3}),
+            self.toon(counts={(Track.LURE, 3): 3})]))
+        trap_only = self.named(self.state([
+            self.toon(counts={(Track.TRAP, 3): 3})]))
+        self.assertGreater(split["damage_budget_ratio"], 0.0)
+        self.assertEqual(trap_only["damage_budget_ratio"], 0.0)
+
+    def test_best_damage_is_the_hardest_anyone_can_throw(self):
+        party = self.named(self.state([
+            self.toon(counts={(Track.THROW, 1): 5}),
+            self.toon(counts={(Track.THROW, 5): 1})]))
+        weak = self.named(self.state([self.toon(counts={(Track.THROW, 1): 5})]))
+        self.assertGreater(party["best_gag_over_weakest_cog"],
+                           weak["best_gag_over_weakest_cog"])
+
+    def test_one_hit_from_death_is_about_the_weakest_toon(self):
+        """A round that removes a toon is a step change, and averaging
+        it over the party hides the thing the feature exists to see."""
+        party = self.named(self.state([self.toon(laff=50),
+                                       self.toon(laff=1)]))
+        self.assertEqual(party["one_hit_from_death"], 1.0)
+        healthy = self.named(self.state([self.toon(laff=50),
+                                         self.toon(laff=50)]))
+        self.assertEqual(healthy["one_hit_from_death"], 0.0)

@@ -90,6 +90,18 @@ FEATURE_NAMES: List[str] = [
 ]
 
 
+def _fighting(state: BattleState):
+    """The toons whose gags and laff still count.
+
+    A sad toon has left the battle: their pouch is not going to be
+    thrown and their laff is not going to be lost again. Falling back to
+    every toon when none is standing keeps this total-free for a
+    terminal state, which `fitted.value` short-circuits before asking
+    but which a caller may still hand straight to `extract`.
+    """
+    return state.active_toons() or state.toons
+
+
 def _damage_budget(state: BattleState) -> int:
     """Total damage the whole pouch can still deal, if every gag lands.
 
@@ -104,27 +116,31 @@ def _damage_budget(state: BattleState) -> int:
     Trap counts only when a Lure is carried, matching the terminal rule:
     a trap with nothing to spring it deals nothing.
     """
-    toon = state.toon
     n_alive = len(state.active_cogs()) or 1
-    has_lure = any(n > 0 for (t, _l), n in toon.gag_counts.items()
+    toons = _fighting(state)
+    # A Trap laid by one toon is sprung by anybody's Lure, so the pair
+    # counts across the party as well as within a pouch.
+    has_lure = any(n > 0 for toon in toons
+                   for (t, _l), n in toon.gag_counts.items()
                    if t == Track.LURE)
     total = 0
-    for (track, level), count in toon.gag_counts.items():
-        if count <= 0 or track in (Track.TOON_UP, Track.LURE):
-            continue
-        if track == Track.TRAP and not has_lure:
-            continue
-        if toon.track_exp.get(track, 0) <= 0:
-            continue
-        try:
-            damage = data.gag(track, level).damage_at(
-                1.0, organic=toon.is_organic(track))
-        except (NotImplementedError, ValueError):
-            continue
-        if not damage:
-            continue
-        reach = n_alive if simulator.is_group_action(track, level) else 1
-        total += damage * count * reach
+    for toon in toons:
+        for (track, level), count in toon.gag_counts.items():
+            if count <= 0 or track in (Track.TOON_UP, Track.LURE):
+                continue
+            if track == Track.TRAP and not has_lure:
+                continue
+            if toon.track_exp.get(track, 0) <= 0:
+                continue
+            try:
+                damage = data.gag(track, level).damage_at(
+                    1.0, organic=toon.is_organic(track))
+            except (NotImplementedError, ValueError):
+                continue
+            if not damage:
+                continue
+            reach = n_alive if simulator.is_group_action(track, level) else 1
+            total += damage * count * reach
     return total
 
 
@@ -145,35 +161,47 @@ def _best_damage(state: BattleState) -> int:
     that cog" into "it does not", which is the single distinction the
     feature exists to capture.
     """
-    toon = state.toon
     best = 0
-    for (track, level), count in toon.gag_counts.items():
-        if count <= 0 or track in (Track.TOON_UP, Track.LURE, Track.TRAP):
-            continue
-        try:
-            damage = data.gag(track, level).damage_at(
-                1.0, organic=toon.is_organic(track))
-        except (NotImplementedError, ValueError):
-            continue
-        if damage and damage > best:
-            best = damage
+    for toon in _fighting(state):
+        for (track, level), count in toon.gag_counts.items():
+            if count <= 0 or track in (Track.TOON_UP, Track.LURE, Track.TRAP):
+                continue
+            try:
+                damage = data.gag(track, level).damage_at(
+                    1.0, organic=toon.is_organic(track))
+            except (NotImplementedError, ValueError):
+                continue
+            if damage and damage > best:
+                best = damage
     return best
 
 
 def extract(state: BattleState) -> List[float]:
     """The feature vector for `state`, in `FEATURE_NAMES` order."""
-    toon = state.toon
-    max_laff = float(toon.max_laff) or 1.0
-    laff_ratio = toon.laff / max_laff
+    # Pooled over the toons still standing. With one toon every sum
+    # below is that toon's own number, so a solo feature vector is
+    # unchanged to the bit -- which matters, because the fitted weights
+    # were trained on solo positions and nothing has retrained them.
+    #
+    # PARTY VALUES ARE DEFINED HERE, NOT VALIDATED. Exact solve cannot
+    # reach a party position, so there are no labels to fit or check
+    # against; what these give is a vector that means something sensible
+    # instead of one that silently describes toons[0] and calls it the
+    # team. Treat any party number the evaluator produces as untested.
+    fighters = _fighting(state)
+    max_laff = float(sum(t.max_laff for t in fighters)) or 1.0
+    team_laff = float(sum(t.laff for t in fighters))
+    laff_ratio = team_laff / max_laff
 
     alive = [c for c in state.cogs if not c.status.is_dead]
     total_max_hp = sum(c.max_hp for c in state.cogs) or 1
     remaining_hp = sum(max(0, c.hp) for c in alive)
     cog_hp_ratio = remaining_hp / total_max_hp
 
-    gags = sum(n for n in toon.gag_counts.values() if n > 0)
-    lure_gags = sum(n for (t, _l), n in toon.gag_counts.items()
-                    if t == Track.LURE and n > 0)
+    gags = sum(n for t in fighters for n in t.gag_counts.values() if n > 0)
+    lure_gags = sum(n for t in fighters
+                    for (tr, _l), n in t.gag_counts.items()
+                    if tr == Track.LURE and n > 0)
 
     best = _best_damage(state)
     killable = sum(1 for c in alive if best >= c.hp)
@@ -190,9 +218,10 @@ def extract(state: BattleState) -> List[float]:
     lured = sum(1 for c in alive if c.status.lured)
     trapped = sum(1 for c in alive if c.status.trapped)
     n_alive = len(alive)
-    group = any(data.gag(t, l).group
-                for (t, l), n in toon.gag_counts.items()
-                if n > 0 and t not in (Track.TOON_UP,))
+    group = any(data.gag(tr, l).group
+                for toon in fighters
+                for (tr, l), n in toon.gag_counts.items()
+                if n > 0 and tr not in (Track.TOON_UP,))
 
     return [
         1.0,
@@ -208,14 +237,18 @@ def extract(state: BattleState) -> List[float]:
         # "not at all".
         min(2.0, best / weakest) if weakest else 2.0,
         min(2.0, incoming / max_laff),
-        1.0 if incoming >= toon.laff else 0.0,
+        # Someone is one round from going down. Per toon and not per
+        # team: a round of cog attacks that removes a toon is a step
+        # change, and averaging it over the party hides exactly the
+        # thing the feature exists to notice.
+        1.0 if incoming >= min(t.laff for t in fighters) else 0.0,
         (lured / n_alive) if n_alive else 0.0,
         # The conjunction: an armed trap is only worth something while a
         # Lure remains to spring it.
         float(trapped) if lure_gags > 0 else 0.0,
         float(trapped) if lure_gags == 0 else 0.0,
         1.0 if group else 0.0,
-        max(0.0, (toon.laff - incoming)) / max_laff,
+        max(0.0, (team_laff - incoming)) / max_laff,
         cog_hp_ratio * laff_ratio,
         # What `gags_ratio` was standing in for. A raw gag count knows
         # nothing about how hard the gags hit or how much cog is left,
