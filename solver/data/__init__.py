@@ -68,10 +68,13 @@ from .cashbot import CASHBOT, CASHBOT_COGS
 from .lawbot import LAWBOT, LAWBOT_COGS
 from .sellbot import SELLBOT, SELLBOT_COGS
 from .cogs import (
-    COG_DEPARTMENTS, all_cogs, cog, cog_max_hp, department_of,
+    COG_DEPARTMENTS, GROUP_ATTACKS, all_cogs, cog, cog_max_hp,
+    department_of, is_group_attack,
 )
 
 __all__ = [
+    "GROUP_ATTACKS",
+    "is_group_attack",
     "AV_PROP_ACCURACY",
     "AV_LURE_BONUS_ACCURACY",
     "AV_ORGANIC_PROP_ACCURACY",

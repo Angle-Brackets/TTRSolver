@@ -93,3 +93,44 @@ def all_cogs():
     for dept in COG_DEPARTMENTS.values():
         for c in dept:
             yield c
+
+
+# Cog attacks that hit EVERY toon rather than one.
+#
+# [CONFIRMED] TTR wiki, which maintains this as a pair of categories --
+# "Group Cog attacks" (14) and "Single Cog attacks" (54). Fetched via
+# the MediaWiki API:
+#
+#   api.php?action=query&list=categorymembers
+#           &cmtitle=Category:Group%20Cog%20attacks&cmlimit=500
+#
+# The two categories cover all 68 attack names in these tables exactly,
+# with nothing left over on either side, so every attack is classified
+# and none is guessed. Being group is a property of the ATTACK, not of
+# the cog throwing it, which is why this is one set rather than a column
+# in each department's table.
+GROUP_ATTACKS = frozenset({
+    "beguile",               # Beguile
+    "close_the_loop",        # Close the Loop
+    "flood_the_market",      # Flood the Market
+    "guilt_trip",            # Guilt Trip
+    "hostile_takeover",      # Hostile Takeover
+    "money_talks",           # Money Talks
+    "nickel_and_dime",       # Nickel and Dime
+    "paradigm_shift",        # Paradigm Shift
+    "power_trip",            # Power Trip
+    "quake",                 # Quake
+    "quash",                 # Quash
+    "shake",                 # Shake
+    "synergy",               # Synergy
+    "tremor",                # Tremor
+})
+
+
+def is_group_attack(attack_name: str) -> bool:
+    """Does this attack hit the whole team?
+
+    Solo it makes no difference -- the lone toon is both the target and
+    the group -- which is why the tables went so long without it.
+    """
+    return attack_name in GROUP_ATTACKS

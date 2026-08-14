@@ -367,11 +367,14 @@ def _party_cog_phase(state: BattleState, healed: List[int], rng) -> None:
     `mechanics.pick_cog_target`, which prefers whoever hurt this cog
     most.
 
-    [TODO] Group cog attacks. Some attacks hit every toon, and this
-    treats all of them as single-target, so a party takes less damage
-    here than it should. Fixing it needs a per-attack group flag, which
-    the cog tables do not carry -- the solo model never had a use for
-    one, since one toon is both the target and the group.
+    Group attacks hit every standing toon. [CONFIRMED] TTR wiki, which
+    classifies all 68 attacks into "Group Cog attacks" (14) and "Single
+    Cog attacks" (54) -- see `data.GROUP_ATTACKS`. Before this the party
+    took strictly less damage than the game deals, because every attack
+    was resolved as single-target.
+
+    One accuracy roll decides a group attack for the whole team, the
+    same shape as a toon's group gag: it either connects or it does not.
     """
     damage_taken = [0 for _ in state.toons]
     for cog in state.active_cogs():
@@ -383,8 +386,15 @@ def _party_cog_phase(state: BattleState, healed: List[int], rng) -> None:
             cog, attack_name, rng)
         if not mechanics.roll_hit(accuracy, rng):
             continue
-        target = mechanics.pick_cog_target(cog, state.toons, rng)
-        damage_taken[target] += damage
+        if data.is_group_attack(attack_name):
+            # Hits everyone still standing. No `pick_cog_target` call --
+            # there is no choice of target to make.
+            for index, toon in enumerate(state.toons):
+                if toon.laff > 0:
+                    damage_taken[index] += damage
+        else:
+            target = mechanics.pick_cog_target(cog, state.toons, rng)
+            damage_taken[target] += damage
 
     for index, toon in enumerate(state.toons):
         # Heal then damage, in that order -- see the note in

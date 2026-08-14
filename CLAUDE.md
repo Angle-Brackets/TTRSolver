@@ -270,10 +270,15 @@ Still solo and **must not be quietly generalised**:
 
 - `simulator.legal_actions` enumerates one toon's moves; the party
   search builds its own candidates on top of it.
-- Group cog attacks are [TODO]: `_party_cog_phase` treats every cog
-  attack as single-target, so a party takes less damage than it should.
-  The cog tables carry no per-attack group flag, because solo the toon
-  is both the target and the group.
+- ~~Group cog attacks~~ — done. [CONFIRMED] TTR wiki, which keeps two
+  categories, "Group Cog attacks" (14) and "Single Cog attacks" (54).
+  Between them they cover all 68 attack names in the tables exactly,
+  nothing unmatched either way, so no attack is guessed.
+  `data.GROUP_ATTACKS` holds the group set and `_party_cog_phase`
+  damages every standing toon for one. Being group is a property of the
+  ATTACK, not of the cog throwing it, which is why it is one set rather
+  than a column per department. The categories are fetched with
+  `action=query&list=categorymembers`, not a page parse.
 - The live readers see one toon: the Local API reports the client's own
   laff and training, and nothing reads a teammate's laff meter off the
   screen.
