@@ -43,8 +43,15 @@ from . import features
 # solve(), validated against 526 larger hold-out positions:
 #
 #                       bias     MAE      r   ordering
-#     hand-written     -51.0    95.9   0.07       52%
-#     fitted            +0.9    25.6   0.86       91%
+#     hand-written     -51.4    95.3   0.07       52%
+#     fitted            +0.9    25.5   0.86       91%
+#
+# Refitted after two rule changes that alter what an exact label means:
+# Trap's +10 accuracy bonus to Lure (calc_prev_hits_bonus, which used to
+# return 0 for a solo toon and should not have) and BALANCED gaining a
+# scarcity term. The fit barely moved -- hold-out MAE 25.6 -> 25.5 --
+# but `trapped_with_lure` rose from 30.49 to 31.85, which is the model
+# noticing that a placed Trap now helps the Lure that springs it land.
 #
 # These replace a set fitted before `can_still_damage` existed, when a
 # line that ran the pouch dry was scored by the heuristic instead of
@@ -62,23 +69,23 @@ from . import features
 # nothing else could. Hold-out MAE went 50.6 -> 25.6 on that change
 # alone.
 WEIGHTS: Optional[List[float]] = [
-         6.09791,   # bias
-        50.26370,   # laff_ratio
-       -13.59214,   # cog_hp_ratio
-       -20.79878,   # cogs_alive
-        12.75310,   # gags_ratio
-        12.26483,   # killable_ratio
-        -5.58024,   # best_gag_over_weakest_cog
-       -96.63270,   # incoming_ratio
-       -10.17342,   # one_hit_from_death
-        14.34086,   # lured_ratio
-        30.49091,   # trapped_with_lure
-        -2.00390,   # trapped_without_lure
-        -0.89792,   # has_group_gag
-       -58.60173,   # laff_after_worst_ratio
-        17.60506,   # cog_hp_x_laff
-        60.42902,   # damage_budget_ratio
-       -70.43923,   # cannot_finish
+         7.42666,   # bias
+        47.88699,   # laff_ratio
+       -14.66949,   # cog_hp_ratio
+       -21.39980,   # cogs_alive
+        14.29848,   # gags_ratio
+        12.73989,   # killable_ratio
+        -5.92877,   # best_gag_over_weakest_cog
+       -94.43436,   # incoming_ratio
+       -10.10696,   # one_hit_from_death
+        14.17673,   # lured_ratio
+        31.85107,   # trapped_with_lure
+        -2.25964,   # trapped_without_lure
+        -0.84992,   # has_group_gag
+       -56.92575,   # laff_after_worst_ratio
+        18.92012,   # cog_hp_x_laff
+        60.03783,   # damage_budget_ratio
+       -70.26441,   # cannot_finish
 ]
 
 
