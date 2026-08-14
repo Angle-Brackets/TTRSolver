@@ -542,5 +542,46 @@ position shows across seeds. Plan *shapes* are unchanged — depth 2 still
 returns trap-one-cog, group-Lure, lured-Throws.
 
 Remaining time is 73% in `greedy_plan`, split between `_greedy_score`
-(4.1s) and `candidates` (1.5s, 20k calls rebuilding the same
-shortlists). Caching `candidates` is the next obvious win.
+and `candidates`.
+
+### The next obvious win was not one
+
+`candidates` looked like the thing to cache or cheapen: 20k calls
+rebuilding the same shortlists. Letting `greedy_plan` rank within a
+track by `_cheap_score` instead of by `SensiblePrior` skips rotating the
+state and running the prior, and the profile duly fell 9.6s → 8.8s.
+
+On the wall clock of both study positions it bought **nothing** —
+2.2s against 2.1s, 7.0s against 7.1s, 18.4s against 18.4s — while
+dropping the battered position's depth-1 values by about 0.4. Reverted.
+The prior orders the levels of a track better than damage arithmetic
+does, which is the job it is still there for, and an 8% profile
+improvement that does not show up in wall clock is not an improvement.
+
+What *did* pay was smaller and duller: `_greedy_score` priced its action
+by diffing every toon's whole gag dictionary against a probe, to
+rediscover a fact the caller already had about a trial where one toon
+throws one gag.
+
+### How much the simulation was worth
+
+Sweeping `GREEDY_SHORTLIST` on the battered position:
+
+| shortlist | rollout quality | search | time |
+| --- | --- | --- | --- |
+| 1 | 74.88 | +91.84 | 3.51s |
+| 2 | 74.88 | +91.49 | 4.12s |
+| 4 | 74.88 | +91.53 | 5.25s |
+| 6 | 74.88 | +91.32 | 6.30s |
+
+Rollout quality is *identical to two decimal places* at every setting,
+and search values stay inside their own seed-to-seed spread, while cost
+rises steadily. Measured separately, `_cheap_score`'s pick agrees with
+the simulation's on **288 of 328** decisions (88%) — the simulation is
+mostly confirming the arithmetic.
+
+Set to **2**, not 1. Identical quality across four settings is a
+suspiciously clean result on one position, and the honest reading is
+that this position does not discriminate, not that the simulation never
+matters. A second candidate is a cheap hedge against that reading being
+wrong.

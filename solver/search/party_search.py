@@ -72,7 +72,29 @@ SCORE_BUDGET = 40
 # How many of a toon's candidate actions get a simulated `_greedy_score`
 # during a rollout. The rest are ranked by arithmetic alone -- see
 # `greedy_plan`.
-GREEDY_SHORTLIST = 4
+#
+# Swept on the battered position. Rollout quality came out at 74.88 for
+# EVERY value from 1 to 6, and search values stayed inside their own
+# seed-to-seed spread, while the cost fell steadily:
+#
+#     shortlist   rollout quality   search    time
+#             1             74.88   +91.84   3.51s
+#             2             74.88   +91.49   4.12s
+#             4             74.88   +91.53   5.25s
+#             6             74.88   +91.32   6.30s
+#
+# Measured separately, `_cheap_score`'s pick agrees with the
+# simulation's on 288 of 328 decisions (88%). So the simulation is
+# mostly confirming the arithmetic, and 2 keeps a second opinion for the
+# 12% at a fifth off the cost.
+#
+# NOT dropped to 1, despite 1 being fastest and scoring no worse here.
+# Identical quality to two decimal places across four settings is a
+# suspiciously clean result on ONE position, and the honest reading is
+# that this position does not discriminate rather than that the
+# simulation never matters. Keeping a second candidate is the cheap
+# hedge against that reading being wrong.
+GREEDY_SHORTLIST = 2
 
 
 def candidates(state: BattleState, toon_index: int,
@@ -84,11 +106,20 @@ def candidates(state: BattleState, toon_index: int,
     Drop. Ranking inside a track uses `SensiblePrior`, which is a guess
     about play and only decides which levels of a track make the
     shortlist, never which track wins.
+
+    Letting `greedy_plan` supply `_cheap_score` as the within-track
+    ranking instead was tried and reverted. It saved rotating the state
+    and running the prior -- 9.6s to 8.8s on the profile -- and then
+    bought NOTHING on the wall clock of either study position, while
+    dropping the battered position's depth-1 values by about 0.4. The
+    prior orders the levels of a track better than damage arithmetic
+    does, which is exactly the job it is still here for.
     """
     rotated = party_mod._as_actor(state, toon_index)
     prior = party_mod.SensiblePrior()
     order = {(a.track, a.level, a.target_index): i
              for i, a in enumerate(prior._candidates(rotated, 0))}
+    key = lambda a: order.get((a.track, a.level, a.target_index), 10 ** 6)
 
     by_track: Dict[Track, List[Action]] = {}
     for action in simulator.legal_actions(rotated):
@@ -98,8 +129,7 @@ def candidates(state: BattleState, toon_index: int,
 
     out: List[Action] = []
     for actions in by_track.values():
-        actions.sort(key=lambda a: order.get(
-            (a.track, a.level, a.target_index), 10 ** 6))
+        actions.sort(key=key)
         out.extend(actions[:per_track])
     return out
 
@@ -602,8 +632,18 @@ def greedy_plan(state: BattleState, objective) -> List[Optional[Action]]:
         # pick one action. The arithmetic gets the shortlist to roughly
         # the right handful; the simulation, which knows about knockback,
         # trap triggers and combo bonuses, still decides between them.
+        # Memoised because an action can be scored more than once while
+        # the pool is sorted.
+        seen: Dict[tuple, float] = {}
+
+        def score_of(action, _cache=seen, _index=index, _state=working):
+            key = (action.track, action.level, action.target_index)
+            if key not in _cache:
+                _cache[key] = _cheap_score(_state, _index, action)
+            return _cache[key]
+
         pool = candidates(working, index, per_track=3)
-        pool.sort(key=lambda a: -_cheap_score(working, index, a))
+        pool.sort(key=lambda a: -score_of(a))
         best, best_score = None, 0.0     # 0.0 => holding is the floor
         for action in pool[:GREEDY_SHORTLIST]:
             trial = [None] * len(state.toons)
@@ -700,9 +740,14 @@ def _greedy_score(state: BattleState, trial, objective) -> float:
     lured = sum(1 for before, after in zip(state.cogs, probe.cogs)
                 if not before.status.lured and after.status.lured
                 and not after.status.is_dead)
+    # Price the action directly. This called `_spent`, which diffs every
+    # toon's whole gag dictionary against the probe's -- forty-odd
+    # lookups to rediscover a fact the caller already had, on a trial
+    # where exactly one toon throws exactly one gag.
     price = 0.0
-    for track, level, count in _spent(state, probe):
-        price += count * objective.gag_price(track, level)
+    for action in trial:
+        if action is not None:
+            price += objective.gag_price(action.track, action.level)
     return (landed + 60.0 * killed + 20.0 * lured
             - 10.0 * price - 0.25 * wasted * scarcity)
 
