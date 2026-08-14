@@ -43,8 +43,20 @@ from . import features
 # solve(), validated against 406 larger hold-out positions:
 #
 #                       bias     MAE      r   ordering
-#     hand-written     -52.6    95.4   0.06       52%
-#     fitted            -0.3    27.3   0.83       91%
+#     hand-written     -51.2    94.3   0.07       53%
+#     fitted            -0.4    27.1   0.83       91%
+#
+# Refitted again after `turn_cost` became nonzero for every objective
+# (it was 0.0 outside SPEEDRUN, which let a party stall through a lure
+# window for free). That changes `step_reward`, so it changes what an
+# exact label is.
+#
+# Same shape of result as the Toon-Up refit: on the SAME fresh labels
+# the old and new weights are indistinguishable for accuracy -- train
+# MAE 20.8 both, hold-out 27.0 against 27.1, r and ordering identical.
+# What did move is BIAS, from +1.4 to -0.4 on hold-out, so the new fit
+# is the better centred of two otherwise equal models. That, plus
+# keeping provenance honest, is the whole case for shipping it.
 #
 # Refitted again after Toon-Up was corrected: it heals other toons and
 # never the thrower ([CONFIRMED] TTR wiki), so solo Toon-Up heals zero,
