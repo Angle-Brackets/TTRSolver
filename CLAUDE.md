@@ -254,10 +254,22 @@ source can confirm what a stranger throws. Any pickup-mode number rests
 on it. The interface takes a distribution so a model fitted from real
 play can replace it without touching the search.
 
+`solver/search/party_search.py` searches a party position: MAX over
+your action (pickup) or the team's joint action (coordinated), CHANCE
+over everything else. **It samples rather than enumerates** — a party
+round's outcome space is the accuracy rolls times each cog's attack
+times its choice of target times the teammates' actions — so its values
+are estimates and are **not comparable with `expectimax.solve`'s**.
+
+The invariant that catches most bugs in it: **coordinated can never
+score below pickup**, since it may choose everything pickup may and
+more. That inequality is what exposed `max_plans` truncating a
+lexicographic prefix of the joint enumeration.
+
 Still solo and **must not be quietly generalised**:
 
-- `simulator.legal_actions` enumerates one toon's moves, so no search
-  yet enumerates a party's.
+- `simulator.legal_actions` enumerates one toon's moves; the party
+  search builds its own candidates on top of it.
 - Group cog attacks are [TODO]: `_party_cog_phase` treats every cog
   attack as single-target, so a party takes less damage than it should.
   The cog tables carry no per-attack group flag, because solo the toon
