@@ -580,8 +580,26 @@ rises steadily. Measured separately, `_cheap_score`'s pick agrees with
 the simulation's on **288 of 328** decisions (88%) — the simulation is
 mostly confirming the arithmetic.
 
-Set to **2**, not 1. Identical quality across four settings is a
-suspiciously clean result on one position, and the honest reading is
-that this position does not discriminate, not that the simulation never
-matters. A second candidate is a cheap hedge against that reading being
-wrong.
+Set to **2**, not 1 — and checking more positions is what settled it,
+against the conclusion the single-position sweep invited. Adding how
+often the plan actually differs between k=1 and k=4:
+
+| position | plans differ | k=1 | k=2 | k=4 | k=6 |
+| --- | --- | --- | --- | --- | --- |
+| maxed vs 4 big | 0/6 | 87.17 | 87.17 | 87.17 | 87.17 |
+| midgame vs 3 | 9/14 | 75.35 | 74.49 | 74.49 | 74.49 |
+| weak vs 2 (long) | 0/17 | 88.35 | 88.35 | 88.35 | 88.35 |
+| **mixed cog hp** | **5/5** | **91.88** | **93.42** | 93.42 | 93.42 |
+
+`k >= 2` is identical everywhere, so nothing above 2 is worth paying
+for. But **k=1 loses 1.54** on the mixed-hp position, where the plan
+differs every single time. Uneven cog health is exactly where choosing
+between two similar-damage options matters, and exactly where
+arithmetic that cannot see knockback or trap triggers goes wrong.
+
+The flat 74.88 was an artefact of a position where the shortlist never
+changes the plan at all. **A measurement that does not vary is not
+evidence that the thing does not matter — it can equally mean the test
+cannot see it.** Dropping the simulation entirely, which that sweep
+suggested and which would have been the larger speedup, would have been
+a real regression.

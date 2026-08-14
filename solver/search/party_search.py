@@ -88,12 +88,25 @@ SCORE_BUDGET = 40
 # mostly confirming the arithmetic, and 2 keeps a second opinion for the
 # 12% at a fifth off the cost.
 #
-# NOT dropped to 1, despite 1 being fastest and scoring no worse here.
-# Identical quality to two decimal places across four settings is a
-# suspiciously clean result on ONE position, and the honest reading is
-# that this position does not discriminate rather than that the
-# simulation never matters. Keeping a second candidate is the cheap
-# hedge against that reading being wrong.
+# NOT dropped to 1, and checking that on more positions is what settled
+# it. The flat 74.88 above was an artefact of a position where the
+# shortlist never changes the plan at all. Across four positions, with
+# how often the plan differs between k=1 and k=4:
+#
+#     position           plans differ    k=1     k=2     k=4     k=6
+#     maxed vs 4 big            0/6    87.17   87.17   87.17   87.17
+#     midgame vs 3              9/14   75.35   74.49   74.49   74.49
+#     weak vs 2 (long)          0/17   88.35   88.35   88.35   88.35
+#     mixed cog hp              5/5    91.88   93.42   93.42   93.42
+#
+# k >= 2 is identical everywhere, so nothing above 2 is worth paying
+# for. But k=1 loses 1.54 on the mixed-hp position, where the plan
+# differs every single time -- uneven cog health is exactly where
+# choosing between two similar-damage options matters, and where the
+# arithmetic that cannot see knockback or trap triggers goes wrong.
+#
+# So the simulation earns its keep, on the positions that discriminate,
+# and one position showing it flat was not evidence that it does not.
 GREEDY_SHORTLIST = 2
 
 
