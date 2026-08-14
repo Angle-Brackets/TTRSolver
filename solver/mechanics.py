@@ -89,6 +89,30 @@ def calc_tgt_def(track: Track, target_cogs) -> int:
     return data.tgt_def(strongest.level, cog_rank(strongest))
 
 
+# [CONFIRMED] TTR wiki (Accuracy#PrevHits): "PrevHits is incremented by
+# the number of previous hits x 25 (excluding Trap) on the target(s) in
+# the current round, with a bonus of +75 being possible with three prior
+# hits."
+PREV_HIT_STEP = 25
+PREV_HIT_MAX = 75
+
+
+def calc_same_round_prev_hits(prior_hits: int) -> int:
+    """The stun bonus from attacks that already landed this round.
+
+    Zero for a solo toon, who acts once and has nothing to inherit from;
+    this is the half of PrevHits that only a party can earn.
+
+    `prior_hits` counts hits on this attack's target(s) earlier in the
+    same round that satisfy the wiki's conditions, which the caller
+    checks because they depend on tracks and targets rather than on a
+    number: the previous attack must have hit, must have been a
+    *different* track, and either attack must affect the group or both
+    must share a target. Trap is excluded from the count.
+    """
+    return min(PREV_HIT_MAX, max(0, prior_hits) * PREV_HIT_STEP)
+
+
 def calc_prev_hits_bonus(track: Track, level: int = 0, all_cogs=None) -> int:
     """PrevHits half of the `bonus` term.
 

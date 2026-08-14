@@ -17,11 +17,13 @@ source: `__updateLureTimeouts()` runs once per round before the cog
 attacks are picked, and the wake-up check is itself gated on the cog's
 round counter still being > 0.
 """
-from typing import List, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from . import data
 from . import mechanics
-from .state import BattleState, CogState, Action, Track
+from .state import (
+    ATTACK_ORDER, BattleState, CogState, Action, Track,
+)
 
 
 def is_group_action(track: Track, level: int) -> bool:
@@ -187,7 +189,7 @@ def toon_action_accuracy(state: BattleState, action: Action) -> int:
 
 
 def apply_toon_action(state: BattleState, action: Action,
-                       hit: bool) -> Tuple[int, int]:
+                       hit: bool, actor: int = 0) -> Tuple[int, int]:
     """Apply the toon's action given a known hit/miss, mutating `state`.
     Returns (laff_healed, damage_dealt_total).
 
@@ -196,7 +198,10 @@ def apply_toon_action(state: BattleState, action: Action,
     dice) and `outcomes.action_outcomes` (which enumerates both branches).
     Anything added here reaches the solver automatically -- don't fork it.
     """
-    toon = state.toon
+    # `actor` indexes state.toons. It defaults to 0, which is the whole
+    # of solo play, but a party round has to name whose gag this is --
+    # spending it from the wrong pouch is silent and wrong.
+    toon = state.toons[actor]
     if action.is_pass:
         # Nothing spent, nothing dealt. The round still happens -- the
         # caller runs the cog phase, which is the entire point of
@@ -418,3 +423,147 @@ def step(state: BattleState, action: Action, gag_cost_lambda=None,
         lost=next_state.is_terminal() and not next_state.is_win())
 
     return next_state, reward, next_state.is_terminal()
+
+
+# ---------------------------------------------------------------------
+# Party rounds
+# ---------------------------------------------------------------------
+
+def _prev_hits_apply(prev_group: bool, prev_targets, this_group: bool,
+                     this_targets) -> bool:
+    """Whether an earlier hit this round feeds this attack's stun bonus.
+
+    [CONFIRMED] TTR wiki (Accuracy#PrevHits). Both main conditions are
+    the caller's (the previous attack hit, and was a different track);
+    this is the sub-condition, of which any one suffices: the previous
+    attack affected the group, the current one does, or the two share a
+    target.
+    """
+    if prev_group or this_group:
+        return True
+    return bool(set(prev_targets) & set(this_targets))
+
+
+def apply_party_round(state: BattleState,
+                      actions: Sequence[Optional[Action]],
+                      hits: Optional[Sequence[bool]] = None) -> List[int]:
+    """Resolve every toon's action for one round, in the game's order.
+
+    `actions[i]` is `state.toons[i]`'s choice, or None to sit the round
+    out. Returns the laff healed for each toon. Cog damage lands on the
+    cogs in `state`.
+
+    THIS IS WHERE A PARTY STOPS BEING FOUR SOLO TOONS. Three effects
+    exist only here, and each is why the round cannot be resolved by
+    calling `apply_toon_action` four times:
+
+    * Order. Gags resolve by track -- Toon-Up, Trap, Lure, Sound, Throw,
+      Squirt, Drop -- not by who chose first. A Lure that lands before a
+      Throw is what makes the Throw a knockback.
+    * Combos. Same-track gags on the same cog in the same round have
+      their damage summed and then get `calc_hp_bonus` on the total.
+      Summed *then* bonused: four Throws at one cog are not four
+      separately-bonused Throws.
+    * Stun. A landed attack makes later attacks of a *different* track
+      more accurate, via `calc_same_round_prev_hits`.
+
+    Accuracy is rolled per attack at the moment it resolves, because the
+    stun bonus depends on what has already landed. Passing `hits` fixes
+    the rolls instead, which is what an enumerating caller wants.
+    """
+    healed = [0 for _ in state.toons]
+    order = sorted(
+        (i for i, a in enumerate(actions) if a is not None and not a.is_pass),
+        key=lambda i: ATTACK_ORDER.index(actions[i].track))
+
+    # Hits so far this round, for the stun bonus: one entry per landed
+    # attack, remembering what it was and whom it touched.
+    landed: List[Tuple[Track, bool, List[int]]] = []
+
+    index = 0
+    while index < len(order):
+        track = actions[order[index]].track
+        same_track = [i for i in order[index:]
+                      if actions[i].track == track]
+        index += len(same_track)
+
+        # Everything of one track resolves together, so a combo forms
+        # from gags that were chosen independently.
+        # Index cogs by identity. `list.index` compares by value and
+        # CogState is a dataclass, so two untouched cogs of the same type
+        # and level are equal -- which made a Throw aimed at cog 1 report
+        # itself as hitting cog 0, and then combo with the gag that
+        # really did. Found by a test asserting two cogs do not combo.
+        where = {id(c): i for i, c in enumerate(state.cogs)}
+        resolved = []
+        for toon_index in same_track:
+            action = actions[toon_index]
+            targets = [where[id(c)] for c in _targets_for(state, action)]
+            group = action.target_index is None
+            prior = sum(
+                1 for prev_track, prev_group, prev_targets in landed
+                if prev_track != track and prev_track != Track.TRAP
+                and _prev_hits_apply(prev_group, prev_targets, group, targets))
+            bonus = mechanics.calc_same_round_prev_hits(prior)
+            if hits is not None:
+                hit = bool(hits[toon_index])
+            else:
+                accuracy = toon_action_accuracy(state, action) + bonus
+                hit = mechanics.roll_hit(min(accuracy, data.ACCURACY_CAP))
+            resolved.append((toon_index, action, targets, group, hit))
+            if hit:
+                landed.append((track, group, targets))
+
+        _apply_track_group(state, track, resolved, healed)
+    return healed
+
+
+def _apply_track_group(state: BattleState, track: Track, resolved,
+                       healed: List[int]) -> None:
+    """Apply one track's worth of simultaneous gags, combos included."""
+    if track == Track.TOON_UP:
+        for toon_index, action, _t, _g, hit in resolved:
+            healed[toon_index] += mechanics.calc_toon_heal(action.level, hit)
+        return
+
+    if track in (Track.TRAP, Track.LURE):
+        # Neither deals damage directly, so neither combos; the existing
+        # single-action path already has their rules exactly.
+        for toon_index, action, _t, _g, hit in resolved:
+            apply_toon_action(state, action, hit, actor=toon_index)
+        return
+
+    # A damage track. Sum by target first, then bonus the total.
+    per_target: Dict[int, List[Tuple[int, int]]] = {}
+    for toon_index, action, targets, _g, hit in resolved:
+        toon = state.toons[toon_index]
+        # Spend the gag whether or not it landed.
+        counts = dict(toon.gag_counts)
+        counts[(action.track, action.level)] -= 1
+        toon.gag_counts = counts
+        if not hit:
+            continue
+        for cog_index in targets:
+            cog = state.cogs[cog_index]
+            if cog.status.is_dead:
+                continue
+            if track == Track.DROP and cog.status.lured:
+                continue          # Drop always misses a lured cog
+            damage = data.gag(track, action.level).damage_at(
+                1.0, organic=toon.is_organic(track))
+            per_target.setdefault(cog_index, []).append((toon_index, damage))
+
+    for cog_index, contributions in per_target.items():
+        cog = state.cogs[cog_index]
+        total = sum(d for _i, d in contributions)
+        total += mechanics.calc_hp_bonus(total, len(contributions))
+        if track in (Track.THROW, Track.SQUIRT) and cog.status.lured:
+            total += int(mechanics.calc_kb_bonus(track, True, total))
+        for toon_index, damage in contributions:
+            cog.status.record_damage(toon_index, damage)
+        cog.hp -= total
+        if cog.hp <= 0:
+            cog.hp = 0
+            cog.status.is_dead = True
+        elif track == Track.SOUND and cog.status.lured:
+            cog.status.clear_lure()

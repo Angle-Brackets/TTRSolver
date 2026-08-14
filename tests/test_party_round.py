@@ -1,0 +1,210 @@
+"""Resolving a round for more than one toon.
+
+Four solo toons are not a party, and three effects are the difference.
+Each exists only when several gags land in the same round, which is why
+calling `apply_toon_action` four times cannot produce it:
+
+* Order. Gags resolve by track, not by who chose first, so a Lure
+  landing before a Throw is what makes the Throw a knockback.
+* Combos. Same-track gags on the same cog have their damage summed and
+  then bonused on the total, rather than bonused individually.
+* Stun. A landed attack makes later attacks of a different track more
+  accurate.
+
+Hits are supplied rather than rolled throughout, so these test the
+resolution and not the dice.
+"""
+import unittest
+
+from solver import data, mechanics, simulator
+from solver.state import Action, BattleState, CogState, ToonState, Track
+
+
+def cog(level=6, hp=None):
+    mx = data.cog_max_hp(level)
+    return CogState("yesman", "bossbot", level,
+                    hp if hp is not None else mx, mx)
+
+
+def toon(counts, laff=80, organic=()):
+    return ToonState(laff, 95, {t: 7 for t, _l in counts}, dict(counts),
+                     organic_tracks=frozenset(organic))
+
+
+class ComboTest(unittest.TestCase):
+    """Same track, same cog, same round."""
+
+    def test_two_throws_beat_two_separate_throws(self):
+        counts = {(Track.THROW, 3): 1}
+        state = BattleState(toons=[toon(counts), toon(counts)],
+                            cogs=[cog(hp=200)])
+        pie = data.gag(Track.THROW, 3).damage_at(1.0)
+        simulator.apply_party_round(
+            state, [Action(Track.THROW, 3, 0), Action(Track.THROW, 3, 0)],
+            hits=[True, True])
+        dealt = 200 - state.cogs[0].hp
+        self.assertEqual(dealt, 2 * pie + mechanics.calc_hp_bonus(2 * pie, 2))
+        self.assertGreater(dealt, 2 * pie)
+
+    def test_the_bonus_is_on_the_total_not_per_gag(self):
+        counts = {(Track.THROW, 3): 1}
+        state = BattleState(toons=[toon(counts) for _ in range(3)],
+                            cogs=[cog(hp=300)])
+        pie = data.gag(Track.THROW, 3).damage_at(1.0)
+        simulator.apply_party_round(
+            state, [Action(Track.THROW, 3, 0)] * 3, hits=[True] * 3)
+        self.assertEqual(300 - state.cogs[0].hp,
+                         3 * pie + mechanics.calc_hp_bonus(3 * pie, 3))
+
+    def test_different_tracks_do_not_combo(self):
+        state = BattleState(
+            toons=[toon({(Track.THROW, 3): 1}), toon({(Track.SQUIRT, 3): 1})],
+            cogs=[cog(hp=200)])
+        throw = data.gag(Track.THROW, 3).damage_at(1.0)
+        squirt = data.gag(Track.SQUIRT, 3).damage_at(1.0)
+        simulator.apply_party_round(
+            state, [Action(Track.THROW, 3, 0), Action(Track.SQUIRT, 3, 0)],
+            hits=[True, True])
+        self.assertEqual(200 - state.cogs[0].hp, throw + squirt)
+
+    def test_different_cogs_do_not_combo(self):
+        counts = {(Track.THROW, 3): 1}
+        state = BattleState(toons=[toon(counts), toon(counts)],
+                            cogs=[cog(hp=200), cog(hp=200)])
+        pie = data.gag(Track.THROW, 3).damage_at(1.0)
+        simulator.apply_party_round(
+            state, [Action(Track.THROW, 3, 0), Action(Track.THROW, 3, 1)],
+            hits=[True, True])
+        self.assertEqual(200 - state.cogs[0].hp, pie)
+        self.assertEqual(200 - state.cogs[1].hp, pie)
+
+    def test_a_miss_is_not_part_of_the_combo(self):
+        counts = {(Track.THROW, 3): 1}
+        state = BattleState(toons=[toon(counts), toon(counts)],
+                            cogs=[cog(hp=200)])
+        pie = data.gag(Track.THROW, 3).damage_at(1.0)
+        simulator.apply_party_round(
+            state, [Action(Track.THROW, 3, 0), Action(Track.THROW, 3, 0)],
+            hits=[True, False])
+        self.assertEqual(200 - state.cogs[0].hp, pie)
+
+
+class OrderTest(unittest.TestCase):
+
+    def test_lure_resolves_before_throw(self):
+        """So the Throw is a knockback, whoever chose first."""
+        state = BattleState(
+            toons=[toon({(Track.THROW, 3): 1}), toon({(Track.LURE, 3): 1})],
+            cogs=[cog(hp=200)])
+        simulator.apply_party_round(
+            state, [Action(Track.THROW, 3, 0), Action(Track.LURE, 3, 0)],
+            hits=[True, True])
+        plain = data.gag(Track.THROW, 3).damage_at(1.0)
+        self.assertGreater(200 - state.cogs[0].hp, plain)
+
+    def test_every_gag_is_spent_whether_or_not_it_lands(self):
+        counts = {(Track.THROW, 3): 2}
+        state = BattleState(toons=[toon(counts), toon(counts)],
+                            cogs=[cog(hp=200)])
+        simulator.apply_party_round(
+            state, [Action(Track.THROW, 3, 0), Action(Track.THROW, 3, 0)],
+            hits=[True, False])
+        for t in state.toons:
+            self.assertEqual(t.gag_counts[(Track.THROW, 3)], 1)
+
+    def test_sitting_the_round_out_spends_nothing(self):
+        counts = {(Track.THROW, 3): 2}
+        state = BattleState(toons=[toon(counts), toon(counts)],
+                            cogs=[cog(hp=200)])
+        simulator.apply_party_round(
+            state, [Action(Track.THROW, 3, 0), None], hits=[True, True])
+        self.assertEqual(state.toons[1].gag_counts[(Track.THROW, 3)], 2)
+
+
+class StunTest(unittest.TestCase):
+    """A landed attack helps the next one of a different track."""
+
+    def test_prior_hits_are_worth_twenty_five_each(self):
+        self.assertEqual(mechanics.calc_same_round_prev_hits(0), 0)
+        self.assertEqual(mechanics.calc_same_round_prev_hits(1), 25)
+        self.assertEqual(mechanics.calc_same_round_prev_hits(2), 50)
+
+    def test_and_cap_at_seventy_five(self):
+        """The wiki: a bonus of +75 is possible with three prior hits."""
+        self.assertEqual(mechanics.calc_same_round_prev_hits(3), 75)
+        self.assertEqual(mechanics.calc_same_round_prev_hits(9), 75)
+
+    def test_a_group_attack_shares_the_bonus_either_way(self):
+        self.assertTrue(simulator._prev_hits_apply(True, [0], False, [1]))
+        self.assertTrue(simulator._prev_hits_apply(False, [0], True, [1]))
+
+    def test_otherwise_they_must_share_a_target(self):
+        self.assertTrue(simulator._prev_hits_apply(False, [0], False, [0]))
+        self.assertFalse(simulator._prev_hits_apply(False, [0], False, [1]))
+
+
+class DamageAttributionTest(unittest.TestCase):
+    """Who hurt the cog, for `pick_cog_target`."""
+
+    def test_each_toons_damage_is_recorded_against_the_cog(self):
+        state = BattleState(
+            toons=[toon({(Track.THROW, 3): 1}), toon({(Track.THROW, 5): 1})],
+            cogs=[cog(hp=300)])
+        simulator.apply_party_round(
+            state, [Action(Track.THROW, 3, 0), Action(Track.THROW, 5, 0)],
+            hits=[True, True])
+        recorded = state.cogs[0].status.damage_by_toon
+        self.assertEqual(set(recorded), {0, 1})
+        self.assertGreater(recorded[1], recorded[0])   # level 5 hits harder
+
+    def test_a_miss_records_nothing(self):
+        counts = {(Track.THROW, 3): 1}
+        state = BattleState(toons=[toon(counts), toon(counts)],
+                            cogs=[cog(hp=300)])
+        simulator.apply_party_round(
+            state, [Action(Track.THROW, 3, 0), Action(Track.THROW, 3, 0)],
+            hits=[True, False])
+        self.assertEqual(set(state.cogs[0].status.damage_by_toon), {0})
+
+
+class ToonUpTest(unittest.TestCase):
+
+    def test_healing_goes_to_the_toon_who_threw_it(self):
+        state = BattleState(
+            toons=[toon({(Track.TOON_UP, 1): 1}, laff=40), toon({}, laff=40)],
+            cogs=[cog()])
+        healed = simulator.apply_party_round(
+            state, [Action(Track.TOON_UP, 1, None), None], hits=[True, True])
+        self.assertGreater(healed[0], 0)
+        self.assertEqual(healed[1], 0)
+
+
+class SoloEquivalenceTest(unittest.TestCase):
+    """One toon through the party path matches the solo path.
+
+    Not a formality: if the two disagree, the party code is a second
+    implementation of the rules rather than a generalisation of them,
+    and they will drift.
+    """
+
+    def test_one_throw_deals_the_same_either_way(self):
+        counts = {(Track.THROW, 4): 2}
+        party = BattleState(toons=[toon(counts)], cogs=[cog(hp=200)])
+        solo = BattleState(toon=toon(counts), cogs=[cog(hp=200)])
+        simulator.apply_party_round(party, [Action(Track.THROW, 4, 0)],
+                                    hits=[True])
+        simulator.apply_toon_action(solo, Action(Track.THROW, 4, 0), True)
+        self.assertEqual(party.cogs[0].hp, solo.cogs[0].hp)
+        self.assertEqual(party.toon.gag_counts, solo.toon.gag_counts)
+
+    def test_a_lone_gag_gets_no_combo_bonus(self):
+        counts = {(Track.THROW, 4): 1}
+        state = BattleState(toons=[toon(counts)], cogs=[cog(hp=200)])
+        simulator.apply_party_round(state, [Action(Track.THROW, 4, 0)],
+                                    hits=[True])
+        self.assertEqual(200 - state.cogs[0].hp,
+                         data.gag(Track.THROW, 4).damage_at(1.0))
+
+
+if __name__ == "__main__":
+    unittest.main()
