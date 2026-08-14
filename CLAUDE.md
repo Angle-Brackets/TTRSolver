@@ -43,6 +43,15 @@ curl "https://toontownrewritten.wiki/api.php?action=parse&page=Lure&prop=wikitex
 
 ## The no-guessing rule
 
+**One value is deliberately [ASSUMED] rather than [CONFIRMED]**, and it
+is the only one: `mechanics.MULTI_LURE_ACCURACY_BONUS`. The TTR v4.0.0
+patch notes state that simultaneous Lures grant a "(20/15/10)%" bonus
+"depending on the gag level discrepancies" but never say which gap
+selects which value. The owner authorised mapping them onto gaps of 0,
+1 and 2+ after reading the notes. That is a bet on bucket boundaries,
+taken knowingly, and it is tagged so it can never read as data. If
+measurement contradicts it, change the table and nothing else.
+
 - **Never fill a `[TODO]` with a plausible-looking value.** If a number
   isn't confirmed from the wiki, leave it `None`, tag it `[TODO]`, and make
   the code raise rather than silently substitute.

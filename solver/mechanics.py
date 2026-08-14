@@ -635,8 +635,26 @@ DROP_MISSES_LURED_COGS = None
 #   * OPEN TOONTOWN IS THE WRONG LEAD HERE, unusually. This is a TTR
 #     4.0.0 addition ("now grant"), so it postdates the Toontown Online
 #     code entirely and nothing in that lineage can confirm it.
-# Per the no-guessing rule this stays None until a source states the
-# mapping.
+# [ASSUMED] -- NOT [CONFIRMED], and the distinction is the point.
+#
+# The project owner authorised filling this in on the balance of
+# evidence, having read the v4.0.0 patch notes directly. Three
+# independent statements point the same way:
+#   * "depending on the gag level discrepancies of the additional Lure
+#     gags" -- the gap is what indexes it;
+#   * "with the bonus being smaller if lower leveled Lure gags are
+#     used" -- a cheap Lure beside a dear one is the wide-gap case;
+#   * the player's own reading, that it is inversely proportional to
+#     the gap.
+# Mapping the three published values onto gaps of 0, 1 and 2+ in that
+# order is the only assignment consistent with all three. It remains an
+# inference about bucket boundaries that no source states.
+#
+# WHAT WOULD SETTLE IT: throwing two group Lures at known levels and
+# recording hit rates over enough trials to separate 20 from 15 from
+# 10. Until then treat any result that leans on this as resting on a
+# guess, and if measurement contradicts it, change these three numbers
+# and nothing else -- that is why they are a table and not inlined.
 #
 # One neighbouring rule from the same patch IS pinned, and the
 # simulator already obeyed it by inference rather than by citation.
@@ -651,7 +669,8 @@ DROP_MISSES_LURED_COGS = None
 # rule against it). Rejecting it was a real bug: it made a genuine TTR
 # play unreachable. Undervalued and reachable beats correctly valued
 # and impossible.
-MULTI_LURE_ACCURACY_BONUS = None
+MULTI_LURE_ACCURACY_BONUS = {0: 20, 1: 15}
+MULTI_LURE_ACCURACY_BONUS_DEFAULT = 10        # gap of 2 or more
 
 
 def multi_lure_eligible(level_a: int, level_b: int) -> bool:
@@ -661,11 +680,31 @@ def multi_lure_eligible(level_a: int, level_b: int) -> bool:
     Dollar Bills qualify, and a group Lure beside a Bill does not. The
     matching is on targeting class rather than on the gag itself.
 
-    Eligibility only. How MUCH the bonus is worth is
-    `MULTI_LURE_ACCURACY_BONUS`, still [TODO] -- so nothing calls this
-    in the accuracy path yet. It is here so the rule is written down
-    where the magnitude will go, and so the search can be taught the
-    pairing without waiting on the number.
+    Eligibility is [CONFIRMED]; the magnitude in
+    `multi_lure_bonus` is [ASSUMED]. Keep the two apart -- this half
+    rests on published text and that half does not.
     """
     return (data.gag(Track.LURE, level_a).group
             == data.gag(Track.LURE, level_b).group)
+
+
+def multi_lure_bonus(levels) -> int:
+    """Accuracy bonus for Lures thrown together, from their level gap.
+
+    Zero unless at least two are eligible -- see `multi_lure_eligible`,
+    which is the [CONFIRMED] half. The size is [ASSUMED]: see the note
+    on `MULTI_LURE_ACCURACY_BONUS`.
+
+    The gap is measured between the highest Lure and the next highest,
+    because the notes describe the bonus as coming from "the additional
+    Lure gags" against the one that overrides -- and the overriding gag
+    is the most accurate, which for Lure tracks level.
+    """
+    levels = sorted(levels, reverse=True)
+    if len(levels) < 2:
+        return 0
+    if not multi_lure_eligible(levels[0], levels[1]):
+        return 0
+    gap = levels[0] - levels[1]
+    return MULTI_LURE_ACCURACY_BONUS.get(gap,
+                                         MULTI_LURE_ACCURACY_BONUS_DEFAULT)

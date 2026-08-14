@@ -566,6 +566,24 @@ def apply_party_round(state: BattleState,
         for _i, _a, _t, _g, key, accuracy in prepared:
             best[key] = max(best.get(key, 0), accuracy)
 
+        # Lure Bonus: multiple Lures thrown together raise each other's
+        # accuracy. [CONFIRMED] that it exists and which pairs qualify
+        # (group with group, Bill with Bill, never one of each);
+        # [ASSUMED] how big it is -- see
+        # `mechanics.MULTI_LURE_ACCURACY_BONUS`.
+        #
+        # Applied to the shared roll rather than per gag, because the
+        # gags in a roll group already resolve on one die and the
+        # highest base accuracy already overrides -- which is the rule
+        # the same patch notes state.
+        if track == Track.LURE:
+            for key in list(best):
+                levels = [a.level for _i, a, _t, _g, k, _acc in prepared
+                          if k == key]
+                bonus = mechanics.multi_lure_bonus(levels)
+                if bonus:
+                    best[key] = min(best[key] + bonus, data.ACCURACY_CAP)
+
         rolls: Dict[Optional[int], int] = {}
         resolved = []
         for toon_index, action, targets, group, key, _accuracy in prepared:

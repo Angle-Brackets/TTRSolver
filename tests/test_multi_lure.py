@@ -25,10 +25,37 @@ class EligibilityTest(unittest.TestCase):
         self.assertFalse(mechanics.multi_lure_eligible(4, 5))
         self.assertFalse(mechanics.multi_lure_eligible(1, 6))
 
-    def test_the_magnitude_is_still_unknown(self):
-        """A guard: if someone fills this in, they must also revisit
-        every [TODO] note explaining why it was None."""
-        self.assertIsNone(mechanics.MULTI_LURE_ACCURACY_BONUS)
+
+class MagnitudeTest(unittest.TestCase):
+    """[ASSUMED], not [CONFIRMED] -- the owner authorised filling this
+    in on the balance of evidence after reading the v4.0.0 notes. No
+    source states which gap selects which of 20/15/10; mapping them onto
+    gaps 0, 1 and 2+ is the only assignment consistent with all three
+    statements about it, and it is still an inference.
+
+    If measurement contradicts it, change the table and nothing else.
+    """
+
+    def test_equal_levels_pay_most(self):
+        self.assertEqual(mechanics.multi_lure_bonus([6, 6]), 20)
+
+    def test_one_apart_pays_the_middle_value(self):
+        self.assertEqual(mechanics.multi_lure_bonus([7, 6]), 15)
+
+    def test_two_apart_falls_to_the_default(self):
+        # 6 and 4 are both group gags, so eligible, but two apart.
+        self.assertEqual(mechanics.multi_lure_bonus([6, 4]), 10)
+
+    def test_a_wide_gap_pays_least(self):
+        self.assertEqual(mechanics.multi_lure_bonus([7, 2]), 10)
+
+    def test_a_lone_lure_earns_nothing(self):
+        self.assertEqual(mechanics.multi_lure_bonus([6]), 0)
+        self.assertEqual(mechanics.multi_lure_bonus([]), 0)
+
+    def test_ineligible_pairs_earn_nothing_however_close(self):
+        """A group Lure beside a Bill, which the notes rule out."""
+        self.assertEqual(mechanics.multi_lure_bonus([5, 4]), 0)
 
 
 class OrganicShiftTest(unittest.TestCase):
