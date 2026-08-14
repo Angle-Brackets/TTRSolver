@@ -270,6 +270,18 @@ def calc_toon_accuracy(track: Track, level: int, toon: ToonState,
     return min(acc, data.ACCURACY_CAP)
 
 
+def accuracy_roll() -> int:
+    """One accuracy die, 0-99.
+
+    Separate from `roll_hit` because a roll is sometimes SHARED. Gags of
+    the same track aimed at the same cog resolve on one roll, and a
+    group gag rolls once for every target -- so the caller needs the
+    number, not just the verdict. `roll_hit` stays for the solo path,
+    where one gag means one roll either way.
+    """
+    return random.randint(0, 99)
+
+
 def roll_hit(accuracy_pct: int) -> bool:
     return random.randint(0, 99) < accuracy_pct
 

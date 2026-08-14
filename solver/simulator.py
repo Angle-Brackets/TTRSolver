@@ -495,6 +495,14 @@ def apply_party_round(state: BattleState,
         # itself as hitting cog 0, and then combo with the gag that
         # really did. Found by a test asserting two cogs do not combo.
         where = {id(c): i for i, c in enumerate(state.cogs)}
+        # ONE ROLL PER TRACK PER TARGET, NOT PER GAG. Gags of the same
+        # track aimed at the same cog share a single accuracy roll, so
+        # they all land or all miss together; a group gag rolls once for
+        # the whole battle. Rolling each gag separately let a party
+        # hedge -- four Throws at one cog would almost surely land
+        # *something* -- which is not the game and badly overvalues
+        # stacking a track on one target.
+        rolls: Dict[Optional[int], int] = {}
         resolved = []
         for toon_index in same_track:
             action = actions[toon_index]
@@ -508,8 +516,11 @@ def apply_party_round(state: BattleState,
             if hits is not None:
                 hit = bool(hits[toon_index])
             else:
+                key = None if group else action.target_index
+                if key not in rolls:
+                    rolls[key] = mechanics.accuracy_roll()
                 accuracy = toon_action_accuracy(state, action) + bonus
-                hit = mechanics.roll_hit(min(accuracy, data.ACCURACY_CAP))
+                hit = rolls[key] < min(accuracy, data.ACCURACY_CAP)
             resolved.append((toon_index, action, targets, group, hit))
             if hit:
                 landed.append((track, group, targets))
@@ -523,6 +534,15 @@ def _apply_track_group(state: BattleState, track: Track, resolved,
     """Apply one track's worth of simultaneous gags, combos included."""
     if track == Track.TOON_UP:
         for toon_index, action, _t, _g, hit in resolved:
+            # Spend it. This returned without spending, which made
+            # healing free -- and a free action is one a search will
+            # take for no reason. A joint search filled three of four
+            # slots with Feathers thrown at toons already on full laff,
+            # purely because they cost nothing.
+            toon = state.toons[toon_index]
+            counts = dict(toon.gag_counts)
+            counts[(action.track, action.level)] -= 1
+            toon.gag_counts = counts
             healed[toon_index] += mechanics.calc_toon_heal(action.level, hit)
         return
 

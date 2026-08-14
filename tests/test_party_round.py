@@ -208,3 +208,82 @@ class SoloEquivalenceTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SharedAccuracyRollTest(unittest.TestCase):
+    """One roll per track per target, not one per gag.
+
+    Gags of the same track aimed at the same cog resolve on a single
+    accuracy roll, so they all land or all miss together; a group gag
+    rolls once for the whole battle. Rolling each gag separately let a
+    party hedge -- four Throws at one cog would almost certainly land
+    *something* -- which is not the game, and badly overvalues stacking
+    a track on one target.
+    """
+
+    class Rolls:
+        """Counts how many accuracy dice were asked for."""
+
+        def __init__(self, value):
+            self.value = value
+            self.calls = 0
+
+        def __call__(self):
+            self.calls += 1
+            return self.value
+
+    def party(self, n, counts):
+        return BattleState(toons=[toon(counts) for _ in range(n)],
+                           cogs=[cog(hp=400), cog(hp=400)])
+
+    def rolls_taken(self, state, actions, value=0):
+        dice = self.Rolls(value)
+        real = mechanics.accuracy_roll
+        mechanics.accuracy_roll = dice
+        try:
+            simulator.apply_party_round(state, actions)
+        finally:
+            mechanics.accuracy_roll = real
+        return dice.calls
+
+    def test_same_track_same_cog_shares_one_roll(self):
+        state = self.party(3, {(Track.THROW, 3): 1})
+        taken = self.rolls_taken(state, [Action(Track.THROW, 3, 0)] * 3)
+        self.assertEqual(taken, 1)
+
+    def test_same_track_different_cogs_roll_separately(self):
+        state = self.party(2, {(Track.THROW, 3): 1})
+        taken = self.rolls_taken(
+            state, [Action(Track.THROW, 3, 0), Action(Track.THROW, 3, 1)])
+        self.assertEqual(taken, 2)
+
+    def test_a_group_gag_rolls_once_for_the_battle(self):
+        state = self.party(2, {(Track.SOUND, 4): 1})
+        taken = self.rolls_taken(state, [Action(Track.SOUND, 4, None)] * 2)
+        self.assertEqual(taken, 1)
+
+    def test_they_all_miss_together(self):
+        """The point of the shared roll: no hedging."""
+        state = self.party(3, {(Track.THROW, 3): 1})
+        self.rolls_taken(state, [Action(Track.THROW, 3, 0)] * 3, value=99)
+        self.assertEqual(state.cogs[0].hp, 400)
+
+    def test_and_all_land_together(self):
+        state = self.party(3, {(Track.THROW, 3): 1})
+        self.rolls_taken(state, [Action(Track.THROW, 3, 0)] * 3, value=0)
+        pie = data.gag(Track.THROW, 3).damage_at(1.0)
+        self.assertEqual(400 - state.cogs[0].hp,
+                         3 * pie + mechanics.calc_hp_bonus(3 * pie, 3))
+
+
+class ToonUpCostTest(unittest.TestCase):
+
+    def test_healing_spends_the_gag(self):
+        """It did not, which made healing free -- and a free action is
+        one a search takes for no reason. A joint search filled three of
+        four slots with Feathers thrown at toons already on full laff."""
+        state = BattleState(
+            toons=[toon({(Track.TOON_UP, 1): 3}, laff=40)], cogs=[cog()])
+        simulator.apply_party_round(state, [Action(Track.TOON_UP, 1, None)],
+                                    hits=[True])
+        self.assertEqual(state.toons[0].gag_counts[(Track.TOON_UP, 1)], 2)

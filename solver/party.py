@@ -82,25 +82,79 @@ class TeammateModel:
         return options[-1][1] if options else None
 
 
+# How the prior trades one thing off against another. Not measured --
+# see the class docstring -- but each is here because a player visibly
+# behaves as if it were.
+KILL_BONUS = 60.0        # removing a cog stops it attacking, forever
+OVERKILL_WEIGHT = 0.8    # damage past a cog's last hit point is thrown away
+SCARCITY_WEIGHT = 45.0   # divided by how many of that gag fit in a pouch
+LURE_ROUND_VALUE = 0.85  # of the damage a lured cog would have dealt
+
+
 class SensiblePrior(TeammateModel):
-    """A guess at what an average player throws.
+    """A guess at what a reasonable player throws.
 
-    THIS IS NOT MEASURED. It says: pick the biggest damage gag you are
-    carrying and aim it at the cog you are most likely to kill with it,
-    preferring one you can finish outright; failing that, aim at the
-    toughest. Most of the mass goes on that choice and the remainder is
-    spread over the alternatives, because people are not deterministic
-    and a chance node that thinks they are will be confidently wrong.
+    NOT MEASURED, and it cannot be: there is no fact of the matter about
+    what a stranger will do. What it encodes is how people visibly play
+    -- spend as little as possible and take as little as possible --
+    which matters most in exactly the fights where a party solver is
+    worth having, the long ones.
 
-    `focus` is how much of the mass the favourite gets. High enough that
+    Four things it weighs, and the first two are why the earlier version
+    of this was wrong:
+
+    * **Overkill is waste.** A Wedding Cake into a five-hit-point cog
+      kills it and throws the rest away. The first version scored on raw
+      damage and so actively preferred the biggest gag in the pouch,
+      which is the opposite of how anybody plays. Only damage up to the
+      cog's remaining health counts, and the excess is charged for.
+    * **Rare gags are dear.** A gag is priced by how few fit in a pouch,
+      so a level 7 has to earn its place. Nobody opens with their
+      Railroad.
+    * **Killing is worth more than hurting.** A dead cog never attacks
+      again, which is worth more than the hit points suggest.
+    * **Lure is damage prevented.** A lured cog does not attack, so a
+      Lure is scored by what it stops rather than what it deals -- which
+      is why teams lure so much, and why a model that only knew about
+      damage tracks would never predict it.
+
+    `focus` is how much probability the favourite gets. High enough that
     the prediction means something, low enough that the search does not
-    plan around it as if it were certain.
+    plan around a guess as though it were certain.
     """
 
     def __init__(self, focus: float = 0.6):
         if not 0.0 < focus <= 1.0:
             raise ValueError("focus must be in (0, 1]")
         self.focus = focus
+
+    def _incoming(self, cog) -> float:
+        from . import outcomes as outcomes_mod
+
+        try:
+            return float(outcomes_mod.worst_case_damage(cog))
+        except (NotImplementedError, ValueError):
+            return 0.0
+
+    def _scarcity(self, track: Track, level: int) -> float:
+        try:
+            limit = data.gag(track, level).max_carry or 1
+        except (NotImplementedError, ValueError):
+            return 0.0
+        return SCARCITY_WEIGHT / limit
+
+    def _score_damage(self, damage: int, targets) -> float:
+        """Progress toward killing, with overkill charged for."""
+        score = 0.0
+        for cog in targets:
+            useful = min(damage, cog.hp)
+            score += useful
+            if damage >= cog.hp:
+                score += KILL_BONUS
+            else:
+                continue
+            score -= OVERKILL_WEIGHT * (damage - cog.hp)
+        return score
 
     def _candidates(self, state: BattleState, toon_index: int) -> List[Action]:
         toon = state.toons[toon_index]
@@ -110,13 +164,34 @@ class SensiblePrior(TeammateModel):
         if not cogs:
             return []
         where = {id(c): i for i, c in enumerate(state.cogs)}
+        scored: List[Tuple[float, int, int, Action]] = []
 
-        best: List[Tuple[int, Action]] = []
         for (track, level), count in toon.gag_counts.items():
-            if count <= 0 or track not in DAMAGE_TRACKS:
+            if count <= 0 or toon.track_exp.get(track, 0) <= 0:
                 continue
-            if toon.track_exp.get(track, 0) <= 0:
+            price = self._scarcity(track, level)
+            group = simulator.is_group_action(track, level)
+
+            if track == Track.LURE:
+                catchable = [c for c in cogs if not c.status.lured]
+                if not catchable:
+                    continue
+                targets = catchable if group else catchable[:1]
+                rounds = mechanics.lure_duration_rounds(level)
+                value = LURE_ROUND_VALUE * rounds * sum(
+                    self._incoming(c) for c in targets)
+                index = None if group else where[id(targets[0])]
+                scored.append((value - price, level, count,
+                               Action(track, level, index)))
                 continue
+
+            if track not in DAMAGE_TRACKS:
+                # Trap alone and Toon-Up are judgement calls that depend
+                # on what everyone else is doing, which is the thing a
+                # pickup group has not agreed. Left out rather than
+                # guessed at.
+                continue
+
             try:
                 damage = data.gag(track, level).damage_at(
                     1.0, organic=toon.is_organic(track))
@@ -124,19 +199,23 @@ class SensiblePrior(TeammateModel):
                 continue
             if not damage:
                 continue
-            if simulator.is_group_action(track, level):
-                best.append((damage * len(cogs), Action(track, level, None)))
+
+            if group:
+                value = self._score_damage(damage, cogs)
+                scored.append((value - price, level, count,
+                               Action(track, level, None)))
                 continue
             for cog in cogs:
                 if track == Track.DROP and cog.status.lured:
                     continue          # always misses; nobody aims there
-                # A kill is worth more than the raw number, which is how
-                # a player picks: finish something if you can.
-                score = damage + (1000 if damage >= cog.hp else 0)
-                best.append((score, Action(track, level, where[id(cog)])))
+                value = self._score_damage(damage, [cog])
+                scored.append((value - price, level, count,
+                               Action(track, level, where[id(cog)])))
 
-        best.sort(key=lambda pair: -pair[0])
-        return [action for _score, action in best]
+        # Ties broken toward the cheaper and the more plentiful gag,
+        # which is the same instinct the scoring is trying to capture.
+        scored.sort(key=lambda row: (-row[0], row[1], -row[2]))
+        return [action for _v, _l, _c, action in scored]
 
     def distribution(self, state: BattleState, toon_index: int
                      ) -> List[Tuple[float, Optional[Action]]]:
@@ -150,6 +229,80 @@ class SensiblePrior(TeammateModel):
         rest = (1.0 - self.focus) / (len(options) - 1)
         return ([(self.focus, options[0])]
                 + [(rest, action) for action in options[1:]])
+
+
+class SolverPolicy(TeammateModel):
+    """Assume a teammate plays the objective you are recommending.
+
+    The principled version of the same idea. `SensiblePrior` hand-scores
+    an imitation of good play; this asks the solver what good play *is*
+    and predicts that -- so a party is modelled as everyone subscribing
+    to the same objective rather than as one real player surrounded by
+    approximations.
+
+    Better in a way that costs. A prior is a scan of the pouch; this is
+    a search per teammate per node, so it is for offline work -- asking
+    what a coordinated team should do, checking whether a known strategy
+    falls out -- and not for the 15-second budget the live advisor has.
+
+    `depth` is deliberately shallow. A teammate is being *predicted*,
+    and predicting them as a deeper searcher than the person you are
+    advising is a strange claim to make about a stranger.
+
+    LIMITATION worth knowing: the state is rotated so the teammate sits
+    at index 0, because the search assumes it is choosing for `toons[0]`
+    -- but `CogStatus.damage_by_toon` indices are not rotated with it,
+    so a cog's memory of who hurt it is wrong from the rotated point of
+    view. That only skews which toon a cog is predicted to attack
+    inside the teammate's own lookahead, not the round actually played.
+    """
+
+    def __init__(self, depth: int = 2, objective=None, focus: float = 0.7):
+        if not 0.0 < focus <= 1.0:
+            raise ValueError("focus must be in (0, 1]")
+        self.depth = depth
+        self.objective = objective
+        self.focus = focus
+        self._fallback = SensiblePrior(focus=focus)
+
+    def distribution(self, state: BattleState, toon_index: int
+                     ) -> List[Tuple[float, Optional[Action]]]:
+        from .search import expectimax
+
+        if state.toons[toon_index].laff <= 0 or not state.active_cogs():
+            return [(1.0, None)]
+        rotated = _as_actor(state, toon_index)
+        try:
+            action = expectimax.best_action(rotated, depth=self.depth,
+                                            objective=self.objective)
+        except (NotImplementedError, ValueError, RecursionError):
+            return self._fallback.distribution(state, toon_index)
+        if action is None:
+            return [(1.0, None)]
+
+        # The rest of the mass goes on the prior's alternatives, so the
+        # node stays a distribution rather than a claim of certainty.
+        others = [a for _p, a in self._fallback.distribution(state, toon_index)
+                  if a is not None and a != action]
+        if not others:
+            return [(1.0, action)]
+        share = (1.0 - self.focus) / len(others)
+        return [(self.focus, action)] + [(share, a) for a in others]
+
+
+def _as_actor(state: BattleState, toon_index: int) -> BattleState:
+    """The same battle seen from one toon's seat.
+
+    The search chooses for `toons[0]`, so predicting what toon 2 would
+    do means handing it a state where toon 2 is toon 0.
+    """
+    if toon_index == 0:
+        return state
+    rotated = state.clone()
+    order = [toon_index] + [i for i in range(len(state.toons))
+                            if i != toon_index]
+    rotated.toons = [rotated.toons[i] for i in order]
+    return rotated
 
 
 DEFAULT_MODEL = SensiblePrior()

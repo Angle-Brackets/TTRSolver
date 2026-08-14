@@ -13,7 +13,7 @@ kill) and never that it is right.
 import unittest
 
 from solver import data, party
-from solver.party import Mode, SensiblePrior
+from solver.party import Mode, SensiblePrior, SolverPolicy
 from solver.state import Action, BattleState, CogState, ToonState, Track
 
 
@@ -84,26 +84,76 @@ class PriorShapeTest(unittest.TestCase):
 
 
 class PriorChoiceTest(unittest.TestCase):
-    """What it favours, which is a guess and is labelled as one."""
+    """What it favours.
 
-    def test_it_prefers_a_gag_that_finishes_a_cog(self):
-        """A player reaches for the kill, so the prior does too."""
-        state = BattleState(
-            toons=[toon(), toon({(Track.THROW, 3): 1, (Track.THROW, 5): 1})],
-            cogs=[cog(hp=200), cog(hp=15)])
-        best = SensiblePrior().distribution(state, 1)[0][1]
-        self.assertEqual(best.target_index, 1)      # the one it can kill
+    All a guess, and labelled as one -- what is asserted is that it
+    behaves the way people visibly do, not that it is right. The theme
+    is the one that matters in long fights: spend as little as
+    possible, take as little as possible.
+    """
 
-    def test_otherwise_the_biggest_gag(self):
+    def cashbot(self, level, hp=None):
+        mx = data.cog_max_hp(level)
+        return CogState("money_bags", "cashbot", level,
+                        hp if hp is not None else mx, mx)
+
+    def best(self, state):
+        return SensiblePrior().distribution(state, 1)[0][1]
+
+    def test_it_does_not_overkill(self):
+        """A Wedding Cake into a five-hit-point cog kills it and throws
+        the rest away. The first version of this scored raw damage and
+        so preferred exactly that, which is the opposite of how anybody
+        plays."""
+        pouch = {(Track.THROW, 1): 10, (Track.THROW, 3): 5,
+                 (Track.THROW, 5): 3, (Track.THROW, 7): 1}
+        state = BattleState(toons=[toon(), toon(pouch)],
+                            cogs=[self.cashbot(6, hp=5)])
+        self.assertEqual(self.best(state).level, 1)
+
+    def test_it_still_reaches_for_enough_gag_to_finish(self):
+        """Frugal is not timid: a cog it can kill this round, it kills."""
+        pouch = {(Track.THROW, 1): 10, (Track.THROW, 5): 3}
+        state = BattleState(toons=[toon(), toon(pouch)],
+                            cogs=[self.cashbot(6, hp=38)])
+        self.assertEqual(self.best(state).level, 5)
+
+    def test_a_rare_gag_has_to_earn_its_place(self):
+        """Two gags both one-shot the cog; the plentiful one wins.
+        Nobody opens with their Railroad."""
+        pouch = {(Track.THROW, 3): 10, (Track.THROW, 7): 1}
+        state = BattleState(toons=[toon(), toon(pouch)],
+                            cogs=[self.cashbot(4, hp=12)])
+        self.assertEqual(self.best(state).level, 3)
+
+    def test_it_lures_when_nothing_can_kill_and_the_cogs_hit_hard(self):
+        """The play a damage-only model can never predict, and the
+        reason teams lure at all: a lured cog deals no damage."""
+        pouch = {(Track.THROW, 3): 5, (Track.LURE, 4): 4}
         state = BattleState(
-            toons=[toon(), toon({(Track.THROW, 3): 1, (Track.THROW, 5): 1})],
-            cogs=[cog(hp=300)])
-        best = SensiblePrior().distribution(state, 1)[0][1]
-        self.assertEqual(best.level, 5)
+            toons=[toon(), toon(pouch)],
+            cogs=[self.cashbot(9) for _ in range(4)])
+        self.assertEqual(self.best(state).track, Track.LURE)
+
+    def test_but_not_when_they_are_already_lured(self):
+        """Nothing left to catch."""
+        pouch = {(Track.THROW, 3): 5, (Track.LURE, 4): 4}
+        cogs = [self.cashbot(9) for _ in range(4)]
+        for c in cogs:
+            c.status.apply_lure(60, 3, 4)
+        state = BattleState(toons=[toon(), toon(pouch)], cogs=cogs)
+        self.assertNotEqual(self.best(state).track, Track.LURE)
+
+    def test_a_kill_beats_chipping_something_else(self):
+        pouch = {(Track.THROW, 3): 5}
+        state = BattleState(
+            toons=[toon(), toon(pouch)],
+            cogs=[self.cashbot(9), self.cashbot(4, hp=10)])
+        self.assertEqual(self.best(state).target_index, 1)
 
     def test_it_does_not_drop_on_a_lured_cog(self):
         """Drop always misses one; nobody aims there."""
-        lured = cog(hp=200)
+        lured = self.cashbot(6, hp=200)
         lured.status.apply_lure(60, 3, 3)
         state = BattleState(toons=[toon(), toon({(Track.DROP, 5): 2})],
                             cogs=[lured])
@@ -111,12 +161,66 @@ class PriorChoiceTest(unittest.TestCase):
                          [(1.0, None)])
 
     def test_sampling_follows_the_distribution(self):
-        state = BattleState(
-            toons=[toon(), toon({(Track.THROW, 3): 1, (Track.THROW, 5): 1})],
-            cogs=[cog(hp=300)])
+        pouch = {(Track.THROW, 3): 5, (Track.THROW, 5): 3}
+        state = BattleState(toons=[toon(), toon(pouch)],
+                            cogs=[self.cashbot(6, hp=300)])
         prior = SensiblePrior(focus=0.6)
-        self.assertEqual(prior.sample(state, 1, Fixed([0.1])).level, 5)
-        self.assertEqual(prior.sample(state, 1, Fixed([0.9])).level, 3)
+        first = prior.distribution(state, 1)[0][1]
+        self.assertEqual(prior.sample(state, 1, Fixed([0.1])), first)
+        self.assertNotEqual(prior.sample(state, 1, Fixed([0.9])), first)
+
+
+class SolverPolicyTest(unittest.TestCase):
+    """Predicting a teammate by the objective you are recommending.
+
+    The principled form of the same idea: rather than hand-scoring an
+    imitation of good play, ask the solver what good play is and predict
+    that -- a party as everyone subscribing to one objective, instead of
+    one real player surrounded by approximations. It costs a search per
+    teammate, so it is for offline work rather than the live budget.
+    """
+
+    def cashbot(self, level):
+        mx = data.cog_max_hp(level)
+        return CogState("money_bags", "cashbot", level, mx, mx)
+
+    def test_it_agrees_with_the_prior_where_the_play_is_clear(self):
+        """Not a proof that either is right, but the cheap model being
+        a stand-in for the expensive one is the thing worth checking
+        before trusting it."""
+        pouch = {(Track.THROW, 3): 5, (Track.THROW, 5): 3,
+                 (Track.LURE, 4): 3, (Track.SOUND, 4): 3}
+        state = BattleState(toons=[toon(pouch), toon(pouch)],
+                            cogs=[self.cashbot(9) for _ in range(4)])
+        prior = SensiblePrior().distribution(state, 1)[0][1]
+        solved = SolverPolicy(depth=1).distribution(state, 1)[0][1]
+        self.assertEqual(prior.track, solved.track)
+
+    def test_it_is_still_a_distribution(self):
+        pouch = {(Track.THROW, 3): 5, (Track.THROW, 5): 3}
+        state = BattleState(toons=[toon(pouch), toon(pouch)],
+                            cogs=[self.cashbot(6)])
+        dist = SolverPolicy(depth=1).distribution(state, 1)
+        self.assertAlmostEqual(sum(p for p, _a in dist), 1.0)
+
+    def test_a_sad_teammate_does_nothing(self):
+        state = BattleState(toons=[toon(), toon(laff=0)],
+                            cogs=[self.cashbot(6)])
+        self.assertEqual(SolverPolicy(depth=1).distribution(state, 1),
+                         [(1.0, None)])
+
+    def test_the_rotation_puts_the_teammate_in_the_chair(self):
+        """The search chooses for toons[0], so predicting toon 1 means
+        handing it a state where toon 1 is toon 0."""
+        a, b = toon({(Track.THROW, 3): 1}), toon({(Track.SOUND, 4): 1})
+        state = BattleState(toons=[a, b], cogs=[self.cashbot(6)])
+        rotated = party._as_actor(state, 1)
+        self.assertEqual(rotated.toon.gag_counts, b.gag_counts)
+        self.assertEqual(len(rotated.toons), 2)
+
+    def test_rotating_to_yourself_changes_nothing(self):
+        state = BattleState(toons=[toon(), toon()], cogs=[self.cashbot(6)])
+        self.assertIs(party._as_actor(state, 0), state)
 
 
 class ModeTest(unittest.TestCase):

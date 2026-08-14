@@ -259,6 +259,16 @@ Still solo and **must not be quietly generalised**:
   laff and training, and nothing reads a teammate's laff meter off the
   screen.
 
+**Accuracy is rolled per track per target, not per gag.** Gags of the
+same track aimed at the same cog share one roll, so they all land or
+all miss together, and a group gag rolls once for the whole battle.
+Rolling each gag independently lets a party hedge — four Throws at one
+cog would almost certainly land *something* — which is not the game and
+badly overvalues stacking a track on a single target.
+`simulator.apply_party_round` keys the roll on (track, target);
+`mechanics.accuracy_roll` exists to hand back the number rather than a
+verdict, because the verdict differs per gag while the die does not.
+
 ## What ends a battle
 
 Three things, and the third is easy to forget when adding rules:
