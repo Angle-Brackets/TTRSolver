@@ -588,16 +588,41 @@ DROP_MISSES_LURED_COGS = None
 # depending on the gag level discrepancies of the additional Lure gags,
 # with the bonus being smaller if low-level Lure gags are used."
 #
-# NOT confirmed, and the reason this is None rather than a number:
-#   * what "gag level discrepancies" indexes -- the gap between the
-#     lures' levels, or the additional lure's level against the
-#     target's, and which of 20/15/10 a given gap selects;
-#   * whether "of the same type" means the same gag, the same
-#     single/group class, or merely both being Lure;
-#   * how it composes with the Trap+Lure bonus already in
-#     `calc_prev_hits_bonus`.
-# Three plausible readings give three different numbers, so per the
-# no-guessing rule this stays None until the wiki pins it down.
+# The DIRECTION is now corroborated, the magnitudes still are not.
+# A player's reading is that the bonus is inversely proportional to the
+# level gap between the lures -- same level pays most, a wide gap pays
+# least -- and the wiki's own qualifier agrees in direction: "with the
+# bonus being smaller if low-level Lure gags are used". A cheap lure
+# added beside a dear one IS the wide-gap case, so both clauses point
+# the same way.
+#
+# What that still does not give is which of 20/15/10 a given gap
+# selects, and the bucket boundaries are the whole content of the rule:
+# gap 0/1/2+ is the natural guess and it is a guess. Also unresolved:
+# whether "of the same type" means the same gag, the same single/group
+# class, or merely both being Lure; and how this composes with the
+# Trap+Lure bonus in `calc_prev_hits_bonus`.
+#
+# Sources chased and exhausted, so the next person need not repeat it:
+#   * The Accuracy page names a "Lure bonus" term that may push past the
+#     95% soft cap, but gives no formula for it.
+#   * Both cited rebalancing PDFs (v4.0.0 and December 2021) are
+#     image-based -- their streams decompress to graphics, not text --
+#     so the numbers cannot be read out programmatically.
+#   * OPEN TOONTOWN IS THE WRONG LEAD HERE, unusually. This is a TTR
+#     4.0.0 addition ("now grant"), so it postdates the Toontown Online
+#     code entirely and nothing in that lineage can confirm it.
+# Per the no-guessing rule this stays None until a source states the
+# mapping.
+#
+# One neighbouring rule from the same patch IS pinned, and the
+# simulator already obeyed it by inference rather than by citation.
+# [CONFIRMED] TTR wiki (Lure, 4.0.0 update changes): "High-level Lure
+# gags override the base accuracy of low-level Lure gags when used
+# simultaneously." That is exactly what `simulator.apply_party_round`
+# does when it keys a shared roll on (track, target) and takes
+# `max(...)` of the group's accuracies -- see the `best[key]` line
+# there, and `test_a_strong_lure_carries_a_weak_one_on_the_same_cog`.
 #
 # The search DOES allow stacked Lure (`party_search._playable` has no
 # rule against it). Rejecting it was a real bug: it made a genuine TTR
