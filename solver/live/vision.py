@@ -52,6 +52,18 @@ MIN_FRAGMENT_FRAC = 0.000058     # of frame area
 MERGE_GAP_FRAC = 0.021           # of frame width
 MIN_SLOT_FRAC = 0.00058          # of frame area
 
+# And a ceiling, of frame WIDTH. The aspect and minimum-size filters both
+# pass on large teal scenery: a grey-blue machine in the background of a
+# Lullaby Lane street matched as a 629x391 "plate", aspect 1.61, in a
+# frame whose real plates were 69x47 and 65x45.
+#
+# A plate is drawn at a fixed scale by a battle camera that barely moves,
+# and measured at 3.4-3.6% of frame width across every capture so far.
+# This is more than three times that, so a genuine plate has room to be
+# much closer than any yet seen while a third of the screen is still
+# refused.
+MAX_SLOT_WIDTH_FRAC = 0.12
+
 # The slot is a fixed-aspect rectangle. Measured 1.44-1.52 across six
 # resolutions; the window is wider than that to tolerate a cog head that
 # eats into one edge of the backdrop.
@@ -228,6 +240,8 @@ def find_plates(frame: np.ndarray,
     for x0, y0, x1, y1, filled in sorted(slots):
         box_w, box_h = x1 - x0, y1 - y0
         if not box_h or filled < area * MIN_SLOT_FRAC:
+            continue
+        if box_w > width * MAX_SLOT_WIDTH_FRAC:
             continue
         if not ASPECT_RANGE[0] <= box_w / box_h <= ASPECT_RANGE[1]:
             continue

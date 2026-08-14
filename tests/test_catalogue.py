@@ -12,7 +12,8 @@ try:
     import numpy as np
 
     from solver.live.catalogue import (
-        GRID, HeadCatalogue, candidates, distance, signature,
+        GRID, MAX_DISTANCE, MAX_UNVERIFIED_DISTANCE, HeadCatalogue, Match,
+        candidates, distance, signature,
     )
     from solver.live.vision import TEAL, Plate
 except ImportError as exc:                   # numpy is an optional extra
@@ -146,3 +147,35 @@ class CatalogueTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UnverifiedMatchTest(unittest.TestCase):
+    """A match that beat nothing is a different claim from one that won.
+
+    The library fills one cog at a time, so for a long while every pool
+    holds exactly one known candidate. With no runner-up the margin is
+    infinity, which satisfies any margin test trivially -- so a single
+    Spin Doctor entry made every Lawbot of level 6-10 match it at full
+    confidence, whatever it actually looked like.
+    """
+
+    def test_a_lone_close_match_is_accepted(self):
+        m = Match("yesman", 0.028)
+        self.assertIsNone(m.runner_up)
+        self.assertTrue(m.confident)
+
+    def test_a_lone_distant_match_is_not(self):
+        """0.147 is what a WRONG cog scores. It clears MAX_DISTANCE at
+        0.22, which is why the distance check alone was not enough."""
+        self.assertLess(0.147, MAX_DISTANCE)
+        self.assertFalse(Match("yesman", 0.147).confident)
+
+    def test_the_margin_rule_still_applies_when_there_is_a_runner_up(self):
+        close = Match("yesman", 0.10, "downsizer", 0.11)
+        self.assertFalse(close.confident)      # margin 0.01, too near
+        clear = Match("yesman", 0.10, "downsizer", 0.20)
+        self.assertTrue(clear.confident)
+
+    def test_the_unverified_bar_sits_between_right_and_wrong(self):
+        self.assertGreater(MAX_UNVERIFIED_DISTANCE, 0.028)
+        self.assertLess(MAX_UNVERIFIED_DISTANCE, 0.132)

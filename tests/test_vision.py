@@ -208,3 +208,33 @@ class HealthTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PlateSizeCeilingTest(unittest.TestCase):
+    """A plate is small. Large teal scenery is not a plate.
+
+    The minimum-size and aspect filters both pass on big background
+    geometry: a grey-blue machine on a Lullaby Lane street matched as a
+    629x391 blob at aspect 1.61, in a frame whose real plates were 69x47
+    and 65x45. It read as a third cog with an unreadable level and 0%
+    health, which blocked the whole battle.
+    """
+
+    def test_a_huge_teal_region_is_not_a_plate(self):
+        frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
+        frame[:, :] = (70, 70, 80)
+        # 620x385: the shape that fooled it, aspect 1.61.
+        frame[100:485, 1200:1820] = V.TEAL
+        self.assertEqual(V.find_plates(frame), [])
+
+    def test_a_plate_sized_region_still_is(self):
+        frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
+        frame[:, :] = (70, 70, 80)
+        frame[100:145, 600:666] = V.TEAL
+        self.assertEqual(len(V.find_plates(frame)), 1)
+
+    def test_the_ceiling_leaves_room_for_a_closer_camera(self):
+        """Real plates measure 3.4-3.6% of frame width; the ceiling is
+        more than three times that, so a genuine plate may be much
+        nearer than any yet captured and still be found."""
+        self.assertGreater(V.MAX_SLOT_WIDTH_FRAC, 0.036 * 3)

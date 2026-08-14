@@ -53,6 +53,13 @@ DEFAULT_DIR = Path(__file__).resolve().parent / "_cog_heads"
 # are mean absolute difference over masked, normalised pixels.
 MAX_DISTANCE = 0.22
 
+# The bar for a match that beat nothing, because its pool held one known
+# cog. See `Match.confident`. Correct matches measured at 0.000, 0.020
+# and 0.028 against wrong cogs at 0.132-0.157, so this sits in a gap
+# nearly five times wide -- but it is three readings of two cogs, and it
+# should be revisited once the library is fuller.
+MAX_UNVERIFIED_DISTANCE = 0.08
+
 
 @dataclass(frozen=True)
 class Match:
@@ -67,6 +74,31 @@ class Match:
 
     @property
     def confident(self) -> bool:
+        """Whether this match is worth acting on.
+
+        Two rules, because a match with nothing to compare against is a
+        different kind of claim from one that beat an alternative.
+
+        With a runner-up, `margin` does the work and the absolute
+        distance only has to be sane.
+
+        WITHOUT ONE, MARGIN IS INFINITY AND MEANS NOTHING. That is not a
+        hypothetical: the library starts empty and fills one cog at a
+        time, so for a long while every pool has exactly one known
+        candidate. A single Spin Doctor entry made *every* Lawbot of
+        level 6-10 match it -- Legal Eagle, Back Stabber, Big Wig alike
+        -- at maximum confidence, because there was no second entry to
+        be closer to. `margin > 0.02` is trivially satisfied by infinity.
+
+        So an unverified match is held to a much tighter distance.
+        Measured on real plates: a correct match scores 0.000-0.028 and
+        a wrong cog 0.132-0.157, which MAX_DISTANCE at 0.22 admits
+        happily. MAX_UNVERIFIED_DISTANCE sits between the two, nearer
+        three times the worst correct reading than half the best wrong
+        one.
+        """
+        if self.runner_up is None:
+            return self.distance <= MAX_UNVERIFIED_DISTANCE
         return self.distance <= MAX_DISTANCE and self.margin > 0.02
 
 
