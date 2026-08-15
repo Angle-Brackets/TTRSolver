@@ -44,7 +44,17 @@ from . import features
 #
 #                       bias     MAE      r   ordering
 #     hand-written     -51.2    94.3   0.07       53%
-#     fitted            -0.4    27.1   0.83       91%
+#     fitted            -0.4    26.9   0.84       91%
+#
+# Refitted a third time, after the Lure Bonus went in. Same result as
+# the two before it: on identical fresh labels the old and new weights
+# are indistinguishable for accuracy (hold-out MAE 26.8 against 26.9,
+# ordering 91% both) and the new fit is better centred (+1.3 to -0.4).
+#
+# THREE FOR THREE. Every rule change flagged as invalidating this
+# evaluator has moved it almost not at all. That is worth knowing when
+# judging how urgent the next refit is -- but not worth skipping one
+# over, because the harmlessness is only visible afterwards.
 #
 # Refitted again after `turn_cost` became nonzero for every objective
 # (it was 0.0 outside SPEEDRUN, which let a party stall through a lure
