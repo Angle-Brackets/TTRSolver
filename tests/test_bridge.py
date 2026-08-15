@@ -186,6 +186,11 @@ class TestIcons(unittest.TestCase):
         state_dict = bridge.state_to_dict(bridge.build_state(CFG))
         for child in bridge.expand_decision(state_dict, depth=1):
             action = child["action"]
+            if action["track"] is None:
+                # A pass has no gag, so no icon. Reachable since the
+                # pass stopped being confined to lured positions.
+                self.assertIsNone(child["icon"])
+                continue
             self.assertEqual(child["icon"],
                              f"gag-{action['track']}-{action['level']}.png")
         for entry in bridge.cog_forecast(state_dict):

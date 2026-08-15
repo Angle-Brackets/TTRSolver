@@ -200,14 +200,41 @@ class BattleState:
     cogs: List[CogState]
     round_num: int = 0
 
+    # Unlured passes still available. A pass is a real move -- conserving
+    # a scarce gag, or in a party declining to hit a cog because
+    # `mechanics.pick_cog_target` makes it prefer whoever damaged it
+    # most, so attacking draws its next swing onto you.
+    #
+    # It is BUDGETED rather than free, and that is what keeps `solve()`
+    # exact. Termination rests on a lexicographic measure that must
+    # strictly decrease: (gags remaining, lure rounds remaining, free
+    # passes). An unlured pass spends no gag and ticks no lure, so
+    # without a budget the search could walk pass -> pass -> pass
+    # forever and the state graph would stop being a DAG.
+    #
+    # 3, because the cost plateaus there. Exact `solve()` on a real
+    # position takes 6.9s with no pass at all, 18.3s at 1, 29.2s at 2,
+    # and 32.6s at 3 -- and then 32.8s at 4 and at 6, because the search
+    # stops finding more passes worth making. So 3 buys the entire
+    # behaviour and anything above it is cost with no effect.
+    #
+    # It is a termination guard rather than a strategic limit: pass is
+    # an ordinary choice and should feel like one.
+    #
+    # A pass while lured does NOT draw on this, because a lured pass has
+    # its own decreasing quantity in the lure timer -- that is the
+    # trap-and-wait line, which can need many rounds.
+    free_passes: int = 3
+
     def __init__(self, cogs: List[CogState], toon: Optional[ToonState] = None,
                  toons: Optional[List[ToonState]] = None,
-                 round_num: int = 0):
+                 round_num: int = 0, free_passes: int = 3):
         if (toon is None) == (toons is None):
             raise ValueError("pass exactly one of `toon` or `toons`")
         self.toons = list(toons) if toons is not None else [toon]
         self.cogs = cogs
         self.round_num = round_num
+        self.free_passes = free_passes
 
     @property
     def toon(self) -> ToonState:
@@ -256,6 +283,7 @@ class BattleState:
             ) for t in self.toons],
             cogs=[c.copy() for c in self.cogs],
             round_num=self.round_num,
+            free_passes=self.free_passes,
         )
 
     def active_cogs(self) -> List[CogState]:

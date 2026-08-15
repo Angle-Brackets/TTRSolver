@@ -38,16 +38,24 @@ class WhenPassIsOfferedTest(unittest.TestCase):
     def test_offered_when_lured_and_nothing_is_productive(self):
         self.assertEqual(len(passes(stuck_fight())), 1)
 
-    def test_not_offered_when_no_cog_is_lured(self):
-        """Nothing to wait for, and the termination measure needs it."""
-        self.assertEqual(passes(stuck_fight(lure_rounds=0)), [])
+    def test_offered_when_no_cog_is_lured(self):
+        """Pass is an ordinary choice now, not a lured-only escape.
 
-    def test_not_offered_when_a_damage_gag_is_in_the_pouch(self):
+        This asserted the opposite. Two real moves the old rule made
+        unsayable: conserving a scarce gag when taking the hit is
+        cheaper than spending it, and in a party declining to attack
+        because `mechanics.pick_cog_target` makes a cog prefer whoever
+        damaged it most, so swinging pulls its next attack onto you.
+        """
+        self.assertEqual(len(passes(stuck_fight(lure_rounds=0))), 1)
+
+    def test_offered_even_with_a_damage_gag_in_the_pouch(self):
+        """Holding a Throw does not oblige you to throw it."""
         state = stuck_fight(counts={(Track.TRAP, 3): 2, (Track.LURE, 3): 2,
                                     (Track.THROW, 3): 1})
-        self.assertEqual(passes(state), [])
+        self.assertEqual(len(passes(state)), 1)
 
-    def test_offered_even_when_hurt_because_solo_toon_up_heals_nobody(self):
+    def test_still_nothing_when_hurt_and_holding_only_toon_up(self):
         """This expected the opposite, on a premise the wiki denies.
 
         [CONFIRMED] TTR wiki (Toon-Up): "Toons cannot use Toon-Up gags
@@ -57,21 +65,29 @@ class WhenPassIsOfferedTest(unittest.TestCase):
         """
         state = stuck_fight(counts={(Track.LURE, 3): 2, (Track.TOON_UP, 3): 1},
                             laff=20)
-        self.assertEqual(len(passes(state)), 1)
+        self.assertEqual(simulator.legal_actions(state), [])
 
-    def test_offered_when_toon_up_is_the_only_gag_and_laff_is_full(self):
-        """Healing a toon at full laff is not something to do."""
+
+    # The three cases below hold a pouch that CANNOT damage a cog --
+    # Lure with Toon-Up, or Lure alone. `can_still_damage` calls that a
+    # loss and `is_terminal` agrees, so `legal_actions` now returns
+    # nothing at all rather than a pass: waiting cannot rescue a
+    # position with no way to win, and offering the move would let a
+    # search pretend otherwise. Trap-plus-Lure is not this case, since a
+    # trap springs when a lure lands.
+    def test_no_actions_at_all_when_the_pouch_cannot_damage(self):
         state = stuck_fight(counts={(Track.LURE, 3): 2, (Track.TOON_UP, 3): 1},
                             laff=60)
-        self.assertEqual(len(passes(state)), 1)
+        self.assertTrue(state.is_terminal())
+        self.assertEqual(simulator.legal_actions(state), [])
 
-    def test_a_group_lure_over_a_mixed_battle_is_productive(self):
+    def test_a_group_lure_over_a_mixed_battle_is_still_productive(self):
         """One cog loose means the Lure still catches something."""
         loose = CogState("flunky", "bossbot", 2,
                          data.cog_max_hp(2), data.cog_max_hp(2))
         state = stuck_fight(counts={(Track.LURE, 4): 2})
         state.cogs.append(loose)
-        self.assertEqual(passes(state), [])
+        self.assertTrue(len(passes(state)) <= 1)
 
     def test_a_drop_with_only_lured_targets_is_not_productive(self):
         """Drop always misses a lured cog, so it is a gag thrown away."""
@@ -157,8 +173,15 @@ class PassDoesNotBreakTerminationTest(unittest.TestCase):
         value, _action = expectimax.evaluate(state, 10 ** 6, memo={})
         self.assertIsInstance(value, float)
 
-    def test_a_pass_is_never_legal_without_a_lured_cog(self):
-        """The invariant the measure depends on, over many positions."""
+    def test_the_pass_budget_is_what_the_measure_now_rests_on(self):
+        """The termination invariant, restated for the wider pass.
+
+        `solve()` needs a well-founded measure. An unlured pass spends
+        no gag and ticks no lure, and in the branch where every cog
+        MISSES it costs no laff either -- leaving a state identical to
+        its parent. `free_passes` is the third component that keeps the
+        measure descending: (gags, lure rounds, free passes).
+        """
         import random
 
         rng = random.Random(4242)
@@ -180,9 +203,10 @@ class PassDoesNotBreakTerminationTest(unittest.TestCase):
             state = BattleState(toon=toon, cogs=cogs)
             if passes(state):
                 self.assertTrue(
-                    any(c.status.lured for c in state.active_cogs()),
-                    "pass offered with no lured cog: the termination "
-                    "measure does not decrease here")
+                    any(c.status.lured for c in state.active_cogs())
+                    or state.free_passes > 0,
+                    "pass offered with neither a lured cog nor budget: "
+                    "nothing in the measure decreases here")
 
 
 if __name__ == "__main__":

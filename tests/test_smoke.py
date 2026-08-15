@@ -57,7 +57,8 @@ class TestAccuracy(unittest.TestCase):
 class TestLegalActions(unittest.TestCase):
     def test_only_owned_tracks_with_stock_are_offered(self):
         state = two_flunky_fight()
-        offered = {(a.track, a.level) for a in simulator.legal_actions(state)}
+        offered = {(a.track, a.level)
+                   for a in simulator.legal_actions(state) if not a.is_pass}
         self.assertEqual(offered, {(Track.THROW, 3), (Track.LURE, 2),
                                    (Track.TRAP, 2)})
 

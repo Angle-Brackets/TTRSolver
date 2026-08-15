@@ -118,8 +118,11 @@ def action_to_dict(a: Action) -> Dict[str, Any]:
 
 
 def action_from_dict(d: Dict[str, Any]) -> Action:
-    return Action(track=Track(d["track"]), level=d["level"],
-                  target_index=d["target"])
+    # `track: null` is a pass, and must round-trip as one. `Track(None)`
+    # raises, which only became reachable once the pass stopped being
+    # confined to lured positions.
+    track = None if d["track"] is None else Track(d["track"])
+    return Action(track=track, level=d["level"], target_index=d["target"])
 
 
 # ---------------------------------------------------------------------
@@ -136,7 +139,16 @@ def gag_name(track: Track, level: int) -> str:
 # writes the files. Both sides tolerate them being absent -- assets/ is
 # gitignored, so a fresh clone has none until the fetcher is run.
 
-def gag_icon(track: Track, level: int) -> str:
+def gag_icon(track, level: int):
+    """None for a pass, which has no gag and therefore no icon.
+
+    `track` is None whenever the action is a pass. That used to be
+    unreachable here because a pass was only legal in one narrow
+    situation the front end never rendered; widening the pass made it
+    reachable and this raised AttributeError on `None.value`.
+    """
+    if track is None:
+        return None
     return f"gag-{track.value}-{level}.png"
 
 

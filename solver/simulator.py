@@ -51,9 +51,15 @@ def legal_actions(state: BattleState) -> List[Action]:
 
     WHEN PASS IS OFFERED
     --------------------
-    Only when a cog is lured *and* nothing productive can be done -- the
-    situation where passing is the only move, not merely a legal one.
-    Two separate reasons for a rule this narrow.
+    Always, while `state.free_passes` lasts. Passing is an ordinary
+    choice: conserve a scarce gag, or in a party decline to hit a cog
+    because `mechanics.pick_cog_target` makes it prefer whoever damaged
+    it most, so swinging really does pull its next attack onto you.
+
+    It used to be offered only when a cog was lured and nothing
+    productive could be done. That was too narrow -- it made both of the
+    above unsayable -- but the reasons behind it are real and worth
+    keeping in view.
 
     The first is that a pass is not the free move it looks like at a
     search horizon. A lured cog does not attack, so passing while the
@@ -79,11 +85,47 @@ def legal_actions(state: BattleState) -> List[Action]:
     burn a Lure re-luring a cog that is already lured. Waiting for the
     lure to lapse, then trapping and re-luring, wins fights that
     otherwise run the pouch dry. tests/test_pass.py plays one out.
+
+    THE UNLURED PASS, AND WHY IT IS BUDGETED
+    ----------------------------------------
+    Passing with nothing lured is also a real move, and the rule above
+    used to forbid it outright. Two cases it was wrong about:
+
+      * conserving a scarce gag, when taking a hit is cheaper than
+        spending the only Railroad in the pouch;
+      * declining to hit a cog in a party, because
+        `mechanics.pick_cog_target` makes a cog prefer whoever damaged
+        it most -- so attacking really does draw its next swing onto
+        you, and sometimes the right move is to let a healthier toon
+        take the aggro.
+
+    `state.free_passes` is a TERMINATION GUARD and not a strategic
+    limit, which is why it starts at 12 -- high enough never to bind in
+    a real battle.
+
+    It cannot simply be unbounded. `solve()` terminates because a
+    well-founded measure descends every round, and an unlured pass
+    spends no gag and ticks no lure. In the outcome branch where every
+    cog MISSES it also costs no laff, leaving a state identical to its
+    parent -- so the graph stops being a DAG and the search recurses
+    forever down pass -> pass -> pass. The measure is therefore
+    (gags, lure rounds, free passes), and still descends.
+
+    A lured pass does not draw on the budget: the lure timer is already
+    the quantity going down, and the trap-and-wait line can need many
+    rounds of it.
     """
     actions = []
     toon = state.toon
     active = state.active_cogs()
     if not active:
+        return actions
+    if not state.can_still_damage():
+        # No way left to hurt a cog, so the battle is already lost --
+        # `state.is_terminal()` says so. Offering a pass here would let
+        # a search "avoid" the loss by waiting forever in a position it
+        # cannot win. Trap-plus-Lure is NOT this case: `can_still_damage`
+        # knows a trap springs when a lure lands.
         return actions
 
     for (track, level), count in toon.gag_counts.items():
@@ -104,8 +146,8 @@ def legal_actions(state: BattleState) -> List[Action]:
                     continue  # can't trap an already-trapped or lured cog
             actions.append(Action(track=track, level=level, target_index=i))
 
-    if (any(cog.status.lured for cog in active)
-            and not any(is_productive(state, a) for a in actions)):
+    lured_wait = any(cog.status.lured for cog in active)
+    if lured_wait or state.free_passes > 0:
         actions.append(Action(track=None, level=0, target_index=None))
 
     return actions
@@ -216,9 +258,18 @@ def apply_toon_action(state: BattleState, action: Action,
     # spending it from the wrong pouch is silent and wrong.
     toon = state.toons[actor]
     if action.is_pass:
-        # Nothing spent, nothing dealt. The round still happens -- the
-        # caller runs the cog phase, which is the entire point of
-        # passing: it is how lure rounds get burned.
+        # Nothing spent from the pouch, nothing dealt. The round still
+        # happens -- the caller runs the cog phase, which is the entire
+        # point of passing while lured: it is how lure rounds get
+        # burned.
+        #
+        # An UNLURED pass does spend something: a unit of
+        # `free_passes`. That is what keeps the termination measure
+        # descending, since such a pass ticks no lure and costs no gag.
+        # A lured pass is free here because the lure timer is already
+        # the quantity going down.
+        if not any(cog.status.lured for cog in state.active_cogs()):
+            state.free_passes = max(0, state.free_passes - 1)
         return 0, 0
     targets = _targets_for(state, action)
 

@@ -149,11 +149,19 @@ the *true* expected value of a position. Not an estimate. That is why the
 learned evaluator in `fitted.py` can be trained on ground truth rather than
 on its own predictions — a luxury most game AI does not have.
 
-The one exception that could break the argument is the **pass** action,
-which spends nothing. It is offered only when a cog is lured and nothing
-else is productive, which is exactly the Trap-and-wait line, and the lure
-timer is itself strictly decreasing — so the measure becomes
-`(gags, lure rounds)` lexicographically, and still descends.
+The one thing that could break the argument is the **pass** action, which
+spends no gag. Passing is an ordinary choice — conserve a scarce gag, or
+in a party decline to attack, since `pick_cog_target` makes a cog prefer
+whoever damaged it most, so swinging pulls its next hit onto you. Given a
+lone Wedding Cake and an 8hp cog, the exact solver passes rather than
+spend it.
+
+To keep the measure well-founded, an unlured pass draws on a small
+budget (`state.free_passes`). Without one, the branch where every cog
+*misses* leaves the state unchanged and the search recurses forever. So
+the measure is `(gags, lure rounds, free passes)` lexicographically, and
+still descends. A lured pass is free of the budget — the lure timer is
+already the quantity going down.
 
 ### Three ways a battle ends
 

@@ -244,8 +244,12 @@ class TestSymmetryDedupe(unittest.TestCase):
         same = [CogState(cog_type="flunky", department="bossbot", level=4,
                          hp=30, max_hp=30) for _ in range(3)]
         state = BattleState(toon=toon, cogs=same)
-        self.assertEqual(len(simulator.legal_actions(state)), 3)
-        self.assertEqual(len(expectimax.distinct_actions(state)), 1)
+        self.assertEqual(
+            len([a for a in simulator.legal_actions(state) if not a.is_pass]),
+            3)
+        self.assertEqual(
+            len([a for a in expectimax.distinct_actions(state)
+                 if not a.is_pass]), 1)
 
     def test_a_damaged_cog_is_a_different_target(self):
         toon = ToonState(laff=40, max_laff=40, track_exp={Track.THROW: 7},
@@ -255,7 +259,9 @@ class TestSymmetryDedupe(unittest.TestCase):
                 CogState(cog_type="flunky", department="bossbot", level=4,
                          hp=12, max_hp=30)]
         state = BattleState(toon=toon, cogs=cogs)
-        self.assertEqual(len(expectimax.distinct_actions(state)), 2)
+        self.assertEqual(
+            len([a for a in expectimax.distinct_actions(state)
+                 if not a.is_pass]), 2)
 
     def test_dedupe_does_not_change_the_answer(self):
         toon = ToonState(laff=40, max_laff=40, track_exp={Track.THROW: 7},
