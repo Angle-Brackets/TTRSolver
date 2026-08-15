@@ -537,3 +537,40 @@ class DropAfterSoundTest(unittest.TestCase):
     def test_and_still_refused_without_the_sound(self):
         drop = Action(track=Track.DROP, level=5, target_index=0)
         self.assertFalse(ps._playable(self.position(), [None, drop]))
+
+
+class LearnedLeafTest(unittest.TestCase):
+    """`leaf="learned"` uses the trained value head, and degrades to a
+    rollout rather than failing when it cannot."""
+
+    def test_it_falls_back_when_the_model_is_unavailable(self):
+        from solver.search import policy
+
+        real = policy.value
+        policy.value = lambda state, feats: None
+        try:
+            value, plan = ps.evaluate(party(2), depth=0, leaf="learned",
+                                      rng=random.Random(0))
+        finally:
+            policy.value = real
+        self.assertIsNone(plan)
+        self.assertIsInstance(value, float)
+
+    def test_it_uses_the_model_when_available(self):
+        from solver.search import policy
+
+        real = policy.value
+        policy.value = lambda state, feats: 42.5
+        try:
+            value, _plan = ps.evaluate(party(2), depth=0, leaf="learned",
+                                       rng=random.Random(0))
+        finally:
+            policy.value = real
+        self.assertAlmostEqual(value, 42.5)
+
+    def test_an_unknown_leaf_name_still_uses_the_evaluator(self):
+        from solver.search import expectimax
+
+        state = party(2)
+        value, _plan = ps.evaluate(state, depth=0, leaf="fitted")
+        self.assertAlmostEqual(value, expectimax.heuristic_value(state))

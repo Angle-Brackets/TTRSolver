@@ -1007,7 +1007,14 @@ def evaluate(state: BattleState, depth: int = 1,
     if state.is_terminal():
         return 0.0, None
     if depth <= 0:
-        if leaf == "rollout":
+        if leaf == "learned":
+            from . import features as features_mod
+
+            learned = policy.value(state, features_mod.extract(state))
+            if learned is not None:
+                return learned, None
+            # No weights or no numpy: fall through rather than fail.
+        if leaf in ("rollout", "learned"):
             return rollout_value(state, objective, rng, model), None
         return expectimax.heuristic_value(state), None
 
