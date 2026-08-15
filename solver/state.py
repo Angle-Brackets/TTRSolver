@@ -212,14 +212,23 @@ class BattleState:
     # without a budget the search could walk pass -> pass -> pass
     # forever and the state graph would stop being a DAG.
     #
-    # 3, because the cost plateaus there. Exact `solve()` on a real
-    # position takes 6.9s with no pass at all, 18.3s at 1, 29.2s at 2,
-    # and 32.6s at 3 -- and then 32.8s at 4 and at 6, because the search
-    # stops finding more passes worth making. So 3 buys the entire
-    # behaviour and anything above it is cost with no effect.
+    # CURRENTLY UNUSED -- `legal_actions` is back to the narrow rule.
     #
-    # It is a termination guard rather than a strategic limit: pass is
-    # an ordinary choice and should feel like one.
+    # The widening (pass as an ordinary choice: conserve a scarce gag,
+    # or decline to attack because `pick_cog_target` aims a cog at
+    # whoever hurt it) is right, and shipping it broke exact `solve()`.
+    # With a budget of 2 the solver valued a position at +88.85 and with
+    # 1 at +84.30, choosing to pass in the first -- but passing only
+    # costs laff and a turn, so it cannot CREATE 4.55 points. Working
+    # the same node by hand gives ~79.9, and enumerating its outcomes
+    # directly gives 84.59: three different numbers for one value, which
+    # is a memo serving answers to the wrong question.
+    #
+    # Adding `free_passes` to `outcomes.state_key` was necessary and not
+    # sufficient, so something else in the search caches across it. That
+    # has to be found before this comes back: exact `solve()` is what
+    # the solo results and every fitted label rest on, and a wrong
+    # answer there is worth more than any strategic gain here.
     #
     # A pass while lured does NOT draw on this, because a lured pass has
     # its own decreasing quantity in the lure timer -- that is the

@@ -38,22 +38,26 @@ class WhenPassIsOfferedTest(unittest.TestCase):
     def test_offered_when_lured_and_nothing_is_productive(self):
         self.assertEqual(len(passes(stuck_fight())), 1)
 
-    def test_offered_when_no_cog_is_lured(self):
-        """Pass is an ordinary choice now, not a lured-only escape.
+    def test_not_offered_when_no_cog_is_lured(self):
+        """Nothing to wait for, and the termination measure needs it.
 
-        This asserted the opposite. Two real moves the old rule made
-        unsayable: conserving a scarce gag when taking the hit is
-        cheaper than spending it, and in a party declining to attack
-        because `mechanics.pick_cog_target` makes a cog prefer whoever
-        damaged it most, so swinging pulls its next attack onto you.
+        This SHOULD be wrong, and is not yet. Passing with nothing lured
+        is a real move -- conserving a scarce gag, or declining to
+        attack in a party because `mechanics.pick_cog_target` aims a cog
+        at whoever hurt it most. Widening the rule to allow it broke
+        exact `solve()`, which then valued a pass as CREATING 4.55
+        points; see `state.free_passes` for the trail. Reverted until
+        that is understood, and this test guards the revert rather than
+        the design.
         """
-        self.assertEqual(len(passes(stuck_fight(lure_rounds=0))), 1)
+        self.assertEqual(passes(stuck_fight(lure_rounds=0)), [])
 
-    def test_offered_even_with_a_damage_gag_in_the_pouch(self):
-        """Holding a Throw does not oblige you to throw it."""
+    def test_not_offered_when_a_damage_gag_is_in_the_pouch(self):
+        """Also should be wrong eventually -- holding a Throw does not
+        oblige you to throw it. Same revert as above."""
         state = stuck_fight(counts={(Track.TRAP, 3): 2, (Track.LURE, 3): 2,
                                     (Track.THROW, 3): 1})
-        self.assertEqual(len(passes(state)), 1)
+        self.assertEqual(passes(state), [])
 
     def test_still_nothing_when_hurt_and_holding_only_toon_up(self):
         """This expected the opposite, on a premise the wiki denies.

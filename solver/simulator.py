@@ -146,8 +146,11 @@ def legal_actions(state: BattleState) -> List[Action]:
                     continue  # can't trap an already-trapped or lured cog
             actions.append(Action(track=track, level=level, target_index=i))
 
-    lured_wait = any(cog.status.lured for cog in active)
-    if lured_wait or state.free_passes > 0:
+    # REVERTED to the narrow rule. The widening is correct in principle
+    # and broke `solve()` in practice -- see `state.free_passes`.
+    lured_wait = (any(cog.status.lured for cog in active)
+                  and not any(is_productive(state, a) for a in actions))
+    if lured_wait:
         actions.append(Action(track=None, level=0, target_index=None))
 
     return actions

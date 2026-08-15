@@ -491,6 +491,19 @@ def state_key(state: BattleState) -> Tuple:
     would let the memo answer a question about one party with the value
     of a different one -- same lead toon, different teammates -- which
     is the quietest possible way for a transposition table to be wrong.
+
+    `free_passes` is in the key for that same reason, and was left out
+    when the field was added. It changes `legal_actions`, so two states
+    differing only in it are genuinely different nodes -- and with them
+    collapsed, the memo answered a position holding three passes with
+    the value of one holding none. The symptom was a search that liked
+    passing MORE as its laff dropped, which is backwards, and it was
+    visible only because someone asked why it would not throw.
+
+    Contrast `round_num`, which stays out: nothing in the mechanics
+    reads it, so including it would split identical nodes for nothing.
+    The test is whether a field can change what happens next, not
+    whether it changes.
     """
     if len(state.toons) == 1:
         toon = state.toon
@@ -499,6 +512,7 @@ def state_key(state: BattleState) -> Tuple:
             frozenset((t, lvl, n)
                       for (t, lvl), n in toon.gag_counts.items() if n > 0),
             _cog_key(state),
+            state.free_passes,
         )
     return (
         tuple((t.laff,
@@ -506,4 +520,5 @@ def state_key(state: BattleState) -> Tuple:
                          for (tr, lvl), n in t.gag_counts.items() if n > 0))
               for t in state.toons),
         _cog_key(state),
+        state.free_passes,
     )
