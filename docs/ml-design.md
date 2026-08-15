@@ -341,6 +341,50 @@ Two lessons worth keeping:
   `solve()` timing out on 794 of 1200 large hold-out attempts is exactly
   why that is hard.
 
+### P0 and P1 trained (steps 3-4) — the policy works, and by a lot
+
+2,500 positions searched wide (120 plans, per-track 5, 16 samples),
+**299,976 ranked plans**, 2,125 train / 375 hold-out. One trunk, two
+heads, GPU.
+
+**Policy (P0).** The metric is `regret@6`: the teacher's best plan value
+minus the best value among the six plans the ranker would have kept.
+Zero means nothing was lost by searching only those six.
+
+| ranking | regret@6 | lossless |
+| --- | --- | --- |
+| **learned policy** | **3.4** | **36%** |
+| `_quick_score` (shipped) | 9.93 | 28.3% |
+| uniform random | 12.09 | — |
+
+**Roughly 3x better than the ranking the search actually ships.**
+
+And a finding about the incumbent that is arguably more useful: at this
+task `_quick_score` scores **9.93 against random's 12.09**. The
+hand-written shortlist ranking is barely better than picking six plans
+at random. That is not a small inefficiency — it is the mechanism behind
+four of this project's five silent-deletion bugs, and it explains why
+they were so easy to introduce. There was never much signal there to
+lose.
+
+**Value (P1).** Hold-out MAE ~8.4 on values around +90. Worth reading
+against the label noise rather than against zero: the teacher used 16
+samples on a per-round spread of ~31, so its own standard error is
+about 7.8. **The value head is at the noise floor of its labels** —
+more capacity or more epochs cannot help; only more samples per label
+could.
+
+**Top-1 accuracy is 6-8% and that is fine.** It asks "did the policy
+pick the teacher's argmax", which is the wrong question twice: the
+policy chooses a shortlist rather than a move, and the teacher's argmax
+is itself a sampled estimate with its top plans within noise of each
+other. Regret is the metric that matches the use.
+
+**Caveat:** training is not converging cleanly — hold-out MAE bounces
+8.35 to 11.59 across checkpoints and the best regret is at epoch 20, not
+40. It wants a learning-rate schedule and early stopping before anything
+is exported. The numbers above are a floor, not a tuned result.
+
 ## 6. What I would actually do
 
 ~~1. Measure throughput.~~ **Done** — see §5b. 17.5k steps/s.

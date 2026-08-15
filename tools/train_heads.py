@@ -254,13 +254,47 @@ def main():
                   f"lossless {rz * 100:4.1f}%")
 
     # Baseline: how often does the SHIPPED heuristic ordering put the
-    # teacher's best plan first? The policy has to beat this, not chance.
-    print("\n  baseline -- the shortlist order the search ships with:")
-    first = sum(1 for r in hold_rows if r["values"][0] == max(r["values"]))
-    print(f"    teacher's own ordering is by construction 100% top-1; "
-          f"({first}/{len(hold_rows)} sanity)")
-    rand1 = sum(1.0 / len(r["plans"]) for r in hold_rows) / len(hold_rows)
-    print(f"    uniform random over the shortlist: {rand1 * 100:.1f}% top-1")
+    # THE baseline is `_quick_score`, the hand-written ranking the
+    # search actually ships. Beating uniform random proves nothing --
+    # docs/ml-design.md records the same trap in `fit_heuristic`, whose
+    # `score()` deliberately compares against the hand-written heuristic
+    # so a fit cannot grade itself against its own predecessor.
+    from solver.search import party_search as ps
+
+    raw = json.loads(Path(args.labels).read_text(encoding="utf-8"))
+    idx = list(range(len(raw["positions"])))
+    random.Random(0).shuffle(idx)
+    hold_raw = [raw["positions"][i] for i in idx[int(len(idx) * 0.85):]]
+
+    q_regret, q_zero, r_regret, n = 0.0, 0, 0.0, 0
+    for entry in hold_raw:
+        state = bridge.state_from_dict(entry["state"])
+        vals = entry["values"]
+        plans = [[None if a is None
+                  else Action(track=Track[a[0]], level=a[1],
+                              target_index=a[2]) for a in pj]
+                 for pj in entry["plans"]]
+        try:
+            scores = [ps._quick_score(state, pl) for pl in plans]
+        except Exception:
+            continue
+        ranked = sorted(range(len(plans)), key=lambda i: -scores[i])
+        best = max(vals)
+        kept = max(vals[i] for i in ranked[:args.shortlist])
+        q_regret += max(0.0, best - kept)
+        q_zero += (best - kept) < 1e-6
+        picks = random.Random(n).sample(range(len(vals)),
+                                        min(args.shortlist, len(vals)))
+        r_regret += max(0.0, best - max(vals[i] for i in picks))
+        n += 1
+
+    if n:
+        print("")
+        print(f"  regret@{args.shortlist} on the same hold-out "
+              f"({n} positions), lower is better:")
+        print(f"    _quick_score (the shipped ranking) {q_regret / n:6.2f}"
+              f"   lossless {q_zero / n * 100:5.1f}%")
+        print(f"    uniform random                     {r_regret / n:6.2f}")
 
     if args.export:
         payload = {"vmean": vmean, "vstd": vstd, "plan_dim": PLAN_DIM,
