@@ -874,7 +874,7 @@ def evaluate(state: BattleState, depth: int = 1,
         # Charged once per plan, not per sample: waste is a property of
         # the choice, not of how the dice fell.
         waste = waste_penalty(objective, state, plan)
-        total = 0.0
+        returns: List[float] = []
         for _ in range(samples):
             nxt, _healed, _done = party_mod.step(
                 state, plan[0], mode=mode, model=model,
@@ -892,8 +892,17 @@ def evaluate(state: BattleState, depth: int = 1,
                 toons_lost=went_sad)
             future, _p = evaluate(nxt, depth - 1, mode, model, objective,
                                   samples, per_track, max_plans, leaf, rng)
-            total += reward + future
-        value = total / samples - waste
+            returns.append(reward + future)
+        # Mean, less a penalty for how widely the samples scatter. A
+        # risk-neutral search cannot express "clears by 15 rather than
+        # by 3" or "hedge in case the Lure misses" -- both are claims
+        # about the spread, and averaging discards exactly that.
+        mean = sum(returns) / len(returns)
+        risk = getattr(objective, "risk_aversion", 0.0)
+        if risk and len(returns) > 1:
+            var = sum((r - mean) ** 2 for r in returns) / (len(returns) - 1)
+            mean -= risk * (var ** 0.5)
+        value = mean - waste
         if value > best_value:
             best_value, best_plan = value, plan
     if best_plan is None:

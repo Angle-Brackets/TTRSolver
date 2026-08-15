@@ -688,3 +688,65 @@ What the feedback is actually asking for is **variance reduction** — pay
 a gag to bound the downside if the Lure misses — and an expected-value
 search does not want that by construction. That is the same missing
 robustness term already recorded above for the 3-damage Sound margin.
+
+
+## Re-measured with group cog attacks
+
+Every number above predates group cog attacks, when a party took
+strictly less damage than the game deals. Re-run on the maxed board,
+400 playouts, all plans winning 100%:
+
+| plan | score | laff | rounds |
+| --- | --- | --- | --- |
+| **2 Foghorn + 2 Aoogah** | **89.3** | 2.4 | 1.04 |
+| 2 Foghorn + 2 Elephant Trunk | 88.3 | 2.4 | 1.04 |
+| 4 Foghorn | 85.7 | 2.4 | 1.04 |
+| 1 Opera + 3 Aoogah | 83.0 | 2.4 | 1.04 |
+| Lure + 3 Opera Singer | 65.0 | 0.6 | 1.05 |
+| 4 Opera Singer | 53.3 | 2.4 | 1.04 |
+
+The ordering survives. Absolute scores are not comparable with the
+original table — that one paid +200 for a win and this pays +100 — but
+cheap mixed-level Sound is still first and 4 Opera Singer still last.
+
+## Why the safety-margin gap is not a risk-aversion problem
+
+`objective.risk_aversion` penalises the spread of a plan's sampled
+returns. It is implemented, swept at 0.1 / 0.25 / 0.5 / 1.0, and left
+at **0.0**, because it changes nothing: the maxed board keeps choosing
+the same Sound levels and the survival board keeps throwing Toon-Up in
+2 of 6 seeds either way.
+
+Measuring why was worth more than the term. The two plans this was
+supposed to separate —
+
+| plan | mean | **stdev** | cleared |
+| --- | --- | --- | --- |
+| 2 Foghorn + 2 Aoogah (clears by 3) | 85.87 | **31.20** | 96% |
+| 2 Foghorn + 2 Elephant Trunk (by 15) | 84.87 | **31.20** | 96% |
+
+— have *identical* spread, and they must. Gag damage in this model is
+deterministic: `calc_toon_damage` interpolates at
+`trained_fraction=1.0`, so a maxed toon always deals exactly max. All
+variance in a round is therefore **accuracy** variance — the Sound
+lands and both plans kill, or it misses and neither does. The margin
+never gets a chance to matter.
+
+So the wider margin is not protection against the dice. It is
+protection against the **model being wrong about the damage** — a toon
+not quite maxed, or the interim `trained_fraction` standing in for
+experience thresholds nobody has transcribed. That is uncertainty about
+a *parameter*, not spread in an *outcome*, and no weight over sampled
+returns can express it.
+
+That makes four objective levers now — `toon_lost_penalty`,
+`rare_gag_premium` (before the shortlist fix), `risk_aversion`, and
+`turn_cost` on position 2 — where a flat response to a sweep meant the
+lever could not reach the decision. **A knob that does not move the
+answer is a diagnostic, not a failure.** Twice it exposed a bug; twice
+it exposed a question that was being asked in the wrong units.
+
+Closing this one properly means either transcribing the minE/maxE
+experience thresholds so damage varies with real training, or searching
+against a deliberately pessimistic damage assumption and comparing the
+two answers.

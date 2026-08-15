@@ -81,6 +81,45 @@ class Objective:
     # restocks either, so this is closer to a partial loss than to
     # damage.
     toon_lost_penalty: float = 0.0
+
+    # How much the SPREAD of a plan's outcomes counts against it, in
+    # units of standard deviation. At 0 the search is risk-neutral: it
+    # maximises expected value and is indifferent between a line that
+    # always clears by 3 and one that usually clears by 30 and sometimes
+    # not at all.
+    #
+    # That indifference is wrong for how the game is actually played,
+    # and it showed up three separate ways: a Sound mix chosen because
+    # it cleared the toughest cog by 3 damage over one clearing by 15;
+    # Toon-Up never thrown as insurance against a Lure missing; and
+    # `toon_lost_penalty` unable to bite because it only fires in the
+    # sampled outcomes where a toon actually goes sad.
+    #
+    # Each of those is a variance complaint, not an expected-value one,
+    # which is why none of the expected-value levers reached them.
+    #
+    # LEFT AT 0.0, BECAUSE IT DOES NOT REACH THEM EITHER, and measuring
+    # why was worth more than the term. On the maxed board, the Sound
+    # mix clearing the toughest cog by 3 and the one clearing by 15
+    # have IDENTICAL outcome spread -- stdev 31.20 for both, clearing
+    # 96% of the time each.
+    #
+    # They must. Gag damage here is deterministic: `calc_toon_damage`
+    # interpolates at `trained_fraction=1.0`, so a maxed toon always
+    # deals exactly max. Every bit of variance in a round therefore
+    # comes from ACCURACY -- the Sound lands and both plans kill, or it
+    # misses and neither does. The margin never gets a chance to matter.
+    #
+    # So the wider margin is not protection against the dice. It is
+    # protection against the MODEL being wrong about the damage -- a
+    # toon not quite maxed, or the interim `trained_fraction` standing
+    # in for experience thresholds nobody has transcribed. That is
+    # uncertainty about a parameter, not spread in an outcome, and no
+    # weight over sampled returns can express it. Closing it properly
+    # means either transcribing the minE/maxE thresholds so damage
+    # varies with real experience, or searching against a pessimistic
+    # damage assumption and comparing.
+    risk_aversion: float = 0.0
     # Flat charge per round. The only term that makes the solver prefer
     # finishing sooner for its own sake; without it, a line that stalls
     # safely forever costs nothing but the gags it spends.
