@@ -68,7 +68,7 @@ from .cashbot import CASHBOT, CASHBOT_COGS
 from .lawbot import LAWBOT, LAWBOT_COGS
 from .sellbot import SELLBOT, SELLBOT_COGS
 from .gags import (
-    GAG_UNLOCK_EXP, TRACK_MAX_EXP, gag_unlock_exp,
+    GAG_UNLOCK_EXP, TRACK_MAX_EXP, gag_exp_window, gag_unlock_exp,
 )
 from .cogs import (
     COG_DEPARTMENTS, GROUP_ATTACKS, all_cogs, cog, cog_max_hp,
@@ -79,6 +79,7 @@ __all__ = [
     "GAG_UNLOCK_EXP",
     "TRACK_MAX_EXP",
     "gag_unlock_exp",
+    "gag_exp_window",
     "GROUP_ATTACKS",
     "is_group_attack",
     "AV_PROP_ACCURACY",

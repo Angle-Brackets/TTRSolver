@@ -374,13 +374,22 @@ EARLY_EXPIRY_ACCURACY_FLOOR = 50
 # deterministic step function of track experience, not the linear
 # interpolation `mechanics.DAMAGE_TRAINED_FRACTION` stands in for.
 #
-# WHAT IS STILL MISSING is `maxE`, the experience at which a gag's
-# damage stops climbing. The natural reading is the NEXT gag's
-# threshold, but the wiki does not say that and a gag remains usable
-# long after the next unlocks, so the window may well extend further.
-# Do not wire `gag_damage_from_exp` to a guessed maxE -- that would
-# replace an honest stand-in with a confident wrong answer, which is
-# strictly worse.
+# `maxE`, where a gag's damage stops climbing, is the NEXT gag's
+# threshold. [PER PROJECT OWNER] -- stated by the player who maintains
+# this project, not found in the wiki, so it is tagged separately from
+# the thresholds above rather than promoted to [CONFIRMED] alongside
+# them. It was the open question when the thresholds landed and the
+# answer resolves it exactly.
+#
+# Level 7 needs no window: those gags have a single fixed damage
+# (Wedding Cake 120, Opera Singer 90, Toontanic 180 -- min equals max),
+# so there is nothing to interpolate and the zero-width window at
+# 10,000 is harmless rather than a division by nearly nothing.
+#
+# The widest windows are at level 6 -- Birthday Cake spans 48-100,
+# Grand Piano 85-170 -- so that is where training actually decides the
+# damage, and where a stand-in of 1.0 flatters an under-trained toon
+# most.
 GAG_UNLOCK_EXP = {
     Track.TOON_UP: (
              0,   # 1  Feather
@@ -453,3 +462,22 @@ TRACK_MAX_EXP = 10_000        # [CONFIRMED] "fully maxed after 10,000"
 def gag_unlock_exp(track: Track, level: int) -> int:
     """Skill points needed before this gag is available. [CONFIRMED]."""
     return GAG_UNLOCK_EXP[track][level - 1]
+
+
+def gag_exp_window(track: Track, level: int):
+    """(minE, maxE) -- the experience over which this gag's damage
+    climbs from its minimum to its maximum.
+
+    minE is [CONFIRMED]; maxE being the next gag's threshold is
+    [PER PROJECT OWNER]. Level 7 returns a zero-width window, which is
+    correct rather than degenerate: those gags have one fixed damage.
+
+    Feeds `mechanics.gag_damage_from_exp`. Nothing calls it in the
+    damage path yet -- that needs `ToonState.track_exp` to hold real
+    experience rather than a 0-7 training level, which is a change with
+    its own reach into the live readers.
+    """
+    low = gag_unlock_exp(track, level)
+    if level >= 7:
+        return low, low
+    return low, gag_unlock_exp(track, level + 1)

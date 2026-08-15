@@ -49,3 +49,48 @@ class ThresholdTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WindowTest(unittest.TestCase):
+    """maxE is the next gag's threshold -- [PER PROJECT OWNER], not
+    found in the wiki, so tagged apart from the thresholds themselves."""
+
+    def test_a_window_runs_to_the_next_gag(self):
+        self.assertEqual(data.gag_exp_window(Track.THROW, 5), (2000, 6000))
+        self.assertEqual(data.gag_exp_window(Track.SOUND, 2), (20, 200))
+
+    def test_level_seven_has_no_window_and_needs_none(self):
+        """Those gags have one fixed damage, so nothing interpolates.
+
+        Checked only on the tracks that deal damage -- Lure and Toon-Up
+        raise from `damage_at`, correctly, having none.
+        """
+        for track in TRACKS:
+            low, high = data.gag_exp_window(track, 7)
+            self.assertEqual(low, high)
+            self.assertEqual(low, data.TRACK_MAX_EXP)
+        for track in (Track.THROW, Track.SQUIRT, Track.SOUND, Track.DROP):
+            gag = data.gag(track, 7)
+            self.assertEqual(
+                gag.damage_at(0.0, False), gag.damage_at(1.0, False),
+                f"{track} level 7 has a damage RANGE, so a zero-width "
+                f"window would divide by nearly nothing")
+
+    def test_windows_tile_the_track_without_gaps(self):
+        for track in TRACKS:
+            for level in range(1, 7):
+                self.assertEqual(data.gag_exp_window(track, level)[1],
+                                 data.gag_exp_window(track, level + 1)[0],
+                                 f"{track} level {level} leaves a gap")
+
+    def test_the_formula_accepts_a_real_window(self):
+        """A maxed toon at the top of a level 6 window deals max."""
+        import solver.mechanics as mechanics
+
+        low, high = data.gag_exp_window(Track.THROW, 6)
+        gag = data.gag(Track.THROW, 6)
+        lo_d, hi_d = gag.damage_at(0.0, False), gag.damage_at(1.0, False)
+        self.assertEqual(
+            mechanics.gag_damage_from_exp(high, high, low, lo_d, hi_d), hi_d)
+        self.assertEqual(
+            mechanics.gag_damage_from_exp(low, high, low, lo_d, hi_d), lo_d)
