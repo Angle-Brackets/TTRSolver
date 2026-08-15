@@ -1,0 +1,12 @@
+# Training only. NOTHING in solver/ may import torch.
+#
+# Same rule as requirements-vision.txt: the solver core, the Local API
+# client and the whole test suite run on the standard library alone.
+# tools/train_heads.py trains on the GPU and exports plain floats, so
+# inference stays stdlib-only -- see search/fitted.py, which is a block
+# of literals for exactly this reason.
+#
+# Install the CUDA build explicitly; the default index serves a CPU
+# wheel and will silently give you no GPU:
+#   pip install --index-url https://download.pytorch.org/whl/cu126 torch
+torch
