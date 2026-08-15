@@ -87,11 +87,34 @@ SCORE_BUDGET = 40
 # would have picked with plans it rates lower, which is exactly the
 # regression observed.
 #
-# The fix is to carry the policy score into the final selection instead
-# of stopping at pool membership. Until that is written and measured,
-# this stays off: a ranker that is better in isolation and worse in
-# place is not an improvement, and shipping it on would trade a measured
-# 1.3 points for a plausible story.
+# The wiring bug IS fixed -- the policy score now orders plans within a
+# stratum as well as choosing bucket membership, so it reaches the final
+# cut. It still loses, at every width tried:
+#
+#     width   policy OFF   policy ON
+#         8      +88.06      +87.29
+#        16      +89.34      +87.29
+#        30      +89.34      +87.29
+#        60      +89.72      +88.29
+#
+# So the model, not the plumbing. The cause is in the LABELS. The
+# teacher estimated each plan from 16 samples of a per-round spread of
+# about 31, giving a standard error near 7.8 -- while the median value
+# gap between the best plan and the sixth is 3.54. The labels are
+# noisier than the distinctions they are meant to teach, so the
+# teacher's ordering among good plans is mostly noise and the policy
+# learned it faithfully.
+#
+# That also explains why the offline metric looked so good. regret@6
+# scored the policy against those same noisy values: when the top twenty
+# plans sit within noise of each other, almost any six of them score a
+# low regret. It measured "avoids obviously bad plans", which the policy
+# genuinely does better than `_quick_score`, and could not see "picks
+# the actually best plan", which is what the search needs.
+#
+# The fix is more samples per plan in the teacher, not a bigger network
+# -- 16 to 128 or more, at eight times the generation cost. Off until
+# then.
 USE_POLICY = False
 
 # How many of a toon's candidate actions get a simulated `_greedy_score`
@@ -367,11 +390,40 @@ def plans(state: BattleState, mode: Mode = Mode.PICKUP,
                 picked.append(row[2])
         buckets[signature] = picked
 
+    # Order WITHIN a stratum by both rankers, not by `_quick_score`
+    # alone.
+    #
+    # This is where the policy was being thrown away. It chose which
+    # plans entered the bucket and then this line re-sorted the bucket on
+    # `_quick_score`, so the learned ordering never reached the final
+    # `max_plans` cut. All the policy achieved was to displace plans the
+    # arithmetic would have kept -- which is why turning it on made the
+    # search worse (mean +88.39 against +89.72) despite ranking three
+    # times better in isolation.
+    #
+    # Alternating the two orderings gives each ranker an equal share of
+    # the final list, and keeps the property the union was for: a plan
+    # has to be missed by both to be lost.
+    policy_of = {}
+    if scores is not None:
+        for index, combo in enumerate(playable):
+            policy_of[id(combo)] = scores[index]
+
     strata: Dict[tuple, List] = {}
     for signature, bucket in buckets.items():
         rows = [(_quick_score(state, combo), combo) for combo in bucket]
-        rows.sort(key=lambda row: -row[0])
-        strata[signature] = rows
+        by_quick = sorted(rows, key=lambda row: -row[0])
+        if not policy_of:
+            strata[signature] = by_quick
+            continue
+        by_pol = sorted(rows, key=lambda row: -policy_of.get(id(row[1]), 0.0))
+        merged, seen = [], set()
+        for a, b in zip(by_pol, by_quick):
+            for row in (a, b):
+                if id(row[1]) not in seen:
+                    seen.add(id(row[1]))
+                    merged.append(row)
+        strata[signature] = merged or by_quick
 
     out: List[Sequence[Optional[Action]]] = []
     order = sorted(strata, key=lambda sig: -strata[sig][0][0])

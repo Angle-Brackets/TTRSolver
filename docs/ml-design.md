@@ -385,6 +385,47 @@ other. Regret is the metric that matches the use.
 40. It wants a learning-rate schedule and early stopping before anything
 is exported. The numbers above are a floor, not a tuned result.
 
+### The policy loses in place, and the offline metric could not see it
+
+Wired in properly -- the policy score reaching the final `max_plans` cut,
+not just bucket membership -- and A/B'd over four seeds at four widths on
+a real battered-party position:
+
+| shortlist width | policy OFF | policy ON |
+| --- | --- | --- |
+| 8 | +88.06 | +87.29 |
+| 16 | **+89.34** | +87.29 |
+| 30 | **+89.34** | +87.29 |
+| 60 | **+89.72** | +88.29 |
+
+It loses everywhere, and the identical +87.29 at three widths says it is
+steering to one particular mediocre plan regardless of how much room it
+has.
+
+**The cause is the labels, not the network.** The teacher estimated each
+plan from 16 samples of a per-round spread of ~31, so its standard error
+per plan is about **7.8** — while the median value gap between the best
+plan and the sixth is **3.54**. The labels are noisier than the
+distinctions they are meant to teach. Among good plans the teacher's
+ordering is largely noise, and the policy reproduced it faithfully.
+
+**And that is why regret@6 flattered it.** The metric scored the policy
+against those same noisy values. When the top twenty plans sit within
+noise of one another, almost any six score a low regret — so regret@6
+measured *"avoids obviously bad plans"*, which the policy really does do
+better than `_quick_score` (whose rank-1-to-median gap of 22 says it
+sometimes picks genuinely bad ones), and was blind to *"picks the best
+plan"*, which is the only thing the search needs from it.
+
+**An offline metric computed against noisy labels cannot validate a
+component whose job is to discriminate within that noise.** The
+end-to-end A/B is the only test that counts, and it should have been run
+before the regret number was reported as a win.
+
+The fix is more samples per plan in the teacher — 16 to 128 or beyond,
+at eight times the generation cost — not a bigger network. `USE_POLICY`
+is off until that is done and re-measured.
+
 ## 6. What I would actually do
 
 ~~1. Measure throughput.~~ **Done** — see §5b. 17.5k steps/s.
