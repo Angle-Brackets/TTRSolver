@@ -224,22 +224,52 @@ USABLE = {(t, l) for t in TRACKS for l in range(1, 8) if _usable(t, l)}
 
 
 def random_toon(rng) -> ToonState:
-    tracks = rng.sample(TRACKS, rng.randint(3, 5))
+    """A toon, deliberately not always a maxed one.
+
+    The first version trained every track to 4-7 and handed out the top
+    gags of each, so every toon was late-game and every puzzle had the
+    same texture. Real pouches are lopsided: a track at experience 2
+    while another is maxed, a pouch of nothing but level 1-3, one track
+    only, or no attack gags at all -- which forces Lure, Trap or a pass
+    and is exactly the position worth being able to solve.
+
+    Training experience matters beyond which gags are owned: it feeds
+    `calc_track_exp`, so an unmaxed track is genuinely less accurate,
+    not merely smaller.
+    """
+    shape = rng.random()
+    if shape < 0.15:
+        tracks = rng.sample(TRACKS, 1)               # one-track toon
+    elif shape < 0.35:
+        tracks = rng.sample(TRACKS, 2)
+    else:
+        tracks = rng.sample(TRACKS, rng.randint(3, 6))
+
     counts, exp = {}, {}
     for track in tracks:
-        trained = rng.randint(4, 7)
+        trained = rng.randint(1, 7)                  # UNMAXED tracks
         exp[track] = trained
-        for level in range(max(1, trained - 3), trained + 1):
-            if (track, level) in USABLE and rng.random() < 0.8:
+        low = 1 if rng.random() < 0.35 else max(1, trained - 3)
+        for level in range(low, trained + 1):
+            if (track, level) in USABLE and rng.random() < 0.75:
                 cap = data.gag(track, level).max_carry or 1
-                counts[(track, level)] = rng.randint(1, min(cap, 4))
+                counts[(track, level)] = rng.randint(1, min(cap, 5))
+
+    # Sometimes strip the damage entirely: no Throw, Squirt, Sound or
+    # Drop. Lure and Trap alone cannot win, so the interesting question
+    # becomes how long the toon survives and whether it stops swinging.
+    if rng.random() < 0.10:
+        counts = {k: v for k, v in counts.items()
+                  if k[0] in (Track.LURE, Track.TRAP, Track.TOON_UP)}
+
     if not counts:
         counts, exp = {(Track.THROW, 4): 2}, {Track.THROW: 5}
-    max_laff = rng.choice([50, 65, 80, 95, 110, 125, 137])
-    return ToonState(max(1, int(max_laff * rng.uniform(0.2, 1.0))), max_laff,
-                     exp, counts,
-                     frozenset([rng.choice(tracks)]) if rng.random() < 0.4
-                     else frozenset())
+    max_laff = rng.choice([15, 25, 40, 50, 65, 80, 95, 110, 125, 137])
+    organic = frozenset()
+    if rng.random() < 0.4:
+        organic = frozenset([rng.choice(list(exp))])
+    return ToonState(max(1, int(max_laff * rng.uniform(0.15, 1.0))), max_laff,
+                     exp, counts, organic)
 
 
 # The hardest cogs that are actually playable, level 12 included.
