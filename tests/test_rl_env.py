@@ -154,3 +154,27 @@ class StrangePositionTest(unittest.TestCase):
                     break
                 state, _h, _d = party_mod.step(
                     state, None, mode=party_mod.Mode.PICKUP, rng=rng)
+
+
+class ToonShapeTest(unittest.TestCase):
+    """Generated toons must be toons the game can produce."""
+
+    def test_every_toon_owns_throw_and_squirt(self):
+        """Both are starting tracks. A toon without them is not a hard
+        puzzle, it is an impossible one."""
+        rng = random.Random(9)
+        for _ in range(300):
+            exp = env.random_toon(rng).track_exp
+            self.assertIn(Track.THROW, exp)
+            self.assertIn(Track.SQUIRT, exp)
+
+    def test_no_toon_owns_all_seven_tracks(self):
+        rng = random.Random(10)
+        for _ in range(300):
+            self.assertLessEqual(len(env.random_toon(rng).track_exp), 6)
+
+    def test_experience_is_in_range(self):
+        rng = random.Random(11)
+        for _ in range(300):
+            for level in env.random_toon(rng).track_exp.values():
+                self.assertTrue(1 <= level <= 7)

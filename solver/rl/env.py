@@ -237,13 +237,16 @@ def random_toon(rng) -> ToonState:
     `calc_track_exp`, so an unmaxed track is genuinely less accurate,
     not merely smaller.
     """
-    shape = rng.random()
-    if shape < 0.15:
-        tracks = rng.sample(TRACKS, 1)               # one-track toon
-    elif shape < 0.35:
-        tracks = rng.sample(TRACKS, 2)
-    else:
-        tracks = rng.sample(TRACKS, rng.randint(3, 6))
+    # THROW AND SQUIRT ALWAYS. Every toon starts with both, so a
+    # one-track toon is not a hard puzzle, it is an impossible one --
+    # the same error as a trapped cog with no trap level, generating a
+    # game that does not exist.
+    #
+    # And never all seven: a toon picks six at most, so the extras come
+    # from the other five tracks and stop at four.
+    tracks = [Track.THROW, Track.SQUIRT]
+    others = [t for t in TRACKS if t not in tracks]
+    tracks += rng.sample(others, rng.randint(0, 4))
 
     counts, exp = {}, {}
     for track in tracks:
@@ -255,15 +258,22 @@ def random_toon(rng) -> ToonState:
                 cap = data.gag(track, level).max_carry or 1
                 counts[(track, level)] = rng.randint(1, min(cap, 5))
 
-    # Sometimes strip the damage entirely: no Throw, Squirt, Sound or
-    # Drop. Lure and Trap alone cannot win, so the interesting question
-    # becomes how long the toon survives and whether it stops swinging.
+    # Sometimes empty the damage tracks. Note this is a spent POUCH and
+    # not an untrained track -- a toon always owns Throw and Squirt, so
+    # the only way to hold no attack gag is to have used them all, which
+    # is a position real play reaches constantly.
     if rng.random() < 0.10:
         counts = {k: v for k, v in counts.items()
                   if k[0] in (Track.LURE, Track.TRAP, Track.TOON_UP)}
 
     if not counts:
-        counts, exp = {(Track.THROW, 4): 2}, {Track.THROW: 5}
+        # The empty-roll fallback. It used to reset to Throw alone,
+        # which quietly rebuilt the impossible one-track toon this
+        # function exists to avoid -- 17 of 400 draws came out that way
+        # even after the sampling above was fixed. A fallback that
+        # violates the invariant is worse than no fallback.
+        counts = {(Track.THROW, 4): 2, (Track.SQUIRT, 4): 2}
+        exp = {Track.THROW: 5, Track.SQUIRT: 5}
     max_laff = rng.choice([15, 25, 40, 50, 65, 80, 95, 110, 125, 137])
     organic = frozenset()
     if rng.random() < 0.4:
