@@ -294,10 +294,51 @@ def hard_position(rng) -> BattleState:
     return BattleState(toons=[toon], cogs=cogs)
 
 
-def mixed_position(rng, hard_fraction: float = 0.5) -> BattleState:
-    """Blend, so the easy case is not forgotten while the hard one is
-    learned."""
-    if rng.random() < hard_fraction:
+def strange_position(rng) -> BattleState:
+    """Positions a fresh battle never produces.
+
+    Training only on round-one boards teaches round-one habits. Real
+    advice is asked for mid-fight, where a cog is already lured with two
+    rounds left, a trap is sitting armed, someone is one hit from sad,
+    or the pouch has been picked over and the cheap gags are gone.
+
+    These are reachable states, not invented ones -- every modifier here
+    is something the simulator itself produces a few rounds in.
+    """
+    state = default_position(rng) if rng.random() < 0.5 else hard_position(rng)
+
+    for cog in state.cogs:
+        roll = rng.random()
+        if roll < 0.25:
+            cog.status.apply_lure(rng.choice([50, 60, 70, 80]),
+                                  rng.randint(1, 4), rng.randint(2, 4))
+        elif roll < 0.40:
+            cog.status.trapped = True
+        if rng.random() < 0.3:
+            cog.hp = max(1, int(cog.hp * rng.uniform(0.1, 0.6)))
+
+    for toon in state.toons:
+        if rng.random() < 0.35:
+            toon.laff = max(1, int(toon.max_laff * rng.uniform(0.05, 0.25)))
+        if rng.random() < 0.4 and toon.gag_counts:
+            # A picked-over pouch: the cheap gags go first in real play.
+            counts = dict(toon.gag_counts)
+            for key in sorted(counts, key=lambda k: k[1])[:rng.randint(1, 3)]:
+                counts[key] = 0
+            toon.gag_counts = {k: v for k, v in counts.items() if v > 0}
+    if not any(t.gag_counts for t in state.toons):
+        return default_position(rng)
+    state.round_num = rng.randint(0, 5)
+    return state
+
+
+def mixed_position(rng, hard_fraction: float = 0.5,
+                   strange_fraction: float = 0.25) -> BattleState:
+    """Blend, so no single shape becomes the whole of what is learned."""
+    roll = rng.random()
+    if roll < strange_fraction:
+        return strange_position(rng)
+    if roll < strange_fraction + hard_fraction:
         return hard_position(rng)
     return default_position(rng)
 

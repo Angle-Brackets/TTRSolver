@@ -83,8 +83,11 @@ def main():
     ap.add_argument("--eval-every", type=int, default=10)
     ap.add_argument("--hard-fraction", type=float, default=0.0,
                     help="share of episodes drawn from hard_position -- "
-                         "solo against a wall of level 10-11 cogs, where "
+                         "solo against a wall of level 10-12 cogs, where "
                          "Lure stops being optional")
+    ap.add_argument("--strange-fraction", type=float, default=0.25,
+                    help="mid-fight boards: already lured, armed traps, "
+                         "picked-over pouches, someone nearly sad")
     ap.add_argument("--reward-scale", type=float, default=0.01,
                     help="learning-side only; eval stays in real units")
     args = ap.parse_args()
@@ -100,7 +103,9 @@ def main():
     sampler = None
     if args.hard_fraction > 0:
         frac = args.hard_fraction
-        sampler = lambda r, _f=frac: env_mod.mixed_position(r, _f)
+        strange = args.strange_fraction
+        sampler = (lambda r, _f=frac, _s=strange:
+                   env_mod.mixed_position(r, _f, _s))
     envs = [env_mod.BattleEnv(rng=random.Random(args.seed * 1000 + i),
                               sampler=sampler)
             for i in range(args.envs)]
