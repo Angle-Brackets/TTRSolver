@@ -59,6 +59,29 @@ PASS_INDEX = 0
 OBS_DIM = MAX_COGS * 9 + MAX_TOONS * (3 + 49) + 3
 
 
+def check_export(payload) -> Optional[str]:
+    """Why a saved policy cannot be used here, or None if it can.
+
+    Nothing else validates this, and the failure is silent: a policy
+    trained on a 243-wide observation fed 247 floats reads every feature
+    shifted by four and returns confident nonsense. That happened --
+    adding `trap_damage_ratio` to the observation invalidated a trained
+    policy, and only a manual check caught it before a comparison was
+    run against it.
+
+    Same shape as `fitted.is_fitted`, which exists so a weight vector
+    that no longer matches the feature list refuses to be used instead
+    of quietly misreading it.
+    """
+    if payload.get("obs_dim") != OBS_DIM:
+        return (f"observation is {OBS_DIM} wide, policy was trained on "
+                f"{payload.get('obs_dim')} -- retrain")
+    if payload.get("n_actions") != len(ACTIONS):
+        return (f"action table is {len(ACTIONS)}, policy was trained on "
+                f"{payload.get('n_actions')} -- retrain")
+    return None
+
+
 def action_at(index: int) -> Optional[Action]:
     """The action for a policy index. `None` is the pass."""
     if index == PASS_INDEX:

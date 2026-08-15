@@ -178,3 +178,28 @@ class ToonShapeTest(unittest.TestCase):
         for _ in range(300):
             for level in env.random_toon(rng).track_exp.values():
                 self.assertTrue(1 <= level <= 7)
+
+
+class ExportCompatibilityTest(unittest.TestCase):
+    """A saved policy must refuse to load against a changed observation.
+
+    Adding a feature to `encode` silently invalidates every trained
+    policy: 247 floats read through weights expecting 243 shifts every
+    input and returns confident nonsense, with no error anywhere. This
+    is the `fitted.is_fitted` guard for the RL side.
+    """
+
+    def test_a_matching_export_is_accepted(self):
+        self.assertIsNone(env.check_export(
+            {"obs_dim": env.OBS_DIM, "n_actions": len(env.ACTIONS)}))
+
+    def test_a_stale_observation_width_is_rejected(self):
+        why = env.check_export(
+            {"obs_dim": env.OBS_DIM - 4, "n_actions": len(env.ACTIONS)})
+        self.assertIsNotNone(why)
+        self.assertIn("retrain", why)
+
+    def test_a_stale_action_table_is_rejected(self):
+        why = env.check_export(
+            {"obs_dim": env.OBS_DIM, "n_actions": len(env.ACTIONS) - 1})
+        self.assertIsNotNone(why)
