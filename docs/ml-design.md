@@ -518,6 +518,45 @@ optimisation, no learning involved.
 Both heads stay in the tree, both measured, both off or opt-in. They are
 not wrong; they are aimed at a cost that turned out not to exist.
 
+### P2, PPO: the one that worked
+
+3M steps, ~2,900 env steps/s, GPU. Evaluated on 200 held-out positions
+against the search on **the same positions in the same reward units**:
+
+| | return | win | wall clock |
+| --- | --- | --- | --- |
+| **PPO policy** | **+60.31** | 93.0% | **0.41s** |
+| search, samples=8 plans=12 | +57.98 | 92.0% | 24.09s |
+| search, samples=32 plans=30 | +61.87 | 94.0% | 101.51s |
+| uniform random | +23.10 | 80.0% | — |
+
+**It beats the cheaper search outright at 59x less time, and comes
+within 1.6 points of a search costing 248x more.** That is the claim P2
+was proposed on, and unlike P0 it survives the end-to-end test rather
+than only the offline one.
+
+Why this worked where distillation did not:
+
+* **No teacher ceiling.** P0 could only approach a teacher that is
+  itself approximate. PPO learns from outcomes.
+* **It never calls `plans()`**, the stage holding 95% of search runtime.
+  It samples an action instead of enumerating thousands of joint plans.
+* **It can pass.** 4.1% of its moves are passes — the action the search
+  cannot currently offer, since widening it broke exact `solve()`. A
+  policy has no transposition table to corrupt.
+
+Learning curve: +56.5 at 100k steps, +63.7 peak at 1.74M, +60.3 at 3M.
+Most of the gain arrives inside the first 500k; the rest is noise around
+a plateau.
+
+**What it is not.** Pickup mode only, so teammates are `SensiblePrior`
+-- it has learned to play alongside a *model* of strangers. Trained and
+tested on the same position sampler (different seeds), so it is
+in-distribution. And it has learned this simulator, bugs included: a
+search exposes a bad rule because a human reads the output and says
+nobody plays that, and a policy hides one. The search stays as the
+cross-check.
+
 ## 6. What I would actually do
 
 ~~1. Measure throughput.~~ **Done** — see §5b. 17.5k steps/s.
