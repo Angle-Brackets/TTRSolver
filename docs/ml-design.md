@@ -422,9 +422,34 @@ component whose job is to discriminate within that noise.** The
 end-to-end A/B is the only test that counts, and it should have been run
 before the regret number was reported as a win.
 
-The fix is more samples per plan in the teacher — 16 to 128 or beyond,
-at eight times the generation cost — not a bigger network. `USE_POLICY`
-is off until that is done and re-measured.
+### Re-labelled at 128 samples: better, still losing
+
+Regenerated 1,500 positions at `samples=128`, dropping the teacher's
+standard error from 7.8 to **2.74** — now below the 3.12 median gap it
+has to resolve, which was the whole hypothesis. Offline regret improved
+to **2.86** against `_quick_score`'s 8.52.
+
+| width | policy OFF | ON, 16-sample labels | ON, 128-sample labels |
+| --- | --- | --- | --- |
+| 8 | **+88.06** | +87.29 | +86.79 |
+| 16 | **+89.34** | +87.29 | +86.79 |
+| 30 | **+89.34** | +87.29 | +87.79 |
+| 60 | **+89.72** | +88.29 | +89.23 |
+
+**The noise diagnosis was partly right and not sufficient.** At width 60
+the deficit closed from 1.43 to 0.49, so cleaner labels genuinely
+helped — and the policy still loses at every width.
+
+What the run now says about itself: the best epoch is **10 of 60**,
+against 55 of 60 before. With 1,275 training positions instead of 2,125,
+it overfits almost immediately. So the label quality went up and the
+label *quantity* went down, and the second undid much of the first —
+1,500 positions at 128 samples cost the same 38 minutes as 2,500 at 16.
+
+The next honest experiment is more positions at high sample count, which
+is hours rather than minutes, and it should be run only if someone
+wants the answer badly enough. `USE_POLICY` stays off. The value head
+(P1) is unaffected by any of this and is wired in and working.
 
 ## 6. What I would actually do
 
