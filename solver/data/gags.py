@@ -360,3 +360,96 @@ def validate_loadout(gag_counts) -> list:
 # nothing qualifies and lures run their full duration. Kept as a threshold
 # rather than hardcoded False because it is a balance knob.
 EARLY_EXPIRY_ACCURACY_FLOOR = 50
+
+
+# Skill points required to unlock each gag, by track and level.
+#
+# [CONFIRMED] TTR wiki (Skill points, "Required skill points"). A track
+# is fully maxed at 10,000 skill points, which is also the level 7
+# threshold -- so the last gag unlocks exactly as the bar fills.
+#
+# This is `minE` in `mechanics.gag_damage_from_exp`, the experience at
+# which a gag becomes available and from which its damage starts
+# climbing. It is transcribed here because damage in the real game is a
+# deterministic step function of track experience, not the linear
+# interpolation `mechanics.DAMAGE_TRAINED_FRACTION` stands in for.
+#
+# WHAT IS STILL MISSING is `maxE`, the experience at which a gag's
+# damage stops climbing. The natural reading is the NEXT gag's
+# threshold, but the wiki does not say that and a gag remains usable
+# long after the next unlocks, so the window may well extend further.
+# Do not wire `gag_damage_from_exp` to a guessed maxE -- that would
+# replace an honest stand-in with a confident wrong answer, which is
+# strictly worse.
+GAG_UNLOCK_EXP = {
+    Track.TOON_UP: (
+             0,   # 1  Feather
+            20,   # 2  Megaphone
+           200,   # 3  Lipstick
+           800,   # 4  Bamboo Cane
+          2000,   # 5  Pixie Dust
+          6000,   # 6  Juggling Cubes
+         10000,   # 7  High Dive
+    ),
+    Track.TRAP: (
+             0,   # 1  Banana Peel
+            20,   # 2  Rake
+           100,   # 3  Marbles
+           500,   # 4  Quicksand
+          2000,   # 5  Trapdoor
+          6000,   # 6  TNT
+         10000,   # 7  Railroad
+    ),
+    Track.LURE: (
+             0,   # 1  $1 Bill
+            20,   # 2  Small Magnet
+           100,   # 3  $5 Bill
+           800,   # 4  Big Magnet
+          2000,   # 5  $10 Bill
+          6000,   # 6  Hypno-goggles
+         10000,   # 7  Presentation
+    ),
+    Track.SOUND: (
+             0,   # 1  Bike Horn
+            20,   # 2  Whistle
+           200,   # 3  Bugle
+           800,   # 4  Aoogah
+          2000,   # 5  Elephant Trunk
+          6000,   # 6  Foghorn
+         10000,   # 7  Opera Singer
+    ),
+    Track.THROW: (
+             0,   # 1  Cupcake
+            10,   # 2  Fruit Pie Slace
+            50,   # 3  Cream Pie Slice
+           400,   # 4  Whole Fruit Pie
+          2000,   # 5  Whole Cream Pie
+          6000,   # 6  Birthday Cake
+         10000,   # 7  Wedding Cake
+    ),
+    Track.SQUIRT: (
+             0,   # 1  Squirting Flower
+            10,   # 2  Glass of Water
+            50,   # 3  Squirt Gun
+           400,   # 4  Seltzer Bottle
+          2000,   # 5  Fire Hose
+          6000,   # 6  Storm Cloud
+         10000,   # 7  Geyser
+    ),
+    Track.DROP: (
+             0,   # 1  Flower Pot
+            20,   # 2  Sandbag
+           100,   # 3  Anvil
+           500,   # 4  Big Weight
+          2000,   # 5  Safe
+          6000,   # 6  Grand Piano
+         10000,   # 7  Toontanic
+    ),
+}
+
+TRACK_MAX_EXP = 10_000        # [CONFIRMED] "fully maxed after 10,000"
+
+
+def gag_unlock_exp(track: Track, level: int) -> int:
+    """Skill points needed before this gag is available. [CONFIRMED]."""
+    return GAG_UNLOCK_EXP[track][level - 1]
