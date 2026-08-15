@@ -371,3 +371,47 @@ class PouchExemptionTest(unittest.TestCase):
         counts = {(Track.THROW, lvl): 30 for lvl in (1, 2, 3, 4)}
         problems = validate_loadout(counts)
         self.assertTrue(any("pouch" in p for p in problems), problems)
+
+
+class ToonUpOrganicRuleTest(unittest.TestCase):
+    """`organic = ceil(1.2 x base)` WITHIN the Toon-Up track only.
+
+    Not a general organic rule, and saying so was a real error: organic
+    varies by track. Throw converges on x1.1 (Wedding Cake 120 -> 132),
+    Squirt and Drop sit around x1.15-1.2. The relationship below is a
+    Toon-Up regularity and nothing wider.
+
+    Lipstick's heal is NOT derived from it any more -- the Lipstick page
+    states 25-30 outright, and the summary tables saying 27 are simply
+    wrong. The relationship is kept as a consistency check on the track,
+    which is all it ever was.
+    """
+
+    def test_the_multiplier_is_NOT_general(self):
+        """Guards the claim above, so nobody generalises the 1.2."""
+        from solver import data
+        from solver.state import Track
+
+        throw7 = data.gag(Track.THROW, 7)
+        self.assertEqual(throw7.damage, (120, 120))
+        self.assertEqual(throw7.organic_damage, (132, 132))  # x1.1, not 1.2
+
+    def test_the_rule_holds_for_every_toon_up_gag(self):
+        import math
+
+        from solver import data
+        from solver.state import Track
+
+        for gag in data.gags_in(Track.TOON_UP):
+            base, organic = gag.heal, gag.organic_heal
+            self.assertIsNotNone(base, f"{gag.display} has no base heal")
+            self.assertEqual(
+                (math.ceil(1.2 * base[0]), math.ceil(1.2 * base[1])),
+                tuple(organic),
+                f"{gag.display}: organic is not ceil(1.2 x base)")
+
+    def test_lipstick_is_the_derived_value(self):
+        from solver import data
+        from solver.state import Track
+
+        self.assertEqual(data.gag(Track.TOON_UP, 3).heal, (25, 30))

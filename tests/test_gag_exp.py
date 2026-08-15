@@ -52,8 +52,10 @@ if __name__ == "__main__":
 
 
 class WindowTest(unittest.TestCase):
-    """maxE is the next gag's threshold -- [PER PROJECT OWNER], not
-    found in the wiki, so tagged apart from the thresholds themselves."""
+    """maxE is the next gag's threshold. [CONFIRMED] -- every gag
+    infobox carries `prevexp` (its own) and `nextexp` (the next gag's),
+    checked across Cupcake, Whole Cream Pie, Big Magnet, Foghorn and
+    Grand Piano, four tracks between them."""
 
     def test_a_window_runs_to_the_next_gag(self):
         self.assertEqual(data.gag_exp_window(Track.THROW, 5), (2000, 6000))

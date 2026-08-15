@@ -146,10 +146,24 @@ def batches(rows, size, k, rng, torch, device, vmean, vstd):
         yield (pos.to(device), P.to(device), T.to(device), V.to(device))
 
 
-def evaluate(nets, rows, k, torch, device, vmean, vstd):
-    """Value MAE (original units) and top-1 / top-5 policy accuracy."""
+def evaluate(nets, rows, k, torch, device, vmean, vstd, shortlist=6):
+    """Value MAE, top-k accuracy, and REGRET -- which is the one that
+    matters.
+
+    Top-1 accuracy asks "did the policy pick the teacher's argmax". That
+    is the wrong question twice over: the policy is used to choose a
+    SHORTLIST, not a move, and the teacher's argmax is itself a sampled
+    estimate whose top few plans sit within noise of each other. A policy
+    can miss the argmax every time and still be perfect for our purpose,
+    provided a plan of equal value survives into the shortlist.
+
+    Regret@k is that question: the value the teacher's best plan had,
+    minus the best value among the k plans the policy would have kept.
+    Zero means nothing was lost by searching only those k.
+    """
     nets.trunk.eval(); nets.value.eval(); nets.policy.eval()
     abs_err, n, top1, top5 = 0.0, 0, 0, 0
+    regret, regret_zero = 0.0, 0
     with torch.no_grad():
         for pos, P, T, V in batches(rows, 128, k, random.Random(1),
                                     torch, device, vmean, vstd):
@@ -163,8 +177,16 @@ def evaluate(nets, rows, k, torch, device, vmean, vstd):
             order = logits.argsort(dim=1, descending=True)
             top1 += (order[:, 0] == best_true).sum().item()
             top5 += (order[:, :5] == best_true.unsqueeze(1)).any(1).sum().item()
+            # Regret: value lost by keeping only the policy's top few.
+            kept = order[:, :shortlist]
+            best_kept = T.gather(1, kept).max(dim=1).values
+            best_any = T.masked_fill(~mask, -1e9).max(dim=1).values
+            gap = (best_any - best_kept).clamp(min=0.0)
+            regret += gap.sum().item()
+            regret_zero += (gap < 1e-6).sum().item()
     nets.trunk.train(); nets.value.train(); nets.policy.train()
-    return abs_err / max(n, 1), top1 / max(n, 1), top5 / max(n, 1)
+    return (abs_err / max(n, 1), top1 / max(n, 1), top5 / max(n, 1),
+            regret / max(n, 1), regret_zero / max(n, 1))
 
 
 def main():
@@ -177,6 +199,8 @@ def main():
     ap.add_argument("--hidden", type=int, default=128)
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--decay", type=float, default=1e-4)
+    ap.add_argument("--shortlist", type=int, default=6,
+                    help="k for regret@k -- the shortlist the policy would keep")
     ap.add_argument("--export", default=None)
     args = ap.parse_args()
 
@@ -221,10 +245,13 @@ def main():
             opt.step()
 
         if epoch % 10 == 0 or epoch == args.epochs:
-            mae, t1, t5 = evaluate(nets, hold_rows, args.plans, torch,
-                                   device, vmean, vstd)
-            print(f"    epoch {epoch:3d}   hold-out value MAE {mae:6.2f}   "
-                  f"policy top-1 {t1 * 100:5.1f}%   top-5 {t5 * 100:5.1f}%")
+            mae, t1, t5, reg, rz = evaluate(nets, hold_rows, args.plans,
+                                            torch, device, vmean, vstd,
+                                            args.shortlist)
+            print(f"    epoch {epoch:3d}  value MAE {mae:6.2f}  "
+                  f"top-1 {t1 * 100:4.1f}%  top-5 {t5 * 100:4.1f}%  "
+                  f"regret@{args.shortlist} {reg:6.2f}  "
+                  f"lossless {rz * 100:4.1f}%")
 
     # Baseline: how often does the SHIPPED heuristic ordering put the
     # teacher's best plan first? The policy has to beat this, not chance.

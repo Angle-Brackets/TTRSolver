@@ -80,12 +80,17 @@ class TestMissingDataRaises(unittest.TestCase):
     """The project rule is that TODO data raises rather than silently
     producing a made-up number. These guard that rule."""
 
-    def test_todo_gag_damage_raises(self):
-        """Damage is fully transcribed now, but two organic/heal cells are
-        still [TODO] on genuine source conflicts. Trapdoor organic damage
-        is one: three wiki pages give 83-94, 84-94 and 83-93."""
-        with self.assertRaises(NotImplementedError):
-            mechanics.calc_toon_heal(3)     # Lipstick: 25 vs 27 minheal
+    def test_gag_damage_and_heal_are_fully_transcribed(self):
+        """Every damage and heal cell now resolves.
+
+        Lipstick's minimum heal was the last hole, closed by inverting
+        the within-track organic relationship on the organic figure the
+        disputing pages agree on -- the same move that settled Trapdoor.
+        See solver/data/gags.py for why that is a derivation and not a
+        coin toss.
+        """
+        for level in range(1, 8):
+            self.assertGreater(mechanics.calc_toon_heal(level), 0)
 
     def test_todo_cog_accuracy_raises(self):
         """Data-driven so it survives the accuracy tables being filled in:

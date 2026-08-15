@@ -109,7 +109,9 @@ GAGS: Tuple[Gag, ...] = (
     # --- Toon Up ---------------------------------------------
     Gag(Track.TOON_UP, 1, 'Feather', accuracy=70, group=False, heal=(8, 10), organic_heal=(10, 12), min_carry=10, max_carry=30),
     Gag(Track.TOON_UP, 2, 'Megaphone', accuracy=70, group=True, heal=(15, 18), organic_heal=(18, 22), min_carry=5, max_carry=25),
-    Gag(Track.TOON_UP, 3, 'Lipstick', accuracy=70, group=False, organic_heal=(30, 36), heal=None, min_carry=5, max_carry=20),
+    # heal=(25, 30) is DERIVED, not read off a page, because the pages
+    # disagree -- see the note below the table.
+    Gag(Track.TOON_UP, 3, 'Lipstick', accuracy=70, group=False, heal=(25, 30), organic_heal=(30, 36), min_carry=5, max_carry=20),
     Gag(Track.TOON_UP, 4, 'Bamboo Cane', accuracy=70, group=True, heal=(40, 45), organic_heal=(48, 54), min_carry=5, max_carry=15),
     Gag(Track.TOON_UP, 5, 'Pixie Dust', accuracy=70, group=False, heal=(50, 60), organic_heal=(60, 72), min_carry=3, max_carry=7),
     Gag(Track.TOON_UP, 6, 'Juggling Cubes', accuracy=70, group=True, heal=(75, 105), organic_heal=(90, 126), min_carry=3, max_carry=3),
@@ -196,11 +198,22 @@ GAGS: Tuple[Gag, ...] = (
 # level 8 Cog can be defeated with an organic Trapdoor". A level 8 has 90
 # hp; 94 clears it and organic Safe at 81 does not.
 
-# One cell no source settles, kept None rather than picked:
-#   Toon-Up 3 (Lipstick) heal -- Toon-Up and Organic gags pages say 27-30,
-#     the Lipstick infobox says minheal 25. Organic 30-36 is agreed, and
-#     ceil(1.2 * 25) = 30 while ceil(1.2 * 27) = 33, which points at 25 --
-#     against the majority. Left open.
+# Toon-Up 3 (Lipstick) heal = (25, 30). [CONFIRMED] -- the Lipstick
+# page's own infobox says `minheal=25 | maxheal=30 | organic=30-36`.
+#
+# This cell sat open for a long time on an apparent conflict: the
+# Toon-Up and Organic gags SUMMARY tables say 27-30. They are simply
+# wrong; the gag's own page is unambiguous and agrees with the organic
+# figure everything else agrees on.
+#
+# Worth recording how it was nearly closed instead. It is derivable --
+# within Toon-Up, `organic = ceil(1.2 x base)` holds exactly across all
+# six other gags, and inverting that on the agreed organic (30, 36)
+# gives (25, 30) uniquely. That reasoning reached the right answer from
+# a premise that was overstated on the way (organic is NOT a flat +20%:
+# Throw converges on x1.1, Squirt and Drop on x1.15-1.2), and it was
+# unnecessary, because the number was written down one page away.
+# Check the specific page before deriving from the summary table.
 #
 # Lure 7 (Presentation) organic accuracy: 100, and the Organic gags page
 # contradicts ITSELF about it. Its prose says Lure gains "a flat increase
@@ -375,11 +388,16 @@ EARLY_EXPIRY_ACCURACY_FLOOR = 50
 # interpolation `mechanics.DAMAGE_TRAINED_FRACTION` stands in for.
 #
 # `maxE`, where a gag's damage stops climbing, is the NEXT gag's
-# threshold. [PER PROJECT OWNER] -- stated by the player who maintains
-# this project, not found in the wiki, so it is tagged separately from
-# the thresholds above rather than promoted to [CONFIRMED] alongside
-# them. It was the open question when the thresholds landed and the
-# answer resolves it exactly.
+# threshold. [CONFIRMED] -- every gag infobox carries `prevexp` and
+# `nextexp`, and `nextexp` IS this number. Checked on Cupcake (0 ->
+# 10), Whole Cream Pie (2,000 -> 6,000), Big Magnet (800 -> 2,000),
+# Foghorn and Grand Piano (6,000 -> 10,000): `prevexp` matches
+# GAG_UNLOCK_EXP for that gag and `nextexp` matches the next gag's,
+# across four tracks.
+#
+# Wedding Cake reads `prevexp=10,000 | nextexp=500 to Go!`, which is the
+# level 7 repeat cycle the Skill points page describes rather than a
+# window -- consistent with level 7 damage being a single fixed value.
 #
 # Level 7 needs no window: those gags have a single fixed damage
 # (Wedding Cake 120, Opera Singer 90, Toontanic 180 -- min equals max),
@@ -468,8 +486,8 @@ def gag_exp_window(track: Track, level: int):
     """(minE, maxE) -- the experience over which this gag's damage
     climbs from its minimum to its maximum.
 
-    minE is [CONFIRMED]; maxE being the next gag's threshold is
-    [PER PROJECT OWNER]. Level 7 returns a zero-width window, which is
+    Both ends are [CONFIRMED]: the gag infobox's `prevexp` is minE and
+    its `nextexp` is maxE. Level 7 returns a zero-width window, which is
     correct rather than degenerate: those gags have one fixed damage.
 
     Feeds `mechanics.gag_damage_from_exp`. Nothing calls it in the

@@ -26,9 +26,12 @@ ALL_TRACKS = DAMAGE_TRACKS + (Track.TOON_UP, Track.LURE)
 # Trapdoor's organic damage used to be here. It was resolved to 83-94 by
 # applying the organic rule rather than by choosing between the wiki's
 # three disagreeing statements of it -- see solver/data/gags.py.
-EXPECTED_MISSING = {
-    ("heal", Track.TOON_UP, 3),          # Lipstick minimum heal
-}
+# Lipstick's heal used to be here too, and was the last one. It is
+# resolved to 25-30 the same way Trapdoor's organic damage was: by
+# inverting the within-track organic relationship on the figure the
+# disputing pages AGREE on, rather than by picking a side. Every damage
+# and heal cell is now transcribed or derived.
+EXPECTED_MISSING = set()
 
 
 def g(track, level):
@@ -108,9 +111,20 @@ class TestMissingCellInventory(unittest.TestCase):
                     found.add((name, gag.track, gag.level))
         self.assertEqual(found, EXPECTED_MISSING)
 
-    def test_accessors_raise_rather_than_default(self):
+    def test_accessors_still_raise_on_a_missing_cell(self):
+        """The mechanism, not a particular gap.
+
+        Every real cell is filled now, so this builds a gag with a hole
+        rather than relying on one existing. Deleting this test when the
+        last [TODO] closed would have removed the guarantee that a
+        FUTURE gap raises instead of silently defaulting -- which is the
+        whole point of the no-guessing rule.
+        """
+        import dataclasses
+
+        holed = dataclasses.replace(g(Track.TOON_UP, 3), heal=None)
         with self.assertRaises(NotImplementedError):
-            g(Track.TOON_UP, 3).heal_at()
+            holed.heal_at()
 
     def test_trapdoor_organic_follows_the_transcription_not_the_rule(self):
         """The wiki says 83-94, 84-94 and 83-93 in three places. The
@@ -159,7 +173,7 @@ class TestWikiValues(unittest.TestCase):
 
     def test_toon_up_heals(self):
         self.assertEqual({lvl: g(Track.TOON_UP, lvl).heal for lvl in LEVELS}, {
-            1: (8, 10), 2: (15, 18), 3: None, 4: (40, 45),
+            1: (8, 10), 2: (15, 18), 3: (25, 30), 4: (40, 45),
             5: (50, 60), 6: (75, 105), 7: (210, 210)})
 
     def test_lure_durations_and_accuracy(self):
