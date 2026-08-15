@@ -474,6 +474,50 @@ is hours rather than minutes, and it should be run only if someone wants
 the answer badly enough. `USE_POLICY` stays off. The value head (P1) is
 unaffected by any of this and is wired in and working.
 
+### The measurement that ends the ML line of attack
+
+P1 wired in, benchmarked on an idle machine:
+
+| | rate |
+| --- | --- |
+| `rollout_value` | 1,030/s |
+| learned value head | **66,474/s** |
+
+**65x faster leaf. 1% faster search** — 27.1s against 27.4s at depth 2.
+Quality identical (+92.29 against +92.17).
+
+Profiling that search says why, and it invalidates the premise both P0
+and P1 rested on:
+
+| | share of a depth-2 search |
+| --- | --- |
+| **`plans()`** | **65.5s of 68.6s — 95%** |
+| ... `_cheap_score` | 25.0s over 4,063,199 calls |
+| ... `_quick_score` | 23.1s over 183,587 calls |
+| ... `_playable` | 9.6s over 1,473,480 calls |
+| the leaf | does not appear |
+
+**The search spends 95% of its time deciding what to consider and 5%
+considering it.** A faster leaf cannot help because the leaf is free
+already, and a learned ranker makes things worse because it adds cost to
+the one stage that is expensive.
+
+The headroom for better ranking is small too. With the arithmetic,
+quality by width runs +88.06 (w8), +89.34 (w16), +89.34 (w30), +89.72
+(w60) — **from width 16 upward there is 0.38 of a point on the table**.
+A perfect ranker could win about 1.7 points, and only by shrinking to
+width 1, which saves about 3 seconds. P0 was proposed to search 6 plans
+as well as 60; the arithmetic already searches 16 as well as 30.
+
+**So the bottleneck is combinatorial, not statistical.** `plans()` is
+called ~100 times in one depth-2 search and re-enumerates thousands of
+combos each time. The leverage is memoising it across nodes, or pruning
+the enumeration before `_playable` and `_cheap_score` see it — ordinary
+optimisation, no learning involved.
+
+Both heads stay in the tree, both measured, both off or opt-in. They are
+not wrong; they are aimed at a cost that turned out not to exist.
+
 ## 6. What I would actually do
 
 ~~1. Measure throughput.~~ **Done** — see §5b. 17.5k steps/s.
