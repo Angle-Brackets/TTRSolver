@@ -287,6 +287,14 @@ def main():
         "hidden": args.hidden,
         "trunk": {k: v.detach().cpu().tolist()
                   for k, v in trunk.state_dict().items()},
+        # The VALUE trunk too. The critic reads from its own tower since
+        # the shared-trunk fix, so exporting `critic` without `vtrunk`
+        # saved a head with nothing to feed it -- the policy's moves
+        # reloaded fine and its grades were simply unrecoverable, which
+        # is the sort of gap that hides until someone asks the model
+        # what it thinks a position is worth.
+        "vtrunk": {k: v.detach().cpu().tolist()
+                   for k, v in vtrunk.state_dict().items()},
         "actor": {k: v.detach().cpu().tolist()
                   for k, v in actor.state_dict().items()},
         "critic": {k: v.detach().cpu().tolist()
