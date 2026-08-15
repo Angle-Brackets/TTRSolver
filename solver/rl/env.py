@@ -313,7 +313,14 @@ def strange_position(rng) -> BattleState:
             cog.status.apply_lure(rng.choice([50, 60, 70, 80]),
                                   rng.randint(1, 4), rng.randint(2, 4))
         elif roll < 0.40:
+            # `trap_level` too, not just the flag. Setting `trapped`
+            # alone builds a state the simulator cannot reach: the first
+            # Lure to spring it looks the trap's damage up by level and
+            # dies on `no gag at trap level None`. A position generator
+            # that can emit unreachable states is worse than one that is
+            # merely narrow -- it trains on a game that does not exist.
             cog.status.trapped = True
+            cog.status.trap_level = rng.randint(1, 6)
         if rng.random() < 0.3:
             cog.hp = max(1, int(cog.hp * rng.uniform(0.1, 0.6)))
 

@@ -115,3 +115,42 @@ class EnvTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StrangePositionTest(unittest.TestCase):
+    """Mid-fight boards must be REACHABLE, not merely unusual.
+
+    The first version set `trapped = True` without a `trap_level`, which
+    no real battle can produce: the next Lure to spring it looks the
+    trap's damage up by level and dies on `no gag at trap level None`.
+    Training crashed 40 seconds in. A generator that can emit
+    unreachable states is worse than one that is merely narrow -- it
+    trains on a game that does not exist.
+    """
+
+    def test_every_trapped_cog_carries_a_trap_level(self):
+        rng = random.Random(5)
+        for _ in range(200):
+            for cog in env.strange_position(rng).cogs:
+                if cog.status.trapped:
+                    self.assertIsNotNone(cog.status.trap_level)
+
+    def test_every_lured_cog_can_be_ticked(self):
+        """`_tick_lure` needs `lure_acc_before_bonus` to roll wake-up."""
+        rng = random.Random(6)
+        for _ in range(200):
+            for cog in env.strange_position(rng).cogs:
+                if cog.status.lured:
+                    self.assertIsNotNone(cog.status.lure_acc_before_bonus)
+
+    def test_positions_survive_being_played(self):
+        from solver import party as party_mod
+
+        rng = random.Random(7)
+        for _ in range(150):
+            state = env.strange_position(rng)
+            for _round in range(4):
+                if state.is_terminal():
+                    break
+                state, _h, _d = party_mod.step(
+                    state, None, mode=party_mod.Mode.PICKUP, rng=rng)
