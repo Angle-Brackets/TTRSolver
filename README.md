@@ -75,6 +75,145 @@ docs/               findings, and what is not yet trustworthy
 visualizer/         browser front end
 ```
 
+## How the solver works: expectimax
+
+### Why not minimax
+
+Minimax assumes your opponent picks the move that hurts you most. Cogs do
+not. A cog picks its attack from a **published frequency table** and rolls
+to hit — it is indifferent to you, not hostile. Modelling cogs as an
+adversary would produce advice braced against a worst case that only
+happens 15% of the time, and would systematically over-value defence.
+
+So the tree alternates two kinds of node:
+
+- **MAX** — the toon chooses. Take the best branch.
+- **CHANCE** — the dice choose. Take the *probability-weighted average* of
+  the branches.
+
+That is expectimax. It answers "what maximises my expected outcome",
+which is the right question against an indifferent opponent.
+
+### One round of the tree
+
+A single round expands into three layers. The toon picks a gag, the gag
+hits or misses, then every living cog attacks:
+
+```mermaid
+graph TD
+    S["MAX<br/>toon to act<br/>62 laff, 2 cogs"]
+
+    S -->|"Throw lvl 5"| A["CHANCE<br/>accuracy roll"]
+    S -->|"group Lure"| B["CHANCE<br/>accuracy roll"]
+    S -->|"Squirt lvl 4"| C["CHANCE<br/>..."]
+
+    A -->|"hit&nbsp;&nbsp;p=0.83"| A1["cog 40→0 DEAD"]
+    A -->|"miss p=0.17"| A2["no change"]
+
+    A1 --> D["CHANCE<br/>cog phase"]
+    A2 --> E["CHANCE<br/>cog phase"]
+
+    D -->|"Bite&nbsp;&nbsp;p=0.50"| D1["MAX<br/>-8 laff"]
+    D -->|"Chomp p=0.50"| D2["MAX<br/>-11 laff"]
+
+    style S fill:#2d6a4f,color:#fff
+    style A fill:#6a4c93,color:#fff
+    style B fill:#6a4c93,color:#fff
+    style C fill:#6a4c93,color:#fff
+    style D fill:#6a4c93,color:#fff
+    style E fill:#6a4c93,color:#fff
+```
+
+Green is a choice, purple is a roll. The value of a CHANCE node is the
+weighted mean of its children; the value of a MAX node is the best child.
+Recursion bottoms out when the battle ends.
+
+### Why this terminates — and why it is exact
+
+Here is the property that makes this project unusual: **solo battles are
+solved exactly, with no heuristic at all.**
+
+Every gag a toon throws is **spent**. The pouch only shrinks, so no line of
+play can be longer than the number of gags carried, and no position can
+repeat with the same pouch. The state graph is a **DAG**, not a cycle, and
+the tree is finite:
+
+```
+round 1        pouch = 34 gags
+round 2        pouch = 33 gags        strictly decreasing
+round 3        pouch = 32 gags        ...so this must end
+```
+
+`expectimax.solve()` therefore plays to the end of the battle and returns
+the *true* expected value of a position. Not an estimate. That is why the
+learned evaluator in `fitted.py` can be trained on ground truth rather than
+on its own predictions — a luxury most game AI does not have.
+
+The one exception that could break the argument is the **pass** action,
+which spends nothing. It is offered only when a cog is lured and nothing
+else is productive, which is exactly the Trap-and-wait line, and the lure
+timer is itself strictly decreasing — so the measure becomes
+`(gags, lure rounds)` lexicographically, and still descends.
+
+### Three ways a battle ends
+
+The third one is easy to forget and cost this project a real bug:
+
+1. Laff hits zero.
+2. Every cog is dead.
+3. **The toon has no remaining way to damage a cog.** Nothing restocks a
+   pouch mid-fight, so 80 Lures and no attacks is a *loss*, and so is
+   Toon-Up plus Trap with no Lure.
+
+Before (3) existed, hopeless positions fell through to the heuristic and
+scored **+47.6** — and since training labels came from `solve()`, the
+evaluator was partly fitted to its own optimism.
+
+### Making it fast: star1 and star2 pruning
+
+Alpha-beta does not apply directly, because a CHANCE node has no "best"
+child to cut on. **star1** bounds it instead. If a chance node's children
+must lie within `[L, U]`, then after seeing some of them you can bound the
+whole node:
+
+```
+       seen so far          still unknown
+     ┌───────────────┐   ┌─────────────────┐
+     p1·v1 + p2·v2  +     p3·L ... p3·U        <- lower and upper bound
+     └───────────────┘   └─────────────────┘
+
+  if upper bound  <  alpha   ->  cut, this branch cannot win
+  if lower bound  >  beta    ->  cut, opponent avoids it
+```
+
+This is why `fitted.value` is **clamped** into the range the bounds
+promise, and why that clamp is a correctness requirement rather than
+tidiness. Unclamped, the fitted model put **32% of positions outside the
+envelope** — as high as 175 against a ceiling of 100 — and the search
+quietly began cutting branches it had no warrant to cut.
+
+**star2** adds a probe pass: try one child of each unseen branch first, and
+if the probe already breaks the bound, skip the rest.
+
+A transposition table catches the rest, since many action orders reach the
+same position — `outcomes.state_key` keys on every toon **in order**,
+deliberately, because a frozenset there would let the memo answer about one
+party using another's value.
+
+### Where it stops being exact
+
+Parties. A party round's outcome space is the accuracy rolls (one per track
+per target) times each cog's choice of attack, times its choice of *whom*
+to hit, times the teammates' actions. That cannot be enumerated, so
+`party_search` **samples** it — and its values are estimates that are not
+comparable with `solve()`'s.
+
+The invariant that catches most bugs there: **coordinated can never score
+below pickup**, since coordinated may choose everything pickup may and
+more. That inequality is what exposed a truncation quietly deleting the
+best plan.
+
+
 ## Reading a live game
 
 Two sources, both verified against a running client rather than from

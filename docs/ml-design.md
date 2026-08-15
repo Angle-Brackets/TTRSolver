@@ -446,10 +446,33 @@ it overfits almost immediately. So the label quality went up and the
 label *quantity* went down, and the second undid much of the first —
 1,500 positions at 128 samples cost the same 38 minutes as 2,500 at 16.
 
+### "A tiny degradation is fine if it is faster" — it is not faster
+
+The right way to read the table is quality per second rather than
+quality per width, since a better ranker should let you search NARROWER
+for the same answer. Pairing each setting with what it cost:
+
+| budget | policy OFF | policy ON |
+| --- | --- | --- |
+| ~1s | **+88.06** (w8, 0.9s) | +86.79 (w8, 1.2s) |
+| ~1.5s | **+89.34** (w16, 1.3s) | +86.79 (w16, 1.6s) |
+| ~2.5s | **+89.34** (w30, 2.2s) | +87.79 (w30, 2.6s) |
+| ~4s | **+89.72** (w60, 3.9s) | +89.23 (w60, 4.3s) |
+
+The policy is **Pareto-dominated**: at every budget it is both slower
+and worse. The pair that settles it is `ON` at width 60 — **+89.23 in
+4.3s** — against `OFF` at width 30 — **+89.34 in 2.2s**. Better answer,
+half the time, policy off.
+
+So the 0.49 deficit at width 60 is not a small price for a speedup;
+there is no speedup. Inference adds 0.3-0.4s to the shortlist build, and
+narrowing the width hurts the policy faster than it hurts the
+arithmetic, which is the opposite of the property P0 was proposed on.
+
 The next honest experiment is more positions at high sample count, which
-is hours rather than minutes, and it should be run only if someone
-wants the answer badly enough. `USE_POLICY` stays off. The value head
-(P1) is unaffected by any of this and is wired in and working.
+is hours rather than minutes, and it should be run only if someone wants
+the answer badly enough. `USE_POLICY` stays off. The value head (P1) is
+unaffected by any of this and is wired in and working.
 
 ## 6. What I would actually do
 
