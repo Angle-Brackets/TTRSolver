@@ -128,24 +128,24 @@ from . import features
 # nothing else could. Hold-out MAE went 50.6 -> 25.6 on that change
 # alone.
 WEIGHTS: Optional[List[float]] = [
-        14.14170,   # bias
-       134.90118,   # laff_ratio
-       -16.71747,   # cog_hp_ratio
-       -10.67920,   # cogs_alive
-        -9.53727,   # gags_ratio
-        11.31706,   # killable_ratio
-        -9.94081,   # best_gag_over_weakest_cog
-      -204.21433,   # incoming_ratio
-       -10.68835,   # one_hit_from_death
-        13.94446,   # lured_ratio
-        90.58634,   # trapped_with_lure
-         0.44116,   # trapped_without_lure
-       -32.60551,   # trap_damage_ratio
-         3.97595,   # has_group_gag
-      -141.50826,   # laff_after_worst_ratio
-        18.18331,   # cog_hp_x_laff
-        57.47830,   # damage_budget_ratio
-       -79.30221,   # cannot_finish
+        17.07794,   # bias
+       160.14802,   # laff_ratio
+        -5.19713,   # cog_hp_ratio
+       -10.77392,   # cogs_alive
+        10.00955,   # gags_ratio
+        12.96260,   # killable_ratio
+       -11.64607,   # best_gag_over_weakest_cog
+      -206.74381,   # incoming_ratio
+        -9.26712,   # one_hit_from_death
+        14.33018,   # lured_ratio
+         0.04219,   # trapped_with_lure
+        -0.40809,   # trapped_without_lure
+        -0.45375,   # trap_damage_ratio
+         2.20267,   # has_group_gag
+      -158.69354,   # laff_after_worst_ratio
+         3.83806,   # cog_hp_x_laff
+        51.01574,   # damage_budget_ratio
+       -99.95419,   # cannot_finish
 ]
 
 

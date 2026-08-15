@@ -224,3 +224,55 @@ class PartyFeaturesTest(unittest.TestCase):
         healthy = self.named(self.state([self.toon(laff=50),
                                          self.toon(laff=50)]))
         self.assertEqual(healthy["one_hit_from_death"], 0.0)
+
+
+class DamageBudgetCountsArmedTrapsTest(unittest.TestCase):
+    """A laid trap is still damage owed.
+
+    It leaves `gag_counts` when played, so the budget fell to ZERO the
+    moment the setup move was made: an armed Trapdoor with a Lure in
+    hand read 85 before laying it and 0 after, lighting `cannot_finish`
+    on a winning position. It also contradicted the terminal rule the
+    function claims to match -- `can_still_damage` knows armed trap plus
+    Lure is not a loss.
+
+    Fixing it collapsed `trapped_with_lure` from +90.6 to +0.04 and
+    `trap_damage_ratio` from -32.6 to -0.45: those features had been
+    compensating for this bug rather than measuring traps, which is why
+    one of them fitted with a nonsensical sign.
+    """
+
+    def position(self, armed):
+        from solver.state import BattleState, CogState, ToonState, Track
+
+        counts = {(Track.LURE, 3): 1}
+        if not armed:
+            counts[(Track.TRAP, 5)] = 1
+        toon = ToonState(40, 60, {Track.LURE: 6, Track.TRAP: 6}, counts)
+        cog = CogState("bean_counter", "cashbot", 6, 56, 56)
+        if armed:
+            cog.status.trapped = True
+            cog.status.trap_level = 5
+        return BattleState(toon=toon, cogs=[cog])
+
+    def test_laying_the_trap_does_not_destroy_the_budget(self):
+        held = features._damage_budget(self.position(False))
+        armed = features._damage_budget(self.position(True))
+        self.assertEqual(held, armed)
+        self.assertGreater(armed, 0)
+
+    def test_an_armed_trap_with_no_lure_still_counts_nothing(self):
+        from solver.state import BattleState, CogState, ToonState, Track
+
+        toon = ToonState(40, 60, {Track.TRAP: 6}, {})
+        cog = CogState("bean_counter", "cashbot", 6, 56, 56)
+        cog.status.trapped = True
+        cog.status.trap_level = 5
+        state = BattleState(toon=toon, cogs=[cog])
+        self.assertEqual(features._damage_budget(state), 0)
+
+    def test_it_agrees_with_the_terminal_rule(self):
+        """Both judge the same thing; they must not disagree."""
+        state = self.position(True)
+        self.assertTrue(state.can_still_damage())
+        self.assertGreater(features._damage_budget(state), 0)

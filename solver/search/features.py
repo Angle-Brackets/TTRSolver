@@ -116,6 +116,18 @@ def _damage_budget(state: BattleState) -> int:
 
     Trap counts only when a Lure is carried, matching the terminal rule:
     a trap with nothing to spring it deals nothing.
+
+    ARMED traps count too, and leaving them out was a real bug. A trap
+    that has been laid is no longer in `gag_counts` -- it is sitting on
+    the cog -- so the budget fell to ZERO the moment the setup move was
+    played. An armed Trapdoor and a Lure in hand read as 85 damage
+    before laying it and 0 after, which then lit `cannot_finish`
+    (weight -79) on a position that is winning.
+
+    That also contradicted the terminal rule this claims to match:
+    `BattleState.can_still_damage` knows an armed trap plus a Lure is
+    not a loss. The continuous version disagreed with the discrete one
+    on precisely the case both exist to judge.
     """
     n_alive = len(state.active_cogs()) or 1
     toons = _fighting(state)
@@ -125,6 +137,15 @@ def _damage_budget(state: BattleState) -> int:
                    for (t, _l), n in toon.gag_counts.items()
                    if t == Track.LURE)
     total = 0
+    if has_lure:
+        for cog in state.active_cogs():
+            if not cog.status.trapped or cog.status.trap_level is None:
+                continue
+            try:
+                total += data.gag(Track.TRAP, cog.status.trap_level).damage_at(
+                    1.0, organic=False)
+            except (NotImplementedError, ValueError, KeyError):
+                pass
     for toon in toons:
         for (track, level), count in toon.gag_counts.items():
             if count <= 0 or track in (Track.TOON_UP, Track.LURE):
