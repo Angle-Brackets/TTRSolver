@@ -200,6 +200,63 @@ literals precisely so inference is stdlib-only.
 
 ---
 
+## 5b. Results so far
+
+### Throughput (step 1) — better than this doc assumed
+
+| operation | rate |
+| --- | --- |
+| `apply_party_round` | 58,726/s |
+| `party.step` (one PPO env step) | **17,572/s** |
+| `greedy_plan` | 1,242/s |
+| `rollout_value` (whole battle) | 1,070/s |
+
+10M PPO steps is roughly **10 minutes single-core**, not the hours §5.3
+feared. The bottleneck is the pure-Python environment, not gradients —
+so a GPU idles here until the simulator is vectorised, and
+multiprocessing (`search/parallel.py` already exists) is the cheaper
+first move.
+
+### S1, the MLP (step 2) — beats the linear model on calibration, ties on ordering
+
+`tools/fit_mlp.py`, numpy only, same cache and same `score()` as
+`fit_heuristic` so the comparison is like-for-like.
+
+| model | train MAE | hold-out MAE | hold-out r | hold-out ordering |
+| --- | --- | --- | --- | --- |
+| linear | 20.8 | 27.1 | 0.83 | **91%** |
+| MLP 64-32, decay 1e-5 | **4.4** | 32.0 | 0.77 | 77% |
+| **MLP 16, decay 1e-2** | 14.4 | **19.0** | **0.89** | **91%** |
+
+The first MLP **overfit badly** — near-perfect on train, worse than
+linear on hold-out. That is exactly the risk §2 named: `solve()` is only
+tractable on small positions, so anything fitted here must extrapolate
+to crowded fights, and an unconstrained network fits the small ones
+almost exactly and generalises worse.
+
+A smaller, heavily regularised net fixes it and **cuts hold-out MAE by
+31%** (27.1 → 19.0) with r up from 0.83 to 0.89.
+
+**But ordering does not move — 91% either way.** Since the search only
+needs to rank moves, this may not change play at all. What it does buy
+is *calibration*, and calibration is worth something in two specific
+places: `expectimax`'s pruning bounds, which need a leaf that stays
+inside its promised envelope, and the party leaf in P1, where the value
+is used as a value rather than as a ranking.
+
+Two lessons worth keeping:
+
+* **The first run's -23 bias with better-than-linear correlation was a
+  harness bug, not a result.** The network had learned the shape and not
+  the scale, because the targets span roughly -200..+100 and were not
+  standardised. Reporting that as "an MLP cannot beat the linear model"
+  would have been a conclusion about the training loop.
+* **Capacity was never the constraint; regularisation was.** The bigger
+  network was strictly worse. Any further work here should push on the
+  *data* — labels for larger positions — rather than on model size, and
+  `solve()` timing out on 794 of 1200 large hold-out attempts is exactly
+  why that is hard.
+
 ## 6. What I would actually do
 
 1. **Measure throughput.** Steps/sec for a party round. One afternoon,
