@@ -82,6 +82,7 @@ FEATURE_NAMES: List[str] = [
     "lured_ratio",
     "trapped_with_lure",
     "trapped_without_lure",
+    "trap_damage_ratio",
     "has_group_gag",
     "laff_after_worst_ratio",
     "cog_hp_x_laff",
@@ -176,6 +177,26 @@ def _best_damage(state: BattleState) -> int:
     return best
 
 
+def _trap_damage_ratio(alive) -> float:
+    """Armed trap damage over the health it is sitting on, averaged
+    across trapped cogs. 0 when nothing is trapped."""
+    from .. import data
+    from ..state import Track
+
+    total, n = 0.0, 0
+    for cog in alive:
+        if not cog.status.trapped or cog.status.trap_level is None:
+            continue
+        try:
+            dmg = data.gag(Track.TRAP, cog.status.trap_level).damage_at(
+                1.0, organic=False)
+        except (NotImplementedError, ValueError, KeyError):
+            continue
+        total += min(2.0, dmg / max(1, cog.hp))
+        n += 1
+    return total / n if n else 0.0
+
+
 def extract(state: BattleState) -> List[float]:
     """The feature vector for `state`, in `FEATURE_NAMES` order."""
     # Pooled over the toons still standing. With one toon every sum
@@ -247,6 +268,20 @@ def extract(state: BattleState) -> List[float]:
         # Lure remains to spring it.
         float(trapped) if lure_gags > 0 else 0.0,
         float(trapped) if lure_gags == 0 else 0.0,
+        # HOW BIG the armed traps are, relative to the health they are
+        # sitting on. The two flags above say only THAT a trap exists,
+        # so a Banana Peel (10 damage) and a Railroad (200) were
+        # identical to the model -- and the fitted evaluator's error on
+        # trap-and-lure positions runs to 176-212 points, which is that
+        # range. No amount of capacity recovers a number absent from the
+        # input; an MLP and an explicit conjunction feature were both
+        # tried first and neither helped, because neither added
+        # information.
+        #
+        # An armed trap is stored damage: the cog WILL lose this the
+        # moment a lure lands. As a ratio of remaining hp it answers the
+        # question that decides the position, which is whether it kills.
+        _trap_damage_ratio(alive) if lure_gags > 0 else 0.0,
         1.0 if group else 0.0,
         max(0.0, (team_laff - incoming)) / max_laff,
         cog_hp_ratio * laff_ratio,

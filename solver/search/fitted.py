@@ -44,7 +44,25 @@ from . import features
 #
 #                       bias     MAE      r   ordering
 #     hand-written     -51.2    94.3   0.07       53%
-#     fitted            -0.4    26.9   0.84       91%
+#     fitted            +4.5    24.3   0.78       89%
+#
+# Refitted with `trap_damage_ratio`, an 18th feature giving the model
+# HOW BIG an armed trap is rather than only that one exists. A Banana
+# Peel and a Railroad were previously identical inputs, and the
+# evaluator's error on trap-and-lure positions ran to 176-212 points --
+# about the span of trap damage itself. An MLP and an explicit
+# conjunction feature were both tried first and neither helped, because
+# neither added information.
+#
+# WATCH THIS PAIR. `trap_damage_ratio` fitted NEGATIVE (-32.6) while
+# `trapped_with_lure` jumped from ~31 to +90.6. A bigger trap scoring
+# worse is backwards, and the two fire under nearly the same condition
+# -- an armed trap with a lure in hand -- so they are collinear and
+# least squares will split them arbitrarily. Their SUM may be right
+# while neither is, which is fine for prediction and misleading to read.
+# Before trusting either number, check the pair jointly on trap+lure
+# positions with scratchpad/evaltest.py, which scores worst-case error
+# rather than MAE.
 #
 # Refitted a third time, after the Lure Bonus went in. Same result as
 # the two before it: on identical fresh labels the old and new weights
@@ -110,23 +128,24 @@ from . import features
 # nothing else could. Hold-out MAE went 50.6 -> 25.6 on that change
 # alone.
 WEIGHTS: Optional[List[float]] = [
-         7.42666,   # bias
-        47.88699,   # laff_ratio
-       -14.66949,   # cog_hp_ratio
-       -21.39980,   # cogs_alive
-        14.29848,   # gags_ratio
-        12.73989,   # killable_ratio
-        -5.92877,   # best_gag_over_weakest_cog
-       -94.43436,   # incoming_ratio
-       -10.10696,   # one_hit_from_death
-        14.17673,   # lured_ratio
-        31.85107,   # trapped_with_lure
-        -2.25964,   # trapped_without_lure
-        -0.84992,   # has_group_gag
-       -56.92575,   # laff_after_worst_ratio
-        18.92012,   # cog_hp_x_laff
-        60.03783,   # damage_budget_ratio
-       -70.26441,   # cannot_finish
+        14.14170,   # bias
+       134.90118,   # laff_ratio
+       -16.71747,   # cog_hp_ratio
+       -10.67920,   # cogs_alive
+        -9.53727,   # gags_ratio
+        11.31706,   # killable_ratio
+        -9.94081,   # best_gag_over_weakest_cog
+      -204.21433,   # incoming_ratio
+       -10.68835,   # one_hit_from_death
+        13.94446,   # lured_ratio
+        90.58634,   # trapped_with_lure
+         0.44116,   # trapped_without_lure
+       -32.60551,   # trap_damage_ratio
+         3.97595,   # has_group_gag
+      -141.50826,   # laff_after_worst_ratio
+        18.18331,   # cog_hp_x_laff
+        57.47830,   # damage_budget_ratio
+       -79.30221,   # cannot_finish
 ]
 
 

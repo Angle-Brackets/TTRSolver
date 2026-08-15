@@ -56,7 +56,7 @@ for _track in TRACKS:
                                   target_index=_target))
 
 PASS_INDEX = 0
-OBS_DIM = MAX_COGS * 8 + MAX_TOONS * (3 + 49) + 3
+OBS_DIM = MAX_COGS * 9 + MAX_TOONS * (3 + 49) + 3
 
 
 def action_at(index: int) -> Optional[Action]:
@@ -64,6 +64,17 @@ def action_at(index: int) -> Optional[Action]:
     if index == PASS_INDEX:
         return Action(track=None, level=0, target_index=None)
     return ACTIONS[index]
+
+
+def _trap_damage(cog) -> float:
+    """Damage the armed trap will deal when sprung, 0 if none."""
+    if not cog.status.trapped or cog.status.trap_level is None:
+        return 0.0
+    try:
+        return float(data.gag(Track.TRAP, cog.status.trap_level)
+                     .damage_at(1.0, organic=False))
+    except (NotImplementedError, ValueError, KeyError):
+        return 0.0
 
 
 def encode(state: BattleState) -> List[float]:
@@ -85,9 +96,21 @@ def encode(state: BattleState) -> List[float]:
                     1.0 if cog.status.lured else 0.0,
                     1.0 if cog.status.trapped else 0.0,
                     min(cog.status.lure_rounds_remaining, 8) / 8.0,
-                    1.0 if cog.status.is_dead else 0.0]
+                    1.0 if cog.status.is_dead else 0.0,
+                    # HOW BIG the armed trap is, as a fraction of what
+                    # the cog has left. A bare `trapped` flag makes a
+                    # Banana Peel (10 damage) and a Railroad (200) look
+                    # identical, and trap damage spans that whole range
+                    # -- which is roughly the size of the errors the
+                    # linear evaluator makes on these positions.
+                    #
+                    # An armed trap is stored damage: the cog WILL lose
+                    # this much the moment a lure lands. Reading it as a
+                    # fraction of remaining hp answers the question that
+                    # actually matters, which is whether it kills.
+                    _trap_damage(cog) / max(1, cog.hp)]
         else:
-            out += [0.0] * 8
+            out += [0.0] * 9
 
     for i in range(MAX_TOONS):
         if i < len(state.toons) and state.toons[i].laff > 0:
