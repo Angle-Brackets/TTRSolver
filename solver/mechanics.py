@@ -294,7 +294,23 @@ def roll_hit(accuracy_pct: int, rng=random) -> bool:
 # Toon attack damage
 # ---------------------------------------------------------------------
 
-def calc_toon_damage(track: Track, level: int, trained_fraction: float = 1.0,
+# Where in a gag's damage range a toon is assumed to sit: 1.0 is fully
+# trained, 0.0 is the bottom of the range. The real game derives this
+# from earned experience against per-gag minE/maxE thresholds that are
+# not transcribed, so it is a single global stand-in.
+#
+# It is a knob so a search can be run against a PESSIMISTIC assumption
+# and the answers compared. That comparison is the only way to ask "how
+# much does this recommendation depend on everyone actually being
+# maxed", which is the question behind a player's preference for a wide
+# damage margin -- see the note on `objective.risk_aversion`. Nothing
+# about outcome variance can answer it, because at a fixed fraction the
+# damage is deterministic.
+DAMAGE_TRAINED_FRACTION = 1.0
+
+
+def calc_toon_damage(track: Track, level: int,
+                      trained_fraction: float = None,
                       organic: bool = False) -> int:
     """Damage dealt by a gag. The real game ties this deterministically to
     the toon's earned experience in the track (see gag_damage_from_exp
@@ -303,6 +319,8 @@ def calc_toon_damage(track: Track, level: int, trained_fraction: float = 1.0,
     linearly interpolates the gag's range. Default 1.0 assumes a fully
     maxed track, which is the common "solved" build anyway.
     """
+    if trained_fraction is None:
+        trained_fraction = DAMAGE_TRAINED_FRACTION
     return data.gag(track, level).damage_at(trained_fraction, organic)
 
 

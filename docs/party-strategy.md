@@ -750,3 +750,45 @@ Closing this one properly means either transcribing the minE/maxE
 experience thresholds so damage varies with real training, or searching
 against a deliberately pessimistic damage assumption and comparing the
 two answers.
+
+
+## Searching against a pessimistic damage assumption
+
+`mechanics.DAMAGE_TRAINED_FRACTION` is the global stand-in for where a
+toon sits in a gag's damage range (1.0 = fully trained). It is a knob so
+a search can be run against a pessimistic assumption and the answers
+compared, which is the only way to ask *how much does this
+recommendation depend on everyone actually being maxed* — the question
+behind a player's preference for a wide damage margin, and one no
+amount of outcome variance can answer.
+
+The recommendation turns out to be **stable**: at fractions 1.0, 0.9 and
+0.8 the search returns the same Sound mix.
+
+### ⚠ An unresolved discrepancy, found while checking that
+
+Dropping the fraction did not stop the plan clearing the board, and it
+should have. Resolved directly against a single level-11 Loan Shark
+(156hp), all four gags forced to hit:
+
+| fraction | gag damage | sum | hpBonus | total | cog ends at |
+| --- | --- | --- | --- | --- | --- |
+| 1.0 | 50, 50, 16, 16 | 132 | 27 | 159 | 0 |
+| 0.9 | 48, 48, 16, 16 | 128 | 26 | 154 | 0 |
+| **0.6** | **40, 40, 15, 15** | **110** | **22** | **132** | **0** |
+
+At 0.6 the gags account for 132 damage against a 156hp cog and the cog
+dies anyway. There is no Lure in the round, so no knockback bonus and no
+luredRatio; nothing legitimate explains the extra 24.
+
+So `apply_party_round` deals more damage than the gags in it account
+for, at least for stacked same-track group gags. **This is a live bug
+and it inflates every party damage number in this document**, including
+the re-measured table above. Reproduction is the three lines in the
+table: build one level-11 cog, four toons with Sound, throw
+`[6, 6, 4, 4]` as group gags with `hits=[True] * 4`, and compare the
+cog's hp against `sum(calc_toon_damage(...)) + calc_hp_bonus(sum, 4)`.
+
+Suspects worth checking first: whether `calc_hp_bonus` is being added
+once per gag instead of once per target, and whether the group
+expansion applies each gag's damage more than once per cog.
