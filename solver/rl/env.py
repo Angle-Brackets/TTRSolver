@@ -242,6 +242,66 @@ def random_toon(rng) -> ToonState:
                      else frozenset())
 
 
+# The hardest cogs that are actually playable, level 12 included.
+#
+# Mr Hollywood and Robber Baron work at 12 (196 hp). Their Beguile,
+# Finger Wag, Embezzle and Synergy carry no accuracy or frequency and
+# that is DELIBERATE, not a gap: they are `modeled=False` signature
+# attacks that do not occur in regular cog battles, and
+# `pick_cog_attack` iterates `modeled_attacks`. The remaining attacks
+# already sum to 100% frequency at every level, which is the check that
+# proves nothing is missing.
+#
+# The Big Cheese is the one genuine hole and is excluded: its Glower
+# Power fires 50% of the time and has [TODO] accuracy. It cannot be
+# derived from the same attack on other cogs -- accuracy is per-cog, and
+# shared attacks disagree at the same level 149 times against 19
+# agreements, with Glower Power itself running 50->90 across Head
+# Hunter's levels and a flat 95 on Tightwad.
+BRUTAL_COGS = [("mr_hollywood", "sellbot", 12),
+               ("robber_baron", "cashbot", 12),
+               ("the_mingler", "sellbot", 11),
+               ("loan_shark", "cashbot", 11),
+               ("legal_eagle", "lawbot", 11),
+               ("head_hunter", "bossbot", 10)]
+
+
+def hard_position(rng) -> BattleState:
+    """One toon against a wall of cogs.
+
+    The position distribution IS the curriculum, and the default sampler
+    never forces Lure: with several toons and mixed cogs you can usually
+    out-damage the board, so "kill the biggest thing" is a winning habit
+    and the agent learns it. Trained only on that, the policy under-uses
+    Lure -- caught on a real position where it threw for a kill while
+    the search re-lured, and the search was right.
+
+    Alone against three or four cogs of 132-156 hp there is no
+    out-damaging anything. Every round they all swing, so the only way
+    to survive long enough to spend a pouch is to stop them swinging.
+    Lure stops being one option among many and becomes the game.
+    """
+    cogs = []
+    for _ in range(rng.randint(3, MAX_COGS)):
+        key, dept, level = rng.choice(BRUTAL_COGS)
+        full = data.cog_max_hp(level)
+        cogs.append(CogState(key, dept, level,
+                             rng.randint(full // 2, full), full))
+    toon = random_toon(rng)
+    # A pouch worth defending: a starved one just loses, and teaches
+    # nothing but that the position was hopeless.
+    toon.laff = max(40, toon.max_laff // 2)
+    return BattleState(toons=[toon], cogs=cogs)
+
+
+def mixed_position(rng, hard_fraction: float = 0.5) -> BattleState:
+    """Blend, so the easy case is not forgotten while the hard one is
+    learned."""
+    if rng.random() < hard_fraction:
+        return hard_position(rng)
+    return default_position(rng)
+
+
 def default_position(rng) -> BattleState:
     cogs = []
     for _ in range(rng.randint(1, MAX_COGS)):
