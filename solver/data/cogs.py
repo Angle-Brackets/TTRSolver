@@ -61,11 +61,102 @@ def cog_max_hp(level: int) -> int:
 # the wiki and remain guide-derived and unverified -- see each module's
 # docstring for the per-department breakdown and the TTR 4.0.0 changelog
 # entry that makes those two columns actively suspect.
+def _fill_unmodeled(spec):
+    """Give `modeled=False` attacks a borrowed accuracy and frequency.
+
+    [ASSUMED] -- NOT [CONFIRMED], and the distinction is the whole point.
+
+    Twelve attacks across eight cogs are confirmed by the wiki to exist,
+    with damage published, but NO accuracy or frequency anywhere. Nine
+    of the twelve are GROUP attacks hitting the whole team for 3-21, so
+    leaving them unfired understates cog threat in exactly the direction
+    that flatters toons -- and worst for parties, which is the same
+    shape as the group-cog-attacks gap fixed earlier.
+
+    Open Toontown cannot supply them, checked rather than assumed: its
+    tables give Mr Hollywood only PowerTrip 50 / RazzleDazzle 50 and
+    Robber Baron only PowerTrip 50 / TeeOff 50 -- precisely the attacks
+    already modelled. TTR added the rest in a rebalancing pass, so the
+    Toontown Online lineage predates them and structurally has nothing
+    to say. (One partial lead it does give: Big Wig's Throw Book at
+    frequency 50. Not used here, since applying it alone would make one
+    cog's mix sourced and the rest borrowed.)
+
+    So each unmodeled attack borrows the MEAN of its own cog's modelled
+    attacks at that level, and every attack is then rescaled so the
+    level still sums to 100. Borrowing within the cog rather than across
+    cogs matters: accuracy is per-cog, and shared attacks disagree at
+    the same level 149 times against 19 agreements.
+
+    This is a preference for being roughly right over being precisely
+    silent, taken knowingly. If the wiki ever publishes the columns,
+    delete this function -- do not tune it.
+    """
+    from .types import CogAttack
+    import dataclasses
+
+    modelled = [a for a in spec.attacks if a.modeled and a.frequency]
+    unmodelled = [a for a in spec.attacks if not a.modeled]
+    if not modelled or not unmodelled:
+        return spec
+
+    n = len(spec.levels)
+    filled = []
+    for attack in spec.attacks:
+        if attack.modeled:
+            filled.append(attack)
+            continue
+        acc, freq = [], []
+        for i in range(n):
+            accs = [a.accuracy[i] for a in modelled
+                    if i < len(a.accuracy) and a.accuracy[i] is not None]
+            frqs = [a.frequency[i] for a in modelled
+                    if i < len(a.frequency) and a.frequency[i] is not None]
+            acc.append(round(sum(accs) / len(accs)) if accs else None)
+            freq.append(round(sum(frqs) / len(frqs)) if frqs else None)
+        filled.append(dataclasses.replace(
+            attack, accuracy=tuple(acc), frequency=tuple(freq),
+            modeled=True))
+
+    # Rescale so each level still sums to 100. `pick_cog_attack` walks a
+    # cumulative frequency and would silently never reach the tail if
+    # they summed higher.
+    rescaled = []
+    totals = [sum(a.frequency[i] for a in filled
+                  if a.frequency[i] is not None) for i in range(n)]
+    for attack in filled:
+        freq = []
+        for i in range(n):
+            value = attack.frequency[i]
+            freq.append(value if not totals[i]
+                        else max(1, round(value * 100 / totals[i])))
+        rescaled.append(dataclasses.replace(attack, frequency=tuple(freq)))
+
+    # Rounding can leave the total off by a point or two; give the
+    # remainder to the commonest attack rather than leaving a gap.
+    fixed = list(rescaled)
+    for i in range(n):
+        drift = 100 - sum(a.frequency[i] for a in fixed)
+        if drift:
+            j = max(range(len(fixed)), key=lambda k: fixed[k].frequency[i])
+            freq = list(fixed[j].frequency)
+            freq[i] += drift
+            fixed[j] = dataclasses.replace(fixed[j], frequency=tuple(freq))
+    return dataclasses.replace(spec, attacks=tuple(fixed))
+
+
+def _fill_department(dept):
+    import dataclasses
+
+    return dataclasses.replace(
+        dept, cogs=tuple(_fill_unmodeled(c) for c in dept.cogs))
+
+
 COG_DEPARTMENTS = {
-    "bossbot": BOSSBOT,
-    "sellbot": SELLBOT,
-    "cashbot": CASHBOT,
-    "lawbot": LAWBOT,
+    "bossbot": _fill_department(BOSSBOT),
+    "sellbot": _fill_department(SELLBOT),
+    "cashbot": _fill_department(CASHBOT),
+    "lawbot": _fill_department(LAWBOT),
 }
 
 

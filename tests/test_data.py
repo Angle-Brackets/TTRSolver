@@ -54,16 +54,20 @@ KNOWN_TODO_CELLS = {
 # Cogs whose "freq" row cannot sum to 100 over the attacks the cog really
 # has, because at least one real attack has no published frequency. Every
 # one of these is a cog whose attack pool changed in TTR 4.0.0.
-COGS_WITH_UNMODELED_ATTACKS = {
-    ("bossbot", "micromanager"),
-    ("bossbot", "corporate_raider"),
-    ("bossbot", "the_big_cheese"),
-    ("cashbot", "penny_pincher"),
-    ("cashbot", "money_bags"),
-    ("cashbot", "robber_baron"),
-    ("lawbot", "big_wig"),
-    ("sellbot", "mr_hollywood"),
-}
+# Empty now. All twelve unmodelled attacks across these eight cogs are
+# filled by `cogs._fill_unmodeled`, which borrows accuracy and frequency
+# from the same cog's modelled attacks and rescales the level to 100.
+#
+# [ASSUMED], not sourced: the wiki publishes damage for them and no
+# accuracy or frequency, and Open Toontown predates their addition to
+# TTR so has nothing to say. Nine of the twelve are GROUP attacks, so
+# leaving them silent understated cog threat -- worst for parties, which
+# is the same direction as the group-cog-attacks gap.
+#
+# Kept as a test rather than deleted: if a cog ever regains an unmodelled
+# attack, that is a real change in what the simulator can represent and
+# should be noticed rather than absorbed.
+COGS_WITH_UNMODELED_ATTACKS = set()
 
 SECTIONS = ("freq", "damage", "accuracy")
 SECTION_FIELDS = {"freq": "frequency", "damage": "damage",

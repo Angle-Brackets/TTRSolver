@@ -31,10 +31,14 @@ themselves. Group cog attacks weren't modelled at all, so parties took
 strictly less damage than the game deals. Both were found because a search
 produced advice a human looked at and said "nobody plays that."
 
-Exactly one value in the project is a deliberate exception, tagged
-`[ASSUMED]` so it can never read as data: the multi-Lure accuracy bonus,
-where the patch notes give the magnitudes `(20/15/10)%` but never say which
-level gap selects which.
+Two things are deliberate exceptions, both tagged `[ASSUMED]` so they can
+never read as data: the multi-Lure accuracy bonus, where the patch notes
+give the magnitudes `(20/15/10)%` but never say which level gap selects
+which; and the accuracy and frequency of twelve cog attacks that the wiki
+confirms exist and publishes damage for, but never gives those two
+columns. Nine of the twelve are group attacks, so leaving them unfired
+understated cog threat — the exception is there because silence was the
+worse error.
 
 ## Quick start
 
