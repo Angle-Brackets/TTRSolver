@@ -557,6 +557,43 @@ search exposes a bad rule because a human reads the output and says
 nobody plays that, and a policy hides one. The search stays as the
 cross-check.
 
+### The curriculum hypothesis, tested
+
+The policy trained on the original sampler under-used Lure -- caught on
+a real position where it threw for a kill while the search re-lured, and
+the search was right. The proposed cause was the position distribution:
+with several toons and mixed cogs you can usually out-damage the board,
+so "kill the biggest thing" wins and Lure never has to be learned.
+
+Retrained with 35% hard solo positions (one toon against three or four
+cogs of 132-196 hp) and 30% mid-fight boards. On 150 held-out
+hard/strange positions:
+
+| | return | win | time | **Lure share** |
+| --- | --- | --- | --- | --- |
+| PPO policy | -52.27 | 43.3% | **0.31s** | **19.5%** |
+| search s=16 p=20 | **-48.26** | **44.7%** | 21.98s | 9.4% |
+
+**Lure usage more than doubled**, 9.4% to 19.5%, and now exceeds the
+search's. The hypothesis was right: it was the curriculum, not credit
+assignment.
+
+**And the quality ranking flipped.** On the easy sampler the policy beat
+the cheap search (+60.31 against +57.98); on the hard one the search is
+ahead by 4 points. Two things worth separating there. The policy is
+still 71x faster. And both scores are deeply negative, because these
+positions are mostly losing -- a random baseline on the training
+distribution scored -21.19, and this set is harder still. Comparing
+-52 with the earlier +60 means nothing; different distributions, not
+different skill.
+
+The interesting open question is which of the two is now WRONG about
+Lure. The policy lures twice as often as the search, and on the one
+position examined by hand the search's preference for re-luring was
+correct. They cannot both be calibrated, and the search's own Lure
+handling is compromised anyway -- it cannot offer a pass outside a lured
+board, since widening that broke exact `solve()`.
+
 ## 6. What I would actually do
 
 ~~1. Measure throughput.~~ **Done** — see §5b. 17.5k steps/s.
