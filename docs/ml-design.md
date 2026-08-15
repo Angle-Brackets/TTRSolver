@@ -587,12 +587,47 @@ distribution scored -21.19, and this set is harder still. Comparing
 -52 with the earlier +60 means nothing; different distributions, not
 different skill.
 
-The interesting open question is which of the two is now WRONG about
-Lure. The policy lures twice as often as the search, and on the one
-position examined by hand the search's preference for re-luring was
-correct. They cannot both be calibrated, and the search's own Lure
-handling is compromised anyway -- it cannot offer a pass outside a lured
-board, since widening that broke exact `solve()`.
+### A shortlist bug that was not there
+
+The obvious suspicion, given this project's history, was that the search
+under-lures because `_quick_score` credits a Lure +25 per cog against
+damage plans scoring 100+, so Lure plans lose the shortlist cut before
+anything evaluates them. A first measurement seemed to confirm it: Lure
+reached the shortlist 35.9% of the time, and scored better than every
+alternative 61.8% of the time when forced.
+
+**Both numbers were wrong, in different ways.**
+
+The 35.9% counted positions where a Lure appeared in the shortlist over
+*all* positions, without checking whether the toon held a Lure gag at
+all. Restricted to positions where a Lure candidate exists, it is
+**100%** -- at every credit value, including 25. The shortlist never
+drops Lure.
+
+The 61.8% compared **one round's reward only**. Lure looks excellent for
+exactly one round, because you take no damage; the search's `evaluate`
+includes the continuation, where the delayed kill is paid for. Measured
+properly with the full evaluation, forcing Lure beats the search's free
+choice **15.6%** of the time, with a median gap of **-0.68**.
+
+So the search's ~9% Lure rate is consistent with its own evaluation. It
+is not being denied the option; it is declining it. The lesson is the
+one this document keeps recording, turned on its head: a metric that
+confirms a suspicion deserves the same scrutiny as one that refutes it,
+and both of these were measuring something other than the question.
+
+### Which is right about Lure remains open
+
+ The policy lures twice as often as the search, and the search's own
+evaluation says that is not warranted. But that evaluation is depth-1
+with a guessed continuation, so "the search says Lure is not worth it"
+is not the same as "Lure is not worth it" -- and on the one position
+examined by hand, the search's preference for re-luring was correct
+while its aggregate rate is low.
+
+Settling it needs ground truth, which for small SOLO positions exact
+`solve()` can supply. That is a concrete experiment rather than more
+tuning, and it is the next thing worth doing here.
 
 ## 6. What I would actually do
 
