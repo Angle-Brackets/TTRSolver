@@ -672,8 +672,15 @@ def _apply_track_group(state: BattleState, track: Track, resolved,
                 continue
             if track == Track.DROP and cog.status.lured:
                 continue          # Drop always misses a lured cog
-            damage = data.gag(track, action.level).damage_at(
-                1.0, organic=toon.is_organic(track))
+            # Via `calc_toon_damage`, NOT `damage_at(1.0, ...)`. Going
+            # straight to the table hardcoded a fully-trained toon and
+            # bypassed `mechanics.DAMAGE_TRAINED_FRACTION`, so a search
+            # run against a pessimistic damage assumption silently kept
+            # dealing maxed damage here -- and the mismatch between what
+            # the knob said and what the round dealt looked exactly like
+            # the round inventing damage out of nowhere.
+            damage = mechanics.calc_toon_damage(
+                track, action.level, organic=toon.is_organic(track))
             per_target.setdefault(cog_index, []).append((toon_index, damage))
 
     for cog_index, contributions in per_target.items():

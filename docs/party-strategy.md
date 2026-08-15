@@ -762,33 +762,47 @@ recommendation depend on everyone actually being maxed* — the question
 behind a player's preference for a wide damage margin, and one no
 amount of outcome variance can answer.
 
-The recommendation turns out to be **stable**: at fractions 1.0, 0.9 and
-0.8 the search returns the same Sound mix.
+And with the knob actually wired in (see below), it answers the
+safety-margin question that outcome variance could not:
 
-### ⚠ An unresolved discrepancy, found while checking that
+| trained_fraction | 2 Foghorn + 2 Aoogah (clears by 3) | 2 Foghorn + 2 Elephant Trunk (by 15) |
+| --- | --- | --- |
+| 1.00 | clears | clears |
+| 0.95 | clears | clears |
+| **0.90** | **fails** | clears |
+| **0.80** | **fails** | clears |
+| 0.60 | fails | fails |
 
-Dropping the fraction did not stop the plan clearing the board, and it
-should have. Resolved directly against a single level-11 Loan Shark
-(156hp), all four gags forced to hit:
+**The wider margin is worth exactly what a player says it is worth.** A
+10% shortfall in training breaks the 3-damage line and the 15-damage
+line survives to 20%. The objective still cannot express that preference
+— it prices the cheaper line higher and always will — but the cost of
+being wrong is now measurable instead of arguable, which is what was
+missing when this was filed as "the objective has no robustness term".
 
-| fraction | gag damage | sum | hpBonus | total | cog ends at |
-| --- | --- | --- | --- | --- | --- |
-| 1.0 | 50, 50, 16, 16 | 132 | 27 | 159 | 0 |
-| 0.9 | 48, 48, 16, 16 | 128 | 26 | 154 | 0 |
-| **0.6** | **40, 40, 15, 15** | **110** | **22** | **132** | **0** |
+### The discrepancy that looked like a damage bug
 
-At 0.6 the gags account for 132 damage against a 156hp cog and the cog
-dies anyway. There is no Lure in the round, so no knockback bonus and no
-luredRatio; nothing legitimate explains the extra 24.
+Dropping the fraction did not stop the plan clearing the board, and the
+arithmetic said it should have — the gags accounted for 132 damage
+against a 156hp cog at fraction 0.6, and the cog died anyway. That was
+written up here as a live bug in `apply_party_round`, inflating every
+party number in this document.
 
-So `apply_party_round` deals more damage than the gags in it account
-for, at least for stacked same-track group gags. **This is a live bug
-and it inflates every party damage number in this document**, including
-the re-measured table above. Reproduction is the three lines in the
-table: build one level-11 cog, four toons with Sound, throw
-`[6, 6, 4, 4]` as group gags with `hits=[True] * 4`, and compare the
-cog's hp against `sum(calc_toon_damage(...)) + calc_hp_bonus(sum, 4)`.
+**It was not.** `_apply_track_group` called
+`data.gag(...).damage_at(1.0, ...)` directly rather than going through
+`mechanics.calc_toon_damage`, so it hardcoded a fully-trained toon and
+never saw `DAMAGE_TRAINED_FRACTION`. The round dealt the full 159 while
+the knob reported 132; the missing 27 was the difference between the two
+assumptions, not damage appearing from nowhere.
 
-Suspects worth checking first: whether `calc_hp_bonus` is being added
-once per gag instead of once per target, and whether the group
-expansion applies each gag's damage more than once per cog.
+So the damage numbers in this document were never inflated, and the
+20% same-track bonus was being applied correctly all along — once per
+same-track set per cog, on that set's summed damage.
+
+The lesson is about the diagnosis rather than the bug. A newly added
+instrument disagreed with the system it was measuring, and the first
+reading was that the system was wrong. The instrument was wrong, and it
+was wrong because it had been wired into one damage path and not the
+other — which is the same shape as every other "the knob does nothing"
+result in this document, just inverted: here the knob did nothing *to
+the simulator* while appearing to work perfectly in isolation.
