@@ -220,7 +220,17 @@ def main():
     nets = Nets(len(train_rows[0]["pos"]), PLAN_DIM, args.hidden, device)
     opt = torch.optim.AdamW(nets.parameters(), lr=args.lr,
                             weight_decay=args.decay)
+    # Cosine decay. Without a schedule the hold-out bounced 8.35 to
+    # 11.59 between checkpoints and the best regret landed at epoch 20
+    # of 40 -- the run was wandering, not converging, and whatever got
+    # exported would have been whichever epoch it stopped on.
+    sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs)
     rng = random.Random(0)
+
+    # Early stopping on REGRET, not on loss. Regret is what the policy
+    # is for; loss includes the value term and a temperature-softened
+    # policy target, neither of which is the thing being bought.
+    best = {"regret": float("inf"), "epoch": 0, "state": None}
 
     for epoch in range(1, args.epochs + 1):
         for pos, P, T, V in batches(train_rows, args.batch, args.plans,
@@ -244,14 +254,25 @@ def main():
             loss.backward()
             opt.step()
 
-        if epoch % 10 == 0 or epoch == args.epochs:
+        sched.step()
+        if epoch % 5 == 0 or epoch == args.epochs:
             mae, t1, t5, reg, rz = evaluate(nets, hold_rows, args.plans,
                                             torch, device, vmean, vstd,
                                             args.shortlist)
+            mark = ""
+            if reg < best["regret"]:
+                best = {"regret": reg, "epoch": epoch, "mae": mae,
+                        "lossless": rz,
+                        "state": {name: {k: v.detach().cpu().clone()
+                                         for k, v in mod.state_dict().items()}
+                                  for name, mod in (("trunk", nets.trunk),
+                                                    ("value", nets.value),
+                                                    ("policy", nets.policy))}}
+                mark = "  <- best"
             print(f"    epoch {epoch:3d}  value MAE {mae:6.2f}  "
                   f"top-1 {t1 * 100:4.1f}%  top-5 {t5 * 100:4.1f}%  "
                   f"regret@{args.shortlist} {reg:6.2f}  "
-                  f"lossless {rz * 100:4.1f}%")
+                  f"lossless {rz * 100:4.1f}%{mark}")
 
     # Baseline: how often does the SHIPPED heuristic ordering put the
     # THE baseline is `_quick_score`, the hand-written ranking the
@@ -279,13 +300,16 @@ def main():
         except Exception:
             continue
         ranked = sorted(range(len(plans)), key=lambda i: -scores[i])
-        best = max(vals)
+        # `top` and not `best` -- `best` is the early-stopping snapshot
+        # a few lines up, and shadowing it turned the export into a
+        # TypeError after a full training run.
+        top = max(vals)
         kept = max(vals[i] for i in ranked[:args.shortlist])
-        q_regret += max(0.0, best - kept)
-        q_zero += (best - kept) < 1e-6
+        q_regret += max(0.0, top - kept)
+        q_zero += (top - kept) < 1e-6
         picks = random.Random(n).sample(range(len(vals)),
                                         min(args.shortlist, len(vals)))
-        r_regret += max(0.0, best - max(vals[i] for i in picks))
+        r_regret += max(0.0, top - max(vals[i] for i in picks))
         n += 1
 
     if n:
@@ -296,13 +320,28 @@ def main():
               f"   lossless {q_zero / n * 100:5.1f}%")
         print(f"    uniform random                     {r_regret / n:6.2f}")
 
+    print("")
+    print(f"  best epoch {best['epoch']}: regret@{args.shortlist} "
+          f"{best['regret']:.2f}, value MAE {best['mae']:.2f}, "
+          f"lossless {best['lossless'] * 100:.1f}%")
+
     if args.export:
-        payload = {"vmean": vmean, "vstd": vstd, "plan_dim": PLAN_DIM,
-                   "weights": {k: v.detach().cpu().tolist()
-                               for k, v in
-                               list(nets.trunk.state_dict().items())}}
+        # Plain floats, not a torch checkpoint. Inference must not need
+        # torch -- see requirements-training.txt. `search/policy.py`
+        # reads this with numpy alone and falls back to the hand-written
+        # ranking when numpy is absent.
+        payload = {
+            "vmean": vmean, "vstd": vstd,
+            "plan_dim": PLAN_DIM, "pos_dim": len(train_rows[0]["pos"]),
+            "track_order": [t.name for t in TRACK_ORDER],
+            "max_toons": MAX_TOONS, "max_cogs": MAX_COGS,
+            "regret": best["regret"], "epoch": best["epoch"],
+            "nets": {name: {k: v.tolist() for k, v in mod.items()}
+                     for name, mod in best["state"].items()},
+        }
         Path(args.export).write_text(json.dumps(payload), encoding="utf-8")
-        print(f"  exported trunk to {args.export}")
+        size = Path(args.export).stat().st_size / 1e6
+        print(f"  exported best epoch to {args.export} ({size:.1f} MB)")
     return 0
 
 
