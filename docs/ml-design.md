@@ -71,6 +71,90 @@ it is the number to watch.
 
 ---
 
+## 2b. P0 — a policy head, and why it now leads
+
+**This is the proposal I would build first, and it did not exist when
+this doc was written.** It came out of asking whether a faster leaf buys
+depth. It does not, and the reason points somewhere better.
+
+### The measurement that redirects everything
+
+Cost per ply on a real party position, width held fixed at
+`plans=12, per_track=3, samples=6`:
+
+| depth | time | growth | value |
+| --- | --- | --- | --- |
+| 1 | 0.38s | — | +91.32 |
+| 2 | 17.91s | **x46.5** | +92.04 |
+| 3 | 198.97s | **x11.1** | +91.96 |
+
+Two conclusions, both awkward for the plan above:
+
+* **A faster leaf cannot buy depth.** The MLP leaf is ~10x quicker than
+  `rollout_value` and about 3x end-to-end. Against a per-ply cost of
+  11-46x that is not half a ply. No value network, however good, changes
+  this.
+* **Depth is not obviously the prize anyway.** Depth 3 scored *below*
+  depth 2 here, within noise — no gain for eleven times the cost.
+
+Search cost is roughly `(plans x samples)^depth`. The exponent is fixed
+by the game; the base is ours. **Halving the effective branching factor
+is worth more than a tenfold faster leaf**, and only one thing halves
+it: knowing which plans deserve attention before evaluating them.
+
+### What the policy head is for
+
+Not an evaluator. A predictor of *which moves are worth searching* —
+foresight about the fight ahead rather than a score for the position in
+front of it.
+
+- **Input:** the §4 observation.
+- **Output:** a distribution over candidate plans (factored over
+  `(track, level, target)` per toon, masked by `legal_actions`).
+- **Target:** what a **deep** search preferred. One search already
+  produces values for every shortlisted plan, so a single expensive
+  position yields a full ranking over ~60 plans, not just an argmax.
+  That is a far richer label per unit of compute than a value target.
+- **Use:** rank candidates in `plans()` and `candidates()`, replacing
+  `_quick_score` and the `SensiblePrior` ordering.
+
+The payoff is compounding: a shortlist that is right at 6 plans instead
+of 60 makes depth 3 cost what depth 2 costs now.
+
+### The part that makes this more than a speedup
+
+`plans()` is where this project keeps losing the right answer. In one
+session: `PER_TRACK = 2` hid the best Sound mix; `max_plans` took a
+lexicographic prefix; then a global top-N over an optimistic score;
+then `SCORE_BUDGET` reintroduced the prefix bug one level down. Four of
+the five reductions that deleted a correct answer were **hand-written
+guesses about which plans deserve attention**. That is exactly the
+function a policy head learns.
+
+So P0 attacks the speed problem and the correctness problem with one
+object, which neither P1 nor P2 does.
+
+### Two constraints it must respect
+
+**1. The policy must not be the only gate.** A learned shortlist is
+still a reduction and can still delete the right answer — quietly, and
+with more confidence than a heuristic. Keep the existing stratification
+as a *floor*: every track family keeps a guaranteed slot, and the policy
+allocates what is left. That preserves the invariant
+(`test_no_family_takes_more_than_its_share`) that caught the global
+top-N bug, and it means a bad policy degrades to today's behaviour
+rather than to silence.
+
+**2. The teacher must be wider than the student.** Labels come from
+search, and search only ranks what its shortlist admitted. Train on
+today's shortlist and the policy learns to reproduce today's blind
+spots — including the bug that deleted 2 Foghorn + 2 Aoogah. Generate
+labels with a deliberately **widened** shortlist (higher `max_plans`,
+higher `PER_TRACK`, more samples), offline and slowly. The student is
+allowed to be narrow; the teacher is not.
+
+---
+
 ## 3. Party: this is where RL belongs
 
 There is **no oracle**. Exact `solve()` cannot reach a party position,
@@ -259,17 +343,24 @@ Two lessons worth keeping:
 
 ## 6. What I would actually do
 
-1. **Measure throughput.** Steps/sec for a party round. One afternoon,
-   and it decides whether P2 is a weekend or a fortnight.
-2. **S1** — MLP on cached `solve()` labels. Cheapest real signal about
-   whether learned function approximation buys anything here at all. If
-   an MLP cannot beat 91% ordering with exact labels, PPO will not save
-   the party case.
-3. **P1** — learned value leaf for `party_search`. Biggest expected win,
-   reuses everything, and directly attacks the 73%-of-runtime rollout.
-4. **P2** — PPO for pickup, only if latency turns out to matter, i.e.
-   only if this is going live.
-5. **P3** — not yet.
+~~1. Measure throughput.~~ **Done** — see §5b. 17.5k steps/s.
+
+~~2. S1 — MLP on cached labels.~~ **Done** — see §5b. Beats the linear
+model on calibration (hold-out MAE 27.1 → 19.0), ties on ordering.
+
+**Revised ordering, after the per-ply measurement:**
+
+1. **P0 — the policy head.** Now first. It is the only proposal that
+   attacks the branching factor, which is the term the cost is
+   exponential in, and it targets the exact machinery that has produced
+   four of this project's five silent-deletion bugs.
+2. **P1** — learned value leaf. Still worth it, but reclassified: it is
+   a **speed and calibration** win (≈3x end-to-end, hold-out MAE down
+   31%), **not** a depth win. Pairs naturally with P0, since AlphaZero's
+   two heads are exactly these two.
+3. **P2** — PPO for pickup, only if latency matters, i.e. only if this
+   goes live.
+4. **P3** — not yet.
 
 ## 7. How we will know it worked
 
