@@ -14,3 +14,9 @@ solver/live/_cog_heads/
 
 # Labelled positions cached by tools/fit_heuristic.py
 .heuristic_labels.json
+
+# Party search labels for the policy/value heads -- 22MB, and
+# regenerable with `python tools/gen_party_data.py` in about twelve
+# minutes. Same reasoning as the solo label cache above: it is a cache,
+# not a source, and it is invalidated by any rule change anyway.
+.party_labels.json
