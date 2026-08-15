@@ -473,9 +473,20 @@ def gag_exp_window(track: Track, level: int):
     correct rather than degenerate: those gags have one fixed damage.
 
     Feeds `mechanics.gag_damage_from_exp`. Nothing calls it in the
-    damage path yet -- that needs `ToonState.track_exp` to hold real
-    experience rather than a 0-7 training level, which is a change with
-    its own reach into the live readers.
+    damage path, and that is a DECISION rather than unfinished work.
+
+    Wiring it up means `ToonState.track_exp` holding real experience
+    instead of a 0-7 training level, which reaches into the live
+    readers. The payoff is only in LIVE analysis -- advising a specific
+    toon whose actual bar is mid-window -- and there it is niche, since
+    most toons being advised are maxed or near it. For testing and
+    strategy work `DAMAGE_TRAINED_FRACTION` is the better tool anyway,
+    because sweeping one number answers "how much does this answer
+    depend on being maxed" directly, which per-toon experience would
+    make harder rather than easier.
+
+    So this is transcribed and correct and deliberately unused. Do not
+    "finish" it without a live case that needs it.
     """
     low = gag_unlock_exp(track, level)
     if level >= 7:
