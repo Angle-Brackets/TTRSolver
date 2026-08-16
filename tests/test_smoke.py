@@ -202,3 +202,72 @@ class TestFullFight(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ToonUpTargetsToonsTest(unittest.TestCase):
+    """Toon-Up names a TOON, not a cog.
+
+    `legal_actions` enumerated single-target actions over `state.cogs`
+    for every track, Toon-Up included. With four cogs and two toons that
+    produced four heals aimed at cog indices, the heal quietly fell back
+    to "first standing teammate", and the search printed nonsense like
+    `Feather -> cog 0` -- which is how it was noticed.
+    """
+
+    def party(self, cogs=4, hurt=True):
+        from solver.state import BattleState, CogState, ToonState, Track
+
+        counts = {(Track.TOON_UP, 1): 2, (Track.THROW, 4): 2}
+        me = ToonState(60, 80, {Track.TOON_UP: 6, Track.THROW: 6}, counts)
+        mate = ToonState(20 if hurt else 80, 80, {Track.THROW: 6},
+                         {(Track.THROW, 4): 1})
+        return BattleState(
+            toons=[me, mate],
+            cogs=[CogState("bean_counter", "cashbot", 6, 40, 56)
+                  for _ in range(cogs)])
+
+    def test_a_heal_targets_a_teammate_index(self):
+        from solver.state import Track
+
+        state = self.party()
+        heals = [a for a in simulator.legal_actions(state)
+                 if a.track == Track.TOON_UP]
+        self.assertEqual(len(heals), 1)
+        self.assertEqual(heals[0].target_index, 1)
+
+    def test_no_heal_is_offered_when_nobody_needs_one(self):
+        from solver.state import Track
+
+        state = self.party(hurt=False)
+        self.assertEqual(
+            [a for a in simulator.legal_actions(state)
+             if a.track == Track.TOON_UP], [])
+
+
+class UnproductiveMovesAreNotOfferedTest(unittest.TestCase):
+    """`is_productive` knew about these and was only ever asked about
+    the pass, so the search could spend a round re-luring an
+    already-lured cog."""
+
+    def all_lured(self):
+        from solver.state import BattleState, CogState, ToonState, Track
+
+        cogs = []
+        for _ in range(2):
+            cog = CogState("bean_counter", "cashbot", 6, 40, 56)
+            cog.status.apply_lure(60, 3, 3)
+            cogs.append(cog)
+        toon = ToonState(50, 80, {Track.LURE: 6, Track.THROW: 6},
+                         {(Track.LURE, 4): 2, (Track.THROW, 4): 2})
+        return BattleState(toons=[toon], cogs=cogs)
+
+    def test_relure_is_not_offered_when_everything_is_lured(self):
+        from solver.state import Track
+
+        state = self.all_lured()
+        self.assertEqual(
+            [a for a in simulator.legal_actions(state)
+             if a.track == Track.LURE], [])
+
+    def test_something_is_still_offered(self):
+        self.assertTrue(simulator.legal_actions(self.all_lured()))

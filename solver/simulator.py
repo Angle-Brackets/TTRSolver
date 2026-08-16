@@ -138,6 +138,25 @@ def legal_actions(state: BattleState) -> List[Action]:
             actions.append(Action(track=track, level=level, target_index=None))
             continue
 
+        if track == Track.TOON_UP:
+            # Toon-Up names a TOON, and this enumerated cogs. With four
+            # cogs and two toons it produced four heals aimed at cog
+            # indices, and the heal quietly fell back to "first standing
+            # teammate" -- so the search saw several identical actions
+            # wearing different labels and printed nonsense like
+            # `Feather -> cog 0`.
+            #
+            # [CONFIRMED] TTR wiki: a toon cannot heal themselves, so
+            # the actor is excluded.
+            for i, other in enumerate(state.toons):
+                if i == 0 or other.laff <= 0:
+                    continue
+                if other.laff >= other.max_laff:
+                    continue          # nothing to restore
+                actions.append(Action(track=track, level=level,
+                                      target_index=i))
+            continue
+
         for i, cog in enumerate(state.cogs):
             if cog.status.is_dead:
                 continue
@@ -146,10 +165,24 @@ def legal_actions(state: BattleState) -> List[Action]:
                     continue  # can't trap an already-trapped or lured cog
             actions.append(Action(track=track, level=level, target_index=i))
 
+    # Whether waiting is the only thing left has to be decided BEFORE
+    # the unproductive actions are dropped -- afterwards every remaining
+    # action is productive by construction and the test always fails.
+    #
     # REVERTED to the narrow rule. The widening is correct in principle
     # and broke `solve()` in practice -- see `state.free_passes`.
     lured_wait = (any(cog.status.lured for cog in active)
                   and not any(is_productive(state, a) for a in actions))
+
+    # Drop the moves that provably do nothing. `is_productive` already
+    # knew about them and was only ever consulted for the pass decision,
+    # so the search was free to spend a round re-luring an
+    # already-lured cog -- which refreshes a timer and buys nothing --
+    # or dropping on a lured one, which always misses.
+    productive = [a for a in actions if is_productive(state, a)]
+    if productive:
+        actions = productive
+
     if lured_wait:
         actions.append(Action(track=None, level=0, target_index=None))
 
