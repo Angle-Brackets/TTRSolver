@@ -93,6 +93,10 @@ def main():
                     help="reverse curriculum: episodes starting with a "
                          "trap already armed and a lure in hand, where "
                          "the payoff is one move away")
+    ap.add_argument("--facility-fraction", type=float, default=0.0,
+                    help="share of episodes that are multi-floor "
+                         "facilities, where a gag saved on one floor is "
+                         "spent on the next and conserving finally pays")
     ap.add_argument("--strange-fraction", type=float, default=0.25,
                     help="mid-fight boards: already lured, armed traps, "
                          "picked-over pouches, someone nearly sad")
@@ -111,12 +115,23 @@ def main():
           + (f" ({torch.cuda.get_device_name(0)})" if device == "cuda" else ""))
 
     sampler = None
-    if args.hard_fraction > 0 or args.combo_fraction > 0:
+    if (args.hard_fraction > 0 or args.combo_fraction > 0
+            or args.facility_fraction > 0):
         frac = args.hard_fraction
         strange = args.strange_fraction
         combo = args.combo_fraction
-        sampler = (lambda r, _f=frac, _s=strange, _c=combo:
-                   env_mod.mixed_position(r, _f, _s, _c))
+        fac = args.facility_fraction
+
+        def sampler(r, _f=frac, _s=strange, _c=combo, _fa=fac):
+            # A facility position becomes a multi-floor episode in
+            # `BattleEnv.reset`, which is the only place a saved gag can
+            # actually be spent later.
+            if r.random() < _fa:
+                return env_mod.facility_position(r)
+            state = env_mod.mixed_position(r, _f, _s, _c)
+            state.cogs_remaining = 0
+            state.kind = "street"
+            return state
     envs = [env_mod.BattleEnv(rng=random.Random(args.seed * 1000 + i),
                               sampler=sampler,
                               coordinated=args.coordinated)

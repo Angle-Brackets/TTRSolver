@@ -690,17 +690,6 @@ def apply_party_round(state: BattleState,
                 landed.append((track, group, targets))
 
         _apply_track_group(state, track, resolved, healed)
-
-    # Cogs walk in to replace the dead. Done here, at the end of round
-    # resolution, so that EVERY caller sees it -- the search as well as
-    # the environment. A search that treated a kill as final progress
-    # while another cog immediately took the slot would systematically
-    # overvalue killing and undervalue Lure.
-    #
-    # After the toon phase and the cog phase both, so a cog that joins
-    # this round does not also get to swing this round.
-    from . import facility
-    facility.reinforce(state)
     return healed
 
 

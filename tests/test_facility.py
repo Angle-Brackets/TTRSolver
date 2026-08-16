@@ -123,17 +123,73 @@ class ReinforceTest(unittest.TestCase):
         self.assertEqual(len(state.holdout), 1)
 
     def test_a_round_reinforces(self):
-        """Reinforcement happens in round resolution, so the SEARCH sees
-        it -- a kill that is instantly replaced is not the progress it
-        looks like."""
+        """Reinforcement happens at the round boundary, so the SEARCH
+        sees it -- a kill that is instantly replaced is not the progress
+        it looks like."""
+        from solver import party as party_mod
+        from solver.state import Action
         state = BattleState(toon=toon(), cogs=[cog(1, hp=1)],
                             holdout=[cog(5)], kind="facility")
+        nxt, _healed, _done = party_mod.step(
+            state, Action(track=Track.THROW, level=3, target_index=0),
+            mode=party_mod.Mode.COORDINATED,
+            joint=[Action(track=Track.THROW, level=3, target_index=0)],
+            rng=random.Random(0))
+        self.assertEqual(len(nxt.active_cogs()), 1)
+        self.assertEqual(nxt.holdout, [])
+
+    def test_track_resolution_does_not_reinforce(self):
+        """`apply_party_round` must NOT reinforce, and this is not a
+        style point.
+
+        `greedy_plan` calls it on a scratch clone after each toon picks,
+        so later toons can see the earlier ones' choices. Reinforcing
+        there grew the scratch state's cog list, the next toon
+        enumerated a target index that did not exist in the real state,
+        and the plan raised IndexError when applied. It is also wrong on
+        the merits: a cog should not be targetable in the round it
+        walked into.
+        """
         from solver.state import Action
+        state = BattleState(toon=toon(), cogs=[cog(1, hp=1)],
+                            holdout=[cog(5)], kind="facility")
         simulator.apply_party_round(
             state, [Action(track=Track.THROW, level=3, target_index=0)],
             hits=[True])
-        self.assertEqual(len(state.active_cogs()), 1)
-        self.assertEqual(state.holdout, [])
+        self.assertEqual(len(state.holdout), 1)   # still waiting
+        self.assertEqual(len(state.cogs), 1)
+
+    def test_the_search_survives_a_facility(self):
+        """The regression this whole fix came from: run the search over
+        real facility episodes and let it raise if a plan targets a cog
+        that is not there."""
+        from solver.party import Mode
+        from solver.search import party_search as ps
+        for seed in (12000, 12004, 12011):
+            e = env.BattleEnv(rng=random.Random(seed),
+                              sampler=env.facility_position,
+                              coordinated=True)
+            _ob, mask = e.reset()
+            done, guard, cached = False, 0, None
+            while not done and guard < 40:
+                guard += 1
+                if all(a is None for a in e.pending):
+                    _v, cached = ps.evaluate(
+                        e.state, depth=1, mode=Mode.COORDINATED,
+                        samples=4, max_plans=6, rng=e.rng)
+                index = env.PASS_INDEX
+                act = (cached[e.actor]
+                       if cached and e.actor < len(cached) else None)
+                if act is not None and not act.is_pass:
+                    for i, c in enumerate(env.ACTIONS):
+                        if (c is not None and c.track == act.track
+                                and c.level == act.level
+                                and c.target_index == act.target_index):
+                            index = i
+                            break
+                if not mask[index]:
+                    index = env.PASS_INDEX
+                _ob, mask, _r, done, _info = e.step(index)
 
 
 class BattleEndTest(unittest.TestCase):

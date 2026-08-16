@@ -356,6 +356,22 @@ def step(state: BattleState, mine: Optional[Action] = None,
     if not nxt.is_terminal():
         _party_cog_phase(nxt, healed, rng)
     nxt.round_num += 1
+
+    # Cogs walk in to replace the dead, at the ROUND BOUNDARY.
+    #
+    # This was inside `apply_party_round` and had to move. That function
+    # is not only how a round resolves -- `greedy_plan` calls it on a
+    # scratch clone after each toon picks, so later toons can see the
+    # earlier ones' choices. Reinforcing there appended a cog to the
+    # scratch state, so the next toon enumerated a target index that did
+    # not exist in the real state, and the plan raised IndexError when
+    # applied.
+    #
+    # The boundary is also where it belongs on the merits: a cog that
+    # walks in should not be targetable by gags thrown in the round it
+    # joined, nor get to swing in it. Both phases are done by here.
+    from . import facility
+    facility.reinforce(nxt)
     return nxt, healed, nxt.is_terminal()
 
 
