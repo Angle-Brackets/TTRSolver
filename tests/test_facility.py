@@ -306,3 +306,44 @@ class EpisodeTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DifficultyPairingTest(unittest.TestCase):
+    """[ASSUMED] which building a party would be in -- a model of player
+    choice, not of the game."""
+
+    def party(self, n, laff=78):
+        return BattleState(toons=[ToonState(laff, laff, {Track.THROW: 7},
+                                            {(Track.THROW, 3): 5})
+                                  for _ in range(n)],
+                           cogs=[cog()], kind="facility")
+
+    def test_bigger_parties_take_harder_buildings(self):
+        rng = random.Random(0)
+        solo = statistics_mean([facility.difficulty_for(self.party(1), rng)
+                                for _ in range(200)])
+        full = statistics_mean([facility.difficulty_for(self.party(4), rng)
+                                for _ in range(200)])
+        self.assertGreater(full, solo + 2)
+
+    def test_always_a_real_wiki_row(self):
+        rng = random.Random(1)
+        for n in range(1, 5):
+            for _ in range(50):
+                d = facility.difficulty_for(self.party(n), rng)
+                self.assertIn(d, facility.DIFFICULTY)
+
+    def test_a_sad_toon_does_not_count(self):
+        """They have left the battle; their laff is not the party's."""
+        rng = random.Random(2)
+        state = self.party(4)
+        for t in state.toons[1:]:
+            t.laff = 0
+        weak = [facility.difficulty_for(state, rng) for _ in range(100)]
+        strong = [facility.difficulty_for(self.party(4), rng)
+                  for _ in range(100)]
+        self.assertLess(statistics_mean(weak), statistics_mean(strong))
+
+
+def statistics_mean(values):
+    return sum(values) / len(values)

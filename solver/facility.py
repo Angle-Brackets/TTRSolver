@@ -112,6 +112,31 @@ def floor_size(floor: int, floors: int, rng) -> int:
     return rng.randint(low, low + 2)
 
 
+def difficulty_for(state, rng) -> int:
+    """[ASSUMED] Which building this party would plausibly be in.
+
+    Not a rule of the game. The wiki is explicit that a building's
+    difficulty is set by the cog that took it over, with nothing about
+    who walks in -- so this is a model of PLAYER CHOICE, not of the
+    game, and it is labelled accordingly.
+
+    It exists because the alternative was worse. Pairing every party
+    with a difficulty 4-9 building made 61% of facility episodes a solo
+    toon against up to five floors of level 9-12 cogs, which is not hard
+    but impossible: both the search and the policy cleared 0.4 floors on
+    average and 0-2% of buildings. Half of training was spent on
+    positions with nothing to learn from, and the evaluation could not
+    tell any two agents apart.
+
+    Scaled on the party's total laff, which is the crudest honest proxy
+    for what a group can take on: a solo 78-laff toon lands around
+    difficulty 2, four of them around 7.
+    """
+    strength = sum(t.max_laff for t in state.toons if t.laff > 0)
+    base = max(1, min(9, round(strength / 45.0)))
+    return max(1, min(9, base + rng.randint(-1, 1)))
+
+
 class FacilityPlan:
     """The floors of one facility, and the pouch that has to last them.
 

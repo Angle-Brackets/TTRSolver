@@ -315,7 +315,9 @@ class BattleEnv:
             # The sampler set a horizon; turn it into actual floors so
             # the episode can keep going and the saved gag can be spent.
             self.plan = facility.plan_facility(
-                self.rng, self.rng.randint(4, 9), self._facility_cog)
+                self.rng,
+                facility.difficulty_for(self.state, self.rng),
+                self._facility_cog)
             first, holdout = self.plan.take_floor()
             if first:
                 self.state.cogs = first
