@@ -33,6 +33,7 @@ import random
 from typing import List, Optional, Tuple
 
 from .. import data, facility, party as party_mod, simulator
+from ..data import gags as gags_mod
 from ..search import objective as objective_mod
 from ..state import Action, BattleState, CogState, ToonState, Track
 
@@ -331,10 +332,17 @@ class BattleEnv:
         if self.state.kind == "facility":
             # The sampler set a horizon; turn it into actual floors so
             # the episode can keep going and the saved gag can be spent.
+            street = facility.sample_street(self.rng)
+            capacity = facility.pouch_for_street(street, self.rng)
+            for toon in self.state.toons:
+                if toon.laff > 0:
+                    restock(toon, self.rng, capacity)
+            difficulty = facility.difficulty_for(self.state, self.rng,
+                                                 street=street)
             self.plan = facility.plan_facility(
-                self.rng,
-                facility.difficulty_for(self.state, self.rng),
-                self._facility_cog)
+                self.rng, difficulty, self._facility_cog,
+                floors=facility.floors_for(self.state, difficulty,
+                                           self.rng))
             first, holdout = self.plan.take_floor()
             if first:
                 self.state.cogs = first
@@ -713,6 +721,77 @@ def sample_horizon(rng) -> int:
     return rng.randint(1, 30)
 
 
+def restock(toon, rng, capacity=None) -> None:
+    """Fill a pouch the way a toon entering a building has one.
+
+    `random_toon` models a pouch part-way through a street battle: one
+    to five of each gag, with a quarter of the trained levels empty.
+    Right for a single fight, wrong for the start of a building, where
+    you have just restocked at the playground. Facility parties were
+    averaging 40 gags against 17 cogs of level 6-9 -- about two gags per
+    cog, where two rarely kills one -- so the run died of an empty pouch
+    on floor one and cleared 0.4 floors.
+
+    RESPECTS THE POUCH CAP, which the first version did not. Filling
+    every gag to its own `max_carry` produced parties holding 378 gags;
+    `POUCH_CAPACITIES` is [CONFIRMED] as a cap on the TOTAL across all
+    tracks, 80 at the very most, and `validate_loadout` would have
+    rejected every one of those loadouts. The data was already in the
+    repo and the first attempt simply did not consult it.
+
+    TRAINING IS NOT TOUCHED, only quantity: which tracks a toon has and
+    how far each is trained stays as sampled, so the lopsided, unmaxed
+    pouches `random_toon` exists to produce survive. A toon with
+    mediocre gags still has mediocre gags -- just a full bag of them.
+    """
+    owned = []
+    for track, trained in toon.track_exp.items():
+        for level in range(1, trained + 1):
+            if (track, level) in USABLE:
+                owned.append((track, level))
+    if not owned:
+        return
+
+    counts = {}
+    # Level 7s sit outside the pouch entirely, one each.
+    for key in owned:
+        if key[1] >= gags_mod.POUCH_EXEMPT_LEVEL:
+            counts[key] = 1
+    inside = [k for k in owned if k[1] < gags_mod.POUCH_EXEMPT_LEVEL]
+    if not inside:
+        toon.gag_counts = {**toon.gag_counts, **counts}
+        return
+
+    # Capacity comes from the street when the caller knows it -- pouch
+    # size tracks progression, so a Toontown Central toon does not carry
+    # a Bossbot Headquarters backpack. Falls back to the middle of the
+    # table when restocking outside a facility.
+    if capacity is None:
+        sizes = sorted(data.POUCH_CAPACITIES.values())
+        capacity = rng.choice(sizes[len(sizes) // 2:])
+
+    # Players carry their best gags, so weight the draw by level rather
+    # than spreading evenly -- an even split would hand a late-game toon
+    # a bag of Cupcakes and misrepresent the decision the solver faces.
+    room = {k: data.gag(*k).max_carry or 1 for k in inside}
+    for key in inside:
+        counts.setdefault(key, 0)
+    weights = [float(k[1]) ** 2 for k in inside]
+    for _ in range(capacity):
+        pool = [(k, w) for k, w in zip(inside, weights)
+                if counts[k] < room[k]]
+        if not pool:
+            break
+        total = sum(w for _k, w in pool)
+        roll = rng.random() * total
+        for key, weight in pool:
+            roll -= weight
+            if roll <= 0:
+                counts[key] += 1
+                break
+    toon.gag_counts = {k: v for k, v in counts.items() if v > 0}
+
+
 def facility_position(rng) -> BattleState:
     """A position that is explicitly a facility floor, horizon and all.
 
@@ -723,6 +802,20 @@ def facility_position(rng) -> BattleState:
     if state.cogs_remaining == 0:
         state.cogs_remaining = rng.randint(4, 30)
     state.kind = "facility"
+    for toon in state.toons:
+        if toon.laff <= 0:
+            continue
+        restock(toon, rng)
+        # Healed as well as restocked, and for the same reason. 43% of
+        # sampled toons were entering a building under half health,
+        # because `mixed_position` models a toon PART WAY THROUGH a
+        # street fight. Nobody walks into a five-storey building at 30%
+        # laff on purpose; you heal at the playground first.
+        #
+        # Laff still carries across floors untouched -- there is no
+        # healing between them, which is the pressure a building run is
+        # actually made of. This sets the starting line, not the rules.
+        toon.laff = toon.max_laff
     return state
 
 

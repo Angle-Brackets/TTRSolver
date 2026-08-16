@@ -62,6 +62,7 @@ import random
 from typing import Callable, List, Optional, Sequence
 
 from . import data
+from .data.gags import POUCH_CAPACITIES
 from .state import BattleState, CogState
 
 # At most four cogs on the field at once. The wiki has no page stating
@@ -97,14 +98,20 @@ DIFFICULTY = {
 }
 
 
-def floor_size(floor: int, floors: int, rng) -> int:
+def floor_size(floor: int, rng) -> int:
     """[ASSUMED] How many cogs a floor holds, counting the holdout.
 
     The wiki confirms the direction and not the numbers: "Each floor
-    contains progressively more Cogs". So this grows with depth and is
-    kept inside a range where the holdout is a real feature of the fight
-    without the floor becoming a siege -- floor one lands at three or
-    four, a fifth floor at six to eight.
+    contains progressively more Cogs". So this grows with depth, and
+    stays in a range where the holdout is a real feature of the fight
+    without the floor becoming a siege:
+
+        floor 1: 3-5    floor 2: 4-6    floor 3: 5-7
+        floor 4: 6-8    floor 5+: 6-8   (the growth stops at 6)
+
+    Depth alone decides it, not depth as a fraction of the building, so
+    the second floor of a two-floor building holds what the second floor
+    of a five-floor building holds. Nothing published says otherwise.
 
     If a count is ever published, replace this and nothing else.
     """
@@ -112,29 +119,142 @@ def floor_size(floor: int, floors: int, rng) -> int:
     return rng.randint(low, low + 2)
 
 
-def difficulty_for(state, rng) -> int:
-    """[ASSUMED] Which building this party would plausibly be in.
+# [CONFIRMED] TTR wiki, Street. Cog level range per street, in
+# playground order. A building's difficulty equals the level of the cog
+# that took it over, so a street's cog range IS its range of building
+# difficulties.
+#
+# This is what replaced scaling difficulty by party laff. The game does
+# not size a building to whoever walks in -- it sizes it to the street,
+# and you arrive with whatever you have. By the last two playgrounds
+# that means difficulty 5-9 as the ordinary case, on toons who may be
+# under 100 laff with untrained tracks.
+STREETS = [
+    ("Loopy Lane", "Toontown Central", (1, 3)),
+    ("Punchline Place", "Toontown Central", (1, 3)),
+    ("Silly Street", "Toontown Central", (1, 3)),
+    ("Barnacle Boulevard", "Donald's Dock", (2, 4)),
+    ("Seaweed Street", "Donald's Dock", (3, 6)),
+    ("Lighthouse Lane", "Donald's Dock", (3, 6)),
+    ("Elm Street", "Daisy Gardens", (2, 4)),
+    ("Maple Street", "Daisy Gardens", (3, 6)),
+    ("Oak Street", "Daisy Gardens", (3, 6)),
+    ("Alto Avenue", "Minnie's Melodyland", (2, 4)),
+    ("Baritone Boulevard", "Minnie's Melodyland", (3, 6)),
+    ("Tenor Terrace", "Minnie's Melodyland", (3, 6)),
+    ("Sleet Street", "The Brrrgh", (5, 7)),
+    ("Walrus Way", "The Brrrgh", (5, 7)),
+    ("Polar Place", "The Brrrgh", (7, 9)),
+    ("Lullaby Lane", "Donald's Dreamland", (6, 9)),
+    ("Pajama Place", "Donald's Dreamland", (6, 9)),
+]
 
-    Not a rule of the game. The wiki is explicit that a building's
-    difficulty is set by the cog that took it over, with nothing about
-    who walks in -- so this is a model of PLAYER CHOICE, not of the
-    game, and it is labelled accordingly.
+# [ASSUMED] How often each street is the one being played. Not a game
+# rule -- nothing published says where players spend their time.
+#
+# Weighted toward the last two playgrounds because that is where the
+# hard buildings are and where a solver earns its keep; a level 1-3
+# building decides nothing. It is a training-distribution choice and
+# nothing else reads it.
+LATE_PLAYGROUNDS = ("The Brrrgh", "Donald's Dreamland")
+LATE_WEIGHT = 4.0
 
-    It exists because the alternative was worse. Pairing every party
-    with a difficulty 4-9 building made 61% of facility episodes a solo
-    toon against up to five floors of level 9-12 cogs, which is not hard
-    but impossible: both the search and the policy cleared 0.4 floors on
-    average and 0-2% of buildings. Half of training was spent on
-    positions with nothing to learn from, and the evaluation could not
-    tell any two agents apart.
 
-    Scaled on the party's total laff, which is the crudest honest proxy
-    for what a group can take on: a solo 78-laff toon lands around
-    difficulty 2, four of them around 7.
+# [CONFIRMED] TTR wiki, Gag pouch. The capacity table is keyed by the
+# LOCATION whose ToonTask awards it, which makes pouch size a function
+# of how far a toon has progressed -- and therefore of which street they
+# are plausibly fighting on.
+#
+# Note the steps are not uniform: 20/25/30/35/40 rise by five, then
+# 50/60/70/80 by ten.
+POUCH_AT = {
+    "Toontown Central": 25,
+    "Donald's Dock": 30,
+    "Daisy Gardens": 35,
+    "Minnie's Melodyland": 40,
+    "The Brrrgh": 50,
+    "Donald's Dreamland": 70,       # Small 60 then Medium 70 here
+}
+
+# The largest, from Bossbot Headquarters -- past every street in
+# `STREETS`, so it is only reachable as the "came back later" case.
+MAX_POUCH_CAPACITY = 80
+POUCH_CAPACITIES_VALUES = sorted(POUCH_CAPACITIES.values())
+
+
+def pouch_for_street(street, rng) -> int:
+    """[ASSUMED] the pouch a toon on this street is carrying.
+
+    The capacities and their locations are [CONFIRMED]; what is assumed
+    is that a toon fighting on a street has roughly the pouch that
+    street's playground awards. That is the floor rather than the rule:
+    a maxed toon revisiting The Brrrgh has an 80, so a quarter of the
+    time this returns a larger one.
+
+    Replaces picking from the top half of the table regardless of where
+    the building was, which handed a Toontown Central toon a Bossbot
+    Headquarters backpack.
     """
+    _name, playground, _levels = street
+    base = POUCH_AT.get(playground, 40)
+    if rng.random() < 0.25:
+        bigger = [c for c in sorted(POUCH_CAPACITIES_VALUES) if c > base]
+        if bigger:
+            return rng.choice(bigger)
+    return base
+
+
+def sample_street(rng):
+    """Pick the street this building is on."""
+    weights = [LATE_WEIGHT if pg in LATE_PLAYGROUNDS else 1.0
+               for _n, pg, _r in STREETS]
+    total = sum(weights)
+    roll = rng.random() * total
+    for street, weight in zip(STREETS, weights):
+        roll -= weight
+        if roll <= 0:
+            return street
+    return STREETS[-1]
+
+
+def difficulty_for(state, rng, street=None) -> int:
+    """The difficulty of the building being fought.
+
+    [CONFIRMED] in shape: difficulty is the level of the cog that took
+    the building over, and a street's cog range bounds it. The street is
+    chosen by `sample_street`, whose weighting is the assumed part.
+
+    `state` is accepted and deliberately unused for difficulty. An
+    earlier version scaled difficulty on the party's laff, which had the
+    causality backwards: the game does not make buildings easier because
+    a weak toon walked in. Party strength now decides how many FLOORS
+    are attempted, which is a real choice -- see `floors_for`.
+    """
+    _name, _pg, (lo, hi) = street or sample_street(rng)
+    return max(1, min(9, rng.randint(lo, hi)))
+
+
+def floors_for(state, difficulty: int, rng) -> int:
+    """[ASSUMED] How many floors this party takes on.
+
+    THIS is where player choice legitimately enters, and the wiki
+    supports that it is a choice: "Above the elevator are white lights
+    that indicate how many floors the Cog Building has", so the count is
+    known before entering and a toon can decline a five-storey building.
+    Difficulty is not visible that way and is not chosen.
+
+    Scaled on the party's total laff across the range the difficulty
+    allows: a solo toon takes the fewest floors that building can have,
+    a full team the most. The assumption is the mapping, not the fact
+    that players pick -- the wiki is explicit about the lights.
+    """
+    lo, hi = DIFFICULTY[difficulty]["floors"]
+    if hi <= lo:
+        return lo
     strength = sum(t.max_laff for t in state.toons if t.laff > 0)
-    base = max(1, min(9, round(strength / 45.0)))
-    return max(1, min(9, base + rng.randint(-1, 1)))
+    frac = max(0.0, min(1.0, strength / 400.0))
+    floors = lo + round(frac * (hi - lo))
+    return max(lo, min(hi, floors + rng.randint(-1, 1)))
 
 
 class FacilityPlan:
@@ -194,7 +314,7 @@ def plan_facility(rng, difficulty: int,
 
     built: List[List[CogState]] = []
     for floor in range(1, n_floors + 1):
-        size = floor_size(floor, n_floors, rng)
+        size = floor_size(floor, rng)
         cogs = [cog_factory(rng, rng.randint(lo, hi)) for _ in range(size)]
         if floor == n_floors:
             # [CONFIRMED] the top floor has a "boss" at the table's boss

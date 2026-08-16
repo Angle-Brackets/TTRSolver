@@ -308,9 +308,9 @@ if __name__ == "__main__":
     unittest.main()
 
 
-class DifficultyPairingTest(unittest.TestCase):
-    """[ASSUMED] which building a party would be in -- a model of player
-    choice, not of the game."""
+class StreetDifficultyTest(unittest.TestCase):
+    """Difficulty comes from the STREET, [CONFIRMED] from the wiki's
+    Street table. Party strength does not make a building easier."""
 
     def party(self, n, laff=78):
         return BattleState(toons=[ToonState(laff, laff, {Track.THROW: 7},
@@ -318,34 +318,92 @@ class DifficultyPairingTest(unittest.TestCase):
                                   for _ in range(n)],
                            cogs=[cog()], kind="facility")
 
-    def test_bigger_parties_take_harder_buildings(self):
+    def test_the_wiki_street_rows(self):
+        rows = {name: levels for name, _pg, levels in facility.STREETS}
+        self.assertEqual(rows["Loopy Lane"], (1, 3))
+        self.assertEqual(rows["Polar Place"], (7, 9))
+        self.assertEqual(rows["Lullaby Lane"], (6, 9))
+        self.assertEqual(rows["Sleet Street"], (5, 7))
+
+    def test_seventeen_streets(self):
+        self.assertEqual(len(facility.STREETS), 17)
+
+    def test_party_size_does_not_change_difficulty(self):
+        """The correction: the game does not make a building easier
+        because a weak toon walked in."""
         rng = random.Random(0)
-        solo = statistics_mean([facility.difficulty_for(self.party(1), rng)
-                                for _ in range(200)])
-        full = statistics_mean([facility.difficulty_for(self.party(4), rng)
-                                for _ in range(200)])
-        self.assertGreater(full, solo + 2)
+        solo = [facility.difficulty_for(self.party(1), rng)
+                for _ in range(600)]
+        full = [facility.difficulty_for(self.party(4), rng)
+                for _ in range(600)]
+        self.assertLess(abs(mean(solo) - mean(full)), 0.5)
+
+    def test_late_streets_are_hard(self):
+        """The complaint that prompted this: by the last playgrounds you
+        face difficulty 5-9 as the ordinary case."""
+        rng = random.Random(0)
+        for name, _pg, _r in facility.STREETS:
+            pass
+        late = [s for s in facility.STREETS
+                if s[1] in facility.LATE_PLAYGROUNDS]
+        for _name, _pg, (lo, _hi) in late:
+            self.assertGreaterEqual(lo, 5)
+
+    def test_difficulty_stays_inside_the_street_range(self):
+        rng = random.Random(3)
+        for street in facility.STREETS:
+            lo, hi = street[2]
+            for _ in range(40):
+                d = facility.difficulty_for(None, rng, street=street)
+                self.assertTrue(lo <= d <= hi)
 
     def test_always_a_real_wiki_row(self):
         rng = random.Random(1)
-        for n in range(1, 5):
-            for _ in range(50):
-                d = facility.difficulty_for(self.party(n), rng)
-                self.assertIn(d, facility.DIFFICULTY)
+        for _ in range(500):
+            self.assertIn(facility.difficulty_for(None, rng),
+                          facility.DIFFICULTY)
+
+
+class FloorChoiceTest(unittest.TestCase):
+    """How many floors a party takes on IS a choice -- the wiki confirms
+    the lights above the elevator show the count before entering."""
+
+    def party(self, n, laff=78):
+        return BattleState(toons=[ToonState(laff, laff, {Track.THROW: 7},
+                                            {(Track.THROW, 3): 5})
+                                  for _ in range(n)],
+                           cogs=[cog()], kind="facility")
+
+    def test_bigger_parties_take_more_floors(self):
+        rng = random.Random(0)
+        solo = [facility.floors_for(self.party(1), 7, rng)
+                for _ in range(400)]
+        full = [facility.floors_for(self.party(4), 7, rng)
+                for _ in range(400)]
+        self.assertGreater(mean(full), mean(solo))
+
+    def test_never_outside_the_wiki_floor_range(self):
+        rng = random.Random(2)
+        for difficulty, row in facility.DIFFICULTY.items():
+            lo, hi = row["floors"]
+            for n in (1, 4):
+                for _ in range(60):
+                    f = facility.floors_for(self.party(n), difficulty, rng)
+                    self.assertTrue(lo <= f <= hi)
 
     def test_a_sad_toon_does_not_count(self):
-        """They have left the battle; their laff is not the party's."""
+        """They have left; their laff is not the party's."""
         rng = random.Random(2)
         state = self.party(4)
         for t in state.toons[1:]:
             t.laff = 0
-        weak = [facility.difficulty_for(state, rng) for _ in range(100)]
-        strong = [facility.difficulty_for(self.party(4), rng)
-                  for _ in range(100)]
-        self.assertLess(statistics_mean(weak), statistics_mean(strong))
+        weak = [facility.floors_for(state, 7, rng) for _ in range(400)]
+        strong = [facility.floors_for(self.party(4), 7, rng)
+                  for _ in range(400)]
+        self.assertLess(mean(weak), mean(strong))
 
 
-def statistics_mean(values):
+def mean(values):
     return sum(values) / len(values)
 
 
@@ -381,8 +439,7 @@ class CogPoolTest(unittest.TestCase):
 
     def test_the_pools_only_claim_levels_the_cog_really_has(self):
         """Each pool entry is checked against the cog's own published
-        range, so a bad row cannot sit there until a rare seed finds
-        it.
+        range, so a bad row cannot sit there until a rare seed finds it.
 
         The cog phase draws from the module-level `random`, so the
         stream is restored afterwards: leaving it advanced made an
@@ -396,3 +453,78 @@ class CogPoolTest(unittest.TestCase):
                     toon=toon(), cogs=[CogState(key, dept, level, full,
                                                 full)])
                 simulator._resolve_cog_phase(state)
+
+
+class PouchTest(unittest.TestCase):
+    """Pouch capacity tracks progression, [CONFIRMED] from the wiki's
+    Gag pouch table, which is keyed by the location awarding it."""
+
+    def test_the_wiki_capacities(self):
+        caps = data.POUCH_CAPACITIES
+        self.assertEqual(caps["Medium Pouch"], 25)
+        self.assertEqual(caps["Large Bag"], 50)
+        self.assertEqual(caps["Large Backpack"], 80)
+
+    def test_the_steps_are_not_uniform(self):
+        """20/25/30/35/40 rise by five, then 50/60/70/80 by ten. Worth
+        pinning: an evenly-spaced table would look plausible and be
+        wrong."""
+        sizes = sorted(data.POUCH_CAPACITIES.values())
+        self.assertEqual(sizes, [20, 25, 30, 35, 40, 50, 60, 70, 80])
+
+    def test_later_playgrounds_carry_more(self):
+        rng = random.Random(0)
+        def mean_for(playground):
+            streets = [s for s in facility.STREETS if s[1] == playground]
+            return sum(facility.pouch_for_street(rng.choice(streets), rng)
+                       for _ in range(300)) / 300
+        self.assertLess(mean_for("Toontown Central"),
+                        mean_for("The Brrrgh"))
+        self.assertLess(mean_for("The Brrrgh"),
+                        mean_for("Donald's Dreamland"))
+
+    def test_never_below_the_playground_pouch(self):
+        rng = random.Random(1)
+        for street in facility.STREETS:
+            floor = facility.POUCH_AT[street[1]]
+            for _ in range(40):
+                self.assertGreaterEqual(
+                    facility.pouch_for_street(street, rng), floor)
+
+    def test_never_above_the_largest_backpack(self):
+        rng = random.Random(2)
+        for street in facility.STREETS:
+            for _ in range(40):
+                self.assertLessEqual(facility.pouch_for_street(street, rng),
+                                     facility.MAX_POUCH_CAPACITY)
+
+    def test_restocked_loadouts_are_legal(self):
+        """The first restock filled every gag to its own max_carry and
+        produced 378-gag parties. POUCH_CAPACITIES caps the TOTAL, and
+        validate_loadout was already in the repo to say so."""
+        rng = random.Random(3)
+        for _ in range(60):
+            state = env.facility_position(rng)
+            for t in state.toons:
+                if t.laff > 0:
+                    env.restock(t, rng, 50)
+                    self.assertEqual(data.validate_loadout(t.gag_counts), [])
+
+    def test_restock_does_not_change_training(self):
+        """Only quantity. A toon with mediocre gags keeps mediocre gags."""
+        rng = random.Random(4)
+        state = env.facility_position(rng)
+        toon_ = state.toons[0]
+        before = dict(toon_.track_exp)
+        env.restock(toon_, rng, 50)
+        self.assertEqual(toon_.track_exp, before)
+
+    def test_toons_enter_a_building_healed(self):
+        """43% were entering under half health, because mixed_position
+        models a toon part way through a street fight."""
+        rng = random.Random(5)
+        for _ in range(40):
+            state = env.facility_position(rng)
+            for t in state.toons:
+                if t.laff > 0:
+                    self.assertEqual(t.laff, t.max_laff)
