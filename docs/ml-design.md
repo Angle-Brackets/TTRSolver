@@ -661,3 +661,50 @@ model on calibration (hold-out MAE 27.1 → 19.0), ties on ordering.
   positions and ask whether the answers look like play. That is how
   every substantive bug in this project has actually been found, and a
   learned model makes it more necessary rather than less.
+
+
+## Expert iteration, and the measurement error that motivated it
+
+PPO appeared unable to learn Trap+Lure: holding trap and lure with
+nothing armed, it laid a trap 9.3% of the time against a search that
+laid 19.2%. That gap drove a curriculum, a coordinated-play rewrite,
+and finally expert iteration -- generating trajectories from
+search-guided play and cloning them.
+
+**The gap was not real.** The two numbers used different criteria: the
+policy was scored on whether the FIRST ELIGIBLE SEAT laid a trap, the
+search on whether ANY SEAT did. Measured the same way on the same 300
+positions:
+
+| | lays a trap (any seat) |
+| --- | --- |
+| search | **24.0%** |
+| PPO, coordinated | **21.0%** |
+| expert clone | 5.7% |
+| clone + class weights | 9.0% |
+
+PPO was already within noise of its teacher. There was nothing to fix.
+
+And expert iteration made it worse, not better. Cloning a depth-1 search
+through cross-entropy on 246 actions lands at 5.7%, and inverse-frequency
+class weighting only recovers to 9.0% while costing overall move match
+(25.9% to 22.7%). A clone is capped by its teacher and loses more on the
+way.
+
+### What the detour was worth
+
+The work stands on its own terms even though its premise did not:
+
+* **Coordinated play** is real and measurable -- 95% of rounds use more
+  than one track, and the improvement over its own random baseline (+96)
+  is double pickup's (+47).
+* **`combo_position`** and the reverse curriculum are sound technique.
+* **`check_export`** now stops a stale policy being read against a
+  changed observation, which had already happened twice.
+
+But the lesson is the expensive one. **Two numbers are not comparable
+until they are computed the same way**, and this project had already
+learned that twice -- regret@6 scored against noisy labels, and PPO
+returns compared across different position distributions. Three times is
+a pattern rather than an accident: when a measurement motivates
+substantial work, re-derive both sides of it first.

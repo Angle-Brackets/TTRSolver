@@ -35,6 +35,8 @@ def main():
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--decay", type=float, default=1e-4)
     ap.add_argument("--holdout", type=float, default=0.1)
+    ap.add_argument("--max-weight", type=float, default=8.0,
+                    help="cap on inverse-frequency class weighting")
     ap.add_argument("--export", default="solver/rl/ppo_expert.json")
     args = ap.parse_args()
 
@@ -70,8 +72,24 @@ def main():
 
     Xtr, Atr, Vtr = tensors(train)
     Xho, Aho, Vho = tensors(hold)
-
     n_actions = len(env_mod.ACTIONS)
+
+    # CLASS WEIGHTS. With 246 actions and plain cross-entropy the model
+    # maximises overall match by predicting the common moves and washing
+    # out the rare ones -- the first clone matched 25.9% of moves while
+    # laying a trap 1.2% of the time, against a teacher that lays 19.2%.
+    # Trap-laying is a couple of percent of all decisions, so the loss
+    # barely notices it.
+    #
+    # Inverse-frequency weighting, square-rooted so a move seen five
+    # times does not outweigh everything else, and clamped so a single
+    # freak decision cannot dominate.
+    counts = torch.bincount(Atr, minlength=n_actions).float()
+    weights = torch.where(counts > 0,
+                          (counts.sum() / counts.clamp(min=1)).sqrt(),
+                          torch.zeros_like(counts))
+    weights = weights.clamp(max=float(args.max_weight)).to(device)
+
     trunk = nn.Sequential(nn.Linear(env_mod.OBS_DIM, args.hidden), nn.Tanh(),
                           nn.Linear(args.hidden, args.hidden),
                           nn.Tanh()).to(device)
@@ -92,7 +110,7 @@ def main():
             sel = perm[start:start + args.batch]
             logits = actor(trunk(Xtr[sel]))
             value = critic(vtrunk(Xtr[sel])).squeeze(-1)
-            loss = (F.cross_entropy(logits, Atr[sel])
+            loss = (F.cross_entropy(logits, Atr[sel], weight=weights)
                     + 0.5 * F.mse_loss(value, Vtr[sel]))
             opt.zero_grad()
             loss.backward()
