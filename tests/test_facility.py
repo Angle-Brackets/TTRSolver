@@ -34,6 +34,16 @@ class DifficultyTableTest(unittest.TestCase):
         self.assertEqual(facility.DIFFICULTY[9],
                          {"floors": (5, 5), "cogs": (9, 11), "boss": 12})
 
+    def test_the_two_generation_rules(self):
+        """The owner's rules: cogs are (d, d+2) and the boss is d+3.
+
+        Both hold across all nine rows, which audits the transcription
+        -- a typo in any cell would break the pattern.
+        """
+        for difficulty, row in facility.DIFFICULTY.items():
+            self.assertEqual(row["cogs"], (difficulty, difficulty + 2))
+            self.assertEqual(row["boss"], difficulty + 3)
+
     def test_boss_outranks_the_floor_cogs(self):
         """The wiki's boss column is above the cog range in every row."""
         for row in facility.DIFFICULTY.values():
@@ -541,3 +551,136 @@ class PouchTest(unittest.TestCase):
             for t in state.toons:
                 if t.laff > 0:
                     self.assertEqual(t.laff, t.max_laff)
+
+
+class ProgressionTest(unittest.TestCase):
+    """A toon is built for the street, not the other way round."""
+
+    def test_laff_floors_are_the_wiki_toontask_totals(self):
+        """[CONFIRMED] TTR wiki, Laff: the running total at the END of
+        the previous playground, which is what you must have finished to
+        be here."""
+        floors = {pg: p["laff"][0]
+                  for pg, p in facility.PROGRESSION.items()}
+        self.assertEqual(floors["Toontown Central"], 15)
+        self.assertEqual(floors["Donald's Dock"], 25)
+        self.assertEqual(floors["The Brrrgh"], 52)
+        self.assertEqual(floors["Donald's Dreamland"], 61)
+
+    def test_pouch_floors_are_the_wiki_capacities(self):
+        for pg, profile in facility.PROGRESSION.items():
+            self.assertIn(profile["pouch"],
+                          set(data.POUCH_CAPACITIES.values()))
+
+    def test_every_street_has_a_profile(self):
+        for _name, playground, _levels in facility.STREETS:
+            self.assertIn(playground, facility.PROGRESSION)
+
+    def test_a_career_earns_six_of_seven_tracks(self):
+        rng = random.Random(0)
+        for _ in range(300):
+            self.assertEqual(len(facility.sample_tracks(rng)), 6)
+
+    def test_throw_and_squirt_from_the_start(self):
+        rng = random.Random(1)
+        for _ in range(200):
+            have = facility.sample_tracks(rng)
+            self.assertEqual(have[Track.THROW], 1)
+            self.assertEqual(have[Track.SQUIRT], 1)
+
+    def test_tracks_in_hand_by_street(self):
+        """Acquisition is at the END of a playground, so a toon fighting
+        in Donald's Dock has three tracks, not four."""
+        rng = random.Random(2)
+        expected = {1: 2, 2: 3, 3: 4, 4: 4, 5: 5, 6: 6}
+        for _ in range(200):
+            have = facility.sample_tracks(rng)
+            for stage, count in expected.items():
+                got = sum(1 for s in have.values() if s <= stage)
+                self.assertEqual(got, count)
+
+    def test_daisy_gardens_grants_no_track(self):
+        """Stage 3 and stage 4 hold the same number, because Daisy
+        Gardens awards nothing."""
+        rng = random.Random(3)
+        for _ in range(200):
+            have = facility.sample_tracks(rng)
+            self.assertEqual(sum(1 for s in have.values() if s <= 3),
+                             sum(1 for s in have.values() if s <= 4))
+
+    def test_a_toon_meets_its_streets_floors(self):
+        rng = random.Random(4)
+        for street in facility.STREETS:
+            profile = facility.PROGRESSION[street[1]]
+            for _ in range(30):
+                t = env.toon_for_street(rng, street)
+                self.assertGreaterEqual(t.max_laff, profile["laff"][0])
+                self.assertLessEqual(t.max_laff, profile["laff"][1])
+                self.assertGreaterEqual(t.pouch_capacity, profile["pouch"])
+
+    def test_early_toons_do_not_hold_late_gags(self):
+        """The flat experience rate gave Toontown Central toons level 7
+        gags. Experience comes from the cogs you beat, and those run
+        level 1-3 on the first streets."""
+        rng = random.Random(5)
+        ttc = [s for s in facility.STREETS
+               if s[1] == "Toontown Central"][0]
+        for _ in range(200):
+            for level in env.toon_for_street(rng, ttc).track_exp.values():
+                self.assertLessEqual(level, 5)
+
+    def test_late_toons_are_not_stuck_on_low_gags(self):
+        """The owner's correction: you develop your gags regularly, so a
+        Dreamland toon is not carrying level 1-2 across the board."""
+        rng = random.Random(6)
+        ddl = [s for s in facility.STREETS
+               if s[1] == "Donald's Dreamland"][0]
+        levels = [lv for _ in range(200)
+                  for lv in env.toon_for_street(rng, ddl).track_exp.values()]
+        self.assertGreater(sum(levels) / len(levels), 4.5)
+
+    def test_no_throw_squirt_bias_late(self):
+        """Levels 5-7 are the grind, so by Dreamland everything with age
+        has converged. A linear age model biased hard to the starting
+        tracks."""
+        rng = random.Random(7)
+        ddl = [s for s in facility.STREETS
+               if s[1] == "Donald's Dreamland"][0]
+        toons = [env.toon_for_street(rng, ddl) for _ in range(300)]
+        def mean_for(track):
+            vals = [t.track_exp[track] for t in toons if track in t.track_exp]
+            return sum(vals) / max(1, len(vals))
+        starting = mean_for(Track.THROW)
+        for track in (Track.TRAP, Track.DROP, Track.LURE):
+            self.assertLess(starting - mean_for(track), 1.0)
+
+    def test_parties_are_two_to_four(self):
+        """Buildings are group content; the 1-4 spread came from a
+        street-battle sampler and made 57% of episodes solo."""
+        rng = random.Random(8)
+        for _ in range(200):
+            self.assertIn(len(env.facility_position(rng).toons), (2, 3, 4))
+
+    def test_the_building_is_on_the_partys_street(self):
+        """Rolling a second street here would undo the whole point of
+        generating the party for one."""
+        for seed in range(40):
+            e = env.BattleEnv(rng=random.Random(seed),
+                              sampler=env.facility_position,
+                              coordinated=True)
+            e.reset()
+            street = facility.street_named(e.state.street)
+            self.assertIsNotNone(street)
+            lo, _hi = street[2]
+            for c in e.state.cogs:
+                self.assertGreaterEqual(c.level, lo)
+
+    def test_restock_fills_from_the_top(self):
+        """Concentrate at the top, then fill in downward."""
+        toon = ToonState(80, 80, {Track.THROW: 5}, {}, frozenset(),
+                         pouch_capacity=12)
+        env.restock(toon, random.Random(0))
+        self.assertEqual(gags_mod.pouch_total(toon.gag_counts), 12)
+        top = toon.gag_counts.get((Track.THROW, 5), 0)
+        self.assertGreater(top, 0)
+        self.assertEqual(toon.gag_counts.get((Track.THROW, 1), 0), 0)

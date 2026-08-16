@@ -59,10 +59,10 @@ from __future__ import annotations
 
 import enum
 import random
-from typing import Callable, List, Optional, Sequence
+from typing import Callable, Dict, List, Optional, Sequence
 
 from . import data
-from .state import BattleState, CogState
+from .state import BattleState, CogState, Track
 
 # At most four cogs on the field at once. The wiki has no page stating
 # this outright, but it is the cap the whole codebase is built on
@@ -157,6 +157,83 @@ STREETS = [
 # nothing else reads it.
 LATE_PLAYGROUNDS = ("The Brrrgh", "Donald's Dreamland")
 LATE_WEIGHT = 4.0
+
+
+# Where each playground sits in the progression, and what a toon
+# fighting on its streets must already have.
+#
+# `laff` floors are [CONFIRMED] TTR wiki, Laff: the running total from
+# ToonTasks, taken at the END of the PREVIOUS playground, because that
+# is what you must have finished to be here. 15/25/34/43/52/61.
+#
+# The ceilings are [ASSUMED]. The same table shows laff that is not on
+# the ToonTask track at all -- fishing +7, gardening +4, racing +3,
+# golf +3, cog disguises +20 -- so a toon who has done side content
+# arrives well above the floor. The owner puts a Dreamland toon around
+# 100, which anchors the top of the range; the rest are interpolated.
+#
+# `pouch` floors are [CONFIRMED] TTR wiki, Gag pouch, read the same way:
+# the capacity awarded by the previous playground's ToonTask.
+PROGRESSION = {
+    "Toontown Central":     {"stage": 1, "laff": (15, 25), "pouch": 20},
+    "Donald's Dock":        {"stage": 2, "laff": (25, 40), "pouch": 25},
+    "Daisy Gardens":        {"stage": 3, "laff": (34, 50), "pouch": 30},
+    "Minnie's Melodyland":  {"stage": 4, "laff": (43, 60), "pouch": 35},
+    "The Brrrgh":           {"stage": 5, "laff": (52, 75), "pouch": 40},
+    "Donald's Dreamland":   {"stage": 6, "laff": (61, 100), "pouch": 50},
+}
+
+# Gag track acquisition, from the owner. A track is earned at the END of
+# its playground, so it is in hand from the NEXT one -- which is why a
+# toon fighting in Donald's Dock has three tracks and not four.
+#
+#   start   Throw + Squirt
+#   TTC     Sound or Toon-Up
+#   DD      Lure or Drop
+#   DG      nothing
+#   MM      the other of Sound/Toon-Up, or Trap
+#   Brrrgh  whatever is left
+#
+# Six of the seven tracks; one is never acquired. [ASSUMED] that each
+# branch is a coin flip -- the owner notes the real split is skewed,
+# most obviously at the final Trap-vs-Drop choice. Weighting it later
+# changes this function and nothing else.
+STARTING_TRACKS = (Track.THROW, Track.SQUIRT)
+
+
+def sample_tracks(rng) -> Dict[Track, int]:
+    """{track: the stage from which the toon has it}.
+
+    Stage numbers match `PROGRESSION[...]["stage"]`, so a track earned
+    at the end of Toontown Central (stage 1) is available from stage 2.
+    """
+    have = {t: 1 for t in STARTING_TRACKS}
+
+    first = rng.choice([Track.SOUND, Track.TOON_UP])
+    have[first] = 2                              # end of TTC -> from DD
+
+    have[rng.choice([Track.LURE, Track.DROP])] = 3     # end of DD -> DG
+
+    # End of Minnie's Melodyland -> in hand from The Brrrgh (stage 5).
+    other = Track.TOON_UP if first is Track.SOUND else Track.SOUND
+    third = rng.choice([other, Track.TRAP])
+    have[third] = 5
+
+    # End of The Brrrgh -> in hand from Dreamland (stage 6). Whatever is
+    # left, and one of the remaining two is never earned at all.
+    left = [t for t in (Track.SOUND, Track.TOON_UP, Track.LURE,
+                        Track.DROP, Track.TRAP) if t not in have]
+    if left:
+        have[rng.choice(left)] = 6
+    return have
+
+
+def street_named(name):
+    """The STREETS row with this name, or None."""
+    for street in STREETS:
+        if street[0] == name:
+            return street
+    return None
 
 
 def sample_street(rng):

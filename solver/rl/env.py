@@ -29,6 +29,7 @@ a *model* of strangers, not alongside strangers.
 """
 from __future__ import annotations
 
+import math
 import random
 from typing import List, Optional, Tuple
 
@@ -325,25 +326,30 @@ class BattleEnv:
     def reset(self) -> Tuple[List[float], List[bool]]:
         while True:
             self.state = self.sampler(self.rng)
-            if not self.state.is_terminal():
-                break
-        self.plan = None
-        self.floor = 1
-        if self.state.kind == "facility":
-            # The sampler set a horizon; turn it into actual floors so
-            # the episode can keep going and the saved gag can be spent.
-            street = facility.sample_street(self.rng)
-            difficulty = facility.difficulty_for(self.state, self.rng,
-                                                 street=street)
-            self.plan = facility.plan_facility(
-                self.rng, difficulty, self._facility_cog,
-                floors=facility.floors_for(self.state, difficulty,
-                                           self.rng))
-            first, holdout = self.plan.take_floor()
-            if first:
+            self.plan = None
+            self.floor = 1
+            if self.state.kind == "facility":
+                # The building is built from the party's OWN street.
+                # Rolling a second street here would undo the whole
+                # point of generating the party for one: a Dreamland
+                # party could end up in a Toontown Central building.
+                street = (facility.street_named(self.state.street)
+                          or facility.sample_street(self.rng))
+                difficulty = facility.difficulty_for(
+                    self.state, self.rng, street=street)
+                self.plan = facility.plan_facility(
+                    self.rng, difficulty, self._facility_cog,
+                    floors=facility.floors_for(self.state, difficulty,
+                                               self.rng))
+                first, holdout = self.plan.take_floor()
                 self.state.cogs = first
                 self.state.holdout = holdout
                 self.state.cogs_remaining = self.plan.remaining()
+            # Checked AFTER the floor is dealt: a facility position
+            # arrives with no cogs and would otherwise read as terminal
+            # and spin here forever.
+            if not self.state.is_terminal():
+                break
         self.rounds = 0
         # Truncation is per FLOOR, not per episode. `max_rounds` exists
         # to cut a fight that has stalled, and a five-floor building
@@ -752,6 +758,96 @@ def sample_horizon(rng) -> int:
     return rng.randint(1, 30)
 
 
+# Experience a well-played track earns per playground of ownership.
+# [ASSUMED], and the only invented number in the level model -- the
+# SHAPE comes from `GAG_UNLOCK_EXP`, which is [CONFIRMED].
+#
+# That shape is what makes this worth doing rather than picking levels
+# by hand. Levels 2-4 cost 400-800 experience in total and levels 5, 6
+# and 7 cost 2000, 6000 and 10000, so a freshly earned track rockets to
+# 4 and then stalls. A linear model of "newer track means lower level"
+# had a Dreamland toon holding level 1-2 Drop as the ordinary case,
+# which is not what a played toon looks like.
+# Experience a well-played track earns during each PLAYGROUND, indexed
+# by `facility.PROGRESSION[...]["stage"]`.
+#
+# Rising rather than flat, because a stage in Toontown Central and a
+# stage in Dreamland are not the same amount of experience: gag
+# experience comes from the cogs you beat, and those run level 1-3 on
+# the first streets and 6-9 on the last. A flat rate handed Toontown
+# Central toons level 7 gags, which is not a toon that exists.
+STAGE_EXP = {1: 60, 2: 200, 3: 500, 4: 900, 5: 1800, 6: 3500}
+
+
+def track_level(track, available_from: int, stage: int,
+                grind: float, usage: float) -> int:
+    """Training level from experience, read off the confirmed table."""
+    earned = sum(STAGE_EXP[s] for s in range(available_from, stage + 1))
+    earned *= grind * usage
+    thresholds = gags_mod.GAG_UNLOCK_EXP[track]
+    level = 1
+    for i, need in enumerate(thresholds):
+        if earned >= need:
+            level = i + 1
+    return max(1, min(7, level))
+
+
+def toon_for_street(rng, street) -> ToonState:
+    """A toon who could plausibly be fighting on this street.
+
+    The correction that made facility training data worth having. The
+    sampler used to build a party and then pick a street, which put
+    15-laff toons carrying 20-gag starting pouches into Dreamland
+    buildings -- toons that have never left Toontown Central. Half the
+    facility episodes were that, and neither the search nor the policy
+    could clear a floor.
+
+    Now the street comes first and the toon is built to match: laff and
+    pouch at or above what the previous playground's ToonTasks award,
+    and tracks limited to those earned by then.
+    """
+    _name, playground, _levels = street
+    profile = facility.PROGRESSION[playground]
+    stage = profile["stage"]
+
+    low, high = profile["laff"]
+    max_laff = rng.randint(low, high)
+    reach = (max_laff - low) / float(high - low) if high > low else 0.5
+
+    # GRIND -- how hard this toon has played, tied to where their laff
+    # sits in the band, because both come from playing. Deliberately
+    # noisy rather than a function of laff: the wiki's own laff table
+    # awards +17 for fishing, gardening, racing and golf, none of which
+    # grants a single point of gag experience. So a toon can fish their
+    # way to the top of the band with mediocre gags, and a cog grinder
+    # can sit mid-band holding level 7s. Both are real, and a tight
+    # coupling would erase them.
+    grind = (0.35 + 1.75 * reach) * math.exp(rng.gauss(0.0, 0.35))
+
+    have = facility.sample_tracks(rng)
+    exp = {}
+    for track, available_from in have.items():
+        if available_from > stage:
+            continue                     # not earned yet at this street
+        # USAGE -- which tracks this toon actually trained. The spread
+        # is the point: it is what separates the earnest trainer from
+        # someone who has left a track sitting where they found it.
+        usage = math.exp(rng.gauss(0.0, 0.55))
+        exp[track] = track_level(track, available_from, stage, grind,
+                                 usage)
+
+    # Pouch: at least what the previous playground awarded, sometimes
+    # more for a toon who pushed further before coming back.
+    sizes = sorted(data.POUCH_CAPACITIES.values())
+    allowed = [c for c in sizes if c >= profile["pouch"]] or [sizes[-1]]
+    capacity = allowed[0] if rng.random() < 0.6 else rng.choice(allowed)
+
+    toon = ToonState(max_laff, max_laff, exp, {}, frozenset(),
+                     pouch_capacity=capacity)
+    restock(toon, rng)
+    return toon
+
+
 def restock(toon, rng, capacity=None) -> None:
     """Fill a pouch the way a toon entering a building has one.
 
@@ -782,70 +878,54 @@ def restock(toon, rng, capacity=None) -> None:
                 owned.append((track, level))
     if not owned:
         return
+    if capacity is None:
+        capacity = toon.pouch_capacity
 
     counts = {}
     # Level 7s sit outside the pouch entirely, one each.
     for key in owned:
         if key[1] >= gags_mod.POUCH_EXEMPT_LEVEL:
             counts[key] = 1
-    inside = [k for k in owned if k[1] < gags_mod.POUCH_EXEMPT_LEVEL]
-    if not inside:
-        toon.gag_counts = {**toon.gag_counts, **counts}
-        return
 
-    # The toon's OWN capacity. Pouch size is something a toon earned,
-    # not something the building's location decides -- an earlier
-    # version read it off the street and gave a Toontown Central toon a
-    # Bossbot Headquarters backpack.
-    if capacity is None:
-        capacity = toon.pouch_capacity
-
-    # Players carry their best gags, so weight the draw by level rather
-    # than spreading evenly -- an even split would hand a late-game toon
-    # a bag of Cupcakes and misrepresent the decision the solver faces.
-    room = {k: data.gag(*k).max_carry or 1 for k in inside}
+    # TOP DOWN, which is how the owner describes a facility loadout:
+    # concentrate at the top, then fill in downward until the pouch is
+    # full. A weighted random draw spread the bag thinly across every
+    # level instead, which is not what anyone walks into a building
+    # with. `_trim_to_pouch` drops the lowest first, so the two are
+    # exact inverses.
+    inside = sorted((k for k in owned
+                     if k[1] < gags_mod.POUCH_EXEMPT_LEVEL),
+                    key=lambda k: -k[1])
     for key in inside:
-        counts.setdefault(key, 0)
-    weights = [float(k[1]) ** 2 for k in inside]
-    for _ in range(capacity):
-        pool = [(k, w) for k, w in zip(inside, weights)
-                if counts[k] < room[k]]
-        if not pool:
+        if gags_mod.pouch_total(counts) >= capacity:
             break
-        total = sum(w for _k, w in pool)
-        roll = rng.random() * total
-        for key, weight in pool:
-            roll -= weight
-            if roll <= 0:
-                counts[key] += 1
-                break
+        room = capacity - gags_mod.pouch_total(counts)
+        want = min(data.gag(*key).max_carry or 1, room)
+        if want > 0:
+            counts[key] = want
     toon.gag_counts = {k: v for k, v in counts.items() if v > 0}
 
 
 def facility_position(rng) -> BattleState:
-    """A position that is explicitly a facility floor, horizon and all.
+    """A facility floor, built street first.
 
-    `BattleEnv.reset` replaces the cogs with a real floor plan, so what
-    this supplies that matters is the party and its pouch.
+    The order is the whole point. Building a party and then choosing a
+    street put 15-laff toons with 20-gag starting pouches into Dreamland
+    buildings -- toons that have never left Toontown Central -- and half
+    the facility episodes were that. Neither the search nor the policy
+    could clear a floor, and no comparison between them meant anything.
+
+    `BattleEnv.reset` reads `state.street` and builds the building from
+    the same street, so the matchup stays coherent.
     """
-    state = mixed_position(rng, 0.3, 0.25, 0.2)
-    if state.cogs_remaining == 0:
-        state.cogs_remaining = rng.randint(4, 30)
-    state.kind = "facility"
-    for toon in state.toons:
-        if toon.laff <= 0:
-            continue
-        restock(toon, rng)
-        # Healed as well as restocked, and for the same reason. 43% of
-        # sampled toons were entering a building under half health,
-        # because `mixed_position` models a toon PART WAY THROUGH a
-        # street fight. Nobody walks into a five-storey building at 30%
-        # laff on purpose; you heal at the playground first.
-        #
-        # Laff still carries across floors untouched -- there is no
-        # healing between them, which is the pressure a building run is
-        # actually made of. This sets the starting line, not the rules.
-        toon.laff = toon.max_laff
+    street = facility.sample_street(rng)
+    # Buildings are group content. The 1-4 spread came from
+    # `mixed_position`, which models a street battle, and made 57% of
+    # facility episodes solo.
+    party = [toon_for_street(rng, street)
+             for _ in range(rng.randint(2, 4))]
+    state = BattleState(toons=party, cogs=[], kind="facility",
+                        street=street[0])
     return state
 
 

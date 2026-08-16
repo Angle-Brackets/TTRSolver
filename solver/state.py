@@ -241,6 +241,16 @@ class BattleState:
     # here has to import the facility module.
     kind: str = "street"
 
+    # Which street this fight is on, when it is a facility -- the name
+    # from `facility.STREETS`. The party is generated to suit it, so the
+    # building has to be built from the SAME street rather than a second
+    # roll, or a Dreamland party ends up in a Toontown Central building.
+    #
+    # Not in `outcomes.state_key`, for the same reason as
+    # `ToonState.pouch_capacity`: nothing in a battle reads it. It
+    # decides how the position was BUILT, not how it plays out.
+    street: str = ""
+
     # Unlured passes still available. A pass is a real move -- conserving
     # a scarce gag, or in a party declining to hit a cog because
     # `mechanics.pick_cog_target` makes it prefer whoever damaged it
@@ -281,7 +291,7 @@ class BattleState:
                  round_num: int = 0, free_passes: int = 3,
                  cogs_remaining: int = 0,
                  holdout: Optional[List[CogState]] = None,
-                 kind: str = "street"):
+                 kind: str = "street", street: str = ""):
         if (toon is None) == (toons is None):
             raise ValueError("pass exactly one of `toon` or `toons`")
         self.toons = list(toons) if toons is not None else [toon]
@@ -291,6 +301,7 @@ class BattleState:
         self.cogs_remaining = cogs_remaining
         self.holdout = list(holdout) if holdout else []
         self.kind = kind
+        self.street = street
 
     @property
     def toon(self) -> ToonState:
@@ -344,6 +355,7 @@ class BattleState:
             cogs_remaining=self.cogs_remaining,
             holdout=[c.copy() for c in self.holdout],
             kind=self.kind,
+            street=self.street,
         )
 
     def active_cogs(self) -> List[CogState]:
