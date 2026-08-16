@@ -85,6 +85,14 @@ def main():
                     help="share of episodes drawn from hard_position -- "
                          "solo against a wall of level 10-12 cogs, where "
                          "Lure stops being optional")
+    ap.add_argument("--coordinated", action="store_true",
+                    help="one shared policy chooses for EVERY toon, a "
+                         "round at a time, instead of playing beside "
+                         "SensiblePrior teammates")
+    ap.add_argument("--combo-fraction", type=float, default=0.0,
+                    help="reverse curriculum: episodes starting with a "
+                         "trap already armed and a lure in hand, where "
+                         "the payoff is one move away")
     ap.add_argument("--strange-fraction", type=float, default=0.25,
                     help="mid-fight boards: already lured, armed traps, "
                          "picked-over pouches, someone nearly sad")
@@ -101,13 +109,15 @@ def main():
           + (f" ({torch.cuda.get_device_name(0)})" if device == "cuda" else ""))
 
     sampler = None
-    if args.hard_fraction > 0:
+    if args.hard_fraction > 0 or args.combo_fraction > 0:
         frac = args.hard_fraction
         strange = args.strange_fraction
-        sampler = (lambda r, _f=frac, _s=strange:
-                   env_mod.mixed_position(r, _f, _s))
+        combo = args.combo_fraction
+        sampler = (lambda r, _f=frac, _s=strange, _c=combo:
+                   env_mod.mixed_position(r, _f, _s, _c))
     envs = [env_mod.BattleEnv(rng=random.Random(args.seed * 1000 + i),
-                              sampler=sampler)
+                              sampler=sampler,
+                              coordinated=args.coordinated)
             for i in range(args.envs)]
     obs, masks = zip(*[e.reset() for e in envs])
     obs = list(obs)
@@ -137,7 +147,8 @@ def main():
     def evaluate(greedy=True):
         total, won = [], []
         for seed in eval_seeds:
-            e = env_mod.BattleEnv(rng=random.Random(seed))
+            e = env_mod.BattleEnv(rng=random.Random(seed),
+                                  coordinated=args.coordinated)
             ob, mk = e.reset()
             ret, done, info = 0.0, False, {}
             while not done:
@@ -160,7 +171,8 @@ def main():
     def baseline_random():
         total, won = [], []
         for seed in eval_seeds:
-            e = env_mod.BattleEnv(rng=random.Random(seed))
+            e = env_mod.BattleEnv(rng=random.Random(seed),
+                                  coordinated=args.coordinated)
             ob, mk = e.reset()
             rng = random.Random(seed)
             ret, done, info = 0.0, False, {}
@@ -300,6 +312,7 @@ def main():
         "critic": {k: v.detach().cpu().tolist()
                    for k, v in critic.state_dict().items()},
         "eval_return": evaluate()[0], "eval_baseline": base_ret,
+        "coordinated": args.coordinated,
     }
     Path(args.export).write_text(json.dumps(payload), encoding="utf-8")
     print(f"  exported to {args.export} "

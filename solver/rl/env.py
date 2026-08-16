@@ -56,7 +56,14 @@ for _track in TRACKS:
                                   target_index=_target))
 
 PASS_INDEX = 0
-OBS_DIM = MAX_COGS * 9 + MAX_TOONS * (3 + 49) + 3
+# Coordinated play adds two blocks: which toon is deciding, and what
+# each toon has already chosen THIS round. Without the second, four
+# toons sharing one policy see identical observations and pick identical
+# actions -- four Lures on the same board. Coordination needs the
+# pending plan to be visible.
+PENDING_DIM = MAX_TOONS * (len(TRACKS) + 2)      # track one-hot, group, none
+OBS_DIM = (MAX_COGS * 9 + MAX_TOONS * (3 + 49) + 3
+           + MAX_TOONS + PENDING_DIM)
 
 
 def check_export(payload) -> Optional[str]:
@@ -100,8 +107,13 @@ def _trap_damage(cog) -> float:
         return 0.0
 
 
-def encode(state: BattleState) -> List[float]:
-    """Fixed-width observation.
+def encode(state: BattleState, actor: int = 0,
+           pending=None) -> List[float]:
+    """Fixed-width observation, from `actor`'s point of view.
+
+    `pending` is the joint plan so far this round -- one entry per toon,
+    None where they have not chosen. Coordinated play needs it; solo and
+    pickup pass nothing and the block reads as all-unchosen.
 
     Cogs and toons are padded to four with an `alive` flag rather than
     pooled, because neither is interchangeable: targets are indexed, and
@@ -151,10 +163,31 @@ def encode(state: BattleState) -> List[float]:
     out += [min(state.round_num, 12) / 12.0,
             len(state.active_cogs()) / MAX_COGS,
             len(state.active_toons()) / MAX_TOONS]
+
+    # Whose decision this is. Solo play always sets index 0, so the
+    # block is constant there and costs nothing.
+    for i in range(MAX_TOONS):
+        out.append(1.0 if i == actor else 0.0)
+
+    # What each toon has already committed to this round. This is the
+    # whole of coordination: it is how the second toon knows a trap is
+    # already going down and can lure instead of trapping again.
+    pending = pending or [None] * MAX_TOONS
+    for i in range(MAX_TOONS):
+        block = [0.0] * (len(TRACKS) + 2)
+        action = pending[i] if i < len(pending) else None
+        if action is None:
+            block[-1] = 1.0                       # not chosen yet, or holding
+        else:
+            if action.track in TRACKS:
+                block[TRACKS.index(action.track)] = 1.0
+            if action.target_index is None:
+                block[len(TRACKS)] = 1.0
+        out.extend(block)
     return out
 
 
-def legal_mask(state: BattleState) -> List[bool]:
+def legal_mask(state: BattleState, actor: int = 0) -> List[bool]:
     """Which indices the agent may pick this round.
 
     The pass is always legal here. The search cannot say that -- see the
@@ -165,7 +198,9 @@ def legal_mask(state: BattleState) -> List[bool]:
     mask[PASS_INDEX] = True
     if not state.active_toons():
         return mask
-    toon = state.toons[0]
+    if actor >= len(state.toons) or state.toons[actor].laff <= 0:
+        return mask
+    toon = state.toons[actor]
     live = [i for i, c in enumerate(state.cogs) if not c.status.is_dead]
     for index in range(1, len(ACTIONS)):
         action = ACTIONS[index]
@@ -191,13 +226,47 @@ class BattleEnv:
     """One battle. `reset()` starts a new one, `step()` plays a round."""
 
     def __init__(self, objective=None, rng=None, max_rounds: int = 20,
-                 sampler=None):
+                 sampler=None, coordinated: bool = False):
+        """`coordinated` makes a round TOON-MAJOR: one env step is one
+        toon's decision, and the round resolves when everybody standing
+        has chosen.
+
+        In pickup mode the teammates come from `SensiblePrior`, so they
+        are noise the policy has to survive -- it can learn what is
+        robust to strangers and never "I trap, you lure", because the
+        other toon's choice is not a choice. Coordinated play makes the
+        whole team's plan the thing being learned.
+
+        The cost is that reward arrives only on the step that completes
+        a round; the intermediate decisions get zero and are carried by
+        the critic. That is why the pending plan is in the observation.
+        """
         self.objective = objective or objective_mod.BALANCED
         self.rng = rng or random.Random()
         self.max_rounds = max_rounds
         self.sampler = sampler or default_position
+        self.coordinated = coordinated
         self.state: Optional[BattleState] = None
         self.rounds = 0
+        self.actor = 0
+        self.pending: List[Optional[Action]] = []
+
+    def _standing(self):
+        return [i for i, t in enumerate(self.state.toons) if t.laff > 0]
+
+    def _begin_round(self):
+        self.pending = [None] * len(self.state.toons)
+        if not self.coordinated:
+            # PICKUP always acts as toons[0] -- `party.step` applies the
+            # action there regardless. Advancing the actor past a sad
+            # toon here built the legal mask from a DIFFERENT toon's
+            # pouch than the one that would throw, so the agent picked a
+            # gag its own toon did not hold and the spend raised
+            # KeyError deep in `apply_toon_action`.
+            self.actor = 0
+            return
+        order = self._standing()
+        self.actor = order[0] if order else 0
 
     def reset(self) -> Tuple[List[float], List[bool]]:
         while True:
@@ -205,14 +274,33 @@ class BattleEnv:
             if not self.state.is_terminal():
                 break
         self.rounds = 0
-        return encode(self.state), legal_mask(self.state)
+        self._begin_round()
+        return (encode(self.state, self.actor, self.pending),
+                legal_mask(self.state, self.actor))
 
     def step(self, index: int):
         """-> (observation, mask, reward, done, info)."""
         before = self.state
         action = action_at(index)
-        nxt, _healed, _done = party_mod.step(
-            before, action, mode=party_mod.Mode.PICKUP, rng=self.rng)
+
+        if self.coordinated:
+            self.pending[self.actor] = None if action.is_pass else action
+            order = self._standing()
+            position = order.index(self.actor) if self.actor in order else -1
+            if position + 1 < len(order):
+                # Still collecting the joint plan: no round resolves, so
+                # no reward. The critic carries these steps.
+                self.actor = order[position + 1]
+                return (encode(self.state, self.actor, self.pending),
+                        legal_mask(self.state, self.actor), 0.0, False,
+                        {"win": False, "rounds": self.rounds,
+                         "truncated": False, "partial": True})
+            nxt, _healed, _done = party_mod.step(
+                before, self.pending[0], mode=party_mod.Mode.COORDINATED,
+                joint=list(self.pending), rng=self.rng)
+        else:
+            nxt, _healed, _done = party_mod.step(
+                before, action, mode=party_mod.Mode.PICKUP, rng=self.rng)
 
         laff_lost = sum(max(0, b.laff - a.laff)
                         for b, a in zip(before.toons, nxt.toons))
@@ -231,8 +319,11 @@ class BattleEnv:
         done = nxt.is_terminal() or self.rounds >= self.max_rounds
         info = {"win": bool(nxt.is_win()), "rounds": self.rounds,
                 "truncated": self.rounds >= self.max_rounds
-                and not nxt.is_terminal()}
-        return encode(nxt), legal_mask(nxt), reward, done, info
+                and not nxt.is_terminal(), "partial": False}
+        if not done:
+            self._begin_round()
+        return (encode(nxt, self.actor, self.pending),
+                legal_mask(nxt, self.actor), reward, done, info)
 
 
 # ---------------------------------------------------------------------
@@ -425,10 +516,61 @@ def strange_position(rng) -> BattleState:
     return state
 
 
+def combo_position(rng) -> BattleState:
+    """A battle where the Trap+Lure payoff is ONE move away.
+
+    A REVERSE CURRICULUM, and it is not reward shaping: no reward is
+    invented and no strategy is encoded, only the distribution of
+    starting states moves closer to the payoff. The agent still has to
+    find the move and still gets paid only what the simulator pays.
+
+    The problem it solves is exploratory rather than temporal. PPO's
+    critic already sees far -- GAE at lambda 0.95 averages over roughly
+    seventeen rounds, far longer than a battle -- but it estimates value
+    under its OWN policy, so a line the policy never plays never enters
+    the data. Measured on the shipped sampler, only 4.6% of positions
+    have an armed trap AND a lure in hand, which is the state where
+    springing pays immediately. With 246 actions to choose between, that
+    reward is essentially never experienced.
+
+    Start there instead, and the agent can learn "lure when a trap is
+    armed" from direct reward. Learning to LAY the trap is then one step
+    further back, which is the standard way round a sparse sequence.
+    """
+    key, dept, lo, hi = rng.choice(SAFE_COGS)
+    level = rng.randint(lo, hi)
+    full = data.cog_max_hp(level)
+    cogs = [CogState(key, dept, level, rng.randint(full // 2, full), full)]
+    for _ in range(rng.randint(0, 2)):
+        k2, d2, l2, h2 = rng.choice(SAFE_COGS)
+        lv2 = rng.randint(l2, h2)
+        f2 = data.cog_max_hp(lv2)
+        cogs.append(CogState(k2, d2, lv2, rng.randint(f2 // 3, f2), f2))
+
+    # The trap is already down on the first cog, and a Lure is in hand.
+    trap_level = rng.randint(3, 6)
+    cogs[0].status.trapped = True
+    cogs[0].status.trap_level = trap_level
+
+    counts = {(Track.LURE, rng.choice([3, 4, 5, 6])): rng.randint(1, 2)}
+    for track in rng.sample([Track.THROW, Track.SQUIRT], rng.randint(1, 2)):
+        counts[(track, rng.choice([4, 5, 6]))] = rng.randint(1, 3)
+    exp = {t: rng.randint(4, 7) for t, _l in counts}
+    max_laff = rng.choice([50, 65, 80, 95, 110])
+    toon = ToonState(max(10, int(max_laff * rng.uniform(0.25, 0.9))),
+                     max_laff, exp, counts)
+    toons = [toon] + [random_toon(rng) for _ in range(rng.randint(0, 2))]
+    return BattleState(toons=toons, cogs=cogs)
+
+
 def mixed_position(rng, hard_fraction: float = 0.5,
-                   strange_fraction: float = 0.25) -> BattleState:
+                   strange_fraction: float = 0.25,
+                   combo_fraction: float = 0.0) -> BattleState:
     """Blend, so no single shape becomes the whole of what is learned."""
     roll = rng.random()
+    if roll < combo_fraction:
+        return combo_position(rng)
+    roll -= combo_fraction
     if roll < strange_fraction:
         return strange_position(rng)
     if roll < strange_fraction + hard_fraction:

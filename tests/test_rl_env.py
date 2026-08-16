@@ -203,3 +203,54 @@ class ExportCompatibilityTest(unittest.TestCase):
         why = env.check_export(
             {"obs_dim": env.OBS_DIM, "n_actions": len(env.ACTIONS) - 1})
         self.assertIsNotNone(why)
+
+
+class CoordinatedTest(unittest.TestCase):
+    """One shared policy choosing for every toon, a round at a time.
+
+    Pickup mode fills the other seats from `SensiblePrior`, so teammates
+    are noise to be survived rather than partners -- the policy can
+    learn what is robust to strangers and never "I trap, you lure".
+    Coordinated mode makes the joint plan the thing being learned.
+    """
+
+    def party(self, rng):
+        state = env.default_position(rng)
+        while len(state.toons) < 3:
+            state = env.default_position(rng)
+        return state
+
+    def test_a_round_takes_one_step_per_standing_toon(self):
+        e = env.BattleEnv(rng=random.Random(9), coordinated=True,
+                          sampler=self.party)
+        _ob, mask = e.reset()
+        standing = sum(1 for t in e.state.toons if t.laff > 0)
+        partial = 0
+        for _ in range(standing):
+            choices = [i for i, ok in enumerate(mask) if ok]
+            _ob, mask, _r, _done, info = e.step(choices[0])
+            partial += bool(info.get("partial"))
+        self.assertEqual(partial, standing - 1)
+
+    def test_intermediate_steps_pay_nothing(self):
+        """Reward lands on the step that resolves the round; the critic
+        carries the rest."""
+        e = env.BattleEnv(rng=random.Random(11), coordinated=True,
+                          sampler=self.party)
+        _ob, mask = e.reset()
+        choices = [i for i, ok in enumerate(mask) if ok]
+        _ob, _mask, reward, _done, info = e.step(choices[0])
+        if info.get("partial"):
+            self.assertEqual(reward, 0.0)
+
+    def test_pickup_always_acts_as_toon_zero(self):
+        """`party.step` applies a pickup action to toons[0] whatever the
+        actor says, so the mask must be built from that toon's pouch.
+        Advancing past a sad toon here once produced a mask from someone
+        else's pouch and a KeyError when the gag was spent."""
+        e = env.BattleEnv(rng=random.Random(3), coordinated=False,
+                          sampler=self.party)
+        e.reset()
+        e.state.toons[0].laff = 0
+        e._begin_round()
+        self.assertEqual(e.actor, 0)
