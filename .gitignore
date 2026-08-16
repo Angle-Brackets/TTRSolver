@@ -20,3 +20,4 @@ solver/live/_cog_heads/
 # minutes. Same reasoning as the solo label cache above: it is a cache,
 # not a source, and it is invalidated by any rule change anyway.
 .party_labels.json
+.expert_traj.json
