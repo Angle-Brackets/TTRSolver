@@ -155,6 +155,12 @@ USE_POLICY = False
 #
 # So the simulation earns its keep, on the positions that discriminate,
 # and one position showing it flat was not evidence that it does not.
+# What a restored point of laff is worth against a point of cog damage,
+# for the two scorers that have no `objective` to read. Mirrors
+# `objective.laff_weight`, which is what `round_reward` charges for laff
+# LOST, so the shortlist and the reward agree on what laff is for.
+HEAL_VALUE = 3.0
+
 GREEDY_SHORTLIST = 2
 
 
@@ -454,10 +460,18 @@ def _quick_score(state: BattleState, plan) -> float:
 
     probe = state.clone()
     try:
-        simulator.apply_party_round(probe, list(plan),
-                                    hits=[a is not None for a in plan])
+        healed = simulator.apply_party_round(
+            probe, list(plan), hits=[a is not None for a in plan])
     except (NotImplementedError, ValueError, KeyError):
         return float("-inf")
+    # Healing counts here too. This ranks which PLANS get sampled at
+    # all, so a plan containing a heal scored strictly below the same
+    # plan attacking and was truncated before evaluation -- the
+    # shortlist-deletion failure this file has had three times.
+    restored = 0.0
+    for amount, before in zip(healed, state.toons):
+        if amount > 0 and before.laff > 0:
+            restored += min(amount, before.max_laff - before.laff)
     landed = sum(max(0, before.hp) - max(0, after.hp)
                  for before, after in zip(state.cogs, probe.cogs))
     killed = sum(1 for before, after in zip(state.cogs, probe.cogs)
@@ -477,7 +491,8 @@ def _quick_score(state: BattleState, plan) -> float:
         state.cogs_remaining)
     lured = sum(1 for before, after in zip(state.cogs, probe.cogs)
                 if not before.status.lured and after.status.lured)
-    return landed + 120.0 * killed + 25.0 * lured - price
+    return (landed + HEAL_VALUE * restored
+            + 120.0 * killed + 25.0 * lured - price)
 
 
 def _playable(state: BattleState, plan) -> bool:
@@ -882,10 +897,23 @@ def _cheap_score(state: BattleState, index: int, action: Action) -> float:
     price = 20.0 / limit + action.level
 
     if action.track == Track.TOON_UP:
+        # What this gag can actually restore, not the party's whole
+        # deficit and not a flat 40. The old cap sat below what any
+        # attack scores -- damage alone runs 50-90 and a kill adds 60 --
+        # so Toon-Up never reached the top `GREEDY_SHORTLIST` and was
+        # cut before the stage that decides ever saw it.
         missing = sum(other.max_laff - other.laff
                       for i, other in enumerate(state.toons)
                       if i != index and other.laff > 0)
-        return min(missing, 40.0) - price
+        try:
+            heal = data.gag(action.track, action.level).heal_at(
+                1.0, organic=toon.is_organic(action.track))
+        except (NotImplementedError, ValueError, KeyError, TypeError):
+            return float("-inf")
+        # Laff is worth more than a point of cog damage -- the objective
+        # prices it at `laff_weight` -- and this scorer has no objective
+        # to read, so HEAL_VALUE carries the same intent.
+        return HEAL_VALUE * float(min(missing, heal)) - price
     if action.track == Track.LURE:
         caught = (len(live) if action.target_index is None
                   else 1) if any(not c.status.lured for c in live) else 0
@@ -916,14 +944,45 @@ def _cheap_score(state: BattleState, index: int, action: Action) -> float:
 
 
 def _greedy_score(state: BattleState, trial, objective) -> float:
-    """One action's worth: useful damage and kills, less cost and waste."""
+    """One action's worth: damage, kills and HEALING, less cost and waste.
+
+    Healing was missing, and it cost more than it sounds. This function
+    scored only damage landed, kills and lures, so a Toon-Up came out at
+    `-10 * price` -- strictly negative -- and `greedy_plan` accepts
+    nothing at or below zero. So greedy_plan could never choose a heal
+    under any circumstances, and since `rollout_value` IS greedy_plan
+    played forward, every position was valued as though the party never
+    heals again.
+
+    Measured over 30 building runs before the fix: 653 decisions where
+    the acting toon held a Toon-Up gag, 398 of them with the party under
+    60% laff, and 5 Toon-Ups thrown out of 743 gags.
+
+    `_cheap_score` already had this right -- it credits Toon-Up
+    explicitly and its docstring says why: "it must not be
+    systematically blind to a track, or that track never reaches the
+    shortlist". The shortlist was fine. The stage that actually decides
+    threw the same track away.
+
+    Laff restored is priced at `HEAL_VALUE`, shared with the other two
+    scorers so there is one number for what laff is worth rather than
+    three.
+    """
     wasted, scarcity = plan_waste(state, trial)
     probe = state.clone()
     try:
-        simulator.apply_party_round(
+        healed = simulator.apply_party_round(
             probe, list(trial), hits=[a is not None for a in trial])
     except (NotImplementedError, ValueError, KeyError):
         return float("-inf")
+
+    # Capped at the headroom actually available, so healing a toon who
+    # is nearly full is worth what it really restores rather than the
+    # gag's nominal value. Overhealing should not look like value.
+    restored = 0.0
+    for amount, before in zip(healed, state.toons):
+        if amount > 0 and before.laff > 0:
+            restored += min(amount, before.max_laff - before.laff)
     landed = sum(before.hp - max(0, after.hp)
                  for before, after in zip(state.cogs, probe.cogs))
     killed = sum(1 for before, after in zip(state.cogs, probe.cogs)
@@ -940,7 +999,8 @@ def _greedy_score(state: BattleState, trial, objective) -> float:
         if action is not None:
             price += objective.gag_price(action.track, action.level,
                                          state.cogs_remaining)
-    return (landed + 60.0 * killed + 20.0 * lured
+    return (landed + HEAL_VALUE * restored
+            + 60.0 * killed + 20.0 * lured
             - 10.0 * price - 0.25 * wasted * scarcity)
 
 

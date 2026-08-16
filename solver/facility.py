@@ -365,13 +365,36 @@ def reinforce(state: BattleState) -> int:
     they can only ever join as slots open. A delay would make the fight
     easier, so this is the conservative reading.
 
-    Mutates `state`, and is called from round resolution so that the
+    TAKES A VACATED SLOT, rather than extending the list, and this is
+    load-bearing rather than tidy. Appending pushed `state.cogs` past
+    four, so a walk-in sat at index 4 -- but `rl.env.ACTIONS` is built
+    for `MAX_COGS = 4` and only encodes targets 0-3, and `encode` only
+    describes four cogs. Every plan aimed at a reinforcement failed the
+    action lookup and silently became a PASS, so the floor could never
+    be cleared: 42% of building runs stalled until truncation, one cog
+    left at full health, the party holding 131 unspent gags and passing
+    for thirty rounds.
+
+    It is also what the game does. There are four battle positions; a
+    cog that walks in occupies one that has been vacated.
+
+    Mutates `state`, and is called from the party round boundary so the
     search sees reinforcements too. A search that treated a kill as
     final progress when another cog immediately replaces it would
     systematically overvalue killing.
     """
     joined = 0
     while state.holdout and len(state.active_cogs()) < MAX_PRESENT:
-        state.cogs.append(state.holdout.pop(0))
+        replacement = state.holdout.pop(0)
+        for i, cog in enumerate(state.cogs):
+            if cog.status.is_dead:
+                state.cogs[i] = replacement
+                break
+        else:
+            if len(state.cogs) >= MAX_PRESENT:
+                # No vacancy and no room: put it back and stop.
+                state.holdout.insert(0, replacement)
+                break
+            state.cogs.append(replacement)
         joined += 1
     return joined

@@ -684,3 +684,56 @@ class ProgressionTest(unittest.TestCase):
         top = toon.gag_counts.get((Track.THROW, 5), 0)
         self.assertGreater(top, 0)
         self.assertEqual(toon.gag_counts.get((Track.THROW, 1), 0), 0)
+
+
+class ReinforceSlotTest(unittest.TestCase):
+    """A walk-in takes a vacated slot. Appending broke the action space.
+
+    `rl.env.ACTIONS` encodes targets 0-3 and `encode` describes four
+    cogs, both from MAX_COGS. Appending a fifth put a live cog at an
+    index no action could name, so every plan aimed at it silently
+    became a pass and the floor could never be cleared.
+    """
+
+    def field(self, alive=4, dead=(), holdout=0):
+        cogs = [cog() for _ in range(alive)]
+        for i in dead:
+            cogs[i].hp = 0
+            cogs[i].status.is_dead = True
+        return BattleState(toon=toon(), cogs=cogs,
+                           holdout=[cog() for _ in range(holdout)],
+                           kind="facility")
+
+    def test_never_exceeds_the_four_cog_cap(self):
+        state = self.field(alive=4, dead=(1, 3), holdout=2)
+        facility.reinforce(state)
+        self.assertLessEqual(len(state.cogs), facility.MAX_PRESENT)
+
+    def test_the_dead_slot_is_reused(self):
+        state = self.field(alive=4, dead=(1,), holdout=1)
+        facility.reinforce(state)
+        self.assertEqual(len(state.cogs), 4)
+        self.assertFalse(state.cogs[1].status.is_dead)
+
+    def test_every_live_cog_is_addressable(self):
+        """The property whose absence caused the stall: every living cog
+        must sit at an index the action table can name."""
+        rng = random.Random(0)
+        for seed in range(30):
+            e = env.BattleEnv(rng=random.Random(seed),
+                              sampler=env.facility_position,
+                              coordinated=True)
+            _ob, mask = e.reset()
+            done, guard = False, 0
+            while not done and guard < 60:
+                guard += 1
+                for i, c in enumerate(e.state.cogs):
+                    if not c.status.is_dead:
+                        self.assertLess(i, env.MAX_COGS)
+                legal = [i for i, v in enumerate(mask) if v]
+                _ob, mask, _r, done, _info = e.step(rng.choice(legal))
+
+    def test_it_fills_an_empty_slot_when_under_four(self):
+        state = self.field(alive=2, holdout=2)
+        self.assertEqual(facility.reinforce(state), 2)
+        self.assertEqual(len(state.active_cogs()), 4)
