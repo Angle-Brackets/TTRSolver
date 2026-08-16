@@ -6,6 +6,7 @@ import random
 import unittest
 
 from solver import data, facility, outcomes, simulator
+from solver.data import gags as gags_mod
 from solver.rl import env
 from solver.state import BattleState, CogState, ToonState, Track
 
@@ -456,8 +457,8 @@ class CogPoolTest(unittest.TestCase):
 
 
 class PouchTest(unittest.TestCase):
-    """Pouch capacity tracks progression, [CONFIRMED] from the wiki's
-    Gag pouch table, which is keyed by the location awarding it."""
+    """Pouch capacity is a property of the TOON, [CONFIRMED] 20-80 from
+    the wiki's Gag pouch table."""
 
     def test_the_wiki_capacities(self):
         caps = data.POUCH_CAPACITIES
@@ -472,43 +473,55 @@ class PouchTest(unittest.TestCase):
         sizes = sorted(data.POUCH_CAPACITIES.values())
         self.assertEqual(sizes, [20, 25, 30, 35, 40, 50, 60, 70, 80])
 
-    def test_later_playgrounds_carry_more(self):
+    def test_a_toon_carries_a_real_capacity(self):
         rng = random.Random(0)
-        def mean_for(playground):
-            streets = [s for s in facility.STREETS if s[1] == playground]
-            return sum(facility.pouch_for_street(rng.choice(streets), rng)
-                       for _ in range(300)) / 300
-        self.assertLess(mean_for("Toontown Central"),
-                        mean_for("The Brrrgh"))
-        self.assertLess(mean_for("The Brrrgh"),
-                        mean_for("Donald's Dreamland"))
+        allowed = set(data.POUCH_CAPACITIES.values())
+        for _ in range(200):
+            self.assertIn(env.random_toon(rng).pouch_capacity, allowed)
 
-    def test_never_below_the_playground_pouch(self):
+    def test_a_generated_toon_fits_its_own_pouch(self):
+        """62% of generated toons would not have fit a starting pouch
+        and 49% not a Medium, because capacity was not consulted when
+        building them at all."""
         rng = random.Random(1)
-        for street in facility.STREETS:
-            floor = facility.POUCH_AT[street[1]]
-            for _ in range(40):
-                self.assertGreaterEqual(
-                    facility.pouch_for_street(street, rng), floor)
+        for _ in range(500):
+            t = env.random_toon(rng)
+            self.assertLessEqual(gags_mod.pouch_total(t.gag_counts),
+                                 t.pouch_capacity)
 
-    def test_never_above_the_largest_backpack(self):
-        rng = random.Random(2)
-        for street in facility.STREETS:
-            for _ in range(40):
-                self.assertLessEqual(facility.pouch_for_street(street, rng),
-                                     facility.MAX_POUCH_CAPACITY)
+    def test_level_sevens_are_never_trimmed(self):
+        """[CONFIRMED] they are carried outside the pouch."""
+        counts = {(Track.THROW, 7): 1, (Track.THROW, 1): 40}
+        out = env._trim_to_pouch(counts, 5, random.Random(0))
+        self.assertEqual(out[(Track.THROW, 7)], 1)
+        self.assertLessEqual(gags_mod.pouch_total(out), 5)
 
-    def test_restocked_loadouts_are_legal(self):
+    def test_trimming_drops_the_cheapest_first(self):
+        """A toon short on room drops Cupcakes before Wedding Cakes."""
+        counts = {(Track.THROW, 1): 10, (Track.THROW, 5): 10}
+        out = env._trim_to_pouch(counts, 12, random.Random(0))
+        self.assertEqual(out.get((Track.THROW, 5)), 10)
+        self.assertEqual(out.get((Track.THROW, 1)), 2)
+
+    def test_capacity_survives_a_clone(self):
+        state = BattleState(toon=ToonState(50, 50, {Track.THROW: 5},
+                                           {(Track.THROW, 1): 2},
+                                           pouch_capacity=35),
+                            cogs=[cog()])
+        self.assertEqual(state.clone().toons[0].pouch_capacity, 35)
+
+    def test_restock_respects_the_toons_own_capacity(self):
         """The first restock filled every gag to its own max_carry and
-        produced 378-gag parties. POUCH_CAPACITIES caps the TOTAL, and
-        validate_loadout was already in the repo to say so."""
+        produced 378-gag parties; POUCH_CAPACITIES caps the TOTAL."""
         rng = random.Random(3)
         for _ in range(60):
             state = env.facility_position(rng)
             for t in state.toons:
                 if t.laff > 0:
-                    env.restock(t, rng, 50)
+                    env.restock(t, rng)
                     self.assertEqual(data.validate_loadout(t.gag_counts), [])
+                    self.assertLessEqual(gags_mod.pouch_total(t.gag_counts),
+                                         t.pouch_capacity)
 
     def test_restock_does_not_change_training(self):
         """Only quantity. A toon with mediocre gags keeps mediocre gags."""
@@ -516,7 +529,7 @@ class PouchTest(unittest.TestCase):
         state = env.facility_position(rng)
         toon_ = state.toons[0]
         before = dict(toon_.track_exp)
-        env.restock(toon_, rng, 50)
+        env.restock(toon_, rng)
         self.assertEqual(toon_.track_exp, before)
 
     def test_toons_enter_a_building_healed(self):

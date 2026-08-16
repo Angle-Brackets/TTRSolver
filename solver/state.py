@@ -56,6 +56,19 @@ class ToonState:
     # rather than copying, exactly like track_exp.
     organic_tracks: FrozenSet[Track] = frozenset()
 
+    # How many gags (levels 1-6; level 7 is exempt) this toon can carry.
+    # A property of the TOON, earned by ToonTask -- see
+    # `data.POUCH_CAPACITIES`, [CONFIRMED] 20 to 80. It is not a
+    # property of where they are standing, which an earlier version had
+    # it as, deriving capacity from the street the building was on.
+    #
+    # Deliberately NOT in `outcomes.state_key`: nothing restocks a pouch
+    # mid-battle or between floors, so capacity cannot change any value
+    # the search computes. It constrains how a toon is BUILT, not how a
+    # battle goes. If restocking is ever modelled, it has to go in the
+    # key -- that is the `free_passes` lesson.
+    pouch_capacity: int = 80
+
     def is_organic(self, track: Track) -> bool:
         return track in self.organic_tracks
 
@@ -323,6 +336,7 @@ class BattleState:
                 track_exp=t.track_exp,
                 gag_counts=t.gag_counts,
                 organic_tracks=t.organic_tracks,
+                pouch_capacity=t.pouch_capacity,
             ) for t in self.toons],
             cogs=[c.copy() for c in self.cogs],
             round_num=self.round_num,

@@ -62,7 +62,6 @@ import random
 from typing import Callable, List, Optional, Sequence
 
 from . import data
-from .data.gags import POUCH_CAPACITIES
 from .state import BattleState, CogState
 
 # At most four cogs on the field at once. The wiki has no page stating
@@ -158,50 +157,6 @@ STREETS = [
 # nothing else reads it.
 LATE_PLAYGROUNDS = ("The Brrrgh", "Donald's Dreamland")
 LATE_WEIGHT = 4.0
-
-
-# [CONFIRMED] TTR wiki, Gag pouch. The capacity table is keyed by the
-# LOCATION whose ToonTask awards it, which makes pouch size a function
-# of how far a toon has progressed -- and therefore of which street they
-# are plausibly fighting on.
-#
-# Note the steps are not uniform: 20/25/30/35/40 rise by five, then
-# 50/60/70/80 by ten.
-POUCH_AT = {
-    "Toontown Central": 25,
-    "Donald's Dock": 30,
-    "Daisy Gardens": 35,
-    "Minnie's Melodyland": 40,
-    "The Brrrgh": 50,
-    "Donald's Dreamland": 70,       # Small 60 then Medium 70 here
-}
-
-# The largest, from Bossbot Headquarters -- past every street in
-# `STREETS`, so it is only reachable as the "came back later" case.
-MAX_POUCH_CAPACITY = 80
-POUCH_CAPACITIES_VALUES = sorted(POUCH_CAPACITIES.values())
-
-
-def pouch_for_street(street, rng) -> int:
-    """[ASSUMED] the pouch a toon on this street is carrying.
-
-    The capacities and their locations are [CONFIRMED]; what is assumed
-    is that a toon fighting on a street has roughly the pouch that
-    street's playground awards. That is the floor rather than the rule:
-    a maxed toon revisiting The Brrrgh has an 80, so a quarter of the
-    time this returns a larger one.
-
-    Replaces picking from the top half of the table regardless of where
-    the building was, which handed a Toontown Central toon a Bossbot
-    Headquarters backpack.
-    """
-    _name, playground, _levels = street
-    base = POUCH_AT.get(playground, 40)
-    if rng.random() < 0.25:
-        bigger = [c for c in sorted(POUCH_CAPACITIES_VALUES) if c > base]
-        if bigger:
-            return rng.choice(bigger)
-    return base
 
 
 def sample_street(rng):

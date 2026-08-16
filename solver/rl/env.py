@@ -333,10 +333,6 @@ class BattleEnv:
             # The sampler set a horizon; turn it into actual floors so
             # the episode can keep going and the saved gag can be spent.
             street = facility.sample_street(self.rng)
-            capacity = facility.pouch_for_street(street, self.rng)
-            for toon in self.state.toons:
-                if toon.laff > 0:
-                    restock(toon, self.rng, capacity)
             difficulty = facility.difficulty_for(self.state, self.rng,
                                                  street=street)
             self.plan = facility.plan_facility(
@@ -481,6 +477,29 @@ def _usable(track: Track, level: int) -> bool:
 USABLE = {(t, l) for t in TRACKS for l in range(1, 8) if _usable(t, l)}
 
 
+def _trim_to_pouch(counts, capacity, rng):
+    """Drop gags until the loadout fits the pouch.
+
+    Level 7s are exempt and never trimmed -- [CONFIRMED], they are
+    carried outside the pouch.
+
+    Trims from the lowest levels first: a toon short on room drops
+    Cupcakes before Wedding Cakes, which is what a player does.
+    """
+    counts = dict(counts)
+    while gags_mod.pouch_total(counts) > capacity:
+        inside = [k for k, v in counts.items()
+                  if v > 0 and k[1] < gags_mod.POUCH_EXEMPT_LEVEL]
+        if not inside:
+            break
+        lowest = min(k[1] for k in inside)
+        key = rng.choice([k for k in inside if k[1] == lowest])
+        counts[key] -= 1
+        if counts[key] <= 0:
+            del counts[key]
+    return counts
+
+
 def random_toon(rng) -> ToonState:
     """A toon, deliberately not always a maxed one.
 
@@ -524,6 +543,18 @@ def random_toon(rng) -> ToonState:
         counts = {k: v for k, v in counts.items()
                   if k[0] in (Track.LURE, Track.TRAP, Track.TOON_UP)}
 
+    # POUCH CAPACITY, chosen per toon rather than per street. 62% of
+    # generated toons would not have fit a starting 20-gag pouch and 49%
+    # not a Medium, so every toon implicitly carried a late-game bag
+    # whatever else was sampled about them.
+    #
+    # Uniform over the confirmed table. Correlating it with training
+    # would be more realistic -- pouch upgrades and gag training both
+    # come from progression, so a maxed toon with a 20-gag pouch is not
+    # a real toon -- and is a refinement deliberately not taken here.
+    capacity = rng.choice(sorted(data.POUCH_CAPACITIES.values()))
+    counts = _trim_to_pouch(counts, capacity, rng)
+
     if not counts:
         # The empty-roll fallback. It used to reset to Throw alone,
         # which quietly rebuilt the impossible one-track toon this
@@ -537,7 +568,7 @@ def random_toon(rng) -> ToonState:
     if rng.random() < 0.4:
         organic = frozenset([rng.choice(list(exp))])
     return ToonState(max(1, int(max_laff * rng.uniform(0.15, 1.0))), max_laff,
-                     exp, counts, organic)
+                     exp, counts, organic, pouch_capacity=capacity)
 
 
 # The hardest cogs that are actually playable, level 12 included.
@@ -762,13 +793,12 @@ def restock(toon, rng, capacity=None) -> None:
         toon.gag_counts = {**toon.gag_counts, **counts}
         return
 
-    # Capacity comes from the street when the caller knows it -- pouch
-    # size tracks progression, so a Toontown Central toon does not carry
-    # a Bossbot Headquarters backpack. Falls back to the middle of the
-    # table when restocking outside a facility.
+    # The toon's OWN capacity. Pouch size is something a toon earned,
+    # not something the building's location decides -- an earlier
+    # version read it off the street and gave a Toontown Central toon a
+    # Bossbot Headquarters backpack.
     if capacity is None:
-        sizes = sorted(data.POUCH_CAPACITIES.values())
-        capacity = rng.choice(sizes[len(sizes) // 2:])
+        capacity = toon.pouch_capacity
 
     # Players carry their best gags, so weight the draw by level rather
     # than spreading evenly -- an even split would hand a late-game toon
