@@ -708,3 +708,57 @@ learned that twice -- regret@6 scored against noisy labels, and PPO
 returns compared across different position distributions. Three times is
 a pattern rather than an accident: when a measurement motivates
 substantial work, re-derive both sides of it first.
+
+## The horizon, and why PPO cannot use it
+
+`BattleState.cogs_remaining` (0-30) is how many cogs come after this
+fight: the rest of a building's floors, a factory, a boss run. It raises
+the price of every gag as `price * (1 + 0.15 * remaining)`, so a
+Railroad spent on floor one costs more than the same Railroad spent on
+the last cog of the day. It reaches the observation, it keys the memo,
+and it scales the plan-ranking scorers as well as the reward.
+
+**The search uses it. PPO does not.** Over 120 identical coordinated
+battles, every gag priced at horizon 0 so the dearer prices cannot move
+the number by themselves:
+
+| agent | horizon | gag cost | mean level | win |
+|---|---|---|---|---|
+| PPO | 0 | 4.17 | 3.97 | 50.8% |
+| PPO | 30 | 4.18 | 3.80 | 50.8% |
+| search | 0 | 2.60 | 3.32 | 55.8% |
+| search | 30 | 2.23 | 3.00 | 50.8% |
+
+PPO is flat to three significant figures. Checked directly rather than
+inferred: at the same position and the same seat, moving the horizon
+from 0 to 30 changes the policy's chosen action in **4.3%** of 394
+positions, and the mean gag level moves 4.66 to 4.60. The feature is in
+the vector -- there is a test that the encoding changes -- and the
+policy has learned to ignore it.
+
+**The reason is structural, and no amount of training fixes it.** The
+episode ends when this battle ends. A gag saved is never spent later,
+because there is no later: the environment never simulates the next
+fight. So conserving costs reward now -- fewer kills, more rounds, more
+laff lost -- and pays exactly nothing, ever. The only thing pushing the
+other way is the price term, which is small against a win bonus of 100.
+Under the reward the agent is actually optimising, spending everything
+to win *this* fight is correct, and PPO found that.
+
+The search responds for a reason that does not apply to PPO: the price
+enters `_quick_score` and `_greedy_score`, which rank plans one round at
+a time, and in most rounds the win bonus is not in play at all. It is
+reacting to the price directly rather than learning a policy from
+returns.
+
+This also means the reward normalisation did not close the scarcity gap
+it was aimed at. PPO went from 4.49 to 4.17 gag value per battle against
+the search's 2.60 -- an improvement, and not the mechanism. Flat reward
+scaling was a real bug and fixing it was worth doing, but it was not
+what made PPO spendthrift.
+
+**What would fix it: multi-battle episodes.** If `cogs_remaining > 0`
+means the environment starts the next fight with the pouch as it now
+stands, then a gag saved genuinely buys a later win and the return
+contains the evidence. That changes what an episode is, so it is a
+design decision rather than a tuning one, and it is not made here.
