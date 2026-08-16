@@ -354,6 +354,12 @@ class TestGroupTrap(unittest.TestCase):
         self.assertFalse(state.cogs[1].status.trapped)
 
     def test_railroad_then_lure_clears_the_field(self):
+        # Seeded because this asserts the Lure LANDS, which is an
+        # accuracy roll off the module-level `random`. Unseeded it
+        # passed on most streams and failed on some, so it was a flake
+        # waiting for an unrelated test to consume a different number of
+        # draws -- which is exactly how it surfaced.
+        random.seed(0)
         state = self._field()
         state, _r, _d = simulator.step(
             state, Action(track=Track.TRAP, level=7, target_index=None))

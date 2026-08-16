@@ -347,3 +347,52 @@ class DifficultyPairingTest(unittest.TestCase):
 
 def statistics_mean(values):
     return sum(values) / len(values)
+
+
+class CogPoolTest(unittest.TestCase):
+    """The crash that killed a training run several minutes in."""
+
+    def env_for_cogs(self):
+        e = env.BattleEnv(rng=random.Random(0),
+                          sampler=env.facility_position, coordinated=True)
+        e.reset()
+        return e
+
+    def test_every_wiki_difficulty_can_be_built(self):
+        e = self.env_for_cogs()
+        for difficulty in facility.DIFFICULTY:
+            for seed in range(20):
+                facility.plan_facility(random.Random(seed), difficulty,
+                                       e._facility_cog)
+
+    def test_an_impossible_level_raises_rather_than_substituting(self):
+        """It used to fall back to the whole pool, which produced a
+        Number Cruncher at level 2 -- a cog that does not exist at level
+        2. A silent stand-in would have trained the policy against cogs
+        the game does not have."""
+        e = self.env_for_cogs()
+        with self.assertRaises(ValueError):
+            e._facility_cog(random.Random(0), 99)
+
+    def test_low_cogs_cover_the_levels_safe_cogs_cannot(self):
+        for level in (1, 2):
+            self.assertTrue([c for c in env.LOW_COGS
+                             if c[2] <= level <= c[3]])
+
+    def test_the_pools_only_claim_levels_the_cog_really_has(self):
+        """Each pool entry is checked against the cog's own published
+        range, so a bad row cannot sit there until a rare seed finds
+        it.
+
+        The cog phase draws from the module-level `random`, so the
+        stream is restored afterwards: leaving it advanced made an
+        unseeded assertion in test_mechanics fail purely on test order.
+        """
+        self.addCleanup(random.setstate, random.getstate())
+        for key, dept, lo, hi in env.SAFE_COGS + env.LOW_COGS:
+            for level in range(lo, hi + 1):
+                full = data.cog_max_hp(level)
+                state = BattleState(
+                    toon=toon(), cogs=[CogState(key, dept, level, full,
+                                                full)])
+                simulator._resolve_cog_phase(state)

@@ -280,9 +280,26 @@ class BattleEnv:
         self.actor = order[0] if order else 0
 
     def _facility_cog(self, rng, level):
-        """A cog of a given level, from the tables known to be complete."""
-        pool = [c for c in SAFE_COGS if c[2] <= level <= c[3]]
-        key, dept, _lo, _hi = rng.choice(pool or SAFE_COGS)
+        """A cog of a given level, from the tables known to be complete.
+
+        RAISES rather than substituting when no cog covers the level.
+        This used to fall back to the whole pool -- `rng.choice(pool or
+        SAFE_COGS)` -- which quietly produced a Number Cruncher at level
+        2, a cog that does not exist at level 2, and the training run
+        died several minutes in with a ValueError from deep inside the
+        data layer.
+
+        A silent stand-in is worse than the crash it prevents: it would
+        have trained the policy against cogs the game does not have.
+        """
+        # BRUTAL_COGS reaches level 12, which a difficulty 9 building's
+        # boss needs and neither other pool provides.
+        pool = [c for c in SAFE_COGS + LOW_COGS if c[2] <= level <= c[3]]
+        pool += [(k, d, lv, lv) for k, d, lv in BRUTAL_COGS if lv == level]
+        if not pool:
+            raise ValueError(
+                f"no cog with a complete table appears at level {level}")
+        key, dept, _lo, _hi = rng.choice(pool)
         full = data.cog_max_hp(level)
         return CogState(key, dept, level, full, full)
 
@@ -418,6 +435,26 @@ SAFE_COGS = [("bean_counter", "cashbot", 4, 8),
              ("head_hunter", "bossbot", 6, 10),
              ("two_face", "sellbot", 6, 10),
              ("the_mingler", "sellbot", 7, 11)]
+
+# Levels 1-2, which SAFE_COGS does not reach -- its lowest is 3. A
+# difficulty 1 building is level 1-3 cogs, so without these the low
+# difficulties could not be built at all.
+#
+# Kept SEPARATE from SAFE_COGS rather than merged into it, so street
+# positions and the fixed evaluation set are byte-identical to previous
+# runs and their returns stay comparable. Only facilities draw from
+# both pools.
+#
+# Every level listed here was checked by running a cog phase 40 times at
+# each one; all eight are complete over their whole published range.
+LOW_COGS = [("flunky", "bossbot", 1, 5),
+            ("cold_caller", "sellbot", 1, 5),
+            ("short_change", "cashbot", 1, 5),
+            ("bottom_feeder", "lawbot", 1, 5),
+            ("pencil_pusher", "bossbot", 2, 6),
+            ("telemarketer", "sellbot", 2, 6),
+            ("penny_pincher", "cashbot", 2, 6),
+            ("bloodsucker", "lawbot", 2, 6)]
 
 
 def _usable(track: Track, level: int) -> bool:
