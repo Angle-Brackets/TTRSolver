@@ -32,7 +32,7 @@ from __future__ import annotations
 import random
 from typing import List, Optional, Tuple
 
-from .. import data, party as party_mod, simulator
+from .. import data, facility, party as party_mod, simulator
 from ..search import objective as objective_mod
 from ..state import Action, BattleState, CogState, ToonState, Track
 
@@ -62,7 +62,7 @@ PASS_INDEX = 0
 # actions -- four Lures on the same board. Coordination needs the
 # pending plan to be visible.
 PENDING_DIM = MAX_TOONS * (len(TRACKS) + 2)      # track one-hot, group, none
-OBS_DIM = (MAX_COGS * 9 + MAX_TOONS * (3 + 49) + 4
+OBS_DIM = (MAX_COGS * 9 + MAX_TOONS * (3 + 49) + 6
            + MAX_TOONS + PENDING_DIM)
 
 
@@ -166,7 +166,14 @@ def encode(state: BattleState, actor: int = 0,
             # What is still coming after this fight. Without it the
             # agent cannot tell floor one of a building from the last
             # cog of the day, and every gag looks equally spendable.
-            min(state.cogs_remaining, 30) / 30.0]
+            min(state.cogs_remaining, 30) / 30.0,
+            # Is anything coming after this fight at all. Distinct from
+            # the horizon count: a street battle and the last floor of a
+            # building both have 0 remaining, but only one of them let
+            # the toon walk away from a fight going badly.
+            1.0 if state.kind == "facility" else 0.0,
+            # Cogs waiting to walk in to THIS fight as slots free.
+            min(len(state.holdout), MAX_COGS) / MAX_COGS]
 
     # Whose decision this is. Solo play always sets index 0, so the
     # block is constant there and costs nothing.
@@ -272,12 +279,55 @@ class BattleEnv:
         order = self._standing()
         self.actor = order[0] if order else 0
 
+    def _facility_cog(self, rng, level):
+        """A cog of a given level, from the tables known to be complete."""
+        pool = [c for c in SAFE_COGS if c[2] <= level <= c[3]]
+        key, dept, _lo, _hi = rng.choice(pool or SAFE_COGS)
+        full = data.cog_max_hp(level)
+        return CogState(key, dept, level, full, full)
+
+    def _next_floor(self, state):
+        """Move a won facility battle on to the next floor.
+
+        The pouch and the laff carry over exactly as they stand: nothing
+        restocks between floors and nobody heals, which is the whole
+        reason a gag spent early is a gag missing later. Cog status --
+        lured, trapped, soaked -- does not, because these are different
+        cogs in a different room.
+        """
+        cogs, holdout = self.plan.take_floor()
+        nxt = state.clone()
+        nxt.cogs = cogs
+        nxt.holdout = holdout
+        nxt.round_num = 0
+        nxt.cogs_remaining = self.plan.remaining()
+        self.floor += 1
+        return nxt
+
     def reset(self) -> Tuple[List[float], List[bool]]:
         while True:
             self.state = self.sampler(self.rng)
             if not self.state.is_terminal():
                 break
+        self.plan = None
+        self.floor = 1
+        if self.state.kind == "facility":
+            # The sampler set a horizon; turn it into actual floors so
+            # the episode can keep going and the saved gag can be spent.
+            self.plan = facility.plan_facility(
+                self.rng, self.rng.randint(4, 9), self._facility_cog)
+            first, holdout = self.plan.take_floor()
+            if first:
+                self.state.cogs = first
+                self.state.holdout = holdout
+                self.state.cogs_remaining = self.plan.remaining()
         self.rounds = 0
+        # Truncation is per FLOOR, not per episode. `max_rounds` exists
+        # to cut a fight that has stalled, and a five-floor building
+        # legitimately runs past 20 rounds -- capping the episode there
+        # would end it around floor two, so the pouch pressure that the
+        # whole facility model exists to create would never arrive.
+        self.floor_rounds = 0
         self._begin_round()
         return (encode(self.state, self.actor, self.pending),
                 legal_mask(self.state, self.actor))
@@ -298,7 +348,8 @@ class BattleEnv:
                 return (encode(self.state, self.actor, self.pending),
                         legal_mask(self.state, self.actor), 0.0, False,
                         {"win": False, "rounds": self.rounds,
-                         "truncated": False, "partial": True})
+                         "floor": self.floor, "truncated": False,
+                         "partial": True})
             nxt, _healed, _done = party_mod.step(
                 before, self.pending[0], mode=party_mod.Mode.COORDINATED,
                 joint=list(self.pending), rng=self.rng)
@@ -319,12 +370,30 @@ class BattleEnv:
             toons_lost=went_sad,
             cogs_remaining=before.cogs_remaining)
 
-        self.state = nxt
         self.rounds += 1
-        done = nxt.is_terminal() or self.rounds >= self.max_rounds
+        self.floor_rounds += 1
+
+        # THE FLOOR IS NOT THE EPISODE. Winning a facility battle with
+        # floors left moves to the next one instead of ending, which is
+        # what makes a conserved gag worth conserving: it gets spent
+        # later in the same return. Without this the horizon was a price
+        # with no payoff and PPO correctly ignored it.
+        if (nxt.is_win() and nxt.kind == "facility"
+                and self.plan is not None and not self.plan.exhausted):
+            nxt = self._next_floor(nxt)
+            self.floor_rounds = 0
+
+        self.state = nxt
+        stalled = self.floor_rounds >= self.max_rounds
+        # A hard episode ceiling as well, so a pathological facility
+        # cannot run forever: generous enough that a five-floor building
+        # finishes well inside it.
+        overrun = self.rounds >= self.max_rounds * 6
+        done = nxt.is_terminal() or stalled or overrun
         info = {"win": bool(nxt.is_win()), "rounds": self.rounds,
-                "truncated": self.rounds >= self.max_rounds
-                and not nxt.is_terminal(), "partial": False}
+                "floor": self.floor,
+                "truncated": (stalled or overrun) and not nxt.is_terminal(),
+                "partial": False}
         if not done:
             self._begin_round()
         return (encode(nxt, self.actor, self.pending),
@@ -584,6 +653,7 @@ def mixed_position(rng, hard_fraction: float = 0.5,
         else:
             state = default_position(rng)
     state.cogs_remaining = sample_horizon(rng)
+    state.kind = "facility" if state.cogs_remaining else "street"
     return state
 
 
@@ -602,6 +672,19 @@ def sample_horizon(rng) -> int:
     if rng.random() < 0.5:
         return 0
     return rng.randint(1, 30)
+
+
+def facility_position(rng) -> BattleState:
+    """A position that is explicitly a facility floor, horizon and all.
+
+    `BattleEnv.reset` replaces the cogs with a real floor plan, so what
+    this supplies that matters is the party and its pouch.
+    """
+    state = mixed_position(rng, 0.3, 0.25, 0.2)
+    if state.cogs_remaining == 0:
+        state.cogs_remaining = rng.randint(4, 30)
+    state.kind = "facility"
+    return state
 
 
 def default_position(rng) -> BattleState:

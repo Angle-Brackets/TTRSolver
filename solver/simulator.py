@@ -527,6 +527,11 @@ def step(state: BattleState, action: Action, gag_cost_lambda=None,
 
     next_state.round_num += 1
 
+    # Same reinforcement rule as the party path; see the note in
+    # `apply_party_round`.
+    from . import facility
+    facility.reinforce(next_state)
+
     # One implementation of what a round is worth, shared with
     # outcomes._accumulate. A terminal state that is not a win is a
     # loss, which includes running out of ways to damage a cog and not
@@ -685,6 +690,17 @@ def apply_party_round(state: BattleState,
                 landed.append((track, group, targets))
 
         _apply_track_group(state, track, resolved, healed)
+
+    # Cogs walk in to replace the dead. Done here, at the end of round
+    # resolution, so that EVERY caller sees it -- the search as well as
+    # the environment. A search that treated a kill as final progress
+    # while another cog immediately took the slot would systematically
+    # overvalue killing and undervalue Lure.
+    #
+    # After the toon phase and the cog phase both, so a cog that joins
+    # this round does not also get to swing this round.
+    from . import facility
+    facility.reinforce(state)
     return healed
 
 

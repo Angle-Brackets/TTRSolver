@@ -214,6 +214,20 @@ class BattleState:
     # Capped around 30, which is roughly a full building plus its boss.
     cogs_remaining: int = 0
 
+    # Cogs waiting off-field to walk into THIS battle as slots free.
+    # [CONFIRMED] Cog Building: "As Toons continuously battle Cogs, more
+    # Cogs may exit from the elevator to join." At most four are ever
+    # present, so a floor of six is four on the field and two here.
+    #
+    # This is why a facility is not a pool divided by four: there is no
+    # gap between a kill and its replacement.
+    holdout: List[CogState] = field(default_factory=list)
+
+    # STREET or FACILITY. See `solver/facility.py`. Held as a plain
+    # string so `state_key` stays hashable and cheap, and so nothing in
+    # here has to import the facility module.
+    kind: str = "street"
+
     # Unlured passes still available. A pass is a real move -- conserving
     # a scarce gag, or in a party declining to hit a cog because
     # `mechanics.pick_cog_target` makes it prefer whoever damaged it
@@ -252,7 +266,9 @@ class BattleState:
     def __init__(self, cogs: List[CogState], toon: Optional[ToonState] = None,
                  toons: Optional[List[ToonState]] = None,
                  round_num: int = 0, free_passes: int = 3,
-                 cogs_remaining: int = 0):
+                 cogs_remaining: int = 0,
+                 holdout: Optional[List[CogState]] = None,
+                 kind: str = "street"):
         if (toon is None) == (toons is None):
             raise ValueError("pass exactly one of `toon` or `toons`")
         self.toons = list(toons) if toons is not None else [toon]
@@ -260,6 +276,8 @@ class BattleState:
         self.round_num = round_num
         self.free_passes = free_passes
         self.cogs_remaining = cogs_remaining
+        self.holdout = list(holdout) if holdout else []
+        self.kind = kind
 
     @property
     def toon(self) -> ToonState:
@@ -310,6 +328,8 @@ class BattleState:
             round_num=self.round_num,
             free_passes=self.free_passes,
             cogs_remaining=self.cogs_remaining,
+            holdout=[c.copy() for c in self.holdout],
+            kind=self.kind,
         )
 
     def active_cogs(self) -> List[CogState]:
@@ -317,11 +337,22 @@ class BattleState:
 
     def is_terminal(self) -> bool:
         return (not self.active_toons()
-                or len(self.active_cogs()) == 0
+                or (len(self.active_cogs()) == 0 and not self.holdout)
                 or not self.can_still_damage())
 
     def is_win(self) -> bool:
-        return bool(self.active_toons()) and len(self.active_cogs()) == 0
+        """Won when the field is clear AND nothing is still walking in.
+
+        The holdout check is belt and braces: `facility.reinforce` fills
+        freed slots during round resolution, so a state with a live
+        holdout and an empty field should not normally exist. Should one
+        arise on a path that skips reinforcement, calling it a win would
+        end the floor early and hand back a victory the toon has not
+        had -- expensive and silent, so it is checked here too.
+        """
+        return (bool(self.active_toons())
+                and len(self.active_cogs()) == 0
+                and not self.holdout)
 
     def can_still_damage(self) -> bool:
         """Whether any sequence of remaining gags can hurt a cog.

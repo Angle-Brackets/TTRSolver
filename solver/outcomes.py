@@ -514,6 +514,8 @@ def state_key(state: BattleState) -> Tuple:
             _cog_key(state),
             state.free_passes,
             state.cogs_remaining,
+            len(state.holdout),
+            state.kind,
         )
     return (
         tuple((t.laff,
@@ -523,4 +525,6 @@ def state_key(state: BattleState) -> Tuple:
         _cog_key(state),
         state.free_passes,
         state.cogs_remaining,
+        len(state.holdout),
+        state.kind,
     )
