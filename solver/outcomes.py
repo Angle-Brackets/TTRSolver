@@ -513,6 +513,7 @@ def state_key(state: BattleState) -> Tuple:
                       for (t, lvl), n in toon.gag_counts.items() if n > 0),
             _cog_key(state),
             state.free_passes,
+            state.cogs_remaining,
         )
     return (
         tuple((t.laff,
@@ -521,4 +522,5 @@ def state_key(state: BattleState) -> Tuple:
               for t in state.toons),
         _cog_key(state),
         state.free_passes,
+        state.cogs_remaining,
     )

@@ -7,7 +7,7 @@ import random
 import unittest
 
 from solver.rl import env
-from solver.state import Track
+from solver.state import BattleState, CogState, ToonState, Track
 
 
 class ActionTableTest(unittest.TestCase):
@@ -254,3 +254,64 @@ class CoordinatedTest(unittest.TestCase):
         e.state.toons[0].laff = 0
         e._begin_round()
         self.assertEqual(e.actor, 0)
+
+
+class HorizonTest(unittest.TestCase):
+    """`cogs_remaining` -- the fights after this one."""
+
+    def test_default_is_the_old_behaviour(self):
+        """A bare state is the last fight, so nothing already written
+        changes meaning."""
+        state = BattleState(toon=ToonState(50, 50, {Track.THROW: 5},
+                                           {(Track.THROW, 1): 2}),
+                            cogs=[CogState("cold_caller", "sellbot", 1,
+                                           6, 6)])
+        self.assertEqual(state.cogs_remaining, 0)
+
+    def test_survives_a_clone(self):
+        state = BattleState(toon=ToonState(50, 50, {Track.THROW: 5},
+                                           {(Track.THROW, 1): 2}),
+                            cogs=[CogState("cold_caller", "sellbot", 1,
+                                           6, 6)],
+                            cogs_remaining=17)
+        self.assertEqual(state.clone().cogs_remaining, 17)
+
+    def test_it_keys_the_memo(self):
+        """Two positions identical but for the horizon are worth
+        different amounts, so they must not share a memo entry -- the
+        bug `free_passes` already had."""
+        from solver import outcomes
+        def make(remaining):
+            return BattleState(toon=ToonState(50, 50, {Track.THROW: 5},
+                                              {(Track.THROW, 1): 2}),
+                               cogs=[CogState("cold_caller", "sellbot", 1,
+                                              6, 6)],
+                               cogs_remaining=remaining)
+        self.assertNotEqual(outcomes.state_key(make(0)),
+                            outcomes.state_key(make(9)))
+
+    def test_a_gag_costs_more_when_more_is_coming(self):
+        from solver.search import objective as om
+        cheap = om.BALANCED.gag_price(Track.THROW, 6, 0)
+        dear = om.BALANCED.gag_price(Track.THROW, 6, 30)
+        self.assertGreater(dear, cheap)
+
+    def test_the_sampler_spans_the_range(self):
+        rng = random.Random(0)
+        seen = [env.sample_horizon(rng) for _ in range(400)]
+        self.assertEqual(min(seen), 0)
+        self.assertGreater(max(seen), 20)
+        self.assertGreater(seen.count(0), 100)   # half are the last fight
+        self.assertLessEqual(max(seen), 30)
+
+    def test_it_reaches_the_observation(self):
+        """Encoded, and normalised into the same range as everything
+        else."""
+        def obs(remaining):
+            state = env.default_position(random.Random(3))
+            state.cogs_remaining = remaining
+            return env.encode(state)
+        near, far = obs(0), obs(30)
+        self.assertNotEqual(near, far)
+        self.assertEqual(len(near), env.OBS_DIM)
+        self.assertTrue(all(-1.0 <= v <= 1.0 for v in far))

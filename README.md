@@ -286,6 +286,17 @@ is fixed and re-measured. See `docs/ml-design.md`.
 - **The objective's weights are chosen, not derived.** `laff_weight`,
   `scarcity_cost`, `turn_cost` and friends are swept and sane; nothing
   calibrates them against real play.
+- **The horizon buys conservation with win rate.** `state.cogs_remaining`
+  (0-30) is how many cogs come *after* this fight -- the rest of a
+  building, a factory, a boss run -- and it raises the price of every gag,
+  so a Railroad spent on floor one costs more than the same Railroad spent
+  on the last cog of the day. This is the quantity `scarcity_cost` had been
+  standing in for with a constant. At a full building ahead it saves about
+  7% of the pouch for about 3 points of win rate in the current fight, and
+  the mean gag level drops 3.36 to 3.05. Whether that trade pays depends on
+  how badly the later floors need the pouch, which one battle's search
+  cannot see. `cogs_remaining = 0` reproduces the old behaviour exactly,
+  and every street battle is undisturbed.
 - **Pickup mode rests on a model of strangers.** `SensiblePrior` is a guess
   about how people play, labelled as one.
 - **Six times a *reduction* has silently deleted the right answer** — a

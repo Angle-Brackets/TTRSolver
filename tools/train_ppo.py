@@ -96,8 +96,10 @@ def main():
     ap.add_argument("--strange-fraction", type=float, default=0.25,
                     help="mid-fight boards: already lured, armed traps, "
                          "picked-over pouches, someone nearly sad")
-    ap.add_argument("--reward-scale", type=float, default=0.01,
-                    help="learning-side only; eval stays in real units")
+    ap.add_argument("--reward-scale", type=float, default=0.0,
+                    help="fixed scale; 0 means normalise by a running "
+                         "standard deviation instead, which preserves "
+                         "relative magnitudes")
     args = ap.parse_args()
 
     import torch
@@ -188,6 +190,39 @@ def main():
     print(f"  baseline (uniform random over legal actions): "
           f"return {base_ret:+7.2f}  win {base_win * 100:5.1f}%")
 
+    # RUNNING REWARD NORMALISATION.
+    #
+    # A flat 0.01 scale kept the value loss in range and destroyed the
+    # signal it was meant to preserve: gag prices run 0.23 to 4.70
+    # against a win bonus of 100, so after scaling the entire
+    # gag-scarcity range is 2-5% of the win signal. Measured over 120
+    # battles, PPO spent 4.49 of gag value against the search's 2.81 and
+    # reached nearly a level higher, while WINNING LESS -- it was not
+    # trading resources for wins, it simply could not hear the price.
+    #
+    # Dividing by a running standard deviation keeps the loss in range
+    # without flattening the ratios: a Railroad still costs twenty times
+    # a Cupcake afterwards, where a fixed scale made both indistinguish-
+    # able from zero next to a win.
+    class RunningScale:
+        def __init__(self):
+            self.n, self.mean, self.m2 = 0, 0.0, 0.0
+
+        def update(self, values):
+            for v in values:
+                self.n += 1
+                delta = v - self.mean
+                self.mean += delta / self.n
+                self.m2 += delta * (v - self.mean)
+
+        @property
+        def std(self):
+            if self.n < 2:
+                return 1.0
+            return max(1e-3, (self.m2 / (self.n - 1)) ** 0.5)
+
+    scaler = RunningScale()
+
     started = time.time()
     finished, wins, collected = [], [], 0
     updates = max(1, args.steps // (args.envs * args.rollout))
@@ -228,7 +263,7 @@ def main():
                 # Scaled for LEARNING only. Returns of +/-100 give a
                 # value loss four orders of magnitude above the policy
                 # loss; eval below reports real units.
-                rewards.append(reward * args.reward_scale)
+                rewards.append(reward)
                 dones.append(float(done))
                 if done:
                     finished.append(info["rounds"])
@@ -237,6 +272,14 @@ def main():
                 obs[i], masks[i] = nob, nmask
                 collected += 1
 
+            # Normalise AFTER the truncation bootstrap, so the tail
+            # value is scaled with everything else rather than added in
+            # different units.
+            if args.reward_scale > 0:
+                rewards = [r * args.reward_scale for r in rewards]
+            else:
+                scaler.update(rewards)
+                rewards = [r / scaler.std for r in rewards]
             buf_rew.append(torch.tensor(rewards, dtype=torch.float32,
                                         device=device))
             buf_done.append(torch.tensor(dones, dtype=torch.float32,

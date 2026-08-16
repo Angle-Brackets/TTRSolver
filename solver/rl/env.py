@@ -62,7 +62,7 @@ PASS_INDEX = 0
 # actions -- four Lures on the same board. Coordination needs the
 # pending plan to be visible.
 PENDING_DIM = MAX_TOONS * (len(TRACKS) + 2)      # track one-hot, group, none
-OBS_DIM = (MAX_COGS * 9 + MAX_TOONS * (3 + 49) + 3
+OBS_DIM = (MAX_COGS * 9 + MAX_TOONS * (3 + 49) + 4
            + MAX_TOONS + PENDING_DIM)
 
 
@@ -162,7 +162,11 @@ def encode(state: BattleState, actor: int = 0,
 
     out += [min(state.round_num, 12) / 12.0,
             len(state.active_cogs()) / MAX_COGS,
-            len(state.active_toons()) / MAX_TOONS]
+            len(state.active_toons()) / MAX_TOONS,
+            # What is still coming after this fight. Without it the
+            # agent cannot tell floor one of a building from the last
+            # cog of the day, and every gag looks equally spendable.
+            min(state.cogs_remaining, 30) / 30.0]
 
     # Whose decision this is. Solo play always sets index 0, so the
     # block is constant there and costs nothing.
@@ -312,7 +316,8 @@ class BattleEnv:
             self.objective, laff_lost, ps._spent(before, nxt),
             won=nxt.is_win(),
             lost=nxt.is_terminal() and not nxt.is_win(),
-            toons_lost=went_sad)
+            toons_lost=went_sad,
+            cogs_remaining=before.cogs_remaining)
 
         self.state = nxt
         self.rounds += 1
@@ -569,13 +574,34 @@ def mixed_position(rng, hard_fraction: float = 0.5,
     """Blend, so no single shape becomes the whole of what is learned."""
     roll = rng.random()
     if roll < combo_fraction:
-        return combo_position(rng)
-    roll -= combo_fraction
-    if roll < strange_fraction:
-        return strange_position(rng)
-    if roll < strange_fraction + hard_fraction:
-        return hard_position(rng)
-    return default_position(rng)
+        state = combo_position(rng)
+    else:
+        roll -= combo_fraction
+        if roll < strange_fraction:
+            state = strange_position(rng)
+        elif roll < strange_fraction + hard_fraction:
+            state = hard_position(rng)
+        else:
+            state = default_position(rng)
+    state.cogs_remaining = sample_horizon(rng)
+    return state
+
+
+def sample_horizon(rng) -> int:
+    """How many cogs are still coming after this fight.
+
+    Assigned here rather than inside each sampler so every position shape
+    is seen at every horizon -- a feature that only ever varies with, say,
+    cog level teaches the agent the wrong thing to condition on.
+
+    Half of all positions are the last fight, which is the street battle
+    the solver has always modelled and the case the horizon must not
+    disturb. The rest are building-shaped: floors of four to five cogs,
+    up to a five-floor building and its boss.
+    """
+    if rng.random() < 0.5:
+        return 0
+    return rng.randint(1, 30)
 
 
 def default_position(rng) -> BattleState:

@@ -469,6 +469,12 @@ def _quick_score(state: BattleState, plan) -> float:
         except (NotImplementedError, ValueError):
             limit = 1
         price += count * (level + 20.0 / limit)
+    # Same horizon scaling the real reward applies. This decides which
+    # plans are ever sampled, so ranking here at horizon 0 would drop
+    # the conserving plan before anything could evaluate it -- the
+    # shortlist-truncation bug this file has had three times already.
+    price *= 1.0 + objective_mod.Objective().horizon_cost * float(
+        state.cogs_remaining)
     lured = sum(1 for before, after in zip(state.cogs, probe.cogs)
                 if not before.status.lured and after.status.lured)
     return landed + 120.0 * killed + 25.0 * lured - price
@@ -729,7 +735,8 @@ def waste_penalty(objective, state: BattleState, plan) -> float:
 
 
 def round_reward(objective, laff_lost: int, spent, won: bool,
-                 lost: bool, toons_lost: int = 0) -> float:
+                 lost: bool, toons_lost: int = 0,
+                 cogs_remaining: int = 0) -> float:
     """What one party round was worth.
 
     The team's laff and the team's gags, priced by the same objective
@@ -740,7 +747,7 @@ def round_reward(objective, laff_lost: int, spent, won: bool,
 
     reward = -objective.laff_weight * float(laff_lost)
     for track, level, count in spent:
-        reward -= count * objective.gag_price(track, level)
+        reward -= count * objective.gag_price(track, level, cogs_remaining)
         if level >= POUCH_EXEMPT_LEVEL:
             reward -= count * getattr(objective, "rare_gag_premium", 0.0)
     # A toon going sad is not just the laff they had left -- it is a
@@ -931,7 +938,8 @@ def _greedy_score(state: BattleState, trial, objective) -> float:
     price = 0.0
     for action in trial:
         if action is not None:
-            price += objective.gag_price(action.track, action.level)
+            price += objective.gag_price(action.track, action.level,
+                                         state.cogs_remaining)
     return (landed + 60.0 * killed + 20.0 * lured
             - 10.0 * price - 0.25 * wasted * scarcity)
 
@@ -1038,7 +1046,8 @@ def evaluate(state: BattleState, depth: int = 1,
                 objective, laff_lost, _spent(state, nxt),
                 won=nxt.is_win(),
                 lost=nxt.is_terminal() and not nxt.is_win(),
-                toons_lost=went_sad)
+                toons_lost=went_sad,
+                cogs_remaining=state.cogs_remaining)
             future, _p = evaluate(nxt, depth - 1, mode, model, objective,
                                   samples, per_track, max_plans, leaf, rng)
             returns.append(reward + future)

@@ -200,6 +200,20 @@ class BattleState:
     cogs: List[CogState]
     round_num: int = 0
 
+    # Cogs still to come AFTER this battle -- the rest of a building's
+    # floors, a factory, a boss run. 0 means this is the last fight.
+    #
+    # The solver has always optimised ONE battle, which is why
+    # `objective.scarcity_cost` exists: a hand-tuned stand-in for "an
+    # irreplaceable gag is worth more than this fight suggests, because
+    # the cost lands in the next one". This is that quantity instead of
+    # a proxy for it. Spending a Railroad on floor one of five is a
+    # different decision from spending it on the last cog of the day,
+    # and nothing in the state could previously tell the two apart.
+    #
+    # Capped around 30, which is roughly a full building plus its boss.
+    cogs_remaining: int = 0
+
     # Unlured passes still available. A pass is a real move -- conserving
     # a scarce gag, or in a party declining to hit a cog because
     # `mechanics.pick_cog_target` makes it prefer whoever damaged it
@@ -237,13 +251,15 @@ class BattleState:
 
     def __init__(self, cogs: List[CogState], toon: Optional[ToonState] = None,
                  toons: Optional[List[ToonState]] = None,
-                 round_num: int = 0, free_passes: int = 3):
+                 round_num: int = 0, free_passes: int = 3,
+                 cogs_remaining: int = 0):
         if (toon is None) == (toons is None):
             raise ValueError("pass exactly one of `toon` or `toons`")
         self.toons = list(toons) if toons is not None else [toon]
         self.cogs = cogs
         self.round_num = round_num
         self.free_passes = free_passes
+        self.cogs_remaining = cogs_remaining
 
     @property
     def toon(self) -> ToonState:
@@ -293,6 +309,7 @@ class BattleState:
             cogs=[c.copy() for c in self.cogs],
             round_num=self.round_num,
             free_passes=self.free_passes,
+            cogs_remaining=self.cogs_remaining,
         )
 
     def active_cogs(self) -> List[CogState]:

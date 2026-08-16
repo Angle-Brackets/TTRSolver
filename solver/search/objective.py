@@ -120,6 +120,51 @@ class Objective:
     # varies with real experience, or searching against a pessimistic
     # damage assumption and comparing.
     risk_aversion: float = 0.0
+
+    # How much `state.cogs_remaining` raises the price of a gag. A gag
+    # spent on the first floor of a building is genuinely dearer than
+    # the same gag spent on the last cog, because nothing restocks a
+    # pouch mid-run -- `scarcity_cost` has been standing in for exactly
+    # this with a constant, having no access to the quantity itself.
+    #
+    # Applied as `price * (1 + k * remaining)`, so the last fight of the
+    # day charges the bare price and a full building ahead charges
+    # several times it.
+    #
+    # 0.15 was measured, not picked. Strength sweep over 40 identical
+    # coordinated battles at horizon 30, priced on one ruler:
+    #
+    #     k       gag cost   mean level   win
+    #     0.033       3.01         3.57   70.0%   <- no effect, noise
+    #     0.15        2.60         3.54   67.5%
+    #     0.5         2.58         3.25   62.5%
+    #     1.5         2.21         3.14   52.5%
+    #
+    # 0.033 does nothing: gag prices run 0.23 to 4.70 against a win
+    # bonus of 100, so doubling them is a few percent of the signal.
+    # Past 0.15 the conservation is bought with battles lost, which is
+    # the wrong trade -- gags saved for a floor you never reach are not
+    # saved.
+    #
+    # THE WIN RATE DOES COST SOMETHING, and 40 battles was too few to
+    # see it. Re-measured over 120 fresh seeds at k = 0.15:
+    #
+    #     horizon   gag cost   mean level   win
+    #     0             2.45         3.36   54.2%
+    #     10            2.46         3.16   53.3%
+    #     30            2.27         3.05   50.8%
+    #
+    # So a full building ahead buys 7% of the pouch for about 3 points
+    # of win rate in the current fight. That is the intended trade and
+    # not a free lunch -- whether it pays depends on how much the later
+    # floors need the pouch, which one battle's search cannot see. The
+    # mean gag level is the cleaner signal: 3.36 down to 3.05, the
+    # search reaching for smaller gags rather than fewer.
+    #
+    # Horizon 0 is unchanged under every k tested, which is the check
+    # that matters most: the street battle the solver has always
+    # modelled is undisturbed.
+    horizon_cost: float = 0.15
     # Flat charge per round. The only term that makes the solver prefer
     # finishing sooner for its own sake; without it, a line that stalls
     # safely forever costs nothing but the gags it spends.
@@ -144,7 +189,8 @@ class Objective:
     win_bonus: float = 100.0
     loss_penalty: float = 100.0
 
-    def gag_price(self, track: Track, level: int) -> float:
+    def gag_price(self, track: Track, level: int,
+                  cogs_remaining: int = 0) -> float:
         """What spending one of this gag costs the objective.
 
         `track=None` is a pass, which spends no gag and so is free. It is
@@ -158,6 +204,10 @@ class Objective:
         if self.scarcity_cost:
             limit = data.gag(track, level).max_carry or 1
             price += self.scarcity_cost * (1.0 / limit)
+        # What is still coming makes the same gag dearer. Defaults to 0
+        # remaining, so every existing caller is unchanged.
+        if cogs_remaining and self.horizon_cost:
+            price *= 1.0 + self.horizon_cost * float(cogs_remaining)
         return price
 
     def step_reward(self, laff_lost: int, track: Track, level: int,
