@@ -159,7 +159,36 @@ USE_POLICY = False
 # for the two scorers that have no `objective` to read. Mirrors
 # `objective.laff_weight`, which is what `round_reward` charges for laff
 # LOST, so the shortlist and the reward agree on what laff is for.
-HEAL_VALUE = 3.0
+# Swept over 45 identical buildings, AFTER the reinforcement-slot fix:
+#
+#     HEAL_VALUE   floors   finished
+#     0.0 (blind)    2.44      62.2%
+#     0.5            2.51      64.4%
+#     1.0            2.62      66.7%
+#     2.0            2.67      68.9%
+#     3.0            2.58      64.4%
+#
+# An earlier sweep of the same values came back perfectly flat --
+# 15.6% finished at every setting, the same seven buildings each time --
+# because 42% of runs were then locked in a pass loop by the
+# reinforcement bug, which no healing policy could affect. That flatness
+# was the clue that something else was wrong, not evidence that healing
+# does not matter.
+#
+# Differences of a few points across 45 seeds are noise; what the sweep
+# supports is that healing is worth something and that 3.0 overcorrects.
+HEAL_VALUE = 2.0
+
+# How much of a trap's damage to credit before it has been sprung. Less
+# than one because the payoff is conditional on a lure landing later and
+# on the cog surviving until then, but nowhere near the flat 20 it used
+# to score.
+TRAP_DISCOUNT = 0.6
+
+# How many extra candidates `greedy_plan` simulates purely to give
+# unrepresented tracks a hearing. Costs simulation in the rollout hot
+# path; buys the guarantee that no track is cut by arithmetic alone.
+TRACK_PROBES = 3
 
 GREEDY_SHORTLIST = 2
 
@@ -850,8 +879,29 @@ def greedy_plan(state: BattleState, objective) -> List[Optional[Action]]:
 
         pool = candidates(working, index, per_track=3)
         pool.sort(key=lambda a: -score_of(a))
+        # TRACK DIVERSITY, the same guarantee `plans()` gives the root.
+        # `_cheap_score` sums a group gag's damage over every target, so
+        # in a four-cog position the top of this list is group gags and
+        # nothing else -- measured at 553/393/333 against 43 for the
+        # best trap, rank 11. Taking the top two therefore simulated
+        # only group attacks, and any track whose worth the arithmetic
+        # does not capture was excluded before the simulation that
+        # would have shown it. Trap was below the cut in 39 of 39
+        # decisions.
+        #
+        # So: the best few overall, plus the best of each track not yet
+        # represented. Bounded by the number of tracks, which is at most
+        # seven.
+        shortlist = pool[:GREEDY_SHORTLIST]
+        seen_tracks = {a.track for a in shortlist}
+        for action in pool:
+            if len(shortlist) >= GREEDY_SHORTLIST + TRACK_PROBES:
+                break
+            if action.track not in seen_tracks:
+                shortlist.append(action)
+                seen_tracks.add(action.track)
         best, best_score = None, 0.0     # 0.0 => holding is the floor
-        for action in pool[:GREEDY_SHORTLIST]:
+        for action in shortlist:
             trial = [None] * len(state.toons)
             trial[index] = action
             score = _greedy_score(working, trial, objective)
@@ -919,7 +969,42 @@ def _cheap_score(state: BattleState, index: int, action: Action) -> float:
                   else 1) if any(not c.status.lured for c in live) else 0
         return 25.0 * caught - price
     if action.track == Track.TRAP:
-        return 20.0 - price
+        # A trap is worth the damage it will deal when something lures a
+        # cog onto it -- conditional, but not small: a level 5 trap hits
+        # for around 90.
+        #
+        # This was a flat 20.0, below what any attack scores, so the best
+        # trap action ranked around 13th of the candidate pool while
+        # `GREEDY_SHORTLIST` simulates the top 2. Measured: below the cut
+        # in 39 of 39 decisions where a trap was held. Since
+        # `greedy_plan` is also the rollout continuation, every position
+        # was valued as though a trap would never be laid again -- the
+        # same blindness Toon-Up had, and the thing the owner warned
+        # about: undervalue Trap and you undervalue Lure with it.
+        #
+        # Credited only when the party can actually spring it. A trap
+        # with no lure behind it is a wasted gag, and `can_still_damage`
+        # already treats the pair as the unit it is.
+        has_lure = any(
+            key[0] == Track.LURE and count > 0
+            for other in state.toons if other.laff > 0
+            for key, count in other.gag_counts.items())
+        if not has_lure:
+            return -price
+        try:
+            damage = mechanics.calc_toon_damage(
+                action.track, action.level,
+                organic=toon.is_organic(action.track))
+        except (NotImplementedError, ValueError):
+            return 20.0 - price
+        target = (state.cogs[action.target_index]
+                  if action.target_index is not None
+                  and 0 <= action.target_index < len(state.cogs)
+                  else None)
+        landed = min(damage, max(0, target.hp)) if target else damage
+        # Discounted against a direct attack: the payoff needs a lure to
+        # arrive, and the cog may be killed by other means first.
+        return TRAP_DISCOUNT * float(landed) - price
 
     try:
         damage = mechanics.calc_toon_damage(
