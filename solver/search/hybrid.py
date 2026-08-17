@@ -173,7 +173,8 @@ def propose(state: BattleState, rng, sample: bool = True
 
 
 def climb(state: BattleState, rng=random, budget: int = 16,
-          width: int = 3) -> Optional[Sequence[Optional[Action]]]:
+          width: int = 3, probe_tracks: bool = False
+          ) -> Optional[Sequence[Optional[Action]]]:
     """Coordinate ascent on the joint plan, instead of independent draws.
 
     `best_plan` re-rolls every seat on every sample, which spends its
@@ -190,6 +191,37 @@ def climb(state: BattleState, rng=random, budget: int = 16,
     Budget is counted in `_quick_score` calls so this can be compared
     with `best_plan` at equal cost, which is the only fair comparison
     between two search strategies.
+
+    `probe_tracks` offers each seat the best action of every track it
+    holds, not just the policy's top `width`. It is OFF, having been
+    tried and measured, and the reason it fails is worth more than the
+    feature would have been.
+
+    The motivation was real. The climb can only reorder what the policy
+    proposes, and PPO gives Trap essentially no probability, so a plan
+    containing one is unreachable however much budget is spent -- while
+    the search opens the same position with `trap5` and a hold. Probing
+    does fix that: on the position in question the climb goes from
+    `sound5 + squirt5 + squirt4 + throw7` to `trap5 + sound5 + squirt4
+    + throw7`, matching the search on three seats of four.
+
+    It does not help, over 180 held-out buildings:
+
+        no probes, budget 8      66.1% finished   trap 1.0%
+        probes,    budget 8      63.3%            trap 1.2%
+        no probes, budget 12     65.0%            trap 0.9%
+        probes,    budget 12     65.0%            trap 1.2%
+
+    Trap use barely moves, so the probes are being OFFERED and
+    `_quick_score` is declining them -- it plays one all-hit round, and
+    a trap pays the round after, so it scores near zero. Widening a
+    proposal cannot help when the judge is blind to what was added, and
+    the probes cost budget that the seat-swaps were using, which is why
+    budget 8 gets worse rather than merely staying flat.
+
+    The evaluator is the ceiling here, not the proposal width. Same
+    conclusion the budget sweep reached from the other side: climbing
+    `_quick_score` harder stops helping, because it is a proxy.
     """
     import numpy as np
 
@@ -216,7 +248,27 @@ def climb(state: BattleState, rng=random, budget: int = 16,
             pending = list(plan)
             pending[seat] = None
             values = _logits(model, state, seat, pending)
-            order = np.argsort(values)[::-1][:width]
+            order = list(np.argsort(values)[::-1][:width])
+            if probe_tracks:
+                # The best of every track this toon can actually play,
+                # in the policy's own within-track order.
+                seen_tracks = set()
+                for i in order:
+                    entry = env_mod.ACTIONS[int(i)]
+                    if entry is not None and np.isfinite(values[int(i)]):
+                        seen_tracks.add(entry.track)
+                for index in np.argsort(values)[::-1]:
+                    index = int(index)
+                    if not np.isfinite(values[index]):
+                        break
+                    entry = env_mod.ACTIONS[index]
+                    if entry is None:
+                        continue          # ACTIONS has gaps
+                    track = entry.track
+                    if track in seen_tracks:
+                        continue
+                    seen_tracks.add(track)
+                    order.append(index)
             for index in order:
                 if not np.isfinite(values[index]):
                     continue
