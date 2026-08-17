@@ -76,6 +76,10 @@ def main():
     ap.add_argument("--lam", type=float, default=0.95)
     ap.add_argument("--clip", type=float, default=0.2)
     ap.add_argument("--entropy", type=float, default=0.01)
+    ap.add_argument("--shaping", type=float, default=0.0,
+                    help="potential-based shaping on incoming damage; "
+                         "pays now for a cog lured or killed, which is "
+                         "what the collapse onto Throw needs")
     ap.add_argument("--vf", type=float, default=0.5)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--export", default="solver/rl/ppo_policy.json")
@@ -134,7 +138,8 @@ def main():
             return state
     envs = [env_mod.BattleEnv(rng=random.Random(args.seed * 1000 + i),
                               sampler=sampler,
-                              coordinated=args.coordinated)
+                              coordinated=args.coordinated,
+                              shaping=args.shaping, gamma=args.gamma)
             for i in range(args.envs)]
     obs, masks = zip(*[e.reset() for e in envs])
     obs = list(obs)
@@ -184,6 +189,39 @@ def main():
             total.append(ret)
             won.append(1.0 if info.get("win") else 0.0)
         return statistics.mean(total), statistics.mean(won)
+
+    def evaluate_facility():
+        """Buildings finished and floors cleared, on a FIXED set.
+
+        The eval above draws street positions, so every learning curve
+        this trainer has ever printed measured single battles -- while
+        the thing actually being optimised is multi-floor play. A policy
+        could have plateaued on facilities at 200k steps and the curve
+        would still have looked healthy.
+
+        Shaping is deliberately off here: this measures the real
+        objective, not the one training is accelerated with.
+        """
+        floors, finished = [], []
+        for seed in range(20_000, 20_000 + 40):
+            e = env_mod.BattleEnv(rng=random.Random(seed),
+                                  sampler=env_mod.facility_position,
+                                  coordinated=args.coordinated)
+            ob, mk = e.reset()
+            done, info, guard = False, {}, 0
+            while not done and guard < 300:
+                guard += 1
+                with torch.no_grad():
+                    logits, _v = forward(
+                        torch.tensor([ob], dtype=torch.float32,
+                                     device=device),
+                        torch.tensor([mk], dtype=torch.bool, device=device))
+                    act = int(logits.argmax(dim=1).item())
+                ob, mk, _r, done, info = e.step(act)
+            cleared = info.get("floor", 1) - (0 if info.get("win") else 1)
+            floors.append(max(0, cleared))
+            finished.append(1.0 if info.get("win") else 0.0)
+        return statistics.mean(floors), statistics.mean(finished)
 
     def baseline_random():
         total, won = [], []
@@ -348,8 +386,10 @@ def main():
         if update % args.eval_every == 0 or update == updates:
             ret, win = evaluate()
             rate = collected / (time.time() - started)
+            fl, fin = evaluate_facility()
             print(f"    update {update:4d}/{updates}  steps {collected:8d}  "
                   f"EVAL return {ret:+7.2f}  win {win * 100:5.1f}%  "
+                  f"| FACILITY floors {fl:4.2f} finished {fin * 100:5.1f}%  "
                   f"({rate:5.0f} steps/s)", flush=True)
 
     payload = {

@@ -239,6 +239,7 @@ class BattleEnv:
     """One battle. `reset()` starts a new one, `step()` plays a round."""
 
     def __init__(self, objective=None, rng=None, max_rounds: int = 20,
+                 shaping: float = 0.0, gamma: float = 0.99,
                  sampler=None, coordinated: bool = False):
         """`coordinated` makes a round TOON-MAJOR: one env step is one
         toon's decision, and the round resolves when everybody standing
@@ -257,6 +258,11 @@ class BattleEnv:
         self.objective = objective or objective_mod.BALANCED
         self.rng = rng or random.Random()
         self.max_rounds = max_rounds
+        # Weight on the potential-based shaping term; 0 disables it.
+        # `gamma` must match the trainer's discount or the shaping stops
+        # being potential-based and starts changing the objective.
+        self.shaping = shaping
+        self.gamma = gamma
         self.sampler = sampler or default_position
         self.coordinated = coordinated
         self.state: Optional[BattleState] = None
@@ -398,6 +404,36 @@ class BattleEnv:
             lost=nxt.is_terminal() and not nxt.is_win(),
             toons_lost=went_sad,
             cogs_remaining=before.cogs_remaining)
+
+        # POTENTIAL-BASED SHAPING on incoming damage.
+        #
+        # The problem it addresses, measured: the policy collapses onto
+        # Throw -- 49% of its gags against the search's 32% -- and
+        # essentially never heals (1.1% vs 8.5%), traps (0.0% vs 3.8%)
+        # or drops (2.1% vs 9.5%). Throw is universally held, always
+        # legal and always pays immediately; a heal spends a gag and a
+        # turn to prevent damage that would have arrived later, so its
+        # advantage is negative early and it is never explored enough to
+        # learn otherwise.
+        #
+        # Raising the entropy coefficient does not touch this. Swept
+        # 0.01 / 0.04 / 0.10, the gag entropy came back 3.79 every time,
+        # because the bonus is over 246 ACTIONS and the policy satisfies
+        # it by spreading across targets while still choosing Throw.
+        #
+        # Shaping with the potential Phi(s) = -shaping * expected
+        # incoming damage pays the agent NOW for a cog it put to sleep
+        # or killed. Potential-based, in the Ng et al. sense --
+        # F = gamma*Phi(s') - Phi(s) -- so it leaves the optimal policy
+        # unchanged and only changes how quickly the credit arrives.
+        # That guarantee is the whole reason to prefer it over simply
+        # handing out a bonus for luring, which would distort what the
+        # agent is optimising.
+        if self.shaping:
+            before_threat = ps.expected_incoming(before)
+            after_threat = 0.0 if nxt.is_terminal() else                 ps.expected_incoming(nxt)
+            reward += self.shaping * (before_threat
+                                      - self.gamma * after_threat)
 
         self.rounds += 1
         self.floor_rounds += 1
