@@ -737,3 +737,78 @@ class ReinforceSlotTest(unittest.TestCase):
         state = self.field(alive=2, holdout=2)
         self.assertEqual(facility.reinforce(state), 2)
         self.assertEqual(len(state.active_cogs()), 4)
+
+
+class TrapSpringsTheLureTest(unittest.TestCase):
+    """[CONFIRMED] by the owner: a cog lured onto a trap takes the
+    damage and is knocked OUT of the lure.
+
+    This was a [TODO] in simulator.apply_toon_action that guessed the
+    other way and kept the cog lured, which made Trap+Lure strictly
+    better than the game allows -- damage AND the full lure duration.
+    Springing a trap spends the lure.
+    """
+
+    def trapped_cog(self, level=4, trap_level=3):
+        full = data.cog_max_hp(level)
+        c = CogState("flunky", "bossbot", level, full, full)
+        c.status.trapped = True
+        c.status.trap_level = trap_level
+        c.status.trap_track = Track.TRAP
+        return c
+
+    def test_the_cog_wakes_up(self):
+        from solver.state import Action
+        c = self.trapped_cog()
+        state = BattleState(
+            toon=ToonState(60, 60, {Track.LURE: 6, Track.TRAP: 6},
+                           {(Track.LURE, 3): 1}), cogs=[c])
+        simulator.apply_toon_action(
+            state, Action(track=Track.LURE, level=3, target_index=0), True)
+        self.assertFalse(state.cogs[0].status.lured)
+
+    def test_the_trap_is_consumed(self):
+        from solver.state import Action
+        c = self.trapped_cog(level=9)
+        state = BattleState(
+            toon=ToonState(60, 60, {Track.LURE: 6, Track.TRAP: 6},
+                           {(Track.LURE, 3): 1}), cogs=[c])
+        simulator.apply_toon_action(
+            state, Action(track=Track.LURE, level=3, target_index=0), True)
+        self.assertFalse(state.cogs[0].status.trapped)
+        self.assertLess(state.cogs[0].hp, state.cogs[0].max_hp)
+
+    def test_a_lure_with_no_trap_still_sleeps(self):
+        """The control: without a trap the cog is lured as normal."""
+        from solver.state import Action
+        full = data.cog_max_hp(4)
+        state = BattleState(
+            toon=ToonState(60, 60, {Track.LURE: 6}, {(Track.LURE, 3): 1}),
+            cogs=[CogState("flunky", "bossbot", 4, full, full)])
+        simulator.apply_toon_action(
+            state, Action(track=Track.LURE, level=3, target_index=0), True)
+        self.assertTrue(state.cogs[0].status.lured)
+
+
+class PreventionTest(unittest.TestCase):
+    """The cog phase reaches the scorers as an expectation."""
+
+    def test_a_lured_cog_threatens_nothing(self):
+        from solver.search import party_search as ps
+        full = data.cog_max_hp(9)
+        c = CogState("legal_eagle", "lawbot", 9, full, full)
+        state = BattleState(toon=toon(), cogs=[c])
+        awake = ps.expected_incoming(state)
+        c.status.apply_lure(60, 3, 3)
+        self.assertGreater(awake, 0.0)
+        self.assertEqual(ps.expected_incoming(state), 0.0)
+
+    def test_bigger_cogs_threaten_more(self):
+        from solver.search import party_search as ps
+        def threat(key, dept, level):
+            full = data.cog_max_hp(level)
+            return ps.expected_incoming(BattleState(
+                toon=toon(),
+                cogs=[CogState(key, dept, level, full, full)]))
+        self.assertLess(threat("flunky", "bossbot", 2),
+                        threat("legal_eagle", "lawbot", 9))

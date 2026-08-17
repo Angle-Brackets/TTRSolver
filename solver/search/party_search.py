@@ -478,6 +478,54 @@ def plans(state: BattleState, mode: Mode = Mode.PICKUP,
     return out
 
 
+def expected_incoming(state: BattleState) -> float:
+    """Laff the cogs are expected to take off the party next round.
+
+    THIS IS HOW THE COG PHASE REACHES THE FAST SCORERS, and it does not
+    involve simulating it. `outcomes.cog_attack_outcomes` is already
+    cached on (department, type, level), so this is a sum over live
+    cogs -- a flunky at level 2 threatens 1.3 a round, a Legal Eagle at
+    9 threatens 11.6.
+
+    It matters because every defensive effect was invisible by
+    construction. `_quick_score` and `_greedy_score` simulate the TOON
+    phase only, so a plan that lures three cogs looked exactly as safe
+    as one that lured none, and Lure was compensated with a flat
+    `25 x cogs lured` that has no relation to what those cogs were
+    about to do. Healing had the same hole and Trap had it too; three
+    hand-tuned constants standing in for one quantity nobody computed.
+
+    A lured cog contributes nothing: it skips its attack.
+    """
+    from .. import outcomes as outcomes_mod
+
+    total = 0.0
+    for cog in state.active_cogs():
+        if cog.status.lured:
+            continue
+        total += sum(p * dmg for p, _name, dmg, hit
+                     in outcomes_mod.cog_attack_outcomes(cog) if hit)
+    return total
+
+
+def prevented(before: BattleState, after: BattleState) -> float:
+    """Incoming damage a round removed, by luring or by killing.
+
+    Counted for the whole lure, not one round of it: a cog asleep for
+    three rounds is three rounds of its attacks that never land, which
+    is the actual reason Lure is the answer to a four-cog floor.
+    """
+    gain = expected_incoming(before) - expected_incoming(after)
+    if gain <= 0:
+        return 0.0
+    rounds = 1.0
+    asleep = [c for c in after.active_cogs() if c.status.lured]
+    if asleep:
+        rounds = max(1.0, sum(c.status.lure_rounds_remaining
+                              for c in asleep) / float(len(asleep)))
+    return gain * rounds
+
+
 def _quick_score(state: BattleState, plan) -> float:
     """One all-hit round, scored on damage landed against gag price.
 
@@ -518,10 +566,8 @@ def _quick_score(state: BattleState, plan) -> float:
     # shortlist-truncation bug this file has had three times already.
     price *= 1.0 + objective_mod.Objective().horizon_cost * float(
         state.cogs_remaining)
-    lured = sum(1 for before, after in zip(state.cogs, probe.cogs)
-                if not before.status.lured and after.status.lured)
     return (landed + HEAL_VALUE * restored
-            + 120.0 * killed + 25.0 * lured - price)
+            + 120.0 * killed + HEAL_VALUE * prevented(state, probe) - price)
 
 
 def _playable(state: BattleState, plan) -> bool:
@@ -1072,9 +1118,7 @@ def _greedy_score(state: BattleState, trial, objective) -> float:
                  for before, after in zip(state.cogs, probe.cogs))
     killed = sum(1 for before, after in zip(state.cogs, probe.cogs)
                  if not before.status.is_dead and after.status.is_dead)
-    lured = sum(1 for before, after in zip(state.cogs, probe.cogs)
-                if not before.status.lured and after.status.lured
-                and not after.status.is_dead)
+
     # Price the action directly. This called `_spent`, which diffs every
     # toon's whole gag dictionary against the probe's -- forty-odd
     # lookups to rediscover a fact the caller already had, on a trial
@@ -1085,7 +1129,7 @@ def _greedy_score(state: BattleState, trial, objective) -> float:
             price += objective.gag_price(action.track, action.level,
                                          state.cogs_remaining)
     return (landed + HEAL_VALUE * restored
-            + 60.0 * killed + 20.0 * lured
+            + 60.0 * killed + HEAL_VALUE * prevented(state, probe)
             - 10.0 * price - 0.25 * wasted * scarcity)
 
 

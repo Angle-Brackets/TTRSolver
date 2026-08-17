@@ -384,14 +384,24 @@ def apply_toon_action(state: BattleState, action: Action,
                 dealt += dmg
                 if cog.hp <= 0:
                     cog.status.is_dead = True
-                    continue
-                # [TODO] Unconfirmed whether a cog that just detonated its
-                # trap is then lured, or knocked out of the lure by the
-                # trap damage (same open question as
-                # mechanics.LURE_ENDS_ON_DAMAGE). Kept as "still lured",
-                # the pre-existing behaviour. Not reachable today anyway:
-                # lure_duration_rounds() above and per-level trap damage
-                # in _apply_trap_trigger() are both [TODO] and raise.
+                # THE TRAP KNOCKS IT OUT OF THE LURE. [CONFIRMED] by the
+                # owner: "If you lure a cog onto a trap, the cog becomes
+                # unlured after taking damage."
+                #
+                # This was a [TODO] that guessed the other way and kept
+                # the cog lured, which made Trap+Lure strictly better
+                # than it is -- the cog took the trap damage AND stayed
+                # asleep for the full lure duration, so the combo bought
+                # damage and several rounds of prevention at once.
+                #
+                # It does not. Springing a trap SPENDS the lure: you
+                # trade the rounds the cog would have spent asleep for
+                # the trap's damage. That is the real trade-off behind
+                # the combo and any evaluation of Trap has to price it,
+                # which is why the discount cannot just be
+                # P(spring) x damage -- the lure given up is part of the
+                # cost.
+                continue
             cog.status.apply_lure(acc_before_bonus, rounds, action.level)
 
     else:  # SOUND, THROW, SQUIRT, DROP -- direct damage
