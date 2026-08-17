@@ -6,21 +6,31 @@ checking the policy's own suggestions. This samples a few joint plans
 from the trained policy and keeps whichever one `_quick_score` likes
 best.
 
-Measured over 180 identical buildings:
+Measured over 180 HELD-OUT buildings -- seeds never tuned against,
+which matters because the tuned set flattered this badly:
 
-    agent                floors  finished  ms/decision
-    plain PPO              2.48     58.9%         0.28
-    PPO x16 + scorer       2.60     64.3%         2.89
-    full search            2.63     65.0%       ~105
+    agent                floors  finished   plans/second
+    plain PPO              2.44     61.7%           2266
+    climb, budget 8        2.49     66.1%            656
+    climb, budget 16       2.48     66.1%            467
+    best-of-16 sampling       -         -            106
+    full search            2.48     67.8%              1
 
-Indistinguishable from the search at a thirty-sixth of the cost, and
-monotonic in `samples`, so it is a dial rather than a setting.
+`climb` recovers about two thirds of the distance from the policy to
+the search for roughly double the policy's cost, and it is
+deterministic -- it walks the policy's ranked logits rather than
+sampling, so it returns the same plan every time.
 
-THE SPREAD IS PART OF THE RESULT. Sampling makes each run different:
-three independent streams over the same 180 buildings finished 62.8%,
-65.6% and 64.4%. Any single run of this is worth about three points
-either way, which is wider than the gap to the search -- so "matches"
-is the claim, and "beats" is not, however tempting one run looks.
+THE SEARCH IS STILL AHEAD, by 1.7 points. On the tuned seeds this
+scored 69.4% against the search's 65.0% and looked like a win; on fresh
+buildings it is 66.1% against 67.8%. Same code, same budget. Anything
+measured on the set it was chosen on is worth re-running elsewhere.
+
+BUDGET 8 BEATS BUDGET 16 on the tuned set (69.4% against 66.7%) and
+ties it here. `_quick_score` is an approximation, so climbing it harder
+optimises the proxy rather than the game -- more budget is not
+automatically better, which is the tell that the scorer, not the
+search strategy, is now the ceiling.
 
 WHY IT WORKS
 ------------
@@ -160,6 +170,71 @@ def propose(state: BattleState, rng, sample: bool = True
         action = env_mod.action_at(index)
         pending[seat] = None if action.is_pass else action
     return pending
+
+
+def climb(state: BattleState, rng=random, budget: int = 16,
+          width: int = 3) -> Optional[Sequence[Optional[Action]]]:
+    """Coordinate ascent on the joint plan, instead of independent draws.
+
+    `best_plan` re-rolls every seat on every sample, which spends its
+    budget re-deciding the seats that were already right. A joint plan
+    is one action per toon, so the natural move is to fix the others and
+    vary one seat at a time -- the same structure the search exploits
+    when it enumerates per toon.
+
+    Starts from the policy's argmax plan, then sweeps the seats,
+    offering each the policy's top `width` alternatives and keeping any
+    that `_quick_score` prefers. Repeats until a full sweep changes
+    nothing or the budget of scorer calls runs out.
+
+    Budget is counted in `_quick_score` calls so this can be compared
+    with `best_plan` at equal cost, which is the only fair comparison
+    between two search strategies.
+    """
+    import numpy as np
+
+    from ..rl import env as env_mod
+    from . import party_search as ps
+
+    if not available():
+        return None
+    model = _load()
+
+    plan = list(propose(state, rng, sample=False))
+    try:
+        best_score = ps._quick_score(state, plan)
+    except (NotImplementedError, ValueError, KeyError):
+        return plan
+    spent = 1
+
+    improved = True
+    while improved and spent < budget:
+        improved = False
+        for seat, toon in enumerate(state.toons):
+            if toon.laff <= 0 or spent >= budget:
+                continue
+            pending = list(plan)
+            pending[seat] = None
+            values = _logits(model, state, seat, pending)
+            order = np.argsort(values)[::-1][:width]
+            for index in order:
+                if not np.isfinite(values[index]):
+                    continue
+                action = env_mod.action_at(int(index))
+                trial = list(plan)
+                trial[seat] = None if action.is_pass else action
+                if trial == plan:
+                    continue
+                try:
+                    score = ps._quick_score(state, trial)
+                except (NotImplementedError, ValueError, KeyError):
+                    continue
+                spent += 1
+                if score > best_score:
+                    plan, best_score, improved = trial, score, True
+                if spent >= budget:
+                    break
+    return plan
 
 
 def best_plan(state: BattleState, rng=random, samples: int = 16
