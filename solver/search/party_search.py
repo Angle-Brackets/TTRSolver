@@ -558,6 +558,50 @@ def expected_incoming(state: BattleState) -> float:
 def prevented(before: BattleState, after: BattleState) -> float:
     """Incoming damage a round removed, by luring or by killing.
 
+    [TODO] TWO KNOWN DEFECTS, DELIBERATELY LEFT IN. Both were fixed and
+    the fix was reverted, because fixing them alone made the search
+    WORSE and the reason is instructive.
+
+      * `rounds` is one mean `lure_rounds_remaining` over every asleep
+        cog, applied to the whole difference. A cog already lured with
+        one round left drags the multiplier down for a cog this plan
+        just put to sleep for four.
+      * KILLS are multiplied by that lure duration too, since they sit
+        in the same difference -- so a kill scores several times more
+        while any lure happens to be running. That one is a plain
+        accounting error, not an approximation.
+
+    A third correction was tried with them: weighting the prevention by
+    whether the lure actually LANDS, since `_quick_score` plays one
+    all-hit round and so pays a 50% accurate Lure what it pays a 95%
+    one.
+
+    All three are right about the mechanics. Measured over 180 held-out
+    buildings, the search finished:
+
+        67.8%   as written here, defects and all
+        64.4%   + accuracy weighting
+        65.0%   + per-cog rounds
+        65.6%   + both, with HEAL_VALUE and the kill weight re-swept
+
+    The hybrid climb gained 1.1 points on fresh seeds, inside this
+    sample's noise; the search lost two to three, outside it.
+
+    WHY. `_greedy_score` shares this function, and it is not really a
+    scorer -- `greedy_plan` uses it to play the ROLLOUTS that grade
+    every plan the search considers. Making it more careful about lures
+    makes the search's model of the future passive rather than the
+    search itself careful: holds went 11.0% to 17.4% and lure use 9.5%
+    to 15.6%, and plans stopped being distinguishable from one another.
+    The constants around this term -- HEAL_VALUE, the kill weights, the
+    prices -- were all chosen while it read as it does now, and they
+    absorb its errors. Correcting one term without refitting the rest
+    is not a partial improvement, it is a miscalibration.
+
+    So this stays wrong on purpose until somebody refits the evaluator
+    as a whole, which is a bigger job than one term. Do not "fix" it in
+    isolation; the numbers above are what that costs.
+
     Counted for the whole lure, not one round of it: a cog asleep for
     three rounds is three rounds of its attacks that never land, which
     is the actual reason Lure is the answer to a four-cog floor.
