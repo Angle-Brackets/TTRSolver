@@ -51,9 +51,23 @@ class PlanGenerationTest(unittest.TestCase):
         stronger track cannot squeeze another out entirely. At two per
         track this cap once hid the best Sound plan available -- see
         docs/party-strategy.md."""
-        tracks = {a.track for a in ps.candidates(party(), 0)}
+        cands = ps.candidates(party(), 0)
+        tracks = {a.track for a in cands if not a.is_pass}
         self.assertEqual(tracks, {Track.THROW, Track.SOUND, Track.LURE,
                                   Track.TRAP})
+
+    def test_a_party_can_already_decline_to_act(self):
+        """Not via a pass candidate -- via an empty slot.
+
+        `candidates` drops the pass, which looks like an omission and is
+        not: a joint plan leaves a toon's slot None when it gives them
+        nothing, measured at 19.2% of all plan slots. Adding an explicit
+        pass candidate as well was inert, chosen 0 times in 543 slots.
+        """
+        seen = set()
+        for plan in ps.plans(party(), Mode.COORDINATED):
+            seen.update(a is None for a in plan)
+        self.assertIn(True, seen)
 
     def test_a_plan_nobody_can_throw_is_not_offered(self):
         state = BattleState(

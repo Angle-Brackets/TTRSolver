@@ -245,7 +245,11 @@ def gag(track: Track, level: int) -> Gag:
     try:
         return _BY_KEY[(track, level)]
     except KeyError:
-        raise KeyError(f"no gag at {track.value} level {level}") from None
+        # `track` is None for a pass, which has no gag. Formatting
+        # `track.value` there raised AttributeError from inside the
+        # error path, so the real problem arrived disguised.
+        name = track.value if track is not None else "no track (a pass)"
+        raise KeyError(f"no gag at {name} level {level}") from None
 
 
 def gags_in(track: Track) -> Tuple[Gag, ...]:

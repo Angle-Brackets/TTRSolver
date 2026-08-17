@@ -351,7 +351,19 @@ def step(state: BattleState, mine: Optional[Action] = None,
     """
     nxt = state.clone()
     actions = teammate_actions(nxt, mine, mode, model, rng, joint)
+    lured_before = any(c.status.lured for c in state.active_cogs())
     healed = simulator.apply_party_round(nxt, actions, rng=rng)
+
+    # SPEND THE PASS BUDGET. `apply_party_round` filters passes out
+    # before it does anything, so nothing here was decrementing
+    # `free_passes` and a party could have passed forever -- the
+    # termination measure (gags, lure rounds, free passes) would have
+    # stopped descending. Charged once per round rather than per toon,
+    # and not at all while a cog is lured, because there the lure timer
+    # is already the quantity going down.
+    if not lured_before and any(a is not None and a.is_pass
+                                for a in actions):
+        nxt.free_passes = max(0, nxt.free_passes - 1)
 
     if not nxt.is_terminal():
         _party_cog_phase(nxt, healed, rng)

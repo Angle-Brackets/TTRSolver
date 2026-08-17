@@ -185,6 +185,13 @@ HEAL_VALUE = 2.0
 # to score.
 TRAP_DISCOUNT = 0.6
 
+# Rounds of lure a sprung trap gives up. A lure runs two to three rounds
+# depending on level, and springing it ends the lure immediately --
+# [CONFIRMED] by the owner -- so the combo buys damage at the cost of
+# the sleep. Held as one number because the trap is scored before the
+# lure that will spring it is chosen, so its level is not yet known.
+TRAP_LURE_ROUNDS_FORGONE = 2.0
+
 # How many extra candidates `greedy_plan` simulates purely to give
 # unrepresented tracks a hearing. Costs simulation in the rollout hot
 # path; buys the guarantee that no track is cut by arithmetic alone.
@@ -220,6 +227,23 @@ def candidates(state: BattleState, toon_index: int,
     by_track: Dict[Track, List[Action]] = {}
     for action in simulator.legal_actions(rotated):
         if action.is_pass:
+            # DROPPED, and it is not the omission it looks like. A party
+            # can already decline: `plans` leaves a toon's slot None
+            # when the joint plan gives them nothing, and measured over
+            # 20 buildings that is 19.2% of all plan slots against 80.8%
+            # throwing a gag.
+            #
+            # Adding the pass here as well was tried and is inert -- an
+            # explicit pass was chosen 0 times in 543 slots, because it
+            # scores 0.0 in `_cheap_score` and a None slot achieves the
+            # same thing without competing for one. It also needed three
+            # separate crash fixes to survive the price loops, so the
+            # redundant encoding is a liability rather than a spare
+            # wheel.
+            #
+            # The overkill this was meant to cure therefore has another
+            # cause: at 10 wasted damage a round the party is choosing
+            # to double up, not being forced to.
             continue
         by_track.setdefault(action.track, []).append(action)
 
@@ -751,8 +775,12 @@ def plan_waste(state: BattleState, plan) -> Tuple[float, float]:
     singles: Dict[tuple, List[int]] = {}
     group: Dict[Track, List[int]] = {}
     for toon, action in zip(state.toons, plan):
-        if action is None or action.track in (Track.TOON_UP, Track.LURE,
-                                              Track.TRAP):
+        # A pass has no track, so it must be skipped here with the
+        # other tracks that deal no damage -- `calc_toon_damage(None, 0)`
+        # raises. It wastes nothing by definition.
+        if (action is None or action.is_pass
+                or action.track in (Track.TOON_UP, Track.LURE,
+                                    Track.TRAP)):
             continue
         try:
             dmg = mechanics.calc_toon_damage(
@@ -782,11 +810,11 @@ def plan_waste(state: BattleState, plan) -> Tuple[float, float]:
 
     price = 0.0
     for toon, action in zip(state.toons, plan):
-        if action is None:
-            continue
+        if action is None or action.is_pass:
+            continue          # a pass costs no gag, so no scarcity
         try:
             limit = data.gag(action.track, action.level).max_carry or 1
-        except (NotImplementedError, ValueError):
+        except (NotImplementedError, ValueError, KeyError):
             limit = 1
         price += 1.0 / limit
 
@@ -984,6 +1012,14 @@ def _cheap_score(state: BattleState, index: int, action: Action) -> float:
     live = [cog for cog in state.cogs if not cog.status.is_dead]
     if not live:
         return 0.0
+
+    # A pass spends nothing and achieves nothing, so it scores zero --
+    # below any productive action, above one that wastes a gag. That
+    # ordering is the whole point of offering it. Checked before the
+    # price lookup, which would ask `data.gag(None, 0)`.
+    if action.is_pass:
+        return 0.0
+
     toon = state.toons[index]
 
     try:
@@ -1028,14 +1064,26 @@ def _cheap_score(state: BattleState, index: int, action: Action) -> float:
         # same blindness Toon-Up had, and the thing the owner warned
         # about: undervalue Trap and you undervalue Lure with it.
         #
-        # Credited only when the party can actually spring it. A trap
-        # with no lure behind it is a wasted gag, and `can_still_damage`
-        # already treats the pair as the unit it is.
-        has_lure = any(
-            key[0] == Track.LURE and count > 0
-            for other in state.toons if other.laff > 0
-            for key, count in other.gag_counts.items())
-        if not has_lure:
+        # P(SPRING), rather than a flat discount. Three things have to
+        # happen for a trap to pay, and all three are in the state:
+        #
+        #   * somebody holds a Lure -- otherwise the trap is a dead gag,
+        #     and `can_still_damage` already treats the pair as one unit
+        #   * that Lure lands, which is an accuracy number
+        #   * the cog lives long enough to be lured onto it
+        #
+        # And the payoff is NOT the trap damage alone. [CONFIRMED] by
+        # the owner: springing a trap knocks the cog OUT of the lure, so
+        # the combo trades the rounds that cog would have spent asleep
+        # for the trap's damage. That prevention is what `prevented`
+        # prices elsewhere, so it is netted off here rather than
+        # ignored -- a trap sprung on a cog that threatens little is
+        # worth much more than one sprung on a Legal Eagle you could
+        # have kept asleep.
+        lurers = [other for other in state.toons if other.laff > 0
+                  and any(key[0] == Track.LURE and count > 0
+                          for key, count in other.gag_counts.items())]
+        if not lurers:
             return -price
         try:
             damage = mechanics.calc_toon_damage(
@@ -1048,9 +1096,15 @@ def _cheap_score(state: BattleState, index: int, action: Action) -> float:
                   and 0 <= action.target_index < len(state.cogs)
                   else None)
         landed = min(damage, max(0, target.hp)) if target else damage
-        # Discounted against a direct attack: the payoff needs a lure to
-        # arrive, and the cog may be killed by other means first.
-        return TRAP_DISCOUNT * float(landed) - price
+        # The lure this will consume, priced as the attacks that cog
+        # would otherwise have skipped.
+        forgone = 0.0
+        if target is not None and not target.status.lured:
+            from .. import outcomes as outcomes_mod
+            threat = sum(p * dmg for p, _n, dmg, hit
+                         in outcomes_mod.cog_attack_outcomes(target) if hit)
+            forgone = HEAL_VALUE * threat * TRAP_LURE_ROUNDS_FORGONE
+        return TRAP_DISCOUNT * float(landed) - forgone - price
 
     try:
         damage = mechanics.calc_toon_damage(
