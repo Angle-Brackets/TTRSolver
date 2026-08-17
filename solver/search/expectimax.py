@@ -616,12 +616,29 @@ def solve(state: BattleState, objective=None,
            memo: Optional[Dict] = None) -> Tuple[float, Optional[Action]]:
     """Play the battle out to the end -- exact, no heuristic.
 
-    Safe because every action spends a gag, so no line can run longer than
-    the pouch and the search cannot loop. `max_depth` is a safety valve, not
-    part of the model: leave it None to solve properly.
+    Safe because every action spends a gag OR a unit of
+    `state.free_passes`, so no line can run longer than the two together
+    and the search cannot loop. `max_depth` is a safety valve, not part
+    of the model: leave it None to solve properly.
+
+    THE PASS BUDGET HAS TO BE IN HERE, and leaving it out is what made
+    the wider pass look unsound. This counted gags only, on the stated
+    assumption that "every action spends a gag" -- true of every action
+    except a pass. A toon holding one gag therefore got `max_depth = 2`,
+    the search truncated, and the leaves fell through to
+    `heuristic_value`. That is where the phantom came from: in one
+    position it returned the correct value +88.64 while naming `pass`
+    as the best move, when passing is really worth +86.39 and throwing
+    the last gag at a 2 hp cog wins outright.
+
+    So the pass was never creating value; a depth limit computed from
+    the wrong measure was. The termination measure has been
+    (gags, lure rounds, free passes) since `free_passes` was added --
+    this simply makes the depth budget agree with it.
     """
     if max_depth is None:
-        max_depth = sum(n for n in state.toon.gag_counts.values() if n > 0) + 1
+        max_depth = (sum(n for n in state.toon.gag_counts.values() if n > 0)
+                     + max(0, state.free_passes) + 1)
     return evaluate(state, max_depth, objective, memo=memo)
 
 

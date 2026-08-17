@@ -165,15 +165,6 @@ def legal_actions(state: BattleState) -> List[Action]:
                     continue  # can't trap an already-trapped or lured cog
             actions.append(Action(track=track, level=level, target_index=i))
 
-    # Whether waiting is the only thing left has to be decided BEFORE
-    # the unproductive actions are dropped -- afterwards every remaining
-    # action is productive by construction and the test always fails.
-    #
-    # REVERTED to the narrow rule. The widening is correct in principle
-    # and broke `solve()` in practice -- see `state.free_passes`.
-    lured_wait = (any(cog.status.lured for cog in active)
-                  and not any(is_productive(state, a) for a in actions))
-
     # Drop the moves that provably do nothing. `is_productive` already
     # knew about them and was only ever consulted for the pass decision,
     # so the search was free to spend a round re-luring an
@@ -183,7 +174,22 @@ def legal_actions(state: BattleState) -> List[Action]:
     if productive:
         actions = productive
 
-    if lured_wait:
+    # PASS, widened. Offered whenever a cog is lured -- that is how lure
+    # rounds get burned, and it costs no budget because the lure timer
+    # is already the quantity descending -- and otherwise while
+    # `free_passes` lasts.
+    #
+    # This was reverted once, on the belief that it broke exact
+    # `solve()`. It did not: `solve` computed its depth budget as
+    # "gags + 1", on the assumption that every action spends a gag, and
+    # a pass does not. The search truncated and its leaves fell through
+    # to `heuristic_value`, which is what invented the value. Fixing the
+    # budget to count `free_passes` too makes narrow and wide agree
+    # exactly where they should -- checked over 93 random positions,
+    # with no case of the wider rule scoring LOWER, which more options
+    # cannot do -- and the six positions where it scores higher are
+    # genuine, one of them by 131 points.
+    if any(cog.status.lured for cog in active) or state.free_passes > 0:
         actions.append(Action(track=None, level=0, target_index=None))
 
     return actions

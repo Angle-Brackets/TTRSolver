@@ -38,26 +38,33 @@ class WhenPassIsOfferedTest(unittest.TestCase):
     def test_offered_when_lured_and_nothing_is_productive(self):
         self.assertEqual(len(passes(stuck_fight())), 1)
 
-    def test_not_offered_when_no_cog_is_lured(self):
-        """Nothing to wait for, and the termination measure needs it.
+    def test_offered_with_nothing_lured_while_budget_lasts(self):
+        """Passing with nothing lured is a real move: conserve a scarce
+        gag, or decline to attack in a party because
+        `mechanics.pick_cog_target` aims a cog at whoever hurt it most.
 
-        This SHOULD be wrong, and is not yet. Passing with nothing lured
-        is a real move -- conserving a scarce gag, or declining to
-        attack in a party because `mechanics.pick_cog_target` aims a cog
-        at whoever hurt it most. Widening the rule to allow it broke
-        exact `solve()`, which then valued a pass as CREATING 4.55
-        points; see `state.free_passes` for the trail. Reverted until
-        that is understood, and this test guards the revert rather than
-        the design.
+        This test used to assert the opposite and said so -- the narrow
+        rule was a revert, kept because widening it appeared to make
+        `solve()` value a pass as creating points. The cause was not the
+        pass: `solve` computed its depth budget as "gags + 1" on the
+        assumption that every action spends a gag, so a line containing
+        passes truncated and its leaves fell through to
+        `heuristic_value`. With the budget counting `free_passes` too,
+        narrow and wide agree exactly.
         """
-        self.assertEqual(passes(stuck_fight(lure_rounds=0)), [])
+        self.assertEqual(len(passes(stuck_fight(lure_rounds=0))), 1)
 
-    def test_not_offered_when_a_damage_gag_is_in_the_pouch(self):
-        """Also should be wrong eventually -- holding a Throw does not
-        oblige you to throw it. Same revert as above."""
+    def test_not_offered_once_the_budget_is_spent(self):
+        """The cap is what keeps the termination measure descending."""
+        state = stuck_fight(lure_rounds=0)
+        state.free_passes = 0
+        self.assertEqual(passes(state), [])
+
+    def test_offered_even_holding_a_damage_gag(self):
+        """Holding a Throw does not oblige you to throw it."""
         state = stuck_fight(counts={(Track.TRAP, 3): 2, (Track.LURE, 3): 2,
                                     (Track.THROW, 3): 1})
-        self.assertEqual(passes(state), [])
+        self.assertEqual(len(passes(state)), 1)
 
     def test_still_nothing_when_hurt_and_holding_only_toon_up(self):
         """This expected the opposite, on a premise the wiki denies.
@@ -215,3 +222,38 @@ class PassDoesNotBreakTerminationTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DepthBudgetTest(unittest.TestCase):
+    """`solve()`'s depth budget must count the pass budget too.
+
+    It counted gags only, on the stated assumption that every action
+    spends a gag. A pass does not, so a toon holding one gag got
+    max_depth = 2, the search truncated, and the leaves fell through to
+    `heuristic_value` -- which returned the right VALUE while naming the
+    wrong ACTION, and is what the wider pass was blamed for.
+    """
+
+    def one_gag_position(self):
+        return BattleState(
+            toon=ToonState(30, 30, {Track.THROW: 5}, {(Track.THROW, 2): 1}),
+            cogs=[CogState("flunky", "bossbot", 2, 2,
+                           data.cog_max_hp(2))],
+            free_passes=3)
+
+    def test_throwing_the_last_gag_at_a_dying_cog_beats_passing(self):
+        outcomes.clear_caches()
+        _value, action = expectimax.solve(self.one_gag_position())
+        self.assertIsNotNone(action)
+        self.assertFalse(action.is_pass)
+        self.assertEqual(action.track, Track.THROW)
+
+    def test_the_budget_leaves_room_for_every_pass(self):
+        state = self.one_gag_position()
+        gags = sum(n for n in state.toon.gag_counts.values() if n > 0)
+        # However solve computes it, it must allow a line that spends
+        # every gag AND every pass.
+        outcomes.clear_caches()
+        value, _action = expectimax.solve(state)
+        self.assertIsInstance(value, float)
+        self.assertGreaterEqual(gags + state.free_passes, 4)
