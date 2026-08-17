@@ -13,6 +13,7 @@ two-cog fight, so depth 4+ on two cogs is slow without further pruning.
 
 stdlib unittest only -- pytest is not installed.
 """
+import random
 import unittest
 
 from solver import data, outcomes, simulator
@@ -744,3 +745,58 @@ class RunningOutOfGagsIsALossTest(unittest.TestCase):
             self.assertTrue(after.is_terminal())
             self.assertFalse(after.is_win())
             self.assertLess(reward, -50.0)
+
+
+class HybridProposalTest(unittest.TestCase):
+    """PPO proposes, `_quick_score` judges.
+
+    Needs numpy and a trained export; skips rather than fails without
+    them, the same contract `search/policy.py` follows.
+    """
+
+    def setUp(self):
+        from solver.search import hybrid
+        if not hybrid.available():
+            self.skipTest("no usable policy export (or numpy missing)")
+        self.hybrid = hybrid
+
+    def position(self):
+        from solver.rl import env as env_mod
+        rng = random.Random(4)
+        for _ in range(50):
+            state = env_mod.facility_position(rng)
+            if not state.is_terminal() and len(state.toons) > 1:
+                return state
+        self.skipTest("no usable position sampled")
+
+    def test_a_proposed_plan_is_playable(self):
+        state = self.position()
+        plan = self.hybrid.best_plan(state, random.Random(0), samples=4)
+        self.assertIsNotNone(plan)
+        self.assertEqual(len(plan), len(state.toons))
+        from solver.search import party_search as ps
+        self.assertTrue(ps._playable(state, plan))
+
+    def test_every_action_is_legal_for_its_toon(self):
+        """The plan comes from the policy, so it inherits the shared
+        move generator -- but a joint plan assigns across toons, which
+        per-toon legality cannot express."""
+        state = self.position()
+        plan = self.hybrid.best_plan(state, random.Random(1), samples=6)
+        for toon, action in zip(state.toons, plan):
+            if action is None or action.is_pass:
+                continue
+            self.assertGreater(
+                toon.gag_counts.get((action.track, action.level), 0), 0)
+
+    def test_one_sample_is_the_policy_argmax(self):
+        """`samples=1` must be plain greedy play, so the hybrid can
+        never be worse than the policy except through the scorer."""
+        state = self.position()
+        greedy = self.hybrid.propose(state, random.Random(2), sample=False)
+        once = self.hybrid.best_plan(state, random.Random(3), samples=1)
+        self.assertEqual(
+            [(a.track, a.level, a.target_index) if a else None
+             for a in greedy],
+            [(a.track, a.level, a.target_index) if a else None
+             for a in once])
