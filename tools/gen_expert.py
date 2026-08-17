@@ -64,14 +64,30 @@ def action_index(action):
 
 
 def one_episode(args):
-    seed, samples, max_plans, hard, strange, combo, coordinated = args
+    (seed, samples, max_plans, hard, strange, combo, coordinated,
+     facility) = args
     rng = random.Random(seed)
-    sampler = (lambda r: env_mod.mixed_position(r, hard, strange, combo))
+    def sampler(r, _h=hard, _s=strange, _c=combo, _f=facility):
+        # Facility positions matter more here than anywhere else. The
+        # search's advantage over PPO is almost entirely in multi-floor
+        # play -- heals and traps whose payoff arrives a round later --
+        # so trajectories drawn only from street battles would not
+        # contain the behaviour worth cloning.
+        if r.random() < _f:
+            return env_mod.facility_position(r)
+        state = env_mod.mixed_position(r, _h, _s, _c)
+        state.cogs_remaining = 0
+        state.kind = "street"
+        return state
     e = env_mod.BattleEnv(rng=rng, sampler=sampler, coordinated=coordinated)
     obs, mask = e.reset()
     rows, done, guard = [], False, 0
 
-    while not done and guard < 60:
+    # 60 decisions is about 15 rounds with a four-toon party, which cuts
+    # a multi-floor building off around its second floor -- exactly the
+    # play worth recording. The environment truncates per floor already,
+    # so this only has to be generous.
+    while not done and guard < 400:
         guard += 1
         # The expert. In coordinated mode the search returns a joint
         # plan and we take the entry for whoever is deciding, so the
@@ -99,6 +115,9 @@ def main():
     ap.add_argument("--strange-fraction", type=float, default=0.25)
     ap.add_argument("--combo-fraction", type=float, default=0.2)
     ap.add_argument("--coordinated", action="store_true")
+    ap.add_argument("--facility-fraction", type=float, default=0.5,
+                    help="share of episodes that are multi-floor "
+                         "facilities, where the search's edge lives")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--workers", type=int, default=None)
     ap.add_argument("--out", default=str(OUT))
@@ -106,7 +125,8 @@ def main():
 
     jobs = [(args.seed * 7919 + i, args.samples, args.max_plans,
              args.hard_fraction, args.strange_fraction, args.combo_fraction,
-             args.coordinated) for i in range(args.episodes)]
+             args.coordinated, args.facility_fraction)
+            for i in range(args.episodes)]
     started, rows = time.time(), []
     with ProcessPoolExecutor(max_workers=args.workers) as pool:
         for n, got in enumerate(pool.map(one_episode, jobs, chunksize=1), 1):

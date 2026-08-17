@@ -179,18 +179,13 @@ USE_POLICY = False
 # supports is that healing is worth something and that 3.0 overcorrects.
 HEAL_VALUE = 2.0
 
+
 # How much of a trap's damage to credit before it has been sprung. Less
 # than one because the payoff is conditional on a lure landing later and
 # on the cog surviving until then, but nowhere near the flat 20 it used
 # to score.
 TRAP_DISCOUNT = 0.6
 
-# Rounds of lure a sprung trap gives up. A lure runs two to three rounds
-# depending on level, and springing it ends the lure immediately --
-# [CONFIRMED] by the owner -- so the combo buys damage at the cost of
-# the sleep. Held as one number because the trap is scored before the
-# lure that will spring it is chosen, so its level is not yet known.
-TRAP_LURE_ROUNDS_FORGONE = 2.0
 
 # How many extra candidates `greedy_plan` simulates purely to give
 # unrepresented tracks a hearing. Costs simulation in the rollout hot
@@ -508,6 +503,25 @@ def plans(state: BattleState, mode: Mode = Mode.PICKUP,
         if not progressed:
             break
         depth_in_stratum += 1
+
+    # HOLD-VARIANTS WERE TRIED HERE AND DO NOT PAY, which is worth
+    # recording because the overkill looks like a bug and is not.
+    #
+    # 53% of planned rounds contain overkill. Most of it is gag
+    # granularity -- a group Sound that overkills a weak cog while being
+    # needed for the strong ones has no better alternative -- but 17% is
+    # avoidable: a hold-variant of the chosen plan scores strictly
+    # better on `_quick_score`, and the stratified cut above had removed
+    # it before anything could evaluate it.
+    #
+    # Generating those variants after the cut removed exactly that 17%,
+    # waste falling from 10.1 a round to 8.4. Outcomes got WORSE:
+    # floors cleared 2.07 to 1.83 over 30 identical buildings. Holding
+    # buys the cogs another round, and a round of four cogs attacking
+    # costs more than the gag it saves.
+    #
+    # So the search is right to double up, and the waste penalty should
+    # not be strengthened either. Left out rather than left in.
     return out
 
 
@@ -1090,10 +1104,11 @@ def _cheap_score(state: BattleState, index: int, action: Action) -> float:
         # ignored -- a trap sprung on a cog that threatens little is
         # worth much more than one sprung on a Legal Eagle you could
         # have kept asleep.
-        lurers = [other for other in state.toons if other.laff > 0
-                  and any(key[0] == Track.LURE and count > 0
-                          for key, count in other.gag_counts.items())]
-        if not lurers:
+        lure_levels = [key[1]
+                       for other in state.toons if other.laff > 0
+                       for key, count in other.gag_counts.items()
+                       if key[0] == Track.LURE and count > 0]
+        if not lure_levels:
             return -price
         try:
             damage = mechanics.calc_toon_damage(
@@ -1113,7 +1128,18 @@ def _cheap_score(state: BattleState, index: int, action: Action) -> float:
             from .. import outcomes as outcomes_mod
             threat = sum(p * dmg for p, _n, dmg, hit
                          in outcomes_mod.cog_attack_outcomes(target) if hit)
-            forgone = HEAL_VALUE * threat * TRAP_LURE_ROUNDS_FORGONE
+            # Rounds of sleep given up, from the lure that would spring
+            # this trap. The CHEAPEST one the party holds, because that
+            # is the one a sensible player spends on it: durations run
+            # 2/2/3/3/4/4/8 by level, so springing a trap with a level 7
+            # Presentation throws away eight rounds of a cog not
+            # attacking, and nobody does that on purpose.
+            #
+            # This was a flat 2.0, which is right only for a level 1-2
+            # lure and understates every other by up to four times.
+            rounds = min(mechanics.lure_duration_rounds(level)
+                         for level in lure_levels)
+            forgone = HEAL_VALUE * threat * float(rounds)
         return TRAP_DISCOUNT * float(landed) - forgone - price
 
     try:
