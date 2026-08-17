@@ -66,6 +66,11 @@ from typing import List, Optional, Sequence
 
 from ..state import Action, BattleState
 
+# How much of the follow-up round counts when `judge="deep"`. Less than
+# one because the second round is played by a greedy stand-in rather
+# than by whatever will really happen.
+LOOKAHEAD_DISCOUNT = 0.7
+
 _EXPORT = Path(__file__).resolve().parents[1] / "rl" / "ppo_facility.json"
 _MODEL: Optional[dict] = None
 _TRIED = False
@@ -172,9 +177,62 @@ def propose(state: BattleState, rng, sample: bool = True
     return pending
 
 
+def _judge(state: BattleState, plan, deep: bool) -> float:
+    """Rank a plan. One round, or two.
+
+    `_quick_score` plays a single all-hit round, which is why a trap
+    scores near zero and why climbing it harder stops paying: it cannot
+    see anything that arrives next round. `deep` plays the plan, then
+    lets `greedy_plan` answer for the round after, and counts that at
+    LOOKAHEAD_DISCOUNT.
+
+    This is what the search has and the climb did not. `party_search`
+    scores its plans with `rollout_value`, several rounds of play; this
+    is the cheapest possible imitation of it.
+
+    IT IS OFF, having been measured. Over 180 held-out buildings:
+
+        1-ply, budget 8      66.7% finished   0.61 ms
+        1-ply, budget 12     65.0%            0.73 ms
+        2-ply, budget 8      63.9%            1.82 ms
+        2-ply, budget 12     63.9%            2.38 ms
+
+    Nearly three points worse at three times the cost. The second round
+    is played by `greedy_plan`, which is a myopic proxy itself, so this
+    adds a GUESS about the next round to a real evaluation of this one
+    and weights the guess at 0.7. A lookahead is only as good as the
+    policy that plays it forward.
+
+    Third judge improvement to fail: trap credit was worth +0.6 (noise),
+    track probes -2.8, this -2.8. Plain one-ply `_quick_score` at budget
+    8 has beaten all of them.
+    """
+    from .. import party as party_mod
+    from . import objective as objective_mod
+    from . import party_search as ps
+
+    first = ps._quick_score(state, plan)
+    if not deep:
+        return first
+    probe = state.clone()
+    try:
+        ps.simulator.apply_party_round(
+            probe, list(plan), hits=[a is not None and not a.is_pass
+                                     for a in plan])
+    except (NotImplementedError, ValueError, KeyError):
+        return first
+    if probe.is_terminal():
+        return first
+    try:
+        follow = ps.greedy_plan(probe, objective_mod.BALANCED)
+        return first + LOOKAHEAD_DISCOUNT * ps._quick_score(probe, follow)
+    except (NotImplementedError, ValueError, KeyError):
+        return first
+
+
 def climb(state: BattleState, rng=random, budget: int = 16,
-          width: int = 3, probe_tracks: bool = False
-          ) -> Optional[Sequence[Optional[Action]]]:
+          width: int = 3, probe_tracks: bool = False,
+          deep: bool = False) -> Optional[Sequence[Optional[Action]]]:
     """Coordinate ascent on the joint plan, instead of independent draws.
 
     `best_plan` re-rolls every seat on every sample, which spends its
@@ -234,7 +292,7 @@ def climb(state: BattleState, rng=random, budget: int = 16,
 
     plan = list(propose(state, rng, sample=False))
     try:
-        best_score = ps._quick_score(state, plan)
+        best_score = _judge(state, plan, deep)
     except (NotImplementedError, ValueError, KeyError):
         return plan
     spent = 1
@@ -278,7 +336,7 @@ def climb(state: BattleState, rng=random, budget: int = 16,
                 if trial == plan:
                     continue
                 try:
-                    score = ps._quick_score(state, trial)
+                    score = _judge(state, trial, deep)
                 except (NotImplementedError, ValueError, KeyError):
                     continue
                 spent += 1

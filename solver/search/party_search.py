@@ -573,12 +573,61 @@ def prevented(before: BattleState, after: BattleState) -> float:
     return gain * rounds
 
 
+def armed_credit(before: BattleState, after: BattleState) -> float:
+    """Damage a trap laid this round will deal when a lure springs it.
+
+    ONE ROUND OF FUTURE VISION, and the narrowest useful kind. This
+    scorer plays a single all-hit round, so a trap -- which deals
+    nothing until a lure arrives -- scored zero and every plan
+    containing one ranked below every plan that attacked. Measured: with
+    trap actions explicitly offered to the hybrid climb, trap use moved
+    1.0% to 1.2% and the finish rate got WORSE, because the option was
+    being offered and this function was declining it.
+
+    Priced like `_cheap_score` does: the trap's damage capped at what
+    the cog has left, discounted by TRAP_DISCOUNT, and only when
+    somebody is holding a Lure to spring it. A trap with nothing behind
+    it really is a wasted gag and should still score zero.
+
+    Deliberately NOT netting off the lure it will consume, which
+    `_cheap_score` does. There the trap is being compared against
+    attacking that cog directly; here the plan has already been played
+    and the question is only what the board is now worth.
+    """
+    from .. import data
+    from .. import mechanics
+
+    holds_lure = any(key[0] == Track.LURE and count > 0
+                     for toon in after.toons if toon.laff > 0
+                     for key, count in toon.gag_counts.items())
+    if not holds_lure:
+        return 0.0
+
+    total = 0.0
+    for old, new in zip(before.cogs, after.cogs):
+        if new.status.is_dead or not new.status.trapped:
+            continue
+        if old.status.trapped or new.status.trap_level is None:
+            continue          # already armed before this round
+        try:
+            damage = mechanics.calc_toon_damage(
+                Track.TRAP, new.status.trap_level,
+                organic=new.status.trap_organic)
+        except (NotImplementedError, ValueError, KeyError):
+            continue
+        total += TRAP_DISCOUNT * float(min(damage, max(0, new.hp)))
+    return total
+
+
 def _quick_score(state: BattleState, plan) -> float:
     """One all-hit round, scored on damage landed against gag price.
 
     Deliberately cheap and deliberately not the real evaluation: it
     decides which plans get sampled, and a plan it ranks badly is never
     looked at again, so it must not be *wrong* -- only rough.
+
+    It does look one step past the round for a trap, and only a trap:
+    see `armed_credit`.
     """
     from .. import data
 
@@ -613,7 +662,7 @@ def _quick_score(state: BattleState, plan) -> float:
     # shortlist-truncation bug this file has had three times already.
     price *= 1.0 + objective_mod.Objective().horizon_cost * float(
         state.cogs_remaining)
-    return (landed + HEAL_VALUE * restored
+    return (landed + HEAL_VALUE * restored + armed_credit(state, probe)
             + 120.0 * killed + HEAL_VALUE * prevented(state, probe) - price)
 
 
