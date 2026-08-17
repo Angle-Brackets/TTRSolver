@@ -555,22 +555,73 @@ def expected_incoming(state: BattleState) -> float:
     return total
 
 
-def prevented(before: BattleState, after: BattleState) -> float:
-    """Incoming damage a round removed, by luring or by killing.
+def _threat(cog) -> float:
+    """Expected damage this cog deals in one round if it is awake."""
+    from .. import outcomes as outcomes_mod
 
-    Counted for the whole lure, not one round of it: a cog asleep for
-    three rounds is three rounds of its attacks that never land, which
-    is the actual reason Lure is the answer to a four-cog floor.
+    return sum(p * dmg for p, _name, dmg, hit
+               in outcomes_mod.cog_attack_outcomes(cog) if hit)
+
+
+def prevented(before: BattleState, after: BattleState, plan=None) -> float:
+    """Incoming damage this round removed, PER COG.
+
+    A lured cog is worth its own threat times its own remaining sleep,
+    not the party average. The first version summed the whole change in
+    expected incoming damage and multiplied it by the mean
+    `lure_rounds_remaining` over every asleep cog, which got two things
+    wrong:
+
+      * a cog already lured with one round left dragged the multiplier
+        down for a cog this plan had just put to sleep for four, and
+      * KILLS were multiplied by the lure duration as well, because they
+        were lumped into the same difference -- so killing a cog while
+        any lure was running scored several times what killing it alone
+        did.
+
+    Now each cog is priced on its own terms. A newly lured cog is worth
+    `threat x rounds asleep x P(the lure lands)`; a cog killed this
+    round is worth one round of its threat, because the strategic value
+    of removing it is already paid by the `killed` term in the scorers.
+
+    WEIGHTED BY WHETHER THE LURE LANDS. `_quick_score` plays one ALL-HIT
+    round, so without this a 50% accurate Lure buys what a 95% one does,
+    and the error is then multiplied by the sleep. A cog only stops
+    attacking with probability `acc`. Accuracy is rolled per track per
+    target with the strongest gag in a roll group setting the odds, so
+    the best lure aimed at a cog is the one that counts.
     """
-    gain = expected_incoming(before) - expected_incoming(after)
-    if gain <= 0:
-        return 0.0
-    rounds = 1.0
-    asleep = [c for c in after.active_cogs() if c.status.lured]
-    if asleep:
-        rounds = max(1.0, sum(c.status.lure_rounds_remaining
-                              for c in asleep) / float(len(asleep)))
-    return gain * rounds
+    landing = 1.0
+    if plan is not None:
+        odds = []
+        for index, action in enumerate(plan):
+            if action is None or action.is_pass:
+                continue
+            if action.track != Track.LURE:
+                continue
+            rotated = party_mod._as_actor(before, index)
+            try:
+                odds.append(simulator.toon_action_accuracy(
+                    rotated, action) / 100.0)
+            except (NotImplementedError, ValueError, KeyError):
+                continue
+        if odds:
+            landing = max(0.0, min(1.0, max(odds)))
+
+    total = 0.0
+    for old, new in zip(before.cogs, after.cogs):
+        if old.status.is_dead:
+            continue
+        threat = _threat(old)
+        if threat <= 0:
+            continue
+        if new.status.is_dead:
+            total += threat                      # one round; `killed` pays
+                                                 # for the rest
+        elif new.status.lured and not old.status.lured:
+            rounds = max(1, new.status.lure_rounds_remaining)
+            total += threat * float(rounds) * landing
+    return total
 
 
 def armed_credit(before: BattleState, after: BattleState) -> float:
@@ -663,7 +714,8 @@ def _quick_score(state: BattleState, plan) -> float:
     price *= 1.0 + objective_mod.Objective().horizon_cost * float(
         state.cogs_remaining)
     return (landed + HEAL_VALUE * restored + armed_credit(state, probe)
-            + 120.0 * killed + HEAL_VALUE * prevented(state, probe) - price)
+            + 120.0 * killed
+            + HEAL_VALUE * prevented(state, probe, plan) - price)
 
 
 def _playable(state: BattleState, plan) -> bool:
@@ -1268,7 +1320,7 @@ def _greedy_score(state: BattleState, trial, objective) -> float:
             price += objective.gag_price(action.track, action.level,
                                          state.cogs_remaining)
     return (landed + HEAL_VALUE * restored
-            + 60.0 * killed + HEAL_VALUE * prevented(state, probe)
+            + 60.0 * killed + HEAL_VALUE * prevented(state, probe, trial)
             - 10.0 * price - 0.25 * wasted * scarcity)
 
 
