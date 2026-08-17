@@ -32,6 +32,40 @@ optimises the proxy rather than the game -- more budget is not
 automatically better, which is the tell that the scorer, not the
 search strategy, is now the ceiling.
 
+WHERE THE REMAINING GAP IS
+--------------------------
+Usage over 80 held-out buildings, climb at budget 8 against the search:
+
+    holds      2.1%   11.0%      <- the big one
+    throw     44.4%   35.1%
+    squirt    20.3%   23.4%
+    sound     11.4%   14.1%
+    drop      10.0%    8.2%
+    lure       7.8%    9.5%
+    toon_up    4.8%    6.7%
+    trap       1.3%    2.9%
+
+CLIMB ALWAYS SWINGS. It declines to act on 2.1% of decisions against
+the search's 11.0%, throws 13% more gags over the same buildings (2159
+against 1918), and skews to level 4 (38.1% against 27.9%) where the
+search prefers 5 and 6. More gags, each weaker, and almost never a
+hold.
+
+Every one of those differences is the same thing: `_quick_score` pays
+for damage landed, so an action that deals none scores near zero
+whatever it saves. Healing is the visible case -- on seed 31003 the
+search heals three times in seven rounds and holds the party at 48-55
+laff, while the climb heals twice, the second time at [2, 17, 2], and
+loses the building with two toons carrying Toon-Up 7.
+
+A caution about the obvious fix, learnt the hard way: hold-variants
+were forced into the SEARCH's shortlist once and play got worse, 2.07
+floors to 1.83, and that was written down as "the overkill is not a
+bug". It was ranked by `_quick_score` too. What that experiment
+actually showed is that holding *as this scorer judges it* is bad --
+the search's own 11% comes from sampled rollouts, which can see a
+conserved gag spent later.
+
 WHY IT WORKS
 ------------
 PPO is a better PROPOSAL DISTRIBUTION than the search's enumeration.
