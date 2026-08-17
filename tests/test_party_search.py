@@ -56,18 +56,18 @@ class PlanGenerationTest(unittest.TestCase):
         self.assertEqual(tracks, {Track.THROW, Track.SOUND, Track.LURE,
                                   Track.TRAP})
 
-    def test_a_party_can_already_decline_to_act(self):
-        """Not via a pass candidate -- via an empty slot.
+    def test_holding_has_exactly_one_spelling(self):
+        """`candidates` drops the pass and `plans` adds it back once, so
+        a coordinated plan says "holds" one way and only one way.
 
-        `candidates` drops the pass, which looks like an omission and is
-        not: a joint plan leaves a toon's slot None when it gives them
-        nothing, measured at 19.2% of all plan slots. Adding an explicit
-        pass candidate as well was inert, chosen 0 times in 543 slots.
+        Both spellings existed for a while -- a bare None from `plans`
+        and an explicit pass from `candidates` -- which left None
+        meaning "holds" here and "will be sampled" in pickup mode.
         """
-        seen = set()
         for plan in ps.plans(party(), Mode.COORDINATED):
-            seen.update(a is None for a in plan)
-        self.assertIn(True, seen)
+            self.assertNotIn(None, plan)
+        self.assertFalse(any(a.is_pass
+                             for a in ps.candidates(party(), 0)))
 
     def test_a_plan_nobody_can_throw_is_not_offered(self):
         state = BattleState(
@@ -75,7 +75,8 @@ class PlanGenerationTest(unittest.TestCase):
             cogs=[cog()])
         for plan in ps.plans(state, Mode.COORDINATED):
             for t, action in zip(state.toons, plan):
-                if action is not None:
+                # A hold throws nothing, so there is no gag to hold.
+                if action is not None and not action.is_pass:
                     self.assertGreater(
                         t.gag_counts.get((action.track, action.level), 0), 0)
 
@@ -161,7 +162,10 @@ class PlanGenerationTest(unittest.TestCase):
         what is spent, so a useless gag is strictly worse than holding.
         """
         state = party(2)
-        self.assertTrue(any(None in plan
+        # Spelt as the PASS action rather than a bare None: `None` now
+        # means only "a pickup teammate to be sampled", which is a
+        # different idea that was sharing the same word.
+        self.assertTrue(any(any(a is not None and a.is_pass for a in plan)
                             for plan in ps.plans(state, Mode.COORDINATED)))
         self.assertFalse(ps._playable(state, [None, None]))
 
@@ -209,7 +213,8 @@ class StratifiedShortlistTest(unittest.TestCase):
         shortlist = ps.plans(self.maxed_position(), Mode.COORDINATED)
         counts = {}
         for plan in shortlist:
-            sig = tuple(sorted({a.track.name for a in plan if a is not None}))
+            sig = tuple(sorted({a.track.name for a in plan
+                                if a is not None and not a.is_pass}))
             counts[sig] = counts.get(sig, 0) + 1
         self.assertLess(max(counts.values()), len(shortlist) // 2,
                         f"one family dominates the shortlist: {counts}")

@@ -277,13 +277,23 @@ def plans(state: BattleState, mode: Mode = Mode.PICKUP,
         return [[action] + blanks for action in candidates(state, 0,
                                                            per_track)]
 
-    # `None` -- hold this round, spend nothing -- is a real option for a
-    # party and has to be offered, because the alternative is forcing a
-    # toon with nothing useful to do to waste a gag. It did exactly
-    # that: asked a four-toon position where three actions already won
-    # the fight, the search had the fourth toon throw Toon-Up at a
-    # teammate on FULL LAFF, because a cheap wasted heal was the least
-    # bad thing it was allowed to say.
+    # HOLDING THIS ROUND is a real option for a party and has to be
+    # offered, because the alternative is forcing a toon with nothing
+    # useful to do to waste a gag. It did exactly that: asked a
+    # four-toon position where three actions already won the fight, the
+    # search had the fourth toon throw Toon-Up at a teammate on FULL
+    # LAFF, because a cheap wasted heal was the least bad thing it was
+    # allowed to say.
+    #
+    # It is spelt as the PASS action, not as a bare `None`. Those were
+    # two names for one thing -- the comment here used to argue they
+    # differed because `legal_actions` only offered a pass while a cog
+    # was lured, and that narrowness is gone. Keeping both left `None`
+    # meaning "holds" in coordinated mode and "will be sampled" in
+    # pickup mode, which is one word for two ideas in a module that
+    # switches between them.
+    #
+    # `None` now means only the pickup thing.
     #
     # This handles the gag that achieves NOTHING: `round_reward` already
     # charges `gag_price` for what is spent, so once holding is on the
@@ -294,15 +304,10 @@ def plans(state: BattleState, mode: Mode = Mode.PICKUP,
     # of it away -- a Railroad into a five-hit-point cog kills it and
     # discards the rest, and holding is plainly worse than that. That is
     # a separate charge; see `waste_penalty`.
-    #
-    # This is NOT the same as `simulator.legal_actions`' pass, which is
-    # deliberately offered only when a cog is lured and nothing else is
-    # productive -- that narrowness protects the solo search's
-    # termination argument. This search is depth-limited and sampled, so
-    # it has no such argument to protect.
-    per_toon = [candidates(state, i, per_track) + [None]
+    hold = Action(track=None, level=0, target_index=None)
+    per_toon = [candidates(state, i, per_track) + [hold]
                 for i in range(len(state.toons))]
-    if not any(any(a is not None for a in row) for row in per_toon):
+    if not any(any(not a.is_pass for a in row) for row in per_toon):
         return []
 
     identical = all(t.gag_counts == state.toons[0].gag_counts
@@ -418,8 +423,12 @@ def plans(state: BattleState, mode: Mode = Mode.PICKUP,
                  for i, a in enumerate(combo) if a is not None)
              for combo in playable]
     for index, combo in enumerate(playable):
-        signature = tuple(sorted({a.track for a in combo if a is not None},
-                                 key=lambda t: t.name))
+        # A hold has no track, so it contributes nothing to the
+        # signature -- two plans differing only in who holds belong in
+        # the same stratum.
+        signature = tuple(sorted(
+            {a.track for a in combo if a is not None and not a.is_pass},
+            key=lambda t: t.name))
         cheap.setdefault(signature, []).append(
             (arith[index], scores[index] if scores is not None else None,
              combo))
@@ -606,12 +615,13 @@ def _playable(state: BattleState, plan) -> bool:
     # Everyone holding is legal but cannot win, and it is the one plan a
     # rollout can spin on. Nothing restocks a pouch, so a round where
     # the whole team passes only feeds the cogs a free turn.
-    if all(action is None for action in plan):
+    if all(action is None or action.is_pass for action in plan):
         return False
 
     trapped = set()
     for toon, action in zip(state.toons, plan):
-        if action is None:
+        # A hold throws nothing, so there is no gag to check for.
+        if action is None or action.is_pass:
             continue
         if toon.gag_counts.get((action.track, action.level), 0) <= 0:
             return False
