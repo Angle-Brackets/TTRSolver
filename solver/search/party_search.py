@@ -179,6 +179,46 @@ USE_POLICY = False
 # supports is that healing is worth something and that 3.0 overcorrects.
 HEAL_VALUE = 2.0
 
+# WEIGHTS FOR THE TWO PLAN SCORERS, kept apart on purpose.
+#
+# They were one set of constants and that was wrong: `_quick_score`
+# ranks candidate plans while `_greedy_score` plays the rollouts every
+# plan is graded against, and the two want different numbers. Raising
+# the shared heal weight to 12 gained the hybrid a point and cost the
+# search two to three, because it made the SIMULATED FUTURE passive
+# rather than the search careful -- see `prevented`.
+#
+# Fitted by `tools/fit_scorer.py` against buildings finished, which is
+# the only ground truth a party position has: exact `solve()` cannot
+# reach one, and both attempts to manufacture labels from a stronger
+# search (the P0 ranking head, expert iteration) lost end to end.
+QUICK_W = {
+    "heal": 2.0,        # laff restored, capped at headroom
+    "armed": 1.0,       # trap laid this round, via `armed_credit`
+    "kill": 120.0,      # per cog killed, regardless of which
+    "kill_threat": 0.0, # per point of threat the kills removed
+    "prevent": 2.0,     # incoming damage removed, via `prevented`
+    "risk": 0.0,        # CHARGED, per standing toon a round could sink
+    "price": 1.0,       # gags spent
+}
+
+# `kill_threat` and `risk` start at zero so the scorer is unchanged
+# until they are fitted. They are the two things the equations could not
+# say: which cog was worth killing, and whether the plan leaves somebody
+# about to go sad.
+#
+# A third gap -- charging for the threat LEFT standing -- is deliberately
+# not a term. `prevented` is already `incoming(before) - incoming(after)`
+# and `before` is fixed while ranking one position's plans, so a
+# residual-threat term would be the same ordering with the sign flipped.
+GREEDY_W = {
+    "heal": 2.0,
+    "kill": 60.0,
+    "prevent": 2.0,
+    "price": 10.0,
+    "waste": 0.25,
+}
+
 
 # How much of a trap's damage to credit before it has been sprung. Less
 # than one because the payoff is conditional on a lure landing later and
@@ -525,6 +565,14 @@ def plans(state: BattleState, mode: Mode = Mode.PICKUP,
     return out
 
 
+def _cog_threat(cog) -> float:
+    """Expected damage one cog deals in a round, if it is awake."""
+    from .. import outcomes as outcomes_mod
+
+    return sum(p * dmg for p, _name, dmg, hit
+               in outcomes_mod.cog_attack_outcomes(cog) if hit)
+
+
 def expected_incoming(state: BattleState) -> float:
     """Laff the cogs are expected to take off the party next round.
 
@@ -617,6 +665,42 @@ def prevented(before: BattleState, after: BattleState) -> float:
     return gain * rounds
 
 
+def killed_threat(before: BattleState, after: BattleState) -> float:
+    """Damage per round removed by killing, not just the count.
+
+    `killed` is a flat count, so it pays the same for a Legal Eagle
+    threatening 11.6 a round as for a Flunky threatening 1.3. No weight
+    on a count can express which cog mattered -- that needs the threat
+    itself, which `expected_incoming` already knows how to compute.
+    """
+    total = 0.0
+    for old, new in zip(before.cogs, after.cogs):
+        if new.status.is_dead and not old.status.is_dead:
+            total += _cog_threat(old)
+    return total
+
+
+def toons_at_risk(state: BattleState) -> float:
+    """Standing toons a round of incoming damage could knock out.
+
+    Nothing in any scorer charged for losing a toon. A sad toon takes
+    their whole pouch out of the run -- in a building that is every
+    later floor -- and the only way it registered was indirectly,
+    through prevention they no longer contribute.
+
+    Approximate on purpose: the cogs' expected damage shared evenly
+    over whoever is standing. `mechanics.pick_cog_target` does not
+    spread it evenly, but the scorers do not simulate the cog phase at
+    all, and a rough count of who is one bad round from sad is the
+    thing that was missing.
+    """
+    standing = [t for t in state.toons if t.laff > 0]
+    if not standing:
+        return 0.0
+    share = expected_incoming(state) / float(len(standing))
+    return sum(1.0 for t in standing if t.laff <= share)
+
+
 def armed_credit(before: BattleState, after: BattleState) -> float:
     """Damage a trap laid this round will deal when a lure springs it.
 
@@ -706,8 +790,14 @@ def _quick_score(state: BattleState, plan) -> float:
     # shortlist-truncation bug this file has had three times already.
     price *= 1.0 + objective_mod.Objective().horizon_cost * float(
         state.cogs_remaining)
-    return (landed + HEAL_VALUE * restored + armed_credit(state, probe)
-            + 120.0 * killed + HEAL_VALUE * prevented(state, probe) - price)
+    return (landed
+            + QUICK_W["heal"] * restored
+            + QUICK_W["armed"] * armed_credit(state, probe)
+            + QUICK_W["kill"] * killed
+            + QUICK_W["kill_threat"] * killed_threat(state, probe)
+            + QUICK_W["prevent"] * prevented(state, probe)
+            - QUICK_W["risk"] * toons_at_risk(probe)
+            - QUICK_W["price"] * price)
 
 
 def _playable(state: BattleState, plan) -> bool:
@@ -1311,9 +1401,12 @@ def _greedy_score(state: BattleState, trial, objective) -> float:
         if action is not None:
             price += objective.gag_price(action.track, action.level,
                                          state.cogs_remaining)
-    return (landed + HEAL_VALUE * restored
-            + 60.0 * killed + HEAL_VALUE * prevented(state, probe)
-            - 10.0 * price - 0.25 * wasted * scarcity)
+    return (landed
+            + GREEDY_W["heal"] * restored
+            + GREEDY_W["kill"] * killed
+            + GREEDY_W["prevent"] * prevented(state, probe)
+            - GREEDY_W["price"] * price
+            - GREEDY_W["waste"] * wasted * scarcity)
 
 
 def rollout_value(state: BattleState, objective, rng,
