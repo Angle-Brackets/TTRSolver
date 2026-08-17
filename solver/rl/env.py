@@ -231,6 +231,32 @@ def legal_mask(state: BattleState, actor: int = 0) -> List[bool]:
                 status = state.cogs[action.target_index].status
                 if status.trapped or status.lured:
                     continue
+
+        # PRODUCTIVITY, the same rules `simulator.is_productive` applies
+        # to the search. Without them the agent may make moves the
+        # search is forbidden -- and it does: measured over 60
+        # buildings, 4.0% of its gags achieved nothing, 73 of those 74
+        # being Toon-Up thrown at a party already on full laff. That is
+        # the `toonup6->all` it opens every floor with.
+        #
+        # Spelt out here rather than by calling `is_productive`, which
+        # assumes the actor is `toons[0]` and would need the state
+        # rotated per candidate action on the hot path.
+        if action.track == Track.TOON_UP:
+            # [CONFIRMED] a toon cannot heal itself, so a heal needs
+            # somebody ELSE hurt and still standing.
+            if not any(other.laff < other.max_laff and other.laff > 0
+                       for i, other in enumerate(state.toons)
+                       if i != actor):
+                continue
+        elif action.track in (Track.LURE, Track.DROP):
+            # Re-luring only refreshes a timer the toon is running
+            # down, and Drop always misses a lured cog.
+            targets = (live if action.target_index is None
+                       else [action.target_index])
+            if not any(not state.cogs[i].status.lured for i in targets):
+                continue
+
         mask[index] = True
     return mask
 
