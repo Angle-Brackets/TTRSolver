@@ -200,64 +200,67 @@ def encode(state: BattleState, actor: int = 0,
     return out
 
 
+# (track, level, target_index) -> index into ACTIONS. Built once so the
+# mask can be derived from the search's own move generator rather than
+# reimplementing it.
+_ACTION_INDEX = {
+    (action.track, action.level, action.target_index): index
+    for index, action in enumerate(ACTIONS)
+    if action is not None and not action.is_pass
+}
+
+
 def legal_mask(state: BattleState, actor: int = 0) -> List[bool]:
     """Which indices the agent may pick this round.
 
-    The pass is always legal here. The search cannot say that -- see the
-    module docstring -- and this environment can, because it memoises
-    nothing.
+    DERIVED FROM `simulator.legal_actions`, deliberately, rather than
+    reimplementing its rules. There used to be two move generators and
+    they drifted, as two of anything will: the mask never applied the
+    productivity rules, so the agent healed parties already on full
+    laff -- 4.0% of every gag it threw -- and it validated Toon-Up
+    targets against live COG indices, a bug the simulator had already
+    found and fixed on its own side without the second copy being
+    corrected with it. Diffed over 1,178 positions that was 204
+    Toon-Ups the mask allowed and the search did not, and 147 the other
+    way.
+
+    Nothing here decides legality. It translates.
+
+    Two things this function still owns, because they are about the
+    agent rather than the rules:
+
+    * The actor. `legal_actions` always speaks for `toons[0]`, so the
+      state is rotated and Toon-Up targets -- which name a TOON -- are
+      mapped back to this state's numbering.
+    * The guarantee of a move. An all-False mask leaves the agent with
+      nothing to pick, so the pass is restored if nothing else survives.
+      `legal_actions` cannot reach that state; the mask is called on
+      states the search would never be asked about.
     """
     mask = [False] * len(ACTIONS)
-    mask[PASS_INDEX] = True
-    if not state.active_toons():
+    if (not state.active_toons() or actor >= len(state.toons)
+            or state.toons[actor].laff <= 0):
+        mask[PASS_INDEX] = True
         return mask
-    if actor >= len(state.toons) or state.toons[actor].laff <= 0:
-        return mask
-    toon = state.toons[actor]
-    live = [i for i, c in enumerate(state.cogs) if not c.status.is_dead]
-    for index in range(1, len(ACTIONS)):
-        action = ACTIONS[index]
-        if toon.gag_counts.get((action.track, action.level), 0) <= 0:
-            continue
-        if toon.track_exp.get(action.track, 0) <= 0:
-            continue
-        group = simulator.is_group_action(action.track, action.level)
-        if group != (action.target_index is None):
-            continue          # a group gag has no single target, and vice versa
-        if action.target_index is not None:
-            if action.target_index not in live:
-                continue
-            if action.track == Track.TRAP:
-                status = state.cogs[action.target_index].status
-                if status.trapped or status.lured:
-                    continue
 
-        # PRODUCTIVITY, the same rules `simulator.is_productive` applies
-        # to the search. Without them the agent may make moves the
-        # search is forbidden -- and it does: measured over 60
-        # buildings, 4.0% of its gags achieved nothing, 73 of those 74
-        # being Toon-Up thrown at a party already on full laff. That is
-        # the `toonup6->all` it opens every floor with.
-        #
-        # Spelt out here rather than by calling `is_productive`, which
-        # assumes the actor is `toons[0]` and would need the state
-        # rotated per candidate action on the hot path.
-        if action.track == Track.TOON_UP:
-            # [CONFIRMED] a toon cannot heal itself, so a heal needs
-            # somebody ELSE hurt and still standing.
-            if not any(other.laff < other.max_laff and other.laff > 0
-                       for i, other in enumerate(state.toons)
-                       if i != actor):
-                continue
-        elif action.track in (Track.LURE, Track.DROP):
-            # Re-luring only refreshes a timer the toon is running
-            # down, and Drop always misses a lured cog.
-            targets = (live if action.target_index is None
-                       else [action.target_index])
-            if not any(not state.cogs[i].status.lured for i in targets):
-                continue
+    rotated = party_mod._as_actor(state, actor)
+    # `_as_actor` orders the toons [actor, everyone else], so a target
+    # `t` in that frame is `order[t]` here.
+    order = [actor] + [i for i in range(len(state.toons)) if i != actor]
 
-        mask[index] = True
+    for action in simulator.legal_actions(rotated):
+        if action.is_pass:
+            mask[PASS_INDEX] = True
+            continue
+        target = action.target_index
+        if action.track == Track.TOON_UP and target is not None:
+            target = order[target]
+        index = _ACTION_INDEX.get((action.track, action.level, target))
+        if index is not None:
+            mask[index] = True
+
+    if not any(mask):
+        mask[PASS_INDEX] = True
     return mask
 
 

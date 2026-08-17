@@ -6,6 +6,7 @@ different interface, and torch never appears in `solver/`.
 import random
 import unittest
 
+from solver import simulator
 from solver.rl import env
 from solver.state import BattleState, CogState, ToonState, Track
 
@@ -315,3 +316,90 @@ class HorizonTest(unittest.TestCase):
         self.assertNotEqual(near, far)
         self.assertEqual(len(near), env.OBS_DIM)
         self.assertTrue(all(-1.0 <= v <= 1.0 for v in far))
+
+
+class MoveGeneratorAgreementTest(unittest.TestCase):
+    """The mask and `simulator.legal_actions` must offer the same moves.
+
+    They are now the same code -- `legal_mask` translates rather than
+    decides -- but the translation still has three chances to be wrong:
+    the (track, level, target) lookup, the actor rotation, and mapping a
+    Toon-Up target (which names a TOON) back to this state's numbering.
+
+    Two generators drifted before. The mask never applied the
+    productivity rules, so the agent healed a party already on full
+    laff, 4.0% of every gag it threw; and it validated Toon-Up targets
+    against live COG indices, which the simulator had already found and
+    fixed on its own side.
+    """
+
+    def key(self, action):
+        if action is None or action.is_pass:
+            return ("PASS",)
+        return (action.track.name, action.level, action.target_index)
+
+    def from_mask(self, state, actor=0):
+        return {self.key(env.ACTIONS[i])
+                for i, ok in enumerate(env.legal_mask(state, actor)) if ok}
+
+    def from_search(self, state):
+        return {self.key(a) for a in simulator.legal_actions(state)}
+
+    def test_they_agree_across_every_sampler(self):
+        rng = random.Random(7)
+        samplers = [env.default_position, env.hard_position,
+                    env.strange_position, env.combo_position,
+                    env.facility_position]
+        checked = 0
+        for i in range(250):
+            state = samplers[i % len(samplers)](rng)
+            if state.is_terminal():
+                continue
+            checked += 1
+            self.assertEqual(self.from_mask(state),
+                             self.from_search(state),
+                             f"move generators disagree on {state.kind}")
+        self.assertGreater(checked, 100)
+
+    def test_they_agree_with_the_pass_budget_spent(self):
+        """`legal_actions` withdraws the pass when free_passes runs out
+        and no cog is lured. The mask used to offer it unconditionally,
+        which diverged on 333 of 386 positions."""
+        rng = random.Random(11)
+        for _ in range(120):
+            state = env.mixed_position(rng, 0.3, 0.25, 0.2)
+            if state.is_terminal():
+                continue
+            state.free_passes = 0
+            self.assertEqual(self.from_mask(state), self.from_search(state))
+
+    def test_a_toon_up_target_names_a_toon(self):
+        """The bug that diverged in BOTH directions: a heal aimed at
+        toon 2 was accepted or rejected on whether COG 2 was alive."""
+        toon_a = ToonState(50, 50, {Track.TOON_UP: 5},
+                           {(Track.TOON_UP, 1): 2})
+        hurt = ToonState(10, 50, {Track.THROW: 5}, {(Track.THROW, 1): 2})
+        state = BattleState(toons=[toon_a, hurt],
+                            cogs=[CogState("cold_caller", "sellbot", 1,
+                                           6, 6)])
+        offered = self.from_mask(state)
+        self.assertIn(("TOON_UP", 1, 1), offered)
+
+    def test_no_heal_when_nobody_is_hurt(self):
+        full = ToonState(50, 50, {Track.TOON_UP: 5},
+                         {(Track.TOON_UP, 1): 2})
+        other = ToonState(50, 50, {Track.THROW: 5}, {(Track.THROW, 1): 2})
+        state = BattleState(toons=[full, other],
+                            cogs=[CogState("cold_caller", "sellbot", 1,
+                                           6, 6)])
+        self.assertEqual(
+            [k for k in self.from_mask(state) if k[0] == "TOON_UP"], [])
+
+    def test_the_agent_always_has_a_move(self):
+        """An all-False mask leaves nothing to pick."""
+        rng = random.Random(5)
+        for _ in range(200):
+            state = env.mixed_position(rng, 0.3, 0.25, 0.2)
+            state.free_passes = 0
+            for actor in range(len(state.toons)):
+                self.assertTrue(any(env.legal_mask(state, actor)))
