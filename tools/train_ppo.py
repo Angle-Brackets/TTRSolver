@@ -70,12 +70,17 @@ def main():
     ap.add_argument("--rollout", type=int, default=128)
     ap.add_argument("--epochs", type=int, default=4)
     ap.add_argument("--minibatch", type=int, default=1024)
-    ap.add_argument("--hidden", type=int, default=256)
+    ap.add_argument("--hidden", type=int, default=256,
+                    help="trunk width; 512 is the capacity test")
     ap.add_argument("--lr", type=float, default=3e-4)
     ap.add_argument("--gamma", type=float, default=0.99)
     ap.add_argument("--lam", type=float, default=0.95)
     ap.add_argument("--clip", type=float, default=0.2)
     ap.add_argument("--entropy", type=float, default=0.01)
+    ap.add_argument("--track-entropy", type=float, default=0.0,
+                    help="entropy bonus on the TRACK marginal rather than "
+                         "the flat 246-way action distribution, which a "
+                         "sweep showed cannot be moved by --entropy")
     ap.add_argument("--shaping", type=float, default=0.0,
                     help="potential-based shaping on incoming damage; "
                          "pays now for a cog lured or killed, which is "
@@ -146,6 +151,28 @@ def main():
     masks = list(masks)
 
     n_actions = len(env_mod.ACTIONS)
+
+    # WHICH TRACK EACH ACTION BELONGS TO, so the entropy bonus can be put
+    # on the track marginal instead of the flat 246-way distribution.
+    #
+    # The measured problem: sweeping the flat entropy coefficient 0.01 /
+    # 0.04 / 0.10 moved gag entropy not at all -- 3.79 at every setting.
+    # An action is (track, level, target) and there are five targets per
+    # gag, so the policy satisfies a flat entropy bonus by spreading
+    # probability over WHICH COG to hit while staying committed to
+    # Throw. Entropy over actions is not entropy over tracks.
+    #
+    # The pass gets its own slot at the end, so "hold" is something the
+    # track-entropy term can encourage too.
+    track_of = torch.zeros(n_actions, dtype=torch.long, device=device)
+    for _i, _a in enumerate(env_mod.ACTIONS):
+        if _a is None or _a.is_pass:
+            track_of[_i] = len(env_mod.TRACKS)
+        else:
+            track_of[_i] = env_mod.TRACKS.index(_a.track)
+    n_tracks = len(env_mod.TRACKS) + 1
+    track_onehot = torch.nn.functional.one_hot(
+        track_of, num_classes=n_tracks).float()
     trunk, vtrunk, actor, critic = build(env_mod.OBS_DIM, n_actions,
                                          args.hidden, device)
     params = (list(trunk.parameters()) + list(vtrunk.parameters())
@@ -377,7 +404,20 @@ def main():
                     ratio.clamp(1 - args.clip, 1 + args.clip) * a).mean()
                 loss_v = F.mse_loss(value, returns[sel])
                 entropy = dist.entropy().mean()
-                loss = loss_pi + args.vf * loss_v - args.entropy * entropy
+
+                # Entropy on the TRACK MARGINAL: sum the action
+                # probabilities within each track, then take the entropy
+                # of that. This is the quantity a flat bonus could not
+                # move, and the one that decides whether the agent ever
+                # tries Lure, Toon-Up or holding.
+                probs = dist.probs
+                track_probs = probs @ track_onehot
+                track_entropy = -(track_probs
+                                  * (track_probs + 1e-9).log()).sum(-1).mean()
+
+                loss = (loss_pi + args.vf * loss_v
+                        - args.entropy * entropy
+                        - args.track_entropy * track_entropy)
                 opt.zero_grad()
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(params, 0.5)
