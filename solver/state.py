@@ -10,6 +10,26 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional, Dict, FrozenSet, Tuple, List
 
+# Level 7 gags are one per pouch and pouch-EXEMPT, so nothing in the
+# ordinary cost machinery restrains them: measured across a `price`
+# sweep of 1.0 / 0.5 / 0.25 / 0, level-7 use did not move at all (38
+# thrown every time). What restrains them today is only that the policy
+# rarely proposes one. Set this False to forbid them outright.
+#
+# IT MUST BE READ AT CALL TIME, not captured at import, so a caller can
+# toggle it between runs. Both `simulator.legal_actions` and
+# `BattleState.can_still_damage` consult it, and they have to agree:
+# `can_still_damage` keys on TRACKS and ignores levels, so a toon
+# holding nothing but Throw-7 would otherwise be judged able to damage a
+# cog while `legal_actions` offered it nothing -- a position the search
+# treats as playable and cannot play, which breaks the termination
+# argument in `legal_actions`.
+ALLOW_LEVEL_7 = True
+
+# Kept here rather than imported from `data.gags` so `state` stays free
+# of data imports; asserted equal in tests/test_level_seven.py.
+LEVEL_SEVEN = 7
+
 
 class Track(str, Enum):
     TOON_UP = "toon_up"
@@ -412,8 +432,9 @@ class BattleState:
         # the moment one member ran out of attacks.
         held = set()
         for toon in self.active_toons():
-            held |= {track for (track, _level), n in toon.gag_counts.items()
-                     if n > 0 and toon.track_exp.get(track, 0) > 0}
+            held |= {track for (track, level), n in toon.gag_counts.items()
+                     if n > 0 and toon.track_exp.get(track, 0) > 0
+                     and (ALLOW_LEVEL_7 or level != LEVEL_SEVEN)}
         if held & {Track.THROW, Track.SQUIRT, Track.SOUND, Track.DROP}:
             return True
         if Track.LURE in held:

@@ -22,6 +22,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 from . import data
 from . import mechanics
+from . import state as state_mod
 from .state import (
     ATTACK_ORDER, BattleState, CogState, Action, Track,
 )
@@ -133,6 +134,12 @@ def legal_actions(state: BattleState) -> List[Action]:
             continue
         if toon.track_exp.get(track, 0) <= 0:
             continue  # toon doesn't own this track
+        # Read at call time so a caller can toggle it between runs.
+        # `state.can_still_damage` applies the same rule; the two must
+        # agree or a toon holding only 7s reads as able to fight and has
+        # nothing legal to throw.
+        if not state_mod.ALLOW_LEVEL_7 and level == state_mod.LEVEL_SEVEN:
+            continue
 
         if is_group_action(track, level):
             actions.append(Action(track=track, level=level, target_index=None))
