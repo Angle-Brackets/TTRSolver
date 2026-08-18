@@ -105,6 +105,11 @@ from ..state import Action, BattleState
 # than by whatever will really happen.
 LOOKAHEAD_DISCOUNT = 0.7
 
+# Per-round discount for `rollout_judge`. Near one because a building is
+# long and a gag saved on floor one is spent on floor four; the reward
+# function already prices the horizon through `cogs_remaining`.
+DISCOUNT = 0.95
+
 _EXPORT = Path(__file__).resolve().parents[1] / "rl" / "ppo_facility.json"
 _MODEL: Optional[dict] = None
 _TRIED = False
@@ -211,6 +216,97 @@ def propose(state: BattleState, rng, sample: bool = True
     return pending
 
 
+def rollout_judge(state: BattleState, plan, seed: int, depth: int = 3,
+                  objective=None) -> float:
+    """Play the plan, then let PPO play on, and total the real reward.
+
+    The horizon `_quick_score` does not have. It plays one all-hit round
+    and scores it with a hand-weighted sum whose weights turn out not to
+    matter -- four random weight vectors finish 62.5-65.0% of the same
+    buildings, and zeroing every term costs five points. So the terms
+    matter and their sizes do not, which is what a flat proxy looks
+    like.
+
+    This scores the future with `round_reward` instead: the objective
+    the environment actually pays, over several rounds of PPO's own
+    play. It is Bertsekas's rollout with the learned policy as the base,
+    which is what makes the guarantee interesting -- a rollout policy is
+    no worse than its base when the evaluation is sound.
+
+    NOT the two-ply judge that failed earlier. That one let
+    `greedy_plan` answer for the next round, and greedy is a myopic
+    proxy, so it added a guess about the future to a real reading of the
+    present and weighted the guess at 0.7. It cost nearly three points.
+    PPO is a considerably better base policy than greedy, and it is fast
+    enough to run several rounds.
+
+    COMMON RANDOM NUMBERS. Every candidate plan is rolled out from the
+    same `seed`, so the accuracy rolls and cog attacks are identical
+    across candidates and the comparison is paired. Without that the
+    climb would reliably pick whichever plan drew the luckiest dice,
+    which with eight candidates is most of them.
+
+    IT IS OFF, AND THE REASON IS THE USEFUL PART. Over 180 held-out
+    buildings, climb at budget 8:
+
+        `_quick_score`, one round      64.4%   0.76 ms
+        PPO rollout, two rounds        61.1%   2.50 ms
+        PPO rollout, four rounds       60.6%   3.23 ms
+
+    Deeper is monotonically worse, and cost is not the issue at three
+    milliseconds. The judge is: scoring a plan by what happens when PPO
+    PLAYS ON measures how well PPO exploits the resulting position, not
+    how good the position is. A strong plan leading somewhere PPO
+    handles badly is marked down. It is circular.
+
+    Third time that has been established here. PPO's own critic ranking
+    PPO's samples: 57.8-58.3% against 58.9% for plain argmax. A two-ply
+    lookahead played by `greedy_plan`: nearly three points worse. This:
+    three to four points worse. The only judge that has ever helped is
+    `_quick_score`, which shares none of the proposer's blind spots and
+    is worth 58.9% to 64.4%.
+
+    It is also why the SEARCH works: `rollout_value` plays forward with
+    `greedy_plan`, a different policy from the plans it grades.
+
+    The horizon idea is not refuted, only this way of getting one --
+    Toon-Up use does rise 4.1% to 5.3% with rollouts on, so the longer
+    view pushes where it should. What is refuted is asking the policy to
+    grade itself.
+    """
+    from .. import party as party_mod
+    from . import objective as objective_mod
+    from . import party_search as ps
+
+    objective = objective or objective_mod.BALANCED
+    rng = random.Random(seed)
+    total, current, live = 0.0, state, list(plan)
+    for step in range(max(1, depth)):
+        if current.is_terminal():
+            break
+        try:
+            nxt, _healed, _done = party_mod.step(
+                current, live[0], mode=party_mod.Mode.COORDINATED,
+                joint=live, rng=rng)
+        except (NotImplementedError, ValueError, KeyError):
+            break
+        laff_lost = sum(max(0, b.laff - a.laff)
+                        for b, a in zip(current.toons, nxt.toons))
+        went_sad = sum(1 for b, a in zip(current.toons, nxt.toons)
+                       if b.laff > 0 and a.laff <= 0)
+        total += (DISCOUNT ** step) * ps.round_reward(
+            objective, laff_lost, ps._spent(current, nxt),
+            won=nxt.is_win(),
+            lost=nxt.is_terminal() and not nxt.is_win(),
+            toons_lost=went_sad,
+            cogs_remaining=current.cogs_remaining)
+        current = nxt
+        if current.is_terminal():
+            break
+        live = propose(current, rng, sample=False)
+    return total
+
+
 def _judge(state: BattleState, plan, deep: bool) -> float:
     """Rank a plan. One round, or two.
 
@@ -266,7 +362,8 @@ def _judge(state: BattleState, plan, deep: bool) -> float:
 
 def climb(state: BattleState, rng=random, budget: int = 16,
           width: int = 3, probe_tracks: bool = False,
-          deep: bool = False) -> Optional[Sequence[Optional[Action]]]:
+          deep: bool = False, rollout: int = 0
+          ) -> Optional[Sequence[Optional[Action]]]:
     """Coordinate ascent on the joint plan, instead of independent draws.
 
     `best_plan` re-rolls every seat on every sample, which spends its
@@ -324,9 +421,15 @@ def climb(state: BattleState, rng=random, budget: int = 16,
         return None
     model = _load()
 
+    # One seed for every candidate this call compares, so the rollouts
+    # are paired rather than a lottery.
+    seed = rng.randrange(1 << 30)
+    judge = ((lambda st, pl: rollout_judge(st, pl, seed, rollout))
+             if rollout else (lambda st, pl: _judge(st, pl, deep)))
+
     plan = list(propose(state, rng, sample=False))
     try:
-        best_score = _judge(state, plan, deep)
+        best_score = judge(state, plan)
     except (NotImplementedError, ValueError, KeyError):
         return plan
     spent = 1
@@ -370,7 +473,7 @@ def climb(state: BattleState, rng=random, budget: int = 16,
                 if trial == plan:
                     continue
                 try:
-                    score = _judge(state, trial, deep)
+                    score = judge(state, trial)
                 except (NotImplementedError, ValueError, KeyError):
                     continue
                 spent += 1
