@@ -202,10 +202,28 @@ QUICK_W = {
     "price": 1.0,       # gags spent
 }
 
-# `kill_threat` and `risk` start at zero so the scorer is unchanged
-# until they are fitted. They are the two things the equations could not
-# say: which cog was worth killing, and whether the plan leaves somebody
-# about to go sad.
+# `kill_threat` and `risk` STAY AT ZERO. They are the two things the
+# equations could not say -- which cog was worth killing, and whether
+# the plan leaves somebody about to go sad -- and they were fitted and
+# measured, and they do nothing.
+#
+# 120 generations of a (1+lambda) ES with both available returned
+# `kill_threat` 0.044 against a cog threatening 8-15 damage a round, and
+# `risk` 0.592 against a landed-damage term in the tens. The optimiser
+# was handed the new directions and declined them.
+#
+# On 240 buildings used for neither fitting nor validation:
+#
+#     baseline (hand-tuned)           63.7%
+#     fitted, all seven weights       63.7%
+#     baseline + the two features     63.7%
+#
+# Identical, which says more than "no gain": these weights barely change
+# WHICH PLAN gets picked. `kill` at 120 or at 86, `price` at 1.0 or 0.38,
+# and the same buildings finish.
+#
+# Left in, behind zero weights that skip their computation, because the
+# next person to look at these equations will notice the same two gaps.
 #
 # A third gap -- charging for the threat LEFT standing -- is deliberately
 # not a term. `prevented` is already `incoming(before) - incoming(after)`
@@ -794,9 +812,11 @@ def _quick_score(state: BattleState, plan) -> float:
             + QUICK_W["heal"] * restored
             + QUICK_W["armed"] * armed_credit(state, probe)
             + QUICK_W["kill"] * killed
-            + QUICK_W["kill_threat"] * killed_threat(state, probe)
+            + (QUICK_W["kill_threat"] * killed_threat(state, probe)
+               if QUICK_W["kill_threat"] else 0.0)
             + QUICK_W["prevent"] * prevented(state, probe)
-            - QUICK_W["risk"] * toons_at_risk(probe)
+            - (QUICK_W["risk"] * toons_at_risk(probe)
+               if QUICK_W["risk"] else 0.0)
             - QUICK_W["price"] * price)
 
 
