@@ -96,7 +96,7 @@ import json
 import math
 import random
 from pathlib import Path
-from typing import List, Optional, Sequence
+from typing import List, Mapping, Optional, Sequence
 
 from ..state import Action, BattleState
 
@@ -193,12 +193,18 @@ def _choose(values, rng, sample: bool) -> int:
     return int(np.argmax(values))
 
 
-def propose(state: BattleState, rng, sample: bool = True
+def propose(state: BattleState, rng, sample: bool = True,
+            fixed: Optional[Mapping[int, Optional[Action]]] = None
             ) -> List[Optional[Action]]:
     """One joint plan, every standing toon choosing in turn.
 
     Later toons see the earlier ones' picks through `pending`, which is
     what makes this a joint plan rather than four independent ones.
+
+    `fixed` pins seats that have ALREADY COMMITTED, which matters when
+    the caller is midway through a round rather than starting one. It is
+    a mapping rather than a list because `None` already means "pass" in
+    a plan, and a pinned pass and an open seat are not the same thing.
     """
     from ..rl import env as env_mod
 
@@ -206,9 +212,12 @@ def propose(state: BattleState, rng, sample: bool = True
     if model is None:
         raise RuntimeError("no usable policy; check hybrid.available()")
 
+    fixed = dict(fixed or {})
     pending: List[Optional[Action]] = [None] * len(state.toons)
+    for seat, action in fixed.items():
+        pending[seat] = action
     for seat, toon in enumerate(state.toons):
-        if toon.laff <= 0:
+        if seat in fixed or toon.laff <= 0:
             continue
         index = _choose(_logits(model, state, seat, pending), rng, sample)
         action = env_mod.action_at(index)
@@ -362,7 +371,8 @@ def _judge(state: BattleState, plan, deep: bool) -> float:
 
 def climb(state: BattleState, rng=random, budget: int = 16,
           width: int = 3, probe_tracks: bool = False,
-          deep: bool = False, rollout: int = 0
+          deep: bool = False, rollout: int = 0,
+          fixed: Optional[Mapping[int, Optional[Action]]] = None
           ) -> Optional[Sequence[Optional[Action]]]:
     """Coordinate ascent on the joint plan, instead of independent draws.
 
@@ -427,7 +437,8 @@ def climb(state: BattleState, rng=random, budget: int = 16,
     judge = ((lambda st, pl: rollout_judge(st, pl, seed, rollout))
              if rollout else (lambda st, pl: _judge(st, pl, deep)))
 
-    plan = list(propose(state, rng, sample=False))
+    fixed = dict(fixed or {})
+    plan = list(propose(state, rng, sample=False, fixed=fixed))
     try:
         best_score = judge(state, plan)
     except (NotImplementedError, ValueError, KeyError):
@@ -438,7 +449,7 @@ def climb(state: BattleState, rng=random, budget: int = 16,
     while improved and spent < budget:
         improved = False
         for seat, toon in enumerate(state.toons):
-            if toon.laff <= 0 or spent >= budget:
+            if seat in fixed or toon.laff <= 0 or spent >= budget:
                 continue
             pending = list(plan)
             pending[seat] = None
