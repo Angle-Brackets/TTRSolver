@@ -3,8 +3,17 @@
 Seeking an outside view on why a learned policy plateaus ~1-2 points below
 a classical search, and which direction is worth pursuing next.
 
-Everything below is measured. All performance figures are on **180 held-out
-buildings** (fixed seeds, never used for tuning) unless stated otherwise.
+Everything below is measured. Figures are on **three disjoint sets of 180
+held-out buildings** (fixed seeds 31000 / 33000 / 36000, never used for
+tuning), reported as the mean with the per-set numbers where the spread
+matters. Earlier entries marked *(one set)* predate the move to three and
+are on the 31000 set alone.
+
+**The noise floor is about a point.** Two runs of the *same* configuration
+differing only in the training seed score 65.0% and 66.1% (per-set +2.2 /
++1.1 / +0.0). Nothing below a point is distinguishable from the seed
+lottery, which is why results here are only believed when every set agrees
+in sign.
 
 ## The problem
 
@@ -90,9 +99,9 @@ Training saturates: 800k -> 6M steps is +8.3 points, 6M -> 16M is +1.1.
 
 | agent | buildings cleared | ms/decision |
 |---|---|---|
-| classical search | **67.8%** | 124 |
-| PPO + climb | 66.7% | 0.6 |
-| plain PPO | 61.7% | 0.28 |
+| classical search | **67.8%** *(one set)* | 124 |
+| PPO + climb | 65.0% (68.3 / 61.7 / 65.0) | 0.6 |
+| plain PPO | 57.6% (57.2 / 53.9 / 61.7) | 0.28 |
 
 The local search recovers roughly two-thirds of the policy-to-search gap for
 double the policy's cost, and lands ~1.1 points short at ~200x less time.
@@ -122,6 +131,38 @@ outside view might help.
    holding identical gags. It changed behaviour in the predicted direction
    (holds 2.0% -> 5.6%) and did not help: three training seeds gave climb
    64.4% / 66.1% / 63.3% against the 290-wide run's 66.7%. Reverted.
+
+5. **Entropy on the *track marginal*** — the one intervention on the policy
+   that worked. Sum the action probabilities into 7 track probabilities and
+   put the bonus on *that* distribution, which is what item 2 showed plain
+   action entropy was not doing. Positive on all three sets (+1.7 / +1.1 /
+   +0.6). Shipped.
+6. **Capacity: 256 -> 512 wide** — -0.2 mean with mixed signs (-2.2 / +0.0 /
+   +1.7), against 20.8 MB of weights for 7.5. Not the bottleneck.
+7. **DAgger with the climb as teacher** — the loop this document asked
+   about in question 2. Roll out with the *learner*, label every visited
+   state with `climb`, aggregate, fine-tune, repeat: 6 iterations, 15,393
+   states. **-2.0 plain and -0.9 with climb**, mixed signs on both.
+
+   The diagnostic beat the number. **Agreement with the teacher never
+   rises** — 44.3 / 37.6 / 43.1 / 44.1 / 42.7 / 45.8 across the six
+   iterations — while the loss falls monotonically 1.56 -> 1.26. The
+   student fits the labels and closes no distance on the teacher, because
+   the target moves with it: MCTS is a fixed operator a policy can converge
+   onto, whereas `climb` is *defined as a perturbation of the student's own
+   proposal*. There is no fixed point to walk toward.
+
+   Two harness bugs nearly buried that, and both are worth stating because
+   they are easy to repeat. The teacher was queried once per round and seat
+   *k* read off the resulting joint plan — so seat *k*'s label assumed
+   seats 0..*k*-1 played the **teacher's** moves while the trajectory had
+   played the **student's**. In a coordinated plan the seats are chosen
+   against each other, so those labels described positions that never
+   occurred: worth 10.4 of an apparent 12.4-point collapse. Separately, the
+   cross-entropy ran over all 246 actions including illegal ones, whose
+   logits inference never reads — the loss sat at 5.46 against ln(246) =
+   5.51, near-uniform, while the student already agreed with the teacher on
+   more than half its decisions.
 
 ### On the evaluator
 
@@ -201,13 +242,19 @@ party at 48-55 laff, while the climb healed twice — the second time at
 1. Is the "candidates too similar for a noisy evaluator" hypothesis right?
    If so, is probes+rollout together the correct test, or is there a better
    way to get candidate diversity that the evaluator will actually accept?
-2. Behaviour cloning from the *search* failed catastrophically (7.5%). Would
-   cloning from the **climb** work better, given that climb's plans are
-   one-seat perturbations of PPO's own output and therefore inside its own
-   distribution? (This is the AlphaZero loop with a cheap improvement
-   operator in place of MCTS.)
-3. Is a 256x2 MLP simply too small for a 290-input, 246-action problem, and
-   is the 6M-step saturation a capacity limit rather than a data one?
+2. ~~Would cloning from the **climb** work better than cloning from the
+   search?~~ **Answered: no** (item 7). The follow-up we would value a view
+   on: is a self-referential improvement operator — one defined as a
+   perturbation of the student's own output — *ever* a usable distillation
+   target, or does the missing fixed point rule the whole family out? If
+   the latter, the operator has to be anchored to something the student
+   does not control, and the cheapest such anchor we can see is the
+   classical search, which is 200x too slow to label with.
+3. ~~Is a 256x2 MLP too small?~~ **Answered: no** (item 6). Doubling the
+   trunk did nothing, so the 6M-step saturation is not capacity.
 4. Is there a principled way to make an evaluator value *not acting*? Every
    attempt to reward holding has failed, yet the search holds 5x more often
-   and wins.
+   and wins. This is now the **only** live question of the four, and three
+   separate failures above (items 8-10, and the trap probes) reduce to it:
+   `_quick_score` pays for damage landed, so every action that trades
+   present damage for future position scores near zero.
