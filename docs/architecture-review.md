@@ -221,22 +221,35 @@ the one combination not yet tried (probes + rollout).
 
 ## The residual behavioural difference
 
-Over 80 held-out buildings, usage measured when the gag is in hand:
+Over 80 held-out buildings, usage measured when the gag is in hand. The
+middle column is the SHIPPED policy (track-entropy); the first is what it
+replaced, kept because most of this document's failures were measured
+against it:
 
-| | climb | search |
-|---|---|---|
-| **declines to act (hold)** | **2.1%** | **11.0%** |
-| throw | 44.4% | 35.1% |
-| squirt | 20.3% | 23.4% |
-| sound | 11.4% | 14.1% |
-| drop | 10.0% | 8.2% |
-| lure | 7.8% | 9.5% |
-| toon-up | 4.8% | 6.7% |
-| trap | 1.3% | 2.9% |
+| | pre-track-entropy | shipped | search |
+|---|---|---|---|
+| gag entropy | 3.96 | **4.39** | 4.37 |
+| **declines to act (hold)** | **2.1%** | **11.9%** | **11.0%** |
+| throw | 44.4% | 33.8% | 35.1% |
+| toon-up | 4.8% | 7.2% | 6.7% |
+| squirt | 20.3% | not re-measured | 23.4% |
+| sound | 11.4% | not re-measured | 14.1% |
+| drop | 10.0% | not re-measured | 8.2% |
+| lure | 7.8% | not re-measured | 9.5% |
+| trap | 1.3% | not re-measured | 2.9% |
 
-The climb throws ~13% more gags over the same buildings and prefers level 4
-where the search prefers 5-6. Every difference points the same way: **it
-always swings.** `_quick_score` pays for damage landed, so any action that
+**On the four axes that were re-measured the profiles now agree**, holds
+included. So the behavioural gap this section was written to describe is
+largely closed, while the outcome gap it was written to explain moved only
++1.1. Two earlier attempts moved a single row toward the search (shaping:
+throw 44.7 -> 35.7; wider observation: holds 2.0 -> 5.6) and changed
+outcomes not at all. Matching this table is evidently not sufficient for
+matching the result, and may not be necessary either.
+
+The description that follows is of the PRE-track-entropy policy. The climb
+threw ~13% more gags over the same buildings and preferred level 4 where the
+search prefers 5-6. Every difference pointed the same way: **it always
+swung.** `_quick_score` pays for damage landed, so any action that
 deals none scores about zero regardless of what it saves. A concrete case:
 on one building the search healed three times in seven rounds and held the
 party at 48-55 laff, while the climb healed twice — the second time at
