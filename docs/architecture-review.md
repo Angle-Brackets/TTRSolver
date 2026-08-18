@@ -9,11 +9,16 @@ tuning), reported as the mean with the per-set numbers where the spread
 matters. Earlier entries marked *(one set)* predate the move to three and
 are on the 31000 set alone.
 
-**The noise floor is about a point.** Two runs of the *same* configuration
-differing only in the training seed score 65.0% and 66.1% (per-set +2.2 /
-+1.1 / +0.0). Nothing below a point is distinguishable from the seed
-lottery, which is why results here are only believed when every set agrees
-in sign.
+**The noise floor is about a point.** Three runs of the *same* configuration
+differing only in the training seed score 65.0% / 66.1% / 65.9%. Nothing
+below a point is distinguishable from the seed lottery, which is why results
+here are only believed when every set agrees in sign.
+
+The seeds also **reorder between sets**: the run that is best on the three
+reported sets (66.1%) is the *worst* of the three on a fourth, disjoint set
+(58.9% against 59.4% and 61.1%). Choosing a training seed on the sets you
+report is therefore its own fitting, and the shipped policy is picked on
+that fourth set instead.
 
 ## The problem
 
