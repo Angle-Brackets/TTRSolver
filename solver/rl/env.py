@@ -64,7 +64,7 @@ PASS_INDEX = 0
 # actions -- four Lures on the same board. Coordination needs the
 # pending plan to be visible.
 PENDING_DIM = MAX_TOONS * (len(TRACKS) + 2)      # track one-hot, group, none
-OBS_DIM = (MAX_COGS * 10 + MAX_TOONS * (3 + 49 + 14) + 6
+OBS_DIM = (MAX_COGS * 9 + MAX_TOONS * (3 + 49) + 6
            + MAX_TOONS + PENDING_DIM)
 
 
@@ -96,18 +96,6 @@ def action_at(index: int) -> Optional[Action]:
     if index == PASS_INDEX:
         return Action(track=None, level=0, target_index=None)
     return ACTIONS[index]
-
-
-def _cog_threat(cog) -> float:
-    """Expected damage this cog deals in a round if it is awake.
-
-    Cached on (department, type, level) by `outcomes.cog_attack_outcomes`,
-    so this is a sum over a handful of tuples.
-    """
-    from .. import outcomes as outcomes_mod
-
-    return sum(p * dmg for p, _name, dmg, hit
-               in outcomes_mod.cog_attack_outcomes(cog) if hit)
 
 
 def _trap_damage(cog) -> float:
@@ -157,17 +145,9 @@ def encode(state: BattleState, actor: int = 0,
                     # this much the moment a lure lands. Reading it as a
                     # fraction of remaining hp answers the question that
                     # actually matters, which is whether it kills.
-                    _trap_damage(cog) / max(1, cog.hp),
-                    # HOW DANGEROUS this cog is, which nothing else in
-                    # here says. Level and hp were the only clues, and
-                    # they do not settle it: on one real floor the four
-                    # cogs threatened 14.6, 14.8, 10.4 and 8.2 damage a
-                    # round, and the policy saw them as near-identical.
-                    # Choosing which cog to kill is most of a party
-                    # round's decision.
-                    _cog_threat(cog) / 20.0]
+                    _trap_damage(cog) / max(1, cog.hp)]
         else:
-            out += [0.0] * 10
+            out += [0.0] * 9
 
     for i in range(MAX_TOONS):
         if i < len(state.toons) and state.toons[i].laff > 0:
@@ -179,19 +159,8 @@ def encode(state: BattleState, actor: int = 0,
                 for level in range(1, 8):
                     out.append(min(toon.gag_counts.get((track, level), 0),
                                    8) / 8.0)
-            # TRAINING AND ORGANIC, which decide whether a gag lands and
-            # how hard. Neither was here, so a toon trained to 7 in
-            # Throw and one trained to 2 -- holding the same gags --
-            # were the same state to the policy, and they do not want
-            # the same play. `toon_for_street` varies training from 1 to
-            # 7 on purpose, so this was a distinction the sampler was
-            # making and the observation was throwing away.
-            for track in TRACKS:
-                out.append(toon.track_exp.get(track, 0) / 7.0)
-            for track in TRACKS:
-                out.append(1.0 if toon.is_organic(track) else 0.0)
         else:
-            out += [0.0] * (3 + 49 + 14)
+            out += [0.0] * (3 + 49)
 
     out += [min(state.round_num, 12) / 12.0,
             len(state.active_cogs()) / MAX_COGS,
