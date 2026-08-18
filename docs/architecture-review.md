@@ -1,7 +1,9 @@
 # TTRSolver: two agents for Toontown Rewritten battles
 
-Seeking an outside view on why a learned policy plateaus ~1-2 points below
-a classical search, and which direction is worth pursuing next.
+A 0.6 ms learned policy and a 124 ms classical search, measured against each
+other over 540 held-out cog buildings -- and what happened when the gap
+between them turned out not to exist. Still seeking an outside view, but on a
+different question than this document originally asked.
 
 ## What changed since the last version of this document
 
