@@ -46,25 +46,48 @@ the policy is 200x faster. Everything below this line was written to explain
 a 2.8-point deficit that does not survive being measured on more than one
 set.
 
-The 67.8% itself was never reproducible: no committed harness produced it.
-Three code-level explanations for the 2.2-point drop were proposed and all
-three are refuted. No rules file has been touched since it was recorded
-(`simulator`, `mechanics`, `party`, `state`, `outcomes` all unchanged across
-21 commits). The building generator is unchanged, so the seeds name the same
-buildings. `PER_TRACK`, `MAX_PLANS` and `SAMPLES` are at their original
-values. And the one behavioural change to `_quick_score` since then
-(`armed_credit`, trap credit) measures **65.6% with it disabled, identical to
-the decimal**, because trap fires at 2.9% and never flips the shortlist. The
-search samples 8 outcome draws per plan and is not deterministic, and 2.2
-points is 4 buildings in 180. The likeliest reading is that there was never a
-regression, only an unreproducible number.
+**The 67.8% was never a regression, and this is measured rather than argued.**
+Running the search on the same 180 buildings with the same battle dice, and
+changing *only* the search's own sampling RNG:
 
-**One asymmetry is worth a second look.** Across the same three sets the
-search scores 65.6 / 65.0 / 64.4 (spread 1.2) and the policy 69.4 / 63.3 /
-65.0 (spread 6.1). Suggestive of a policy with sharper strengths and
-weaknesses against a flatter search, which is what the timing hypothesis
-below would predict, but it is three points each against a per-set standard
-error near 3.6. A lead, not a finding.
+| run | set 31000 |
+|---|---|
+| shipped seed | 65.6% |
+| `armed_credit` disabled, same seed | 65.6% |
+| sampling seed +500000 | 68.3% |
+| sampling seed +900000 | 66.1% |
+
+Spread 2.7, sd 1.44, against the 2.2-point difference three separate
+hypotheses were invented to explain. The search draws 8 outcome samples per
+plan, so it is deterministic given its seed -- the `armed_credit` row is the
+control, identical to the decimal -- and the entire difference lives in the
+seed. 67.8% and 65.6% are one measurement taken twice.
+
+For the record, because the reasoning was wrong three times in a row: the
+drop was attributed first to repo-wide mechanics fixes (no rules file has
+been touched since the number was recorded -- `simulator`, `mechanics`,
+`party`, `state`, `outcomes` unchanged across 21 commits), then to the search
+relying on optimistic rollout bugs (that evidence comes from a *rejected*
+experiment that is not in the code), then to `armed_credit` (65.6% with it
+disabled). None of them survived. **No committed harness ever produced the
+67.8%**, which is the root cause of all three: an unreproducible number
+invites explanation instead of re-measurement.
+
+**This makes the search's 65.0% an underestimate.** Each set above was
+measured with one sampling thread, and on set 31000 that thread returned 65.6
+against a three-thread mean of 66.7. With sd 1.44 per measurement the
+three-set mean carries about 0.8 of standard error from the search's own dice
+before the building draw is counted. The honest summary is that the two
+agents cannot be separated at this sample size, and the ordering in the table
+below should not be read as one.
+
+**One asymmetry, now withdrawn.** The search scored 65.6 / 65.0 / 64.4 across
+the three sets against the policy's 69.4 / 63.3 / 65.0, and a spread of 1.2
+against 6.1 looked like a uniformly competent search against a spiky policy --
+which is what the timing hypothesis predicts. But each of those search
+numbers is a single draw from a distribution with sd 1.44, so a spread of 1.2
+across three of them is luck, not uniformity. We do not know the search's
+set-to-set spread, because every set was measured once.
 
 Everything below is measured. Figures are on **three disjoint sets of 180
 held-out buildings** (fixed seeds 31000 / 33000 / 36000, never used for
@@ -168,12 +191,16 @@ Training saturates: 800k -> 6M steps is +8.3 points, 6M -> 16M is +1.1.
 | agent | buildings cleared | ms/decision |
 |---|---|---|
 | PPO + climb | **65.9%** (69.4 / 63.3 / 65.0) | 0.6 |
-| classical search | 65.0% (65.6 / 65.0 / 64.4) | 124 |
+| classical search | 65.0% (65.6 / 65.0 / 64.4) * | 124 |
 | plain PPO | 57.6% (57.2 / 53.9 / 61.7) | 0.28 |
 
+\* One sampling thread per set, and the search's own dice are worth sd 1.44
+per measurement -- on set 31000 three threads gave 65.6 / 68.3 / 66.1, mean
+66.7. Read the search's row as "about 65-67".
+
 The top two are tied and the ordering is noise. The 7-point gap between the
-climb and plain PPO is not: the local search is the one component whose
-value is comfortably larger than the measurement error.
+climb and plain PPO is not: the local search is the one component whose value
+is comfortably larger than the measurement error.
 
 ## What has been tried and failed
 
