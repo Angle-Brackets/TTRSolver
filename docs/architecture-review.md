@@ -348,11 +348,118 @@ on one building the search healed three times in seven rounds and held the
 party at 48-55 laff, while the climb healed twice — the second time at
 [2, 17, 2] laff — and lost, with two toons still carrying Toon-Up 7.
 
+## What actually decides a building
+
+Measured over 50 held-out buildings, each played by both agents
+(`tools/trace_building.py --stats 50`):
+
+| agent | cleared | toons lost | heal rounds | rounds |
+|---|---|---|---|---|
+| climb | 62.0% | 1.02 | 1.4 | 10.4 |
+| search | 64.0% | 0.88 | 0.9 | 10.1 |
+
+| | no toon lost | lost >=1 |
+|---|---|---|
+| climb | n=29, **100% cleared** | n=21, 9.5% |
+| search | n=31, **100% cleared** | n=19, 5.3% |
+
+**The outcome is the first toon loss and almost nothing else.** The clear
+rate is very nearly the fraction of buildings where nobody goes sad -- 29/50
+against 62% cleared, 31/50 against 64%.
+
+Part of that is definitional: a building is lost when *every* toon is sad, so
+losing implies losing toons. Two parts are not.
+
+**No run was ever lost to gag exhaustion.** All 60 intact-party runs cleared.
+The `can_still_damage` termination -- the pouch running dry, 80 Lures and no
+attacks -- never fires at these pouch sizes. So the `price`, `scarcity_cost`,
+`rare_gag_premium` and `horizon_cost` machinery in both scorers is defending
+against a failure mode that does not occur, and `price` is the single largest
+negative term in `_quick_score`. Every hour spent tuning conservation was
+spent on the wrong axis.
+
+**And healing more does not help.** The climb heals on 1.4 rounds a building
+against the search's 0.9, and loses MORE toons, 1.02 against 0.88. More
+healing, worse survival. The reading -- corroborated by the project owner's
+own observation of play, independently of these numbers -- is that the search
+is not out-healing the damage, it is **preventing** it: killing or luring the
+threat a round earlier so there is less to heal. The climb heals reactively
+once the damage has landed.
+
+That is the first mechanism in this project connecting a behaviour to the
+variable that decides buildings, and it suggests the objective everything has
+been measured against -- buildings cleared -- has been hiding its own
+structure. **Damage prevented before it lands** is the quantity to optimise,
+and neither scorer prices it: `prevented` exists in `_quick_score` at weight
+2.0 against a `landed` term with weight 1.0 per point of damage, which for a
+cog threatening 8-15 a round is not close to parity with killing it.
+
+## What the CRN experiment settled
+
+Hypotheses 1 and 2 below were written before this ran. Both are now
+answered, and the answers are more interesting than the hypotheses.
+
+The design: replay held-out buildings, find every round where the two agents
+choose a different joint plan, and fork. One branch plays the policy's
+action, the other the search's; both then play the rest of the building out
+under **one fixed continuation policy on identical dice**, so the only thing
+that differs is the action. 500 forks over 47 buildings, bootstrapped by
+BUILDING, because ten forks from one building are not ten independent
+observations.
+
+| bucket | greedy continuation | policy continuation |
+|---|---|---|
+| overall | **+2.29** [+0.32, +4.30] | +0.75 [-0.80, +2.43] |
+| target | **+5.94** [+2.02, +9.40] | +0.90 [-1.64, +3.29] |
+| track | **+2.65** [+0.05, +5.41] | +0.86 [-1.26, +3.27] |
+| hold | -0.18 [-2.52, +2.39] | -0.01 [-1.36, +1.37] |
+| sign test | 78-47 to search, p=0.007 | 59-51, p=0.50 |
+
+**The agents disagree almost always and it almost never matters.** They pick
+the same joint plan on 5.3% of rounds, and three quarters of their
+disagreements are worth under a point. Two agents playing what is very nearly
+a different game, finishing the same fraction of buildings.
+
+**Holding is worth nothing.** 233 samples, a tight interval around zero,
+under *both* continuations, so this one is not confounded. Reward shaping,
+hold-variants, the wider observation, four attempts to teach `_quick_score`
+patience and hypothesis 2 below were all aimed at reproducing the search's
+11% hold rate. It does not pay.
+
+**And the search's apparent edge was an artifact of who plays on.** Under
+`greedy_plan` the search leads by +2.29, with target selection at +5.94,
+surviving both a cluster bootstrap and a sign test at p=0.007. Swap the
+continuation for the climb and every interval covers zero. The reason:
+`greedy_plan` **is the search's own rollout policy**, so its moves were
+chosen assuming that follow-up and then graded under it, while the policy's
+moves were chosen assuming the policy continues. That is a fourth instance of
+the judge sharing the proposer's assumptions, and the one that came closest
+to being written up as a result -- it passed the statistics, because
+statistics test whether an effect is real, not whether the design measures
+what it claims.
+
+Neither continuation is neutral, so the reading is not "no difference" but
+something sharper: **the better move depends on who is playing after it.**
+Which is why every attempt to move the policy's behaviour toward the search
+moved the behaviour and not the result. The search's moves are good *for the
+search's continuation*, not good in themselves, and transplanting them
+transplants nothing.
+
+`tools/disagree.py` is the experiment; `tools/trace_building.py` prints two
+whole games side by side.
+
 ## Our current read, offered so you can attack it
 
-Four hypotheses, in descending order of how much we believe them.
+Four hypotheses, in descending order of how much we believed them **when they
+were written**. The section above has since answered 1 and gutted 2; they are
+kept because the reasoning is what an outside reader is being asked to check.
 
 ### 1. We have been matching marginals when the thing that matters is conditionals
+
+**Answered, and both halves were right for the wrong reason.** Conditional
+agreement really is near zero -- 5.3% -- while the marginals agree. But the
+disagreement is nearly free, so there was no blind spot hiding behind the
+marginals. The premise held and the conclusion did not.
 
 This is the one we would most like a second opinion on, because it
 reinterprets nearly every result above.
@@ -378,6 +485,13 @@ are agreeing by accident and the gap is timing. This also yields a corpus of
 maximum-disagreement states, which is the natural place to look next.
 
 ### 2. The evaluator we keep trying to fix may not be the organ responsible
+
+**Gutted: the behaviour it is about is worth nothing.** The CRN result puts
+holding at -0.18 and -0.01 under the two continuations, on 233 samples with
+tight intervals. Everything below is an argument about *where in the
+architecture* patience lives, and it was worth having only while patience was
+assumed to be worth having. It is kept as a record of how long a plausible
+premise can go unmeasured -- five separate interventions were aimed at this.
 
 Four attempts above try to make `_quick_score` value not-acting, all failed.
 But **the search's holds do not come from `_quick_score`.** That function
@@ -436,17 +550,31 @@ control is the classical search, at 200x the cost per label.
 
 ## Questions we would value an outside view on
 
-0. **If the search's lead is gone** (see the pending measurement at the top),
-   what is the right objective for this project? The policy is 200x faster
-   and would be the better agent on every axis; the search's remaining value
-   would be as an independent judge and a source of labels. Is there a
-   principled use for a slower, equal-strength second agent, or is the
-   correct move to retire it as the benchmark and find a new one?
-1. Is the marginal-versus-conditional reading in section 1 right, and is
-   conditional agreement on replayed states the sharpest available
-   diagnostic? What else would you measure on a corpus of positions where
-   two agents of near-equal strength disagree?
-2. Is the "candidates too similar for a noisy evaluator" hypothesis right?
+0. **The search's lead is gone and the disagreement is free.** The agents tie
+   at ~65%, choose the same joint plan on 5.3% of rounds, and three quarters
+   of their disagreements are worth under a point. What is the right
+   objective now? The policy is 200x faster, so it is the better agent on
+   every axis that remains; the search's value would be as an independent
+   judge and a source of labels. Is there a principled use for a slower,
+   equal-strength second agent, or is the move to retire it as the benchmark
+   and find a harder task -- higher floors, tighter pouches -- where the two
+   separate again?
+1. **How should an experiment like the CRN fork be made neutral?** Ours
+   reversed sign depending on whether the continuation was the search's
+   rollout policy or the climb, because each agent's move was chosen assuming
+   its own follow-up. Averaging the two continuations feels like splitting a
+   difference rather than removing a bias. Is there a standard construction
+   for comparing two policies' actions without privileging either one's
+   continuation -- and is "the better move depends on who plays after it" a
+   known phenomenon with a name?
+2. **Four times now, an evaluator sharing the proposer's assumptions has
+   produced a result that then vanished.** PPO's critic on PPO's samples, a
+   greedy two-ply, a PPO rollout judge, and now a CRN fork continued by the
+   search's own rollout policy -- the last passing a cluster bootstrap and a
+   sign test at p=0.007. Is there a checkable property that would have caught
+   all four in advance, short of running every experiment twice with the
+   roles swapped?
+3. Is the "candidates too similar for a noisy evaluator" hypothesis right?
    If so, is probes+rollout together the correct test, or is there a better
    way to get candidate diversity that the evaluator will actually accept?
 3. ~~Would cloning from the **climb** work better than cloning from the
@@ -459,9 +587,11 @@ control is the classical search, at 200x the cost per label.
    classical search, which is 200x too slow to label with.
 4. ~~Is a 256x2 MLP too small?~~ **Answered: no** (item 6). Doubling the
    trunk did nothing, so the 6M-step saturation is not capacity.
-5. Is there a principled way to make an evaluator value *not acting*? Every
-   attempt to reward holding has failed, yet the search holds 5x more often
-   and wins. This is now the **only** live question of the four, and three
-   separate failures above (items 8-10, and the trap probes) reduce to it:
-   `_quick_score` pays for damage landed, so every action that trades
-   present damage for future position scores near zero.
+6. ~~Is there a principled way to make an evaluator value *not acting*?~~
+   **Withdrawn.** This was the last live question of the original four, and
+   it rested on the search holding 5x more often *and winning*. It does not
+   win, and holding measures at -0.18 and -0.01 per disagreement under the
+   two continuations. Five interventions were aimed at teaching an evaluator
+   patience; none of them should have been. The question we should have asked
+   first, and are now asking about everything else here, is whether the
+   behaviour we were trying to copy was worth anything.
