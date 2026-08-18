@@ -3,6 +3,41 @@
 Seeking an outside view on why a learned policy plateaus ~1-2 points below
 a classical search, and which direction is worth pursuing next.
 
+## What changed since the last version of this document
+
+Three suggestions were acted on. **One worked, and the two failures were
+more informative than the success.**
+
+| | result |
+|---|---|
+| Entropy on the *track marginal* | **+1.1 mean**, positive on all three sets — shipped |
+| Capacity 256 -> 512 wide | -0.2, mixed signs — refuted |
+| DAgger with the climb as teacher | -2.0 plain / -0.9 with climb — refuted |
+
+Two things were learned that change how everything else here should be read.
+
+**A noise floor was established, and it is about a point.** Three runs of the
+same configuration differing only in the training seed score 65.0 / 66.1 /
+65.9. Worse, they *reorder between sets*: the run that tops the three
+reported sets comes last on a fourth. Most single-number results in the
+earlier version of this document were within this.
+
+**The behavioural gap this document was written to explain has largely
+closed, and the outcome gap did not close with it.** Track-entropy moved the
+policy's profile onto the search's on every axis re-measured — holds 2.0% ->
+11.9% against 11.0%, throw 44.4% -> 33.8% against 35.1%, gag entropy 3.96 ->
+4.39 against 4.37 — and bought +1.1. Two earlier changes each moved one row
+into agreement and bought nothing. **Matching the search's behaviour is not
+sufficient for matching its result, and may not be necessary.** That is the
+central puzzle now, and it is a different puzzle from the one below.
+
+**And the gap itself is in doubt.** The 67.8% the whole programme aims at was
+measured on one set, before several mechanics fixes. Re-measured on set
+31000 the search scores **65.6%**, against the shipped policy's **69.4%** —
+the search *loses* there by 3.8. Two further sets are still running. If that
+holds up, most of what follows is an account of closing a gap that had
+already closed.
+
 Everything below is measured. Figures are on **three disjoint sets of 180
 held-out buildings** (fixed seeds 31000 / 33000 / 36000, never used for
 tuning), reported as the mean with the per-set numbers where the spread
@@ -255,12 +290,108 @@ on one building the search healed three times in seven rounds and held the
 party at 48-55 laff, while the climb healed twice — the second time at
 [2, 17, 2] laff — and lost, with two toons still carrying Toon-Up 7.
 
+## Our current read, offered so you can attack it
+
+Four hypotheses, in descending order of how much we believe them.
+
+### 1. We have been matching marginals when the thing that matters is conditionals
+
+This is the one we would most like a second opinion on, because it
+reinterprets nearly every result above.
+
+Every behavioural measurement in this document is a **marginal frequency** --
+how often each track gets used across a corpus. Track-entropy made those
+marginals agree with the search's and bought +1.1. But a policy can hold
+11.9% of the time, exactly matching the search's 11.0%, while holding in
+*entirely different positions*. Marginal agreement constrains the repertoire
+and says nothing about the timing, and it is the timing that wins battles:
+the whole value of a hold is that it is the right round to do nothing.
+
+If that is what is happening, the behavioural programme is exhausted -- we
+have given the policy the search's vocabulary and it is still saying
+different things with it -- and no further work on usage tables will help.
+
+**It is cheaply testable and we have not done it.** Replay held-out
+buildings, and on each decision record what the search would do and what the
+policy does. Then measure *conditional* agreement: on the states where the
+search holds, how often does the policy hold? Compare against the policy's
+base rate of holding. If conditional agreement is at base rate, the marginals
+are agreeing by accident and the gap is timing. This also yields a corpus of
+maximum-disagreement states, which is the natural place to look next.
+
+### 2. The evaluator we keep trying to fix may not be the organ responsible
+
+Four attempts above try to make `_quick_score` value not-acting, all failed.
+But **the search's holds do not come from `_quick_score`.** That function
+only shortlists which plans get sampled; the search's actual judgement is
+`rollout_value`, twelve rounds played forward with `greedy_plan`. The
+patience we are trying to reproduce is a *rollout* property.
+
+The climb has no rollout. So "teach `_quick_score` to value holding" may be
+trying to grow the behaviour on an organ that never carried it. The obvious
+correction -- give the climb a rollout -- was tried and lost 3.3 to 3.8
+points, which we attribute to variance across candidates too similar to
+distinguish. Those two facts together are the tightest corner in this
+project: the patience lives in a rollout, and the climb cannot afford a
+rollout quiet enough to be read.
+
+### 3. Being more correct about the game made the search play worse
+
+The strangest evidence here, and we would value a view on whether it
+generalises. Three corrections were made to the scorer, each *right* about
+TTR's mechanics: weight a lure's damage-prevention by whether the lure
+actually lands; apply per-cog lure durations rather than one mean; stop
+multiplying kills by lure duration (a plain accounting error). Measured:
+
+    67.8%   as written, defects and all
+    64.4%   + accuracy weighting
+    65.0%   + per-cog rounds
+    65.6%   + both, re-swept
+
+Every correction cost points. The cause is a **dual role**: `_greedy_score`
+is not only an evaluator, it is the policy that plays the rollouts grading
+every plan. Making it more careful about lures did not make the search
+patient -- it made the search's *model of the future* passive, and holds in
+the simulated continuation went 11.0% to 17.4%. The search then compared
+plans against a future in which it plays badly.
+
+We think the general form is: **when a rollout policy and a leaf evaluator
+share an implementation, fidelity improvements to the shared code are not
+sign-definite**, because a rollout policy wants to be *strong and fast* while
+an evaluator wants to be *accurate*. Is that the right reading, and is the
+standard answer simply to pay for two implementations?
+
+### 4. Self-referential improvement operators have no fixed point
+
+From the DAgger failure. AlphaZero distils MCTS, an operator defined
+*independently* of the policy -- the student chases a target that stands
+still. `climb` is defined as a perturbation *of the policy's own output*, so
+distilling it moves the target by exactly the amount the student moves.
+Agreement with the teacher stayed flat at 37-46% across six iterations while
+the loss fell monotonically: the student got better at the labels and no
+closer to the teacher.
+
+We suspect this rules out the whole family of cheap self-referential
+improvement operators as distillation targets, which is a shame, because the
+cheapness was the point. The only anchor we have that the student does not
+control is the classical search, at 200x the cost per label.
+
 ## Questions we would value an outside view on
 
-1. Is the "candidates too similar for a noisy evaluator" hypothesis right?
+0. **If the search's lead is gone** (see the pending measurement at the top),
+   what is the right objective for this project? The policy is 200x faster
+   and would be the better agent on every axis; the search's remaining value
+   would be as an independent judge and a source of labels. Is there a
+   principled use for a slower, equal-strength second agent, or is the
+   correct move to retire it as the benchmark and find a new one?
+1. Is the marginal-versus-conditional reading in section 1 right, and is
+   conditional agreement on replayed states the sharpest available
+   diagnostic? What else would you measure on a corpus of positions where
+   two agents of near-equal strength disagree?
+2. Is the "candidates too similar for a noisy evaluator" hypothesis right?
    If so, is probes+rollout together the correct test, or is there a better
    way to get candidate diversity that the evaluator will actually accept?
-2. ~~Would cloning from the **climb** work better than cloning from the
+3. ~~Would cloning from the **climb** work better than cloning from the
    search?~~ **Answered: no** (item 7). The follow-up we would value a view
    on: is a self-referential improvement operator — one defined as a
    perturbation of the student's own output — *ever* a usable distillation
@@ -268,9 +399,9 @@ party at 48-55 laff, while the climb healed twice — the second time at
    the latter, the operator has to be anchored to something the student
    does not control, and the cheapest such anchor we can see is the
    classical search, which is 200x too slow to label with.
-3. ~~Is a 256x2 MLP too small?~~ **Answered: no** (item 6). Doubling the
+4. ~~Is a 256x2 MLP too small?~~ **Answered: no** (item 6). Doubling the
    trunk did nothing, so the 6M-step saturation is not capacity.
-4. Is there a principled way to make an evaluator value *not acting*? Every
+5. Is there a principled way to make an evaluator value *not acting*? Every
    attempt to reward holding has failed, yet the search holds 5x more often
    and wins. This is now the **only** live question of the four, and three
    separate failures above (items 8-10, and the trap probes) reduce to it:
