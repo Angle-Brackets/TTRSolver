@@ -31,12 +31,40 @@ into agreement and bought nothing. **Matching the search's behaviour is not
 sufficient for matching its result, and may not be necessary.** That is the
 central puzzle now, and it is a different puzzle from the one below.
 
-**And the gap itself is in doubt.** The 67.8% the whole programme aims at was
-measured on one set, before several mechanics fixes. Re-measured on set
-31000 the search scores **65.6%**, against the shipped policy's **69.4%** —
-the search *loses* there by 3.8. Two further sets are still running. If that
-holds up, most of what follows is an account of closing a gap that had
-already closed.
+**And the gap is gone.** The 67.8% the whole programme aims at was measured
+on ONE set. Re-measured on three, paired, same buildings:
+
+| set | search | PPO + climb | |
+|---|---|---|---|
+| 31000 | 65.6% | 69.4% | policy +3.8 |
+| 33000 | 65.0% | 63.3% | search +1.7 |
+| 36000 | 64.4% | 65.0% | policy +0.6 |
+| **mean** | **65.0%** | **65.9%** | **+0.9** |
+
+Mixed signs and a mean inside the noise floor: **the agents are tied**, and
+the policy is 200x faster. Everything below this line was written to explain
+a 2.8-point deficit that does not survive being measured on more than one
+set.
+
+The 67.8% itself was never reproducible: no committed harness produced it.
+Three code-level explanations for the 2.2-point drop were proposed and all
+three are refuted. No rules file has been touched since it was recorded
+(`simulator`, `mechanics`, `party`, `state`, `outcomes` all unchanged across
+21 commits). The building generator is unchanged, so the seeds name the same
+buildings. `PER_TRACK`, `MAX_PLANS` and `SAMPLES` are at their original
+values. And the one behavioural change to `_quick_score` since then
+(`armed_credit`, trap credit) measures **65.6% with it disabled, identical to
+the decimal**, because trap fires at 2.9% and never flips the shortlist. The
+search samples 8 outcome draws per plan and is not deterministic, and 2.2
+points is 4 buildings in 180. The likeliest reading is that there was never a
+regression, only an unreproducible number.
+
+**One asymmetry is worth a second look.** Across the same three sets the
+search scores 65.6 / 65.0 / 64.4 (spread 1.2) and the policy 69.4 / 63.3 /
+65.0 (spread 6.1). Suggestive of a policy with sharper strengths and
+weaknesses against a flatter search, which is what the timing hypothesis
+below would predict, but it is three points each against a per-set standard
+error near 3.6. A lead, not a finding.
 
 Everything below is measured. Figures are on **three disjoint sets of 180
 held-out buildings** (fixed seeds 31000 / 33000 / 36000, never used for
@@ -139,12 +167,13 @@ Training saturates: 800k -> 6M steps is +8.3 points, 6M -> 16M is +1.1.
 
 | agent | buildings cleared | ms/decision |
 |---|---|---|
-| classical search | **67.8%** *(one set)* | 124 |
-| PPO + climb | 65.0% (68.3 / 61.7 / 65.0) | 0.6 |
+| PPO + climb | **65.9%** (69.4 / 63.3 / 65.0) | 0.6 |
+| classical search | 65.0% (65.6 / 65.0 / 64.4) | 124 |
 | plain PPO | 57.6% (57.2 / 53.9 / 61.7) | 0.28 |
 
-The local search recovers roughly two-thirds of the policy-to-search gap for
-double the policy's cost, and lands ~1.1 points short at ~200x less time.
+The top two are tied and the ordering is noise. The 7-point gap between the
+climb and plain PPO is not: the local search is the one component whose
+value is comfortably larger than the measurement error.
 
 ## What has been tried and failed
 
