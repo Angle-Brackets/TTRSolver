@@ -21,3 +21,7 @@ solver/live/_cog_heads/
 # not a source, and it is invalidated by any rule change anyway.
 .party_labels.json
 .expert_traj.json
+
+# CRN disagreement dumps: regenerate with tools/disagree.py
+disagreements-*.tsv
+disagreements.tsv
