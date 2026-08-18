@@ -668,6 +668,33 @@ def prevented(before: BattleState, after: BattleState) -> float:
     as a whole, which is a bigger job than one term. Do not "fix" it in
     isolation; the numbers above are what that costs.
 
+    THE WEIGHT WAS TRIED TOO, AND IT IS THE BETTER CAUTIONARY TALE.
+    Raising `QUICK_W["prevent"]` changes no shape, so none of the above
+    applies to it. The case for raising it was the strongest this project
+    has had: a building is decided by the first toon loss (intact party
+    100% cleared, anyone sad ~7%), the search wins those rounds by
+    removing threats rather than out-healing them, and the climb heals
+    55% more than the search while losing more toons. Swept on 50
+    buildings, prevent=8 gave:
+
+        cleared   62.0% -> 68.0%
+        toons lost 1.02 -> 0.82
+        lures       150 -> 182
+        heals        79 -> 71
+
+    Every number moved the way the mechanism predicted, and the owner's
+    own observation of live play said the same thing independently.
+
+    On three sets that were NOT used to find it: -0.8, -3.3, -1.7, mean
+    -1.9, and toons lost went UP by 0.056 -- the metric it was meant to
+    fix. The sweep set had by then also carried a trace, the toon-loss
+    statistics, a level-7 baseline and a price sweep. It was a tuning
+    set and nobody had said so out loud.
+
+    A mechanism that is coherent, predicts the right direction on every
+    intermediate variable, and matches independent human observation is
+    still not evidence, if it was measured where it was found.
+
     Counted for the whole lure, not one round of it: a cog asleep for
     three rounds is three rounds of its attacks that never land, which
     is the actual reason Lure is the answer to a four-cog floor.
