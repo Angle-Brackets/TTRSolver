@@ -129,6 +129,14 @@ def legal_actions(state: BattleState) -> List[Action]:
         # knows a trap springs when a lure lands.
         return actions
 
+    # PINK SLIPS, one per live cog. Offered before gags because they are
+    # unconditional: no accuracy, no track, no interaction with lure or
+    # trap. Finite and strictly decreasing, so they do not threaten the
+    # termination argument above -- the measure simply gains a component.
+    for i, cog in enumerate(state.cogs):
+        if toon.fires > 0 and not cog.status.is_dead:
+            actions.append(Action(track=None, target_index=i, fire=True))
+
     for (track, level), count in toon.gag_counts.items():
         if count <= 0:
             continue
@@ -320,6 +328,35 @@ def apply_toon_action(state: BattleState, action: Action,
         if not any(cog.status.lured for cog in state.active_cogs()):
             state.free_passes = max(0, state.free_passes - 1)
         return 0, 0
+
+    if action.fire:
+        # A pink slip removes the cog from the battle. It cannot miss, so
+        # `hit` is not consulted, and it spends the toon's action for the
+        # round exactly as a gag would.
+        #
+        # Reported as 0 damage rather than the cog's remaining hp: the
+        # cog is fired out of the fight, not damaged, and every scorer in
+        # the project reads the return value as damage dealt. Crediting
+        # it as damage would make a fire look like the biggest hit in the
+        # game to an evaluator that already struggles to price a kill.
+        index = action.target_index
+        if index is None or not (0 <= index < len(state.cogs)):
+            return 0, 0
+        cog = state.cogs[index]
+        if cog.status.is_dead:
+            return 0, 0
+        if toon.fires <= 0:
+            raise ValueError("no pink slip to spend")
+        toon.fires -= 1
+        # Kills BOTH layers of a Version 2.0 -- [CONFIRMED] wiki. Nothing
+        # here needs to know about the second layer because a fire never
+        # leaves one behind.
+        cog.hp = 0
+        cog.status.is_dead = True
+        cog.status.lured = False
+        cog.status.trapped = False
+        return 0, 0
+
     targets = _targets_for(state, action)
 
     # Copy-on-write. `BattleState.clone` shares this dict rather than

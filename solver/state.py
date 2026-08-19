@@ -67,6 +67,7 @@ class ToonState:
     # gag_counts[(track, level)] = number of that gag left in the pouch
     gag_counts: Dict[Tuple[Track, int], int] = field(default_factory=dict)
 
+
     # Tracks whose gags are organic. Organic is a property of the whole
     # track, not of an individual gag -- a toon earns an organic track
     # from a ToonTask and every gag in it is organic thereafter.
@@ -88,6 +89,22 @@ class ToonState:
     # battle goes. If restocking is ever modelled, it has to go in the
     # key -- that is the `free_passes` lesson.
     pouch_capacity: int = 80
+
+    # Pink slips, "fires". [CONFIRMED] wiki: they fire a targeted cog out
+    # of battle with a cannon and eliminate BOTH layers of a Version 2.0.
+    # The owner confirms the rest from play: using one costs the toon's
+    # action for the round, and it cannot miss.
+    #
+    # LAST FIELD ON PURPOSE. `ToonState` is built positionally all over
+    # the tests and tools, so inserting this between existing fields
+    # shifted every one after it -- `organic_tracks` landed in `fires`
+    # and 26 tests died on "frozenset > int". A new field goes on the
+    # end unless every construction site is keyword-only.
+    #
+    # Defaults to 0, because a fire is strictly better than any gag
+    # against any cog and a party holding them does not play the game.
+    # They come from the CEO, two to six a run, cap 200.
+    fires: int = 0
 
     def is_organic(self, track: Track) -> bool:
         return track in self.organic_tracks
@@ -430,6 +447,13 @@ class BattleState:
         # good support loadout, because the damage is somebody else's
         # job. Asking this toon-by-toon would call a winnable fight lost
         # the moment one member ran out of attacks.
+        # A pink slip removes a cog outright, so a party holding one can
+        # always still finish the fight even with an empty pouch. This has
+        # to come before the track check or "eighty Lures and no attacks"
+        # would read as lost while a fire sat unused.
+        if any(toon.fires > 0 for toon in self.active_toons()):
+            return True
+
         held = set()
         for toon in self.active_toons():
             held |= {track for (track, level), n in toon.gag_counts.items()
@@ -453,18 +477,27 @@ class Action:
     go by. It is a real choice and occasionally the only winning one --
     see `simulator.legal_actions` for when it is offered and why it is
     not offered more often.
+
+    `fire=True` with `track=None` is a pink slip, which is NOT a pass --
+    hence `is_pass` checking both. It spends no gag, so anything reasoning
+    about the pouch has to know about it separately.
     """
     track: Optional[Track]
     level: int = 0
     # target_index: index into state.cogs, or None for a track that hits
     # all active cogs (Toon-Up, Sound, Lure, or level-7 Throw/Squirt/Drop/Trap)
     target_index: Optional[int] = None
+    # A pink slip aimed at `target_index`. Instant, unmissable, and it
+    # removes a Version 2.0's Skelecog form along with its suit.
+    fire: bool = False
 
     @property
     def is_pass(self) -> bool:
-        return self.track is None
+        return self.track is None and not self.fire
 
     def describe(self) -> str:
+        if self.fire:
+            return f"fire -> {self.target_index}"
         if self.is_pass:
             return "pass"
         target = "all" if self.target_index is None else self.target_index
