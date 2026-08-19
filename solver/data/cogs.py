@@ -145,11 +145,133 @@ def _fill_unmodeled(spec):
     return dataclasses.replace(spec, attacks=tuple(fixed))
 
 
+
+# ---------------------------------------------------------------------
+# Boss-only levels 13-15
+# ---------------------------------------------------------------------
+# Three Bossbot cogs go above level 12, and only inside the Bossbot
+# Clubhouse -- the CEO's first cog battle draws levels 9-14 and its
+# second opens with a level 14 Big Cheese. The main tables stop at 12
+# because that is the STREET range; the Big Cheese's own infobox carries
+# the footnote "The Big Cheese can have three additional levels, up to
+# level 15."
+#
+# DAMAGE IS [CONFIRMED], read from each cog's CogAttackTable on the wiki,
+# which publishes eight levels per attack. Our stored arrays are an exact
+# PREFIX of those eight on every attack of all three cogs, which is how
+# the extension was checked rather than trusted -- see
+# tests/test_boss_levels.py.
+#
+# ACCURACY AND FREQUENCY ARE [ASSUMED], and this is the only guess here.
+# The wiki publishes neither at ANY level (our existing values come from
+# the QED guide), and Open Toontown cannot help: its SuitBattleGlobals
+# stores five levels per cog exactly as we do, so the Toontown Online
+# lineage has nothing above 12 either. Checked, not assumed.
+#
+# So the last published value is CARRIED FORWARD FLAT. That is a
+# deliberately dull choice: extrapolating the visible trend (55, 65, 70,
+# 75, 80 -> 85, 90, 95) would be inventing a curve, while a flat carry
+# invents only "no further change". It errs toward weaker cogs, which is
+# the direction that flatters toons, so treat any CEO clear rate as an
+# upper bound. `solver.search.sensitivity` finds the recommended move
+# unchanged across +-20 accuracy points, so this costs forecast
+# precision rather than advice.
+HIGH_LEVEL_DAMAGE = {
+    ("bossbot", "head_hunter"): {
+        "levels": (6, 7, 8, 9, 10, 11, 12, 13),
+        "fountain_pen": (5, 6, 8, 10, 12, 14, 16, 18),
+        "rolodex": (6, 7, 8, 9, 10, 11, 12, 13),
+        "glower_power": (7, 8, 10, 12, 13, 15, 17, 18),
+        "half_windsor": (8, 10, 12, 14, 16, 18, 20, 22),
+        "head_shrink": (10, 12, 15, 18, 21, 23, 26, 29),
+    },
+    ("bossbot", "corporate_raider"): {
+        "levels": (7, 8, 9, 10, 11, 12, 13, 14),
+        "canned": (6, 7, 8, 9, 10, 11, 12, 13),
+        "evil_eye": (12, 15, 18, 21, 24, 27, 30, 33),
+        "play_hardball": (7, 8, 12, 15, 16, 20, 23, 24),
+        "power_tie": (10, 12, 14, 16, 18, 20, 22, 24),
+        "hostile_takeover": (10, 13, 14, 15, 18, 19, 20, 23),
+    },
+    ("bossbot", "the_big_cheese"): {
+        "levels": (8, 9, 10, 11, 12, 13, 14, 15),
+        "tee_off": (8, 11, 14, 17, 20, 22, 24, 26),
+        "glower_power": (10, 12, 15, 18, 20, 22, 24, 26),
+        "power_trip": (11, 13, 14, 16, 19, 21, 22, 24),
+        "flood_the_market": (13, 15, 16, 18, 21, 23, 24, 26),
+    },
+}
+
+
+
+def _carry(column, extra: int):
+    """Extend a per-level column by `extra`, repeating its last value.
+
+    Pads with None when there is nothing to repeat, or when the last
+    known value is itself None -- the point is never to invent a number,
+    only to decline to change one.
+    """
+    column = tuple(column)
+    if extra <= 0:
+        return column
+    last = column[-1] if column else None
+    return column + (last,) * extra
+
+
+def _extend_high_levels(spec):
+    """Give the three Clubhouse cogs their boss-only levels.
+
+    Raises rather than silently skipping if the published prefix does not
+    match what we already store -- a mismatch would mean the wiki table
+    and our table are describing different things, and quietly appending
+    to that would corrupt the levels we do have.
+    """
+    import dataclasses
+
+    table = HIGH_LEVEL_DAMAGE.get((spec.department, spec.key))
+    if table is None:
+        return spec
+
+    levels = table["levels"]
+    if tuple(spec.levels) == levels:
+        return spec                        # already extended
+    if tuple(spec.levels) != levels[:len(spec.levels)]:
+        raise ValueError(
+            f"{spec.key}: stored levels {spec.levels} are not a prefix of "
+            f"the published {levels}")
+
+    grown = []
+    for attack in spec.attacks:
+        published = table.get(attack.name)
+        if published is None:
+            raise ValueError(f"{spec.key}: no published damage for "
+                             f"{attack.name}")
+        have = len(attack.damage)
+        if tuple(attack.damage) != published[:have]:
+            raise ValueError(
+                f"{spec.key}.{attack.name}: stored damage {attack.damage} is "
+                f"not a prefix of the published {published}")
+        extra = len(levels) - have
+        grown.append(dataclasses.replace(
+            attack,
+            damage=published,
+            # [ASSUMED] flat carry -- see the note above. An EMPTY or
+            # all-None column pads with None rather than inventing a
+            # number: `_fill_unmodeled` runs after this and borrows
+            # across the cog's other attacks, which is a real source,
+            # where a made-up value would not be.
+            accuracy=_carry(attack.accuracy, extra),
+            frequency=_carry(attack.frequency, extra),
+        ))
+    return dataclasses.replace(spec, levels=levels, attacks=tuple(grown))
+
+
 def _fill_department(dept):
     import dataclasses
 
     return dataclasses.replace(
-        dept, cogs=tuple(_fill_unmodeled(c) for c in dept.cogs))
+        dept, cogs=tuple(_fill_unmodeled(_extend_high_levels(c))
+                         for c in dept.cogs))
 
 
 COG_DEPARTMENTS = {

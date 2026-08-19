@@ -337,6 +337,25 @@ class BattleEnv:
         order = self._standing()
         self.actor = order[0] if order else 0
 
+    def _boss_cog(self, rng, level):
+        """A cog of a given level, allowed to reach 13-15.
+
+        `_facility_cog` draws from the street pools, which stop at 12.
+        The CEO needs the three Bossbot Clubhouse cogs, so this picks
+        from whichever of them actually covers the level rather than
+        substituting -- the same refusal-to-guess `_facility_cog` makes.
+        """
+        from .. import data
+
+        candidates = [key for key in ("head_hunter", "corporate_raider",
+                                      "the_big_cheese")
+                      if level in data.cog("bossbot", key).levels]
+        if not candidates:
+            raise ValueError(f"no Bossbot Clubhouse cog at level {level}")
+        key = rng.choice(candidates)
+        full = data.cog_max_hp(level)
+        return CogState(key, "bossbot", level, full, full)
+
     def _facility_cog(self, rng, level):
         """A cog of a given level, from the tables known to be complete.
 
@@ -384,7 +403,17 @@ class BattleEnv:
             self.state = self.sampler(self.rng)
             self.plan = None
             self.floor = 1
-            if self.state.kind == "vp":
+            if self.state.kind == "ceo":
+                # The CEO is not on a street either. Its cog levels reach
+                # 14, which only the Bossbot Clubhouse cogs cover, so it
+                # uses its own factory rather than `_facility_cog`.
+                from .. import ceo as ceo_mod
+                self.plan = ceo_mod.ceo_plan(self.rng, self._boss_cog)
+                first, holdout = self.plan.take_floor()
+                self.state.cogs = first
+                self.state.holdout = holdout
+                self.state.cogs_remaining = self.plan.remaining()
+            elif self.state.kind == "vp":
                 # The VP is not on a street and has no difficulty row, so
                 # its plan is built from the wiki's two level bands
                 # instead. Everything downstream -- holdout,
@@ -518,7 +547,7 @@ class BattleEnv:
         # what makes a conserved gag worth conserving: it gets spent
         # later in the same return. Without this the horizon was a price
         # with no payoff and PPO correctly ignored it.
-        if (nxt.is_win() and nxt.kind in ("facility", "vp")
+        if (nxt.is_win() and nxt.kind in ("facility", "vp", "ceo")
                 and self.plan is not None and not self.plan.exhausted):
             nxt = self._next_floor(nxt)
             self.floor_rounds = 0
