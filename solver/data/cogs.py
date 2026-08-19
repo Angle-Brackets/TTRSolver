@@ -97,14 +97,35 @@ def _fill_unmodeled(spec):
 
     modelled = [a for a in spec.attacks if a.modeled and a.frequency]
     unmodelled = [a for a in spec.attacks if not a.modeled]
-    if not modelled or not unmodelled:
+    blank = ([a for a in spec.attacks
+              if a.modeled and all(v is None for v in a.accuracy)]
+             if BORROW_BLANK_ACCURACY else [])
+    if not modelled or (not unmodelled and not blank):
         return spec
 
     n = len(spec.levels)
     filled = []
     for attack in spec.attacks:
-        if attack.modeled:
+        # A MODELLED attack with an entirely empty accuracy column needs
+        # the same borrow. `the_big_cheese/glower_power` is the case:
+        # its damage is published and its frequency known, but the wiki
+        # gives no accuracy at any level and the guide gave three values
+        # for one attack, so the cell was left [TODO]. That made the Big
+        # Cheese unusable -- it is why the street pools exclude it -- and
+        # the CEO's second battle opens with one, so "roughly right over
+        # precisely silent" applies here exactly as it does below.
+        blank_accuracy = (BORROW_BLANK_ACCURACY
+                          and all(v is None for v in attack.accuracy))
+        if attack.modeled and not blank_accuracy:
             filled.append(attack)
+            continue
+        if attack.modeled and blank_accuracy:
+            acc = []
+            for i in range(n):
+                accs = [a.accuracy[i] for a in modelled
+                        if i < len(a.accuracy) and a.accuracy[i] is not None]
+                acc.append(round(sum(accs) / len(accs)) if accs else None)
+            filled.append(dataclasses.replace(attack, accuracy=tuple(acc)))
             continue
         acc, freq = [], []
         for i in range(n):
@@ -204,6 +225,23 @@ HIGH_LEVEL_DAMAGE = {
 
 
 
+
+# OFF BY DEFAULT, AND THAT IS THE POINT. A modelled attack whose accuracy
+# column is entirely None is a deliberate [TODO] -- the wiki publishes no
+# accuracy and the guide gave three values for one attack, so the cell was
+# left missing so that `accuracy_at` RAISES rather than substituting.
+# Four tests depend on exactly that behaviour.
+#
+# `the_big_cheese/glower_power` is the case, and it is why the street cog
+# pools exclude the Big Cheese. The CEO's second battle opens with one, so
+# `solver.ceo` turns this on and accepts a borrowed accuracy -- the same
+# [ASSUMED] mechanism `_fill_unmodeled` already applies to twelve other
+# attacks, and stated rather than smuggled.
+#
+# Anything measured with this on inherits an approximation. Leave it off
+# unless you are modelling a fight that cannot be built without it.
+BORROW_BLANK_ACCURACY = False
+
 def _carry(column, extra: int):
     """Extend a per-level column by `extra`, repeating its last value.
 
@@ -280,6 +318,27 @@ COG_DEPARTMENTS = {
     "cashbot": _fill_department(CASHBOT),
     "lawbot": _fill_department(LAWBOT),
 }
+
+
+def enable_blank_accuracy_borrow() -> None:
+    """Turn the borrow on and rebuild the tables.
+
+    The departments are built at import, so flipping the flag alone
+    changes nothing -- a caller that set it and carried on would get the
+    old specs and no warning. Idempotent, and there is deliberately no
+    way to turn it back off: half the process holding borrowed accuracy
+    and half holding a [TODO] would be worse than either.
+    """
+    global BORROW_BLANK_ACCURACY, COG_DEPARTMENTS
+    if BORROW_BLANK_ACCURACY:
+        return
+    BORROW_BLANK_ACCURACY = True
+    COG_DEPARTMENTS = {
+        "bossbot": _fill_department(BOSSBOT),
+        "sellbot": _fill_department(SELLBOT),
+        "cashbot": _fill_department(CASHBOT),
+        "lawbot": _fill_department(LAWBOT),
+    }
 
 
 def cog(department: str, cog_key: str):

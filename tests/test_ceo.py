@@ -23,11 +23,21 @@ class CeoStructureTest(unittest.TestCase):
     def test_two_rounds(self):
         self.assertEqual(len(plan().floors), 2)
 
-    def test_round_two_opens_with_a_level_14_v2_big_cheese(self):
+    def test_round_two_opens_with_a_v2_big_cheese(self):
+        """The wiki says level 14; we run at 12 because `tgt_def` is
+        unpublished above 12 and the project refuses to invent it. The
+        COG has to be a Big Cheese either way -- drawing it from the
+        level pool got a Corporate Raider, which is a different fight."""
         second = plan().floors[1]
         self.assertEqual(second[0].cog_type, "the_big_cheese")
-        self.assertEqual(second[0].level, 14)
+        self.assertEqual(second[0].level, ceo.BIG_CHEESE_LEVEL)
         self.assertTrue(second[0].status.suited)
+
+    def test_the_level_cap_is_recorded_as_a_deviation(self):
+        self.assertEqual(ceo.WIKI_COG_LEVELS, (9, 14))
+        self.assertEqual(ceo.WIKI_BIG_CHEESE_LEVEL, 14)
+        self.assertLess(ceo.COG_LEVELS[1], ceo.WIKI_COG_LEVELS[1],
+                        "the cap exists; if it is lifted, say so here")
 
     def test_every_banquet_leftover_is_a_v2(self):
         """[OPEN TOONTOWN SOURCE] generateDinerSuits builds every diner

@@ -65,20 +65,76 @@ ROUND_ONE = 12
 LEFTOVERS = 10
 
 # [CONFIRMED] wiki: "range from level 9 to level 14".
-COG_LEVELS = (9, 14)
+#
+# CAPPED AT 12, AND THIS IS A KNOWN DEVIATION FROM THE GAME. The accuracy
+# formula needs `tgt_def`, the target-defence term, and
+# `data.accuracy.TGT_DEF_RANK_1` records that the wiki gives "Unknown"
+# for levels 13-19 -- the table jumps 12: -55 straight to 20: -65 and the
+# omission is deliberate. `tgt_def` raises rather than substituting, so a
+# level 13 or 14 cog cannot be simulated at all, and inventing a value by
+# interpolating -55 to -65 is exactly what the no-guessing rule forbids.
+#
+# The cap makes the CEO EASIER than the real fight, so every clear rate
+# here is an upper bound -- on top of the flat accuracy carry in
+# `data.cogs.HIGH_LEVEL_DAMAGE`, which errs the same way. Lift both the
+# moment tgt_def for 13-14 is published.
+WIKI_COG_LEVELS = (9, 14)
+COG_LEVELS = (9, 12)
 
 # [CONFIRMED] wiki: battle two opens with a level 14 v2.0 Big Cheese.
-BIG_CHEESE_LEVEL = 14
+# Capped for the same reason. Open Toontown independently has this cog at
+# level 12 (two of them), so 12 is at least not an invented number.
+WIKI_BIG_CHEESE_LEVEL = 14
+BIG_CHEESE_LEVEL = 12
 
 LAFF_RANGE = (100, 119)
 FIRES_PER_TOON = 5
 PARTY_SIZE = 2
 
 
+def enable_big_cheese() -> None:
+    """Accept a borrowed accuracy for the Big Cheese. CALL EXPLICITLY.
+
+    `the_big_cheese/glower_power` has no published accuracy at any level.
+    That cell is deliberately left missing so `accuracy_at` RAISES, and it
+    is the project's last live example of the rule -- four tests use it as
+    their data-gap sentinel, one with a "test premise changed" guard. It
+    is also why the street cog pools exclude this cog.
+
+    The CEO's second battle opens with one, so simulating the fight means
+    accepting the same [ASSUMED] borrow `_fill_unmodeled` already applies
+    to twelve other attacks: the mean of the cog's other attacks at that
+    level.
+
+    NOT called on import, and that is deliberate. An earlier version did,
+    which meant merely importing this module flipped a global and leaked
+    the approximation into every unrelated test in the same process.
+    Building a CEO plan needs nothing from this; only resolving an attack
+    does. Opt in where you measure, so the approximation is visible in the
+    script that depends on it.
+    """
+    from .data import cogs as cogs_mod
+
+    cogs_mod.enable_blank_accuracy_borrow()
+
+
 def _as_v2(cog: CogState) -> CogState:
     """Put the outer suit on. A v2.0 carries a second full health pool."""
     cog.status.suited = True
     return cog
+
+
+
+def big_cheese(level: int = None) -> CogState:
+    """The named cog battle two opens with, at full health."""
+    from . import data
+
+    level = BIG_CHEESE_LEVEL if level is None else level
+    spec = data.cog("bossbot", "the_big_cheese")
+    if level not in spec.levels:
+        raise ValueError(f"no Big Cheese at level {level}")
+    full = data.cog_max_hp(level)
+    return CogState("the_big_cheese", "bossbot", level, full, full)
 
 
 def ceo_plan(rng, cog_factory,
@@ -103,7 +159,10 @@ def ceo_plan(rng, cog_factory,
             _as_v2(cog)
         first.append(cog)
 
-    second: List[CogState] = [_as_v2(cog_factory(rng, BIG_CHEESE_LEVEL))]
+    # NAMED, not drawn. The wiki is specific that battle two opens with a
+    # Big Cheese, and the random factory picks any cog covering the level
+    # -- at 12 that includes Corporate Raider, which is a different fight.
+    second: List[CogState] = [_as_v2(big_cheese(BIG_CHEESE_LEVEL))]
     # Every banquet survivor is a Version 2.0.
     second += [_as_v2(cog_factory(rng, rng.randint(lo, hi)))
                for _ in range(leftovers)]
