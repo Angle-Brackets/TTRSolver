@@ -18,7 +18,13 @@ class ActionTableTest(unittest.TestCase):
         is always present even when everything else is masked out."""
         self.assertEqual(env.PASS_INDEX, 0)
         self.assertTrue(env.action_at(0).is_pass)
-        self.assertEqual(len(env.ACTIONS), 1 + 7 * 7 * 5)
+        # 1 pass + 7 tracks x 7 levels x 5 targets + one fire per cog
+        # slot. The fires are APPENDED so every gag index keeps the
+        # meaning it had; a policy trained before them is refused by
+        # check_export rather than read four slots out of step.
+        self.assertEqual(len(env.ACTIONS), 1 + 7 * 7 * 5 + env.MAX_COGS)
+        self.assertEqual(sum(1 for a in env.ACTIONS if a is not None
+                             and a.fire), env.MAX_COGS)
 
     def test_pass_is_always_legal(self):
         """The search cannot say this -- widening its pass broke exact

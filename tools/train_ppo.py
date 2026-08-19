@@ -190,13 +190,20 @@ def main():
     #
     # The pass gets its own slot at the end, so "hold" is something the
     # track-entropy term can encourage too.
+    # Pass gets a slot, and so does FIRE -- a pink slip has no track and
+    # is not a hold, so it belongs in neither bucket. Without its own
+    # slot this raised "None is not in list" the moment fires entered the
+    # action table, which is the right failure: the mapping has to say
+    # what every action is.
     track_of = torch.zeros(n_actions, dtype=torch.long, device=device)
     for _i, _a in enumerate(env_mod.ACTIONS):
-        if _a is None or _a.is_pass:
+        if _a is not None and _a.fire:
+            track_of[_i] = len(env_mod.TRACKS) + 1
+        elif _a is None or _a.is_pass:
             track_of[_i] = len(env_mod.TRACKS)
         else:
             track_of[_i] = env_mod.TRACKS.index(_a.track)
-    n_tracks = len(env_mod.TRACKS) + 1
+    n_tracks = len(env_mod.TRACKS) + 2
     track_onehot = torch.nn.functional.one_hot(
         track_of, num_classes=n_tracks).float()
     trunk, vtrunk, actor, critic = build(env_mod.OBS_DIM, n_actions,
