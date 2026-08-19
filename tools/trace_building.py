@@ -89,8 +89,13 @@ def play(seed, agent, budget, verbose=True, label="", sampler=None):
             state = e.state
             if e.floor != floor_seen:
                 floor_seen = e.floor
-                name = (("cog round", "skelecog round")[min(e.floor - 1, 1)]
-                        if state.kind == "vp" else f"floor {e.floor + 1}")
+                if state.kind == "vp":
+                    name = ("cog round", "skelecog round")[min(e.floor - 1, 1)]
+                elif state.kind == "ceo":
+                    name = ("waiter battle",
+                            "Big Cheese + banquet leftovers")[min(e.floor - 1, 1)]
+                else:
+                    name = f"floor {e.floor + 1}"
                 lines.append(f"    --- {name} "
                              f"({state.cogs_remaining} cogs still to come) ---")
             if agent == "search":
@@ -138,6 +143,12 @@ def main():
                     help="instead of tracing, report seeds where the two "
                          "agents disagree about the OUTCOME")
     ap.add_argument("--start", type=int, default=36000)
+    ap.add_argument("--ceo", action="store_true",
+                    help="trace one side of the CEO: two toons with pink "
+                         "slips, the waiter battle then the Big Cheese and "
+                         "the banquet leftovers")
+    ap.add_argument("--leftovers", type=int, default=None,
+                    help="banquet survivors carried into the second battle")
     ap.add_argument("--vp", action="store_true",
                     help="trace one side of the Sellbot VP instead of a "
                          "cog building: two maxed toons, the cog round then "
@@ -194,7 +205,16 @@ def main():
         return 0
 
     sampler = None
-    if args.vp:
+    if args.ceo:
+        from solver import ceo as ceo_mod
+        ceo_mod.enable_big_cheese()
+        if args.leftovers is not None:
+            ceo_mod.LEFTOVERS = args.leftovers
+        sampler = ceo_mod.ceo_position
+        print(f"\n  CEO side {args.seed}   {ceo_mod.ROUND_ONE} waiters, "
+              f"then a level {ceo_mod.BIG_CHEESE_LEVEL} v2.0 Big Cheese "
+              f"+ {ceo_mod.LEFTOVERS} leftovers")
+    elif args.vp:
         from solver import vp as vp_mod
         sampler = vp_mod.vp_position
         print(f"\n  VP side {args.seed}   {vp_mod.COG_ROUND} cogs "
@@ -203,7 +223,7 @@ def main():
         print(f"\n  building {args.seed}")
     play(args.seed, "climb", args.budget, label="PPO + climb",
          sampler=sampler)
-    if not args.vp:
+    if not args.vp and not args.ceo:
         play(args.seed, "search", args.budget, label="classical search",
              sampler=sampler)
     return 0

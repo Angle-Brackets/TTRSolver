@@ -431,6 +431,13 @@ class BattleState:
                 gag_counts=t.gag_counts,
                 organic_tracks=t.organic_tracks,
                 pouch_capacity=t.pouch_capacity,
+                # Pink slips are SPENT, so they must be carried. Omitting
+                # this defaulted every clone to zero and the fires simply
+                # evaporated -- a CEO sweep reported "20 used every run"
+                # which was not usage at all, it was the loss being read
+                # as spending. Anything mutable enough to be spent has to
+                # appear here; the field list is not decoration.
+                fires=t.fires,
             ) for t in self.toons],
             cogs=[c.copy() for c in self.cogs],
             round_num=self.round_num,

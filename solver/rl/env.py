@@ -57,6 +57,21 @@ for _track in TRACKS:
             ACTIONS.append(Action(track=_track, level=_level,
                                   target_index=_target))
 
+# PINK SLIPS, one per cog slot, appended AFTER the gags so every existing
+# index keeps its meaning. Without these the agent could not fire at all:
+# `simulator.legal_actions` offers them, but nothing here could name one,
+# so `legal_mask` dropped them and a party holding twenty slips played as
+# though it held none.
+#
+# This takes the table from 246 to 250 and therefore INVALIDATES every
+# policy trained before it -- `check_export` refuses them rather than
+# reading the weights shifted by four, which is the failure this project
+# has already had once.
+FIRE_TARGETS = list(range(MAX_COGS))
+for _target in FIRE_TARGETS:
+    ACTIONS.append(Action(track=None, level=0, target_index=_target,
+                          fire=True))
+
 PASS_INDEX = 0
 # Coordinated play adds two blocks: which toon is deciding, and what
 # each toon has already chosen THIS round. Without the second, four
@@ -206,7 +221,15 @@ def encode(state: BattleState, actor: int = 0,
 _ACTION_INDEX = {
     (action.track, action.level, action.target_index): index
     for index, action in enumerate(ACTIONS)
-    if action is not None and not action.is_pass
+    if action is not None and not action.is_pass and not action.fire
+}
+
+# Fires key on the target alone -- they have no track and no level, and
+# keying them into the table above would collide with the pass.
+_FIRE_INDEX = {
+    action.target_index: index
+    for index, action in enumerate(ACTIONS)
+    if action is not None and action.fire
 }
 
 
@@ -251,6 +274,11 @@ def legal_mask(state: BattleState, actor: int = 0) -> List[bool]:
     for action in simulator.legal_actions(rotated):
         if action.is_pass:
             mask[PASS_INDEX] = True
+            continue
+        if action.fire:
+            index = _FIRE_INDEX.get(action.target_index)
+            if index is not None:
+                mask[index] = True
             continue
         target = action.target_index
         if action.track == Track.TOON_UP and target is not None:
