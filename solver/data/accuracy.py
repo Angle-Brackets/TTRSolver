@@ -115,7 +115,22 @@ TRACK_EXP_BY_LEVEL = {1: 0, 2: 10, 3: 20, 4: 30, 5: 40, 6: 50, 7: 60}
 TGT_DEF_RANK_1 = {
     1: -2, 2: -5, 3: -10, 4: -12, 5: -15, 6: -25,
     7: -30, 8: -35, 9: -40, 10: -45, 11: -50, 12: -55,
-    # 13-19: wiki says "Unknown" -- deliberately omitted.
+    # 13-19 [ASSUMED], AUTHORISED BY THE OWNER, and the second such cell
+    # in the project after MULTI_LURE_ACCURACY_BONUS. The wiki prints
+    # "Unknown" here and this table previously omitted the rows so that
+    # `tgt_def` would RAISE -- which it did, and which is what blocked
+    # the CEO, whose cogs reach level 14.
+    #
+    # Linearly interpolated between the two published endpoints, 12: -55
+    # and 20: -65, at -1.25 a level and rounded. A straight line is the
+    # dullest curve that joins them: it invents no shape the data does
+    # not show, and the published ends pin it at both sides.
+    #
+    # This is a bet on the shape between two known points, taken
+    # knowingly. If measurement contradicts it, change these seven cells
+    # and nothing else.
+    13: -56, 14: -58, 15: -59, 16: -60,
+    17: -61, 18: -63, 19: -64,
     20: -65,
 }
 

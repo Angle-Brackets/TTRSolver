@@ -147,26 +147,38 @@ class TestTrackExp(unittest.TestCase):
 
 
 class TestTgtDef(unittest.TestCase):
-    def test_confirmed_levels_present(self):
-        self.assertEqual(set(acc.TGT_DEF_RANK_1),
-                         set(range(1, 13)) | {20})
+    def test_every_level_to_twenty_is_present(self):
+        self.assertEqual(set(acc.TGT_DEF_RANK_1), set(range(1, 21)))
 
-    def test_levels_13_to_19_are_absent(self):
-        """The wiki prints "Unknown" for these. Absence makes a lookup
-        raise, which is the intended behaviour -- do not interpolate
-        between level 12 (-55) and level 20 (-65)."""
+    def test_levels_13_to_19_are_interpolated_and_marked_assumed(self):
+        """These used to be ABSENT so a lookup would raise, because the
+        wiki prints "Unknown" for them. The owner has since authorised
+        interpolating between the two published endpoints -- 12: -55 and
+        20: -65 -- because the CEO's cogs reach level 14 and the fight
+        could not otherwise be simulated at all.
+
+        A straight line at -1.25 a level, rounded. It is a bet on the
+        shape between two known points, taken knowingly, and it is the
+        second such cell in the project after MULTI_LURE_ACCURACY_BONUS.
+        If measurement contradicts it, change these seven and nothing
+        else."""
+        self.assertEqual(
+            {lvl: acc.TGT_DEF_RANK_1[lvl] for lvl in range(13, 20)},
+            {13: -56, 14: -58, 15: -59, 16: -60, 17: -61, 18: -63,
+             19: -64})
         for level in range(13, 20):
             with self.subTest(level=level):
-                self.assertNotIn(level, acc.TGT_DEF_RANK_1)
-                self.assertNotIn(level, acc.TGT_DEF_RANK_2_PLUS)
-                with self.assertRaises(KeyError):
-                    acc.tgt_def(level)
+                # strictly between the endpoints that pin it
+                self.assertLess(acc.tgt_def(level), acc.tgt_def(12))
+                self.assertGreater(acc.tgt_def(level), acc.tgt_def(20))
 
     def test_rank_1_values(self):
         self.assertEqual(
             acc.TGT_DEF_RANK_1,
             {1: -2, 2: -5, 3: -10, 4: -12, 5: -15, 6: -25, 7: -30,
-             8: -35, 9: -40, 10: -45, 11: -50, 12: -55, 20: -65})
+             8: -35, 9: -40, 10: -45, 11: -50, 12: -55,
+             13: -56, 14: -58, 15: -59, 16: -60, 17: -61, 18: -63,
+             19: -64, 20: -65})
 
     def test_rank_2_plus_differs_only_at_levels_4_and_5(self):
         """Accuracy#tgtDef prints "-12*/-15" and "-15*/-20" with the

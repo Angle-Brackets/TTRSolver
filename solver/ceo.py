@@ -72,26 +72,17 @@ LEFTOVERS = 10
 
 # [CONFIRMED] wiki: "range from level 9 to level 14".
 #
-# CAPPED AT 12, AND THIS IS A KNOWN DEVIATION FROM THE GAME. The accuracy
-# formula needs `tgt_def`, the target-defence term, and
-# `data.accuracy.TGT_DEF_RANK_1` records that the wiki gives "Unknown"
-# for levels 13-19 -- the table jumps 12: -55 straight to 20: -65 and the
-# omission is deliberate. `tgt_def` raises rather than substituting, so a
-# level 13 or 14 cog cannot be simulated at all, and inventing a value by
-# interpolating -55 to -65 is exactly what the no-guessing rule forbids.
-#
-# The cap makes the CEO EASIER than the real fight, so every clear rate
-# here is an upper bound -- on top of the flat accuracy carry in
-# `data.cogs.HIGH_LEVEL_DAMAGE`, which errs the same way. Lift both the
-# moment tgt_def for 13-14 is published.
-WIKI_COG_LEVELS = (9, 14)
-COG_LEVELS = (9, 12)
+# The cap that used to sit here is GONE. It existed because `tgt_def` had
+# no value above level 12 and raised rather than substituting; the owner
+# has since authorised interpolating those cells, so the wiki's real
+# range can be used. See data.accuracy.TGT_DEF_RANK_1 -- levels 13-19
+# there are [ASSUMED], and every CEO number now rests on them.
+COG_LEVELS = (9, 14)
 
 # [CONFIRMED] wiki: battle two opens with a level 14 v2.0 Big Cheese.
-# Capped for the same reason. Open Toontown independently has this cog at
-# level 12 (two of them), so 12 is at least not an invented number.
-WIKI_BIG_CHEESE_LEVEL = 14
-BIG_CHEESE_LEVEL = 12
+# Open Toontown has two of them at level 12 instead; the wiki is the
+# source of truth for TTR and the discrepancy is noted, not split.
+BIG_CHEESE_LEVEL = 14
 
 LAFF_RANGE = (100, 119)
 FIRES_PER_TOON = 5

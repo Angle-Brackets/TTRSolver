@@ -33,11 +33,13 @@ class CeoStructureTest(unittest.TestCase):
         self.assertEqual(second[0].level, ceo.BIG_CHEESE_LEVEL)
         self.assertTrue(second[0].status.suited)
 
-    def test_the_level_cap_is_recorded_as_a_deviation(self):
-        self.assertEqual(ceo.WIKI_COG_LEVELS, (9, 14))
-        self.assertEqual(ceo.WIKI_BIG_CHEESE_LEVEL, 14)
-        self.assertLess(ceo.COG_LEVELS[1], ceo.WIKI_COG_LEVELS[1],
-                        "the cap exists; if it is lifted, say so here")
+    def test_the_wiki_range_is_used_in_full(self):
+        """The cap is gone: tgt_def 13-19 is now interpolated (owner
+        authorised), so levels 13 and 14 can actually be simulated."""
+        from solver import data
+        self.assertEqual(ceo.COG_LEVELS, (9, 14))
+        self.assertEqual(ceo.BIG_CHEESE_LEVEL, 14)
+        self.assertEqual(data.tgt_def(14), -58)
 
     def test_every_banquet_leftover_is_a_v2(self):
         """[OPEN TOONTOWN SOURCE] generateDinerSuits builds every diner
