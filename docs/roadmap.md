@@ -35,11 +35,14 @@ is unchanged across ±20 accuracy points and only diverges at −30. The gap
 costs forecast precision, not advice quality. Chase it if you want
 trustworthy absolute win rates; skip it if you want good moves.
 
-Closing this would also let the **twelve 4.0.0 attacks** currently parked in
-`"unmodeled_attacks"` be folded into the real tables. They have confirmed
-damage and targeting but no frequency, so today the simulator simply
-under-estimates the eight cogs that have them — nine of the twelve are
-group attacks.
+~~Closing this would also let the twelve 4.0.0 attacks currently parked in
+`"unmodeled_attacks"` be folded into the real tables.~~ **Done, with an
+approximation rather than data.** `cogs._fill_unmodeled` gives each of them
+the mean accuracy and frequency of the same cog's *modelled* attacks, so
+the eight cogs carrying them are no longer under-estimated. It is tagged as
+a borrow, not as data: "a preference for being roughly right over being
+precisely silent, taken knowingly". If the wiki ever publishes the columns,
+delete the function rather than tuning it.
 
 ## 2. Smaller data gaps
 
