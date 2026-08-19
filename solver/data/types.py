@@ -58,6 +58,29 @@ class Gag:
     # pouch total: you cannot carry 20 Birthday Cakes however much room is
     # left, because its own cap is 3. `min_carry` is the limit on a starting
     # pouch, `max_carry` with every pouch upgrade.
+    #
+    # [TODO] NOTHING INTERPOLATES BETWEEN THESE, and `min_carry` is
+    # consequently dead: every consumer in the project reads `max_carry`
+    # and so assumes a fully upgraded pouch. That over-equips exactly the
+    # under-trained toons `env.scrappy_position` exists to model.
+    #
+    # The rule that would fix it is NOT AVAILABLE. Two accounts disagree
+    # and neither is confirmed:
+    #   * this comment says the limit rises with POUCH upgrades (the
+    #     20 -> 80 ToonTasks);
+    #   * the project owner reports it rises with how much of the TRACK
+    #     is unlocked.
+    # Each gag's infobox publishes only the two endpoints (`mincarry`,
+    # `maxcarry`) with no function between them; `Gag pouch` covers the
+    # pouch TOTAL only; and a wiki search for the rule returns patch
+    # notes changing individual caps (TNT 2 -> 3, Trapdoor 5 -> 7) plus a
+    # Sellbot Task Force reward granting "+1 level 7 gag carry capacity",
+    # which is a third mechanism again.
+    #
+    # So this stays unmodelled rather than guessed. Filling it in would
+    # change every scarcity price in the project -- `objective`,
+    # `_quick_score`, `_greedy_score` and `party.py` all divide by
+    # `max_carry` -- so a wrong rule would be expensive and quiet.
     min_carry: Optional[int] = None
     max_carry: Optional[int] = None
 

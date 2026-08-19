@@ -983,6 +983,14 @@ def restock(toon, rng, capacity=None) -> None:
         if gags_mod.pouch_total(counts) >= capacity:
             break
         room = capacity - gags_mod.pouch_total(counts)
+        # [TODO] `max_carry` is the FULLY UPGRADED limit, so every toon
+        # built here is given a maxed per-gag allowance whatever their
+        # progression -- see the note on `Gag.min_carry`. It matters most
+        # for `scrappy_position`, which lowers laff and gag LEVELS but
+        # then hands out maxed COUNTS of what remains, making those
+        # parties better supplied than intended. The interpolation rule
+        # is not published, so this is a known overestimate rather than a
+        # guess in the other direction.
         want = min(data.gag(*key).max_carry or 1, room)
         if want > 0:
             counts[key] = want
