@@ -44,6 +44,7 @@ from enum import Enum
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from . import data, mechanics, simulator
+from .data import gags as gags_mod
 from .state import Action, BattleState, Track
 
 
@@ -136,9 +137,15 @@ class SensiblePrior(TeammateModel):
         except (NotImplementedError, ValueError):
             return 0.0
 
-    def _scarcity(self, track: Track, level: int) -> float:
+    def _scarcity(self, track: Track, level: int, unlocked: int = 6) -> float:
+        """How dear this gag is TO ITS HOLDER.
+
+        A carry limit rises as the track is trained, so the same gag is
+        scarcer for a toon who has only just unlocked it. Defaults to a
+        fully trained track, which is what this assumed before.
+        """
         try:
-            limit = data.gag(track, level).max_carry or 1
+            limit = gags_mod.carry_limit(track, level, unlocked) or 1
         except (NotImplementedError, ValueError):
             return 0.0
         return SCARCITY_WEIGHT / limit

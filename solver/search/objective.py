@@ -28,6 +28,7 @@ from dataclasses import dataclass
 from typing import Dict
 
 from .. import data
+from ..data import gags as gags_mod
 from ..state import Track
 
 
@@ -190,7 +191,8 @@ class Objective:
     loss_penalty: float = 100.0
 
     def gag_price(self, track: Track, level: int,
-                  cogs_remaining: int = 0) -> float:
+                  cogs_remaining: int = 0,
+                  unlocked: int = 6) -> float:
         """What spending one of this gag costs the objective.
 
         `track=None` is a pass, which spends no gag and so is free. It is
@@ -202,7 +204,15 @@ class Objective:
             return 0.0
         price = self.gag_cost * float(level)
         if self.scarcity_cost:
-            limit = data.gag(track, level).max_carry or 1
+            # `unlocked` is the HOLDER's training level in the track, so
+            # scarcity is what the gag costs THAT toon. A carry limit is
+            # not a property of the gag: a toon whose Trap tops out at
+            # Trapdoor holds 3 of them, and one who has reached TNT holds
+            # 7. Pricing both at 7 under-charged the first by more than
+            # half. Defaults to a fully trained track, which is what this
+            # assumed unconditionally before, so callers without a toon
+            # in scope are unchanged.
+            limit = gags_mod.carry_limit(track, level, unlocked) or 1
             price += self.scarcity_cost * (1.0 / limit)
         # What is still coming makes the same gag dearer. Defaults to 0
         # remaining, so every existing caller is unchanged.

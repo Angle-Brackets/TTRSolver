@@ -44,6 +44,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 from .. import party as party_mod
 from .. import simulator
 from ..party import Mode, TeammateModel
+from ..data import gags as gags_mod
 from ..state import Action, BattleState, Track
 from . import expectimax
 from . import objective as objective_mod
@@ -823,9 +824,9 @@ def _quick_score(state: BattleState, plan) -> float:
     killed = sum(1 for before, after in zip(state.cogs, probe.cogs)
                  if not before.status.is_dead and after.status.is_dead)
     price = 0.0
-    for track, level, count in _spent(state, probe):
+    for track, level, count, unlocked in _spent(state, probe):
         try:
-            limit = data.gag(track, level).max_carry or 1
+            limit = gags_mod.carry_limit(track, level, unlocked) or 1
         except (NotImplementedError, ValueError):
             limit = 1
         price += count * (level + 20.0 / limit)
@@ -1067,7 +1068,9 @@ def plan_waste(state: BattleState, plan) -> Tuple[float, float]:
         if action is None or action.is_pass:
             continue          # a pass costs no gag, so no scarcity
         try:
-            limit = data.gag(action.track, action.level).max_carry or 1
+            limit = gags_mod.carry_limit(
+                action.track, action.level,
+                toon.track_exp.get(action.track, 0)) or 1
         except (NotImplementedError, ValueError, KeyError):
             limit = 1
         price += 1.0 / limit
@@ -1118,8 +1121,15 @@ def round_reward(objective, laff_lost: int, spent, won: bool,
     from ..data.gags import POUCH_EXEMPT_LEVEL
 
     reward = -objective.laff_weight * float(laff_lost)
-    for track, level, count in spent:
-        reward -= count * objective.gag_price(track, level, cogs_remaining)
+    for entry in spent:
+        # `_spent` yields the holder's training level as a fourth field so
+        # scarcity can be priced per toon. Callers that build `spent`
+        # themselves still pass triples, and those price as a fully
+        # trained track -- which is what this did for everyone before.
+        track, level, count = entry[0], entry[1], entry[2]
+        unlocked = entry[3] if len(entry) > 3 else 6
+        reward -= count * objective.gag_price(track, level, cogs_remaining,
+                                              unlocked)
         if level >= POUCH_EXEMPT_LEVEL:
             reward -= count * getattr(objective, "rare_gag_premium", 0.0)
     # A toon going sad is not just the laff they had left -- it is a
@@ -1134,12 +1144,19 @@ def round_reward(objective, laff_lost: int, spent, won: bool,
 
 
 def _spent(before: BattleState, after: BattleState):
+    """(track, level, count, unlocked) per gag spent this round.
+
+    `unlocked` is the training level of the toon who SPENT it, because a
+    carry limit -- and so scarcity -- belongs to the holder rather than
+    to the gag.
+    """
     out = []
     for old, new in zip(before.toons, after.toons):
         for key, had in old.gag_counts.items():
             used = had - new.gag_counts.get(key, 0)
             if used > 0:
-                out.append((key[0], key[1], used))
+                out.append((key[0], key[1], used,
+                            old.track_exp.get(key[0], 0)))
     return out
 
 
@@ -1277,7 +1294,9 @@ def _cheap_score(state: BattleState, index: int, action: Action) -> float:
     toon = state.toons[index]
 
     try:
-        limit = data.gag(action.track, action.level).max_carry or 1
+        limit = gags_mod.carry_limit(
+            action.track, action.level,
+            toon.track_exp.get(action.track, 0)) or 1
     except (NotImplementedError, ValueError):
         limit = 1
     price = 20.0 / limit + action.level
