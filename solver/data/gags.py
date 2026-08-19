@@ -350,6 +350,15 @@ POUCH_EXEMPT_LEVEL = 7
 # infoboxes. Six tracks match on all 12; see tests/test_carry_limits.py,
 # which asserts it rather than trusting this comment.
 #
+# NOTE ON MEASURING A CHANGE LIKE THIS. Threading these limits through
+# the samplers changes which loadouts toons get, so it changes the
+# BUILDINGS -- the benchmark before and after is not the same population
+# and clear rates across it are not comparable. Set 36000 moved 60.8% ->
+# 67.5% and three held-out sets moved -0.3 on the same measurement. The
+# first was read as a gain and was not one. What justifies this table is
+# that it is right, not that it scores better; a data correction that
+# moves the benchmark cannot be validated by the benchmark.
+#
 # Rows are the highest gag unlocked in the track (1-6), columns are the
 # gag's own level (1-6). Unlocking level 7 does not raise the others --
 # Open Toontown's seventh row equals its sixth across these columns.
