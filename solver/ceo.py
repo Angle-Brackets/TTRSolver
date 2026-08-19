@@ -58,8 +58,14 @@ from .state import BattleState, CogState
 # [ASSUMED] owner's observed play. Open Toontown says 1.00 -- see above.
 V2_FRACTION = 0.20
 
-# [ASSUMED] neither the wiki nor the source gives a count for battle one.
-ROUND_ONE = 12
+# Cogs in the first battle, PER SIDE -- the two sides fight in parallel,
+# each with its own set, so a full CEO faces twice this.
+#
+# [ASSUMED] from the owner's observed play. Neither the wiki nor the
+# Open Toontown source gives a count: the wiki describes the battle
+# without quantifying it, and `SuitBuildingGlobals` entry 14 gives a
+# level pool rather than a roster.
+ROUND_ONE = 20
 
 # Banquet survivors carried into battle two. Swept, not guessed.
 LEFTOVERS = 10
