@@ -857,8 +857,15 @@ def track_level(track, available_from: int, stage: int,
     return max(1, min(7, level))
 
 
-def toon_for_street(rng, street) -> ToonState:
+def toon_for_street(rng, street, hardship: float = 0.0) -> ToonState:
     """A toon who could plausibly be fighting on this street.
+
+    `hardship` in [0, 1] squeezes the toon toward the bottom of what the
+    street allows: laff to the floor of the band, and grind down, which
+    is what actually lowers gag levels. It is a SYNTHETIC DIFFICULTY
+    KNOB, not a claim about the game -- no wiki page says how many
+    underlevelled toons attempt a Dreamland building. See
+    `scrappy_position` for why it exists.
 
     The correction that made facility training data worth having. The
     sampler used to build a party and then pick a street, which put
@@ -876,6 +883,13 @@ def toon_for_street(rng, street) -> ToonState:
     stage = profile["stage"]
 
     low, high = profile["laff"]
+    if hardship > 0.0:
+        # Squeeze the band toward its floor rather than going below it:
+        # the floor is what the previous playground's ToonTasks award, so
+        # dropping under it would build a toon who could not have reached
+        # this street at all -- the exact incoherence `facility_position`
+        # was written to stop.
+        high = max(low, low + int(round((high - low) * (1.0 - hardship))))
     max_laff = rng.randint(low, high)
     reach = (max_laff - low) / float(high - low) if high > low else 0.5
 
@@ -888,6 +902,10 @@ def toon_for_street(rng, street) -> ToonState:
     # can sit mid-band holding level 7s. Both are real, and a tight
     # coupling would erase them.
     grind = (0.35 + 1.75 * reach) * math.exp(rng.gauss(0.0, 0.35))
+    # Grind is what sets gag levels, so this is the half of `hardship`
+    # that produces "mediocre gags" -- laff alone would just make a
+    # well-equipped toon fragile.
+    grind *= (1.0 - 0.65 * hardship)
 
     have = facility.sample_tracks(rng)
     exp = {}
@@ -992,6 +1010,85 @@ def facility_position(rng) -> BattleState:
     state = BattleState(toons=party, cogs=[], kind="facility",
                         street=street[0])
     return state
+
+
+SCRAPPY_HARDSHIP = 0.8
+
+
+def scrappy_position(rng) -> BattleState:
+    """A facility floor for a party that has no business being there.
+
+    WHY THIS EXISTS. On the standard facility sampler the two agents are
+    tied -- 65.9% against 65.0% over three sets, inside the noise -- and
+    every lever tried against that tie has come back null. The tie may be
+    a property of the TASK rather than of the agents: with a maxed pouch
+    there is usually a gag that simply removes the problem, so most
+    positions have many good answers and it does not matter much which
+    one you pick. That is exactly what the CRN experiment measured -- the
+    agents disagree on 95% of rounds and three quarters of the
+    disagreements are worth under a point.
+
+    Take the shortcuts away and the support tracks have to carry the
+    fight. With low laff you cannot trade hits, and with mediocre gags
+    you cannot one-shot a cog or lean on Sound to clear a floor, so
+    Toon-Up and Lure stop being optional. Those are precisely the two
+    tracks every scorer here prices worst: `_quick_score` pays for damage
+    landed, a heal is capped at the target's missing laff, and
+    `prevented` is worth 2.0 a point against a kill's flat 120.
+
+    So this is a task where the evaluator's known weaknesses should
+    finally cost something measurable, and where a difference between the
+    agents has room to appear.
+
+    SYNTHETIC, and labelled as such. The wiki says nothing about how
+    underlevelled a party attempting a building typically is;
+    `SCRAPPY_HARDSHIP` is a dial, not a datum. It never goes below the
+    laff floor the previous playground awards, so every toon it builds
+    could really have reached the street it is on.
+
+    THE PARTY IS CONSTRAINED TO HOLD THE SUPPORT TRACKS, and the first
+    version was not. Hardship lowers `grind`, and grind decides how many
+    tracks a toon ever trained, so squeezing it stripped exactly the
+    tracks this regime is meant to lean on: Lure fell 34% -> 23% and
+    Toon-Up 43% -> 32%. A party that has no Lure cannot be made to
+    demonstrate anything about Lure. So the pooled party must hold both,
+    and the sampler redraws until it does.
+
+    That is a bias, stated rather than hidden: these are underlevelled
+    parties that DID train support, not a random sample of underlevelled
+    parties.
+
+    WHAT IT SHOWED, AND IT WAS NOT WHAT IT WAS BUILT FOR. Over 120
+    buildings, both agents:
+
+        standard   climb 60.8%   search 60.0%   toons lost 1.02 / 0.99
+        scrappy    climb 50.0%   search 50.0%   toons lost 1.52 / 1.47
+
+    The task got 10 points harder in the intended way -- Sound 15.7% ->
+    11.1%, Toon-Up 5.4% -> 7.9% -- and the agents stayed exactly level.
+    So the tie is NOT an artifact of an easy task, which is what this
+    regime was written to test. That is a stronger result than the
+    original tie: two agents that track each other as the ground moves
+    are equal in a way two agents that merely score the same are not.
+
+    The oddity worth chasing: LURE USE DOES NOT MOVE, 11.9% -> 12.0%,
+    although the party pools Lure far more often here (59% -> 77%) and
+    the regime exists because you cannot trade hits. Both agents answer a
+    harder fight by healing more rather than by preventing more, and
+    both share `_quick_score`'s `prevented` term. That points at the
+    shared evaluator rather than at either agent.
+    """
+    street = facility.sample_street(rng)
+    for _ in range(40):
+        party = [toon_for_street(rng, street, hardship=SCRAPPY_HARDSHIP)
+                 for _ in range(rng.randint(2, 4))]
+        pooled = {track for toon in party
+                  for (track, _level), n in toon.gag_counts.items()
+                  if n > 0 and toon.track_exp.get(track, 0) > 0}
+        if {Track.LURE, Track.TOON_UP} <= pooled:
+            break
+    return BattleState(toons=party, cogs=[], kind="facility",
+                       street=street[0])
 
 
 def default_position(rng) -> BattleState:
