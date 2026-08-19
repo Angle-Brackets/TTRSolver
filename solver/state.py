@@ -147,6 +147,14 @@ class CogStatus:
 
     is_dead: bool = False
 
+    # A Version 2.0 Cog is wearing its outer suit. [CONFIRMED] wiki: a
+    # v2.0 is suit + Skelecog form, each with the health of a normal cog
+    # of that level, and it is only defeated when both are gone -- the
+    # published totals are exactly twice the normal table on all twelve
+    # levels. So this needs no second hp number: `hp`/`max_hp` are the
+    # CURRENT layer, and this flag says another one is waiting behind it.
+    suited: bool = False
+
     # Damage this cog has taken, per toon index, for cog target
     # selection -- a cog prefers to hit back at whoever hurt it most.
     # None while solo, where there is only one toon to attack and
@@ -227,6 +235,44 @@ class CogState:
         return CogState(cog_type=self.cog_type, department=self.department,
                         level=self.level, hp=self.hp, max_hp=self.max_hp,
                         status=self.status.copy())
+
+    def take_damage(self, amount: int) -> int:
+        """Apply damage through the Version 2.0 layers. Returns damage USED.
+
+        THE ONE RULE WORTH KNOWING: a hit that destroys the outer suit
+        does NOT carry the excess into the Skelecog form. TTR removed
+        carryover damage in the 3.0.0 rebalancing of December 2021, so a
+        Toontanic into a 90 hp suit wastes 90 of its 180.
+
+        That makes v2.0 the only cog in the game that rewards precision
+        over raw damage, and it cuts directly against how both agents
+        play -- they favour group gags and heavy single hits, and a
+        board full of v2.0s punishes exactly that.
+
+        RETURNS THE FULL AMOUNT THROWN, not the part that fitted. Every
+        scorer and the reward function read this as "damage dealt", and
+        returning the clamped value silently redefined that for the whole
+        project -- a 180-damage TNT into a 42 hp cog reported 42, and
+        three organic-damage tests caught it. Overkill is a SCORER's
+        concern (`plan_waste` already charges for it) and must not be
+        smuggled in here.
+        """
+        if amount <= 0 or self.status.is_dead:
+            return 0
+        self.hp -= amount
+        if self.hp > 0:
+            return amount
+        self.hp = 0
+        if self.status.suited:
+            # The suit comes off and the Skelecog steps out at FULL
+            # health. The overkill is discarded here, which is the whole
+            # of the no-carryover rule.
+            self.status.suited = False
+            self.hp = self.max_hp
+        else:
+            self.status.is_dead = True
+        return amount
+
 
 
 @dataclass(slots=True)

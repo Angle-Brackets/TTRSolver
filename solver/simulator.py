@@ -355,6 +355,11 @@ def apply_toon_action(state: BattleState, action: Action,
         cog.status.is_dead = True
         cog.status.lured = False
         cog.status.trapped = False
+        # Both layers go. [CONFIRMED] wiki: a pink slip eliminates the
+        # suit AND the Skelecog form, so a fired v2.0 leaves nothing --
+        # clearing this also keeps dead cogs from splitting the memo key
+        # on a flag that can no longer matter.
+        cog.status.suited = False
         return 0, 0
 
     targets = _targets_for(state, action)
@@ -424,10 +429,7 @@ def apply_toon_action(state: BattleState, action: Action,
         for cog in targets:
             if cog.status.trapped:
                 dmg = _apply_trap_trigger(cog)
-                cog.hp -= dmg
-                dealt += dmg
-                if cog.hp <= 0:
-                    cog.status.is_dead = True
+                dealt += cog.take_damage(dmg)
                 # THE TRAP KNOCKS IT OUT OF THE LURE. [CONFIRMED] by the
                 # owner: "If you lure a cog onto a trap, the cog becomes
                 # unlured after taking damage."
@@ -468,10 +470,8 @@ def apply_toon_action(state: BattleState, action: Action,
             # Source damage is float; HP here is an int, so floor. Only
             # bites when kbBonus lands on an odd base damage.
             dmg = int(total)
-            cog.hp -= dmg
-            dealt += dmg
-            if cog.hp <= 0:
-                cog.status.is_dead = True
+            dealt += cog.take_damage(dmg)
+            if cog.status.is_dead:
                 cog.status.clear_lure()
             elif action.track == Track.SOUND and cog.status.lured:
                 # [CONFIRMED] TTR wiki: "Lured Cogs are awakened by Sound
@@ -843,9 +843,8 @@ def _apply_track_group(state: BattleState, track: Track, resolved,
             total += int(mechanics.calc_kb_bonus(track, True, total))
         for toon_index, damage in contributions:
             cog.status.record_damage(toon_index, damage)
-        cog.hp -= total
-        if cog.hp <= 0:
-            cog.hp = 0
-            cog.status.is_dead = True
+        cog.take_damage(int(total))
+        if cog.status.is_dead:
+            pass
         elif track == Track.SOUND and cog.status.lured:
             cog.status.clear_lure()

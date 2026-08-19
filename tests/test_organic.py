@@ -63,13 +63,22 @@ class OrganicTrapTest(unittest.TestCase):
     was laid."""
 
     def sprung(self, organic):
+        """Damage as REPORTED, not as inferred from the hp delta.
+
+        This used to measure `before - cog.hp`, which only equalled the
+        damage while hp was allowed to go negative. `CogState.take_damage`
+        clamps it at 0 -- the party path already did, the two solo paths
+        did not -- so a 180-damage TNT into a 42 hp cog now leaves hp at 0
+        and the delta reads 42. The gag's damage did not change; the way
+        this measured it did.
+        """
         st = fight(organic=frozenset({Track.TRAP}) if organic else frozenset())
         apply_toon_action(st, Action(Track.TRAP, 6, 0), hit=True)
         self.assertTrue(st.cogs[0].status.trapped)
         self.assertEqual(st.cogs[0].status.trap_organic, organic)
-        before = st.cogs[0].hp
-        apply_toon_action(st, Action(Track.LURE, 5, 0), hit=True)
-        return before - st.cogs[0].hp
+        _healed, dealt = apply_toon_action(st, Action(Track.LURE, 5, 0),
+                                           hit=True)
+        return dealt
 
     def test_an_organic_trap_hits_harder_when_sprung(self):
         self.assertGreater(self.sprung(True), self.sprung(False))

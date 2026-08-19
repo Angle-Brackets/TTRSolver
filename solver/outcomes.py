@@ -437,11 +437,15 @@ def collapse_damage(branches: List[Outcome]) -> List[Outcome]:
 
 
 def _cog_key(state: BattleState) -> Tuple:
+    # `suited` is in here for the same reason `free_passes` is in
+    # `state_key`: it changes what happens next. A suited cog at 90 hp
+    # has 180 left to give and a bare one has 90, so collapsing them
+    # would let the memo answer a Version 2.0 with a Skelecog's value.
     return tuple((c.cog_type, c.department, c.level, c.hp, c.status.is_dead,
                   c.status.lured, c.status.lure_rounds_remaining,
                   c.status.lure_acc_before_bonus, c.status.lure_level,
                   c.status.trapped, c.status.trap_level,
-                  c.status.trap_organic)
+                  c.status.trap_organic, c.status.suited)
                  for c in state.cogs)
 
 
@@ -511,6 +515,10 @@ def state_key(state: BattleState) -> Tuple:
             toon.laff,
             frozenset((t, lvl, n)
                       for (t, lvl), n in toon.gag_counts.items() if n > 0),
+            # Pink slips change `legal_actions` AND `can_still_damage`,
+            # so a toon holding two is a different node from one holding
+            # none. Same test as `free_passes`.
+            toon.fires,
             _cog_key(state),
             state.free_passes,
             state.cogs_remaining,
@@ -520,7 +528,8 @@ def state_key(state: BattleState) -> Tuple:
     return (
         tuple((t.laff,
                frozenset((tr, lvl, n)
-                         for (tr, lvl), n in t.gag_counts.items() if n > 0))
+                         for (tr, lvl), n in t.gag_counts.items() if n > 0),
+               t.fires)
               for t in state.toons),
         _cog_key(state),
         state.free_passes,
