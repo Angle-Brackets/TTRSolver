@@ -61,8 +61,17 @@ SKELECOG_LEVELS = (8, 12)
 MAXED_LAFF = 137
 MAXED_POUCH = 80
 
+# Laff the party brings. 137 is the true ceiling, but a toon with maxed
+# GAGS and unmaxed LAFF is the commoner VP-goer: gag training and laff
+# come from different grinds, and the wiki's own laff table hands out +17
+# for fishing, gardening, racing and golf, none of which grants a point
+# of gag experience. Sweep it -- with the first toon loss deciding a
+# building, laff is the axis this model is most sensitive to.
+LAFF_RANGE = (MAXED_LAFF, MAXED_LAFF)
 
-def maxed_toon(rng, tracks: Optional[Dict[Track, int]] = None) -> ToonState:
+
+def maxed_toon(rng, tracks: Optional[Dict[Track, int]] = None,
+               laff: Optional[int] = None) -> ToonState:
     """A fully trained toon: 137 laff, 80 gags, every owned track at 7.
 
     Which six tracks is still a draw, because which one a toon skipped is
@@ -72,7 +81,13 @@ def maxed_toon(rng, tracks: Optional[Dict[Track, int]] = None) -> ToonState:
     have = tracks if tracks is not None else facility.sample_tracks(rng)
     exp = {track: 7 for track in have}
 
-    toon = ToonState(laff=MAXED_LAFF, max_laff=MAXED_LAFF,
+    # Read LAFF_RANGE at call time so a caller can sweep it; a default
+    # argument would bind once at import and silently measure the same
+    # party every time, which this module has already been caught doing
+    # with the round sizes.
+    if laff is None:
+        laff = rng.randint(*LAFF_RANGE)
+    toon = ToonState(laff=laff, max_laff=laff,
                      track_exp=exp, gag_counts={},
                      pouch_capacity=MAXED_POUCH)
 
