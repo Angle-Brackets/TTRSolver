@@ -85,6 +85,15 @@ def main():
                     help="potential-based shaping on incoming damage; "
                          "pays now for a cog lured or killed, which is "
                          "what the collapse onto Throw needs")
+    ap.add_argument("--survival-shaping", type=float, default=0.0,
+                    help="weight on a potential over toons still "
+                         "standing; potential-based, so it cannot "
+                         "change the optimum, only how fast the "
+                         "credit for losing a toon arrives")
+    ap.add_argument("--objective", default="",
+                    help="comma-separated overrides on the reward "
+                         "objective, e.g. "
+                         "toon_lost_penalty=40,horizon_cost=0")
     ap.add_argument("--vf", type=float, default=0.5)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--export", default="solver/rl/ppo_policy.json")
@@ -141,10 +150,27 @@ def main():
             state.cogs_remaining = 0
             state.kind = "street"
             return state
+    objective = None
+    if args.objective:
+        import dataclasses
+        from solver.search import objective as objective_mod
+        fields = {f.name for f in dataclasses.fields(objective_mod.Objective)}
+        edits = {}
+        for pair in args.objective.split(","):
+            key, _, value = pair.partition("=")
+            key = key.strip()
+            if key not in fields:
+                raise SystemExit(f"  no such objective field: {key!r}")
+            edits[key] = float(value)
+        objective = dataclasses.replace(objective_mod.DEFAULT, **edits)
+        print(f"  objective overrides: {edits}")
+
     envs = [env_mod.BattleEnv(rng=random.Random(args.seed * 1000 + i),
                               sampler=sampler,
                               coordinated=args.coordinated,
-                              shaping=args.shaping, gamma=args.gamma)
+                              shaping=args.shaping, gamma=args.gamma,
+                              survival_shaping=args.survival_shaping,
+                              objective=objective)
             for i in range(args.envs)]
     obs, masks = zip(*[e.reset() for e in envs])
     obs = list(obs)

@@ -269,7 +269,8 @@ class BattleEnv:
 
     def __init__(self, objective=None, rng=None, max_rounds: int = 20,
                  shaping: float = 0.0, gamma: float = 0.99,
-                 sampler=None, coordinated: bool = False):
+                 sampler=None, coordinated: bool = False,
+                 survival_shaping: float = 0.0):
         """`coordinated` makes a round TOON-MAJOR: one env step is one
         toon's decision, and the round resolves when everybody standing
         has chosen.
@@ -291,6 +292,26 @@ class BattleEnv:
         # `gamma` must match the trainer's discount or the shaping stops
         # being potential-based and starts changing the objective.
         self.shaping = shaping
+        # Weight on a SECOND potential, over toons still standing.
+        #
+        # The measured fact it exists for: a building is decided by the
+        # first toon loss and almost nothing else. An intact party clears
+        # 100% of the time (60 for 60) and a party that has lost anyone
+        # clears about 7%. The reward says almost nothing about that --
+        # `toon_lost_penalty` is 0.0, so the step a toon goes sad is
+        # charged only the laff of the final hit, roughly -20, while the
+        # true swing in win probability is on the order of -186. The
+        # terminal -loss_penalty does not arrive until the wipe, ten to
+        # twenty steps later, by which point discounting and noise have
+        # buried it.
+        #
+        # Phi(s) = survival_shaping * (toons standing), so
+        # F = gamma*Phi(s') - Phi(s) delivers the charge on the exact
+        # step the toon is lost. Potential-based in the Ng et al. sense,
+        # so unlike a raw penalty it CANNOT change the optimal policy --
+        # only how fast the credit arrives. That guarantee is why this is
+        # tried before `toon_lost_penalty`, which can.
+        self.survival_shaping = survival_shaping
         self.gamma = gamma
         self.sampler = sampler or default_position
         self.coordinated = coordinated
@@ -396,6 +417,23 @@ class BattleEnv:
         return (encode(self.state, self.actor, self.pending),
                 legal_mask(self.state, self.actor))
 
+    def _survival_term(self, before, after, done: bool) -> float:
+        """gamma*Phi(s') - Phi(s) for Phi = w * (toons standing).
+
+        Applied on EVERY step, including the intermediate seat decisions
+        that resolve no round. Those leave Phi unchanged, so the correct
+        term is -(1-gamma)*Phi rather than zero -- and skipping them was
+        worth about 1.7 of a 20-point telescoping check, a real drift
+        that quietly favoured whatever the agent happened to be doing
+        while toons were alive. In PPO's MDP a step is one seat's
+        decision, so the identity has to hold per step, not per round.
+        """
+        if not self.survival_shaping:
+            return 0.0
+        phi_before = float(len(before.active_toons()))
+        phi_after = 0.0 if done else float(len(after.active_toons()))
+        return self.survival_shaping * (self.gamma * phi_after - phi_before)
+
     def step(self, index: int):
         """-> (observation, mask, reward, done, info)."""
         before = self.state
@@ -410,7 +448,9 @@ class BattleEnv:
                 # no reward. The critic carries these steps.
                 self.actor = order[position + 1]
                 return (encode(self.state, self.actor, self.pending),
-                        legal_mask(self.state, self.actor), 0.0, False,
+                        legal_mask(self.state, self.actor),
+                        self._survival_term(self.state, self.state, False),
+                        False,
                         {"win": False, "rounds": self.rounds,
                          "floor": self.floor, "truncated": False,
                          "partial": True})
@@ -458,12 +498,6 @@ class BattleEnv:
         # That guarantee is the whole reason to prefer it over simply
         # handing out a bonus for luring, which would distort what the
         # agent is optimising.
-        if self.shaping:
-            before_threat = ps.expected_incoming(before)
-            after_threat = 0.0 if nxt.is_terminal() else                 ps.expected_incoming(nxt)
-            reward += self.shaping * (before_threat
-                                      - self.gamma * after_threat)
-
         self.rounds += 1
         self.floor_rounds += 1
 
@@ -484,6 +518,28 @@ class BattleEnv:
         # finishes well inside it.
         overrun = self.rounds >= self.max_rounds * 6
         done = nxt.is_terminal() or stalled or overrun
+
+        # SHAPING IS APPLIED HERE, AFTER THE FLOOR ADVANCE, and keyed on
+        # `done` rather than on `nxt.is_terminal()`. It used to sit above
+        # both, and a floor win makes `is_terminal()` true while the
+        # EPISODE continues -- so the potential was zeroed and then
+        # restarted at the next floor, and the episode sum picked up a
+        # fresh -Phi(s_0) every floor instead of once.
+        #
+        # That breaks the telescoping the Ng et al. guarantee rests on,
+        # which means the old threat shaping was not potential-based
+        # across a building at all: it was changing the objective, not
+        # only the speed of credit. Worth knowing, because that shaping
+        # was measured as "moved behaviour substantially, moved outcomes
+        # not at all" -- a result now taken with a defective term.
+        # tests/test_survival_shaping.py pins the telescoping.
+        if self.shaping:
+            before_threat = ps.expected_incoming(before)
+            after_threat = 0.0 if done else ps.expected_incoming(nxt)
+            reward += self.shaping * (before_threat
+                                      - self.gamma * after_threat)
+
+        reward += self._survival_term(before, nxt, done)
         info = {"win": bool(nxt.is_win()), "rounds": self.rounds,
                 "floor": self.floor,
                 "truncated": (stalled or overrun) and not nxt.is_terminal(),
