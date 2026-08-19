@@ -384,7 +384,19 @@ class BattleEnv:
             self.state = self.sampler(self.rng)
             self.plan = None
             self.floor = 1
-            if self.state.kind == "facility":
+            if self.state.kind == "vp":
+                # The VP is not on a street and has no difficulty row, so
+                # its plan is built from the wiki's two level bands
+                # instead. Everything downstream -- holdout,
+                # cogs_remaining, one pouch across both rounds -- is the
+                # ordinary facility machinery.
+                from .. import vp as vp_mod
+                self.plan = vp_mod.vp_plan(self.rng, self._facility_cog)
+                first, holdout = self.plan.take_floor()
+                self.state.cogs = first
+                self.state.holdout = holdout
+                self.state.cogs_remaining = self.plan.remaining()
+            elif self.state.kind == "facility":
                 # The building is built from the party's OWN street.
                 # Rolling a second street here would undo the whole
                 # point of generating the party for one: a Dreamland
@@ -506,7 +518,7 @@ class BattleEnv:
         # what makes a conserved gag worth conserving: it gets spent
         # later in the same return. Without this the horizon was a price
         # with no payoff and PPO correctly ignored it.
-        if (nxt.is_win() and nxt.kind == "facility"
+        if (nxt.is_win() and nxt.kind in ("facility", "vp")
                 and self.plan is not None and not self.plan.exhausted):
             nxt = self._next_floor(nxt)
             self.floor_rounds = 0
