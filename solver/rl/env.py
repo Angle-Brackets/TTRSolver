@@ -603,7 +603,8 @@ def random_toon(rng) -> ToonState:
         low = 1 if rng.random() < 0.35 else max(1, trained - 3)
         for level in range(low, trained + 1):
             if (track, level) in USABLE and rng.random() < 0.75:
-                cap = data.gag(track, level).max_carry or 1
+                # Capped by what `trained` allows, not by a maxed track.
+                cap = gags_mod.carry_limit(track, level, trained) or 1
                 counts[(track, level)] = rng.randint(1, min(cap, 5))
 
     # Sometimes empty the damage tracks. Note this is a spent POUCH and
@@ -983,15 +984,15 @@ def restock(toon, rng, capacity=None) -> None:
         if gags_mod.pouch_total(counts) >= capacity:
             break
         room = capacity - gags_mod.pouch_total(counts)
-        # [TODO] `max_carry` is the FULLY UPGRADED limit, so every toon
-        # built here is given a maxed per-gag allowance whatever their
-        # progression -- see the note on `Gag.min_carry`. It matters most
-        # for `scrappy_position`, which lowers laff and gag LEVELS but
-        # then hands out maxed COUNTS of what remains, making those
-        # parties better supplied than intended. The interpolation rule
-        # is not published, so this is a known overestimate rather than a
-        # guess in the other direction.
-        want = min(data.gag(*key).max_carry or 1, room)
+        # The limit the toon's OWN training allows, not the fully
+        # upgraded one. Reading `max_carry` here handed every toon a
+        # maxed allowance of every gag whatever their progression, which
+        # over-supplied precisely the under-trained parties
+        # `scrappy_position` exists to model: it lowered laff and gag
+        # LEVELS and then gave out maxed COUNTS of what was left.
+        want = min(gags_mod.carry_limit(key[0], key[1],
+                                        toon.track_exp.get(key[0], 0)),
+                   room)
         if want > 0:
             counts[key] = want
     toon.gag_counts = {k: v for k, v in counts.items() if v > 0}

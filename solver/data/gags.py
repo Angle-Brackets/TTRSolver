@@ -333,6 +333,72 @@ MAX_POUCH = max(POUCH_CAPACITIES.values())
 POUCH_EXEMPT_LEVEL = 7
 
 
+# ---------------------------------------------------------------------
+# Per-gag carry limits, by how far the track is trained
+# ---------------------------------------------------------------------
+# A gag's carry limit is not fixed: it rises as you unlock LATER gags in
+# the same track. `Gag.min_carry`/`max_carry` are only the two endpoints
+# of this table, and until now nothing interpolated between them -- every
+# consumer read `max_carry` and so treated every toon as fully upgraded.
+#
+# [OPEN TOONTOWN SOURCE] `ToontownBattleGlobals.CarryLimits`, which is
+# the algorithm rather than a description of one. Tagged as source, never
+# [CONFIRMED] -- but the wiki corroborates it unusually strongly, and the
+# check is worth stating because it is 12 independent numbers per track:
+# each table's DIAGONAL reproduces the repo's `min_carry` values and its
+# BOTTOM ROW reproduces `max_carry`, both read from the gags' own wiki
+# infoboxes. Six tracks match on all 12; see tests/test_carry_limits.py,
+# which asserts it rather than trusting this comment.
+#
+# Rows are the highest gag unlocked in the track (1-6), columns are the
+# gag's own level (1-6). Unlocking level 7 does not raise the others --
+# Open Toontown's seventh row equals its sixth across these columns.
+_CARRY_STANDARD = (
+    (10,  0,  0,  0, 0, 0),
+    (10,  5,  0,  0, 0, 0),
+    (15, 10,  5,  0, 0, 0),
+    (20, 15, 10,  5, 0, 0),
+    (25, 20, 15, 10, 3, 0),
+    (30, 25, 20, 15, 7, 3),
+)
+
+# TTR rebalanced two tracks in opposite directions, and the wiki records
+# both. Trap was BUFFED onto the standard table -- "Trap now shares the
+# same carry capacity with other gag tracks" (Trap, rebalancing update),
+# which its infoboxes confirm on all six levels, so Trap is not listed
+# here. Sound was NERFED onto Trap's OLD numbers, and took the whole row
+# rather than only the levels usually quoted: 5 Elephant Trunks and 2
+# Foghorns at the top, and 20/15/15/10 below them.
+_CARRY_SOUND = (
+    ( 5,  0,  0,  0, 0, 0),
+    ( 7,  3,  0,  0, 0, 0),
+    (10,  7,  3,  0, 0, 0),
+    (15, 10,  7,  3, 0, 0),
+    (15, 15, 10,  5, 3, 0),
+    (20, 15, 15, 10, 5, 2),
+)
+
+
+def carry_limit(track, level: int, unlocked: int) -> int:
+    """How many of this gag a toon trained to `unlocked` may hold.
+
+    `unlocked` is the toon's training level in the track, 1-7, which is
+    what `ToonState.track_exp` stores.
+
+    Level 7 is always 1 and never scales: it is earned through the
+    Sellbot Task Force rather than by training the track, and the one
+    ToonTask that raises it is rare enough that modelling the increase
+    would describe almost nobody.
+    """
+    if unlocked <= 0 or level > unlocked:
+        return 0
+    if level >= POUCH_EXEMPT_LEVEL:
+        return 1
+    table = _CARRY_SOUND if getattr(track, "value", track) == "sound" \
+        else _CARRY_STANDARD
+    return table[min(unlocked, 6) - 1][level - 1]
+
+
 def pouch_total(gag_counts) -> int:
     """Gags counting against the pouch: everything below level 7.
 
