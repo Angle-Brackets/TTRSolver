@@ -67,9 +67,10 @@ def pouch(state) -> int:
                for n in t.gag_counts.values() if n > 0)
 
 
-def play(seed, agent, budget, verbose=True, label=""):
+def play(seed, agent, budget, verbose=True, label="", sampler=None):
     e = env_mod.BattleEnv(rng=random.Random(seed),
-                          sampler=env_mod.facility_position, coordinated=True)
+                          sampler=sampler or env_mod.facility_position,
+                          coordinated=True)
     obs, mask = e.reset()
     rng = random.Random(seed)
     plan, done, guard, info = None, False, 0, {}
@@ -88,7 +89,9 @@ def play(seed, agent, budget, verbose=True, label=""):
             state = e.state
             if e.floor != floor_seen:
                 floor_seen = e.floor
-                lines.append(f"    --- floor {e.floor + 1} "
+                name = (("cog round", "skelecog round")[min(e.floor - 1, 1)]
+                        if state.kind == "vp" else f"floor {e.floor + 1}")
+                lines.append(f"    --- {name} "
                              f"({state.cogs_remaining} cogs still to come) ---")
             if agent == "search":
                 plan = ps.best_plan(state, mode=ps.Mode.COORDINATED, rng=rng)
@@ -135,6 +138,10 @@ def main():
                     help="instead of tracing, report seeds where the two "
                          "agents disagree about the OUTCOME")
     ap.add_argument("--start", type=int, default=36000)
+    ap.add_argument("--vp", action="store_true",
+                    help="trace one side of the Sellbot VP instead of a "
+                         "cog building: two maxed toons, the cog round then "
+                         "the skelecog round")
     args = ap.parse_args()
 
     if not hybrid.available():
@@ -186,9 +193,19 @@ def main():
         print(f"\n  {len(splits)} of {args.scan} buildings split the agents")
         return 0
 
-    print(f"\n  building {args.seed}")
-    play(args.seed, "climb", args.budget, label="PPO + climb")
-    play(args.seed, "search", args.budget, label="classical search")
+    sampler = None
+    if args.vp:
+        from solver import vp as vp_mod
+        sampler = vp_mod.vp_position
+        print(f"\n  VP side {args.seed}   {vp_mod.COG_ROUND} cogs "
+              f"then {vp_mod.SKELECOG_ROUND} skelecogs")
+    else:
+        print(f"\n  building {args.seed}")
+    play(args.seed, "climb", args.budget, label="PPO + climb",
+         sampler=sampler)
+    if not args.vp:
+        play(args.seed, "search", args.budget, label="classical search",
+             sampler=sampler)
     return 0
 
 
