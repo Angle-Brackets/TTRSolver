@@ -61,10 +61,11 @@ V2_FRACTION = 0.20
 # Cogs in the first battle, PER SIDE -- the two sides fight in parallel,
 # each with its own set, so a full CEO faces twice this.
 #
-# [ASSUMED] from the owner's observed play. Neither the wiki nor the
-# Open Toontown source gives a count: the wiki describes the battle
-# without quantifying it, and `SuitBuildingGlobals` entry 14 gives a
-# level pool rather than a roster.
+# VERIFIED by the owner in the live game. Neither published source gives
+# a count -- the wiki describes the battle without quantifying it, and
+# `SuitBuildingGlobals` entry 14 gives a level pool rather than a roster
+# -- so this rests on observation, which is the strongest evidence
+# available for it.
 ROUND_ONE = 20
 
 # Banquet survivors carried into battle two. Swept, not guessed.

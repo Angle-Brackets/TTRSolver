@@ -90,6 +90,13 @@ def main():
                          "standing; potential-based, so it cannot "
                          "change the optimum, only how fast the "
                          "credit for losing a toon arrives")
+    ap.add_argument("--fire-fraction", type=float, default=0.0,
+                    help="fraction of training positions that hand the party "
+                         "pink slips. They are unmissable instant kills, so a "
+                         "policy that never sees one leaves its fire logits "
+                         "untrained and will not use slips it is holding")
+    ap.add_argument("--fire-max", type=int, default=5,
+                    help="most slips a toon gets in those positions")
     ap.add_argument("--objective", default="",
                     help="comma-separated overrides on the reward "
                          "objective, e.g. "
@@ -140,15 +147,35 @@ def main():
         combo = args.combo_fraction
         fac = args.facility_fraction
 
+        fire_fraction = args.fire_fraction
+        fire_max = args.fire_max
+
         def sampler(r, _f=frac, _s=strange, _c=combo, _fa=fac):
             # A facility position becomes a multi-floor episode in
             # `BattleEnv.reset`, which is the only place a saved gag can
             # actually be spent later.
             if r.random() < _fa:
-                return env_mod.facility_position(r)
-            state = env_mod.mixed_position(r, _f, _s, _c)
-            state.cogs_remaining = 0
-            state.kind = "street"
+                state = env_mod.facility_position(r)
+            else:
+                state = env_mod.mixed_position(r, _f, _s, _c)
+                state.cogs_remaining = 0
+                state.kind = "street"
+
+            # PINK SLIPS IN A MINORITY OF POSITIONS. A slip is an
+            # unmissable instant kill, so handing them out everywhere
+            # would teach a policy to answer every board by firing and
+            # it would never learn to throw. Giving them to a fraction
+            # teaches the harder thing: when a guaranteed kill is worth
+            # more than the gag it replaces.
+            #
+            # Without ANY, the four fire logits are never updated, and a
+            # party holding twenty slips plays as though it holds none --
+            # which is exactly what the first CEO run showed, a toon
+            # dying on 7 laff with five slips in hand.
+            if fire_fraction and r.random() < fire_fraction:
+                count = r.randint(1, fire_max)
+                for toon in state.toons:
+                    toon.fires = count
             return state
     objective = None
     if args.objective:
