@@ -1033,7 +1033,12 @@ def plan_waste(state: BattleState, plan) -> Tuple[float, float]:
         # A pass has no track, so it must be skipped here with the
         # other tracks that deal no damage -- `calc_toon_damage(None, 0)`
         # raises. It wastes nothing by definition.
-        if (action is None or action.is_pass
+        #
+        # A FIRE is skipped for the same reason and a better one: it has
+        # no track either, and it cannot waste anything. Overkill is the
+        # thing this function charges for, and a pink slip removes the
+        # cog whatever its hp -- there is no excess to spill.
+        if (action is None or action.is_pass or action.fire
                 or action.track in (Track.TOON_UP, Track.LURE,
                                     Track.TRAP)):
             continue
@@ -1290,6 +1295,38 @@ def _cheap_score(state: BattleState, index: int, action: Action) -> float:
     # price lookup, which would ask `data.gag(None, 0)`.
     if action.is_pass:
         return 0.0
+
+    if action.fire:
+        # A pink slip removes the target outright: unmissable, and it
+        # takes both layers of a Version 2.0 with it. Scored as the kill
+        # it is, plus the threat it silences, so it ranks above any gag
+        # against the same cog -- which is the truth of it.
+        #
+        # It reaches this function at all only because `legal_actions`
+        # offers it; before this branch existed, `_cheap_score` asked
+        # `data.gag(None, 0)` and the whole search died with "no gag at
+        # no track (a pass) level 0".
+        #
+        # NOT discounted for the turn it costs. Every action costs the
+        # turn, so charging it here would only shift every score by a
+        # constant. What is deliberately missing is any sense that slips
+        # are FINITE -- this ranks one action, and scarcity across a
+        # whole fight belongs to the objective's price, which charges
+        # nothing for a fire because no gag leaves the pouch. A search
+        # using this will therefore fire freely. That is close to right
+        # for the CEO, where slips are the reward for the fight and
+        # spending them is normal play, and wrong anywhere they are
+        # precious.
+        target_index = action.target_index
+        if target_index is None or not (0 <= target_index < len(state.cogs)):
+            return float("-inf")
+        target = state.cogs[target_index]
+        if target.status.is_dead:
+            return float("-inf")
+        removed = float(max(0, target.hp))
+        if target.status.suited:
+            removed += float(target.max_hp)     # the Skelecog goes too
+        return removed + QUICK_W["kill"] + _cog_threat(target)
 
     toon = state.toons[index]
 

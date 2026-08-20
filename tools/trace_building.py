@@ -36,6 +36,8 @@ HEALS = {Track.TOON_UP}
 
 
 def show(action) -> str:
+    if action is not None and action.fire:
+        return f"FIRE->c{action.target_index}"
     if action is None or action.is_pass:
         return "hold"
     if action.target_index is None:
@@ -58,7 +60,9 @@ def board(state) -> str:
         if c.status.trapped:
             marks += "T"
         cogs.append(f"c{i}:lv{c.level}={c.hp}{marks}")
-    toons = " ".join(f"t{i}:{max(0, t.laff)}" for i, t in enumerate(state.toons))
+    toons = " ".join(
+        f"t{i}:{max(0, t.laff)}" + (f"/{t.fires}f" if t.fires else "")
+        for i, t in enumerate(state.toons))
     return f"[{' '.join(cogs) or 'none'}]  {toons}"
 
 
@@ -107,9 +111,13 @@ def play(seed, agent, budget, verbose=True, label="", sampler=None):
             lines.append(f"         {'  '.join(show(a) for a in plan)}")
         action = plan[e.actor] if plan and e.actor < len(plan) else None
         index = env_mod.PASS_INDEX
-        if action is not None and not action.is_pass:
+        if action is not None and action.fire:
+            index = env_mod._FIRE_INDEX.get(action.target_index,
+                                            env_mod.PASS_INDEX)
+        elif action is not None and not action.is_pass:
             for i, cand in enumerate(env_mod.ACTIONS):
-                if (cand is not None and cand.track == action.track
+                if (cand is not None and not cand.fire
+                        and cand.track == action.track
                         and cand.level == action.level
                         and cand.target_index == action.target_index):
                     index = i
