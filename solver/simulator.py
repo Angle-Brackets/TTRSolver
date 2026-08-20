@@ -652,8 +652,24 @@ def apply_party_round(state: BattleState,
     the rolls instead, which is what an enumerating caller wants.
     """
     healed = [0 for _ in state.toons]
+
+    # PINK SLIPS RESOLVE FIRST, before any gag. A fired cog is removed
+    # from the battle by cannon, so it is gone before the round's gags
+    # land -- which means a teammate who threw at the same cog has wasted
+    # the gag. That ordering is [ASSUMED]: no source states where in a
+    # round the cannon fires, and the alternative (slips last) would let
+    # a party damage a cog and then remove it for free.
+    #
+    # It also has to happen outside the sort below, which keys on
+    # ATTACK_ORDER.index(track) -- a slip has no track and that raised
+    # "None is not in list" the moment fires reached a party round.
+    for i, action in enumerate(actions):
+        if action is not None and action.fire:
+            apply_toon_action(state, action, hit=True, actor=i)
+
     order = sorted(
-        (i for i, a in enumerate(actions) if a is not None and not a.is_pass),
+        (i for i, a in enumerate(actions)
+         if a is not None and not a.is_pass and not a.fire),
         key=lambda i: ATTACK_ORDER.index(actions[i].track))
 
     # Hits so far this round, for the stun bonus: one entry per landed
