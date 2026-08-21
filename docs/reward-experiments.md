@@ -106,3 +106,7 @@ that ever moved the climb made the policy WORSE.
 
 Further PPO work cannot reach the live agent. The target is the scorer
 or the climb procedure.
+
+That target was taken up in [`scorer-audit.md`](scorer-audit.md): four
+bugs in the party path, worth 69.5% -> 88.0% on the CEO at zero banquet
+leftovers, and none of them reachable from the policy side.
