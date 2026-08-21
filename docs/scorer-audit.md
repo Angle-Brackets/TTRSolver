@@ -387,29 +387,49 @@ opening draw does not predict the outcome either.
 ## Refuted -- widening the climb's candidate window
 
 The climb offers each seat only the policy's top `width` actions,
-default 3. On the opening round of the CEO's second battle that is
-demonstrably too narrow, and the instance is worth keeping even though
-the fix is not:
+default 3, and it is fair to ask whether that is too narrow. On the
+opening round of the CEO's second battle, enumerating ALL 2132 legal
+joint plans:
 
     board  c0:14=254V c1:9=110V c2:10=132V c3:12=196V   laff 71/65
 
-    431.3  START, both seats' argmax:  lure/6 all + squirt/6 c0
-    831.7  seat 1 -> squirt/7 all      <- one single-seat move
-    468.7  seat 0 -> squirt/7 all      (abandons the lure)
-    472.7  seat 1 -> drop/6 c0         <- what it played
+    585.6   lure/6->all   + trap/7->all     <- best legal plan
+    559.6   squirt/7->all + drop/7->all
+    525.0   toon_up/5->1  + drop/7->all
+    472.7   squirt/7->all + drop/6->c0      <- played, rank 17 of 2132
 
-The best plan is ONE seat-move from the start, so coordinate ascent
-should walk into it. It cannot: `squirt/7->all` is ranked 6th for seat 1
-and the window is 3 wide. So the sweep takes the only improving move it
-can see, which is to move the OTHER seat off the lure, and settles at
-473 instead of 832. Every individual step is correct -- a lure with no
-follow-up really is worth less than an attack.
+So the best plan does open with a Lure, and the two-track setup it pairs
+with -- a Trap behind it -- is exactly the kind a one-seat-at-a-time
+sweep assembles badly. But the climb lands in the top 0.8%, which is
+respectable rather than broken, and the gap is 113 points.
 
-Neither the policy nor the scorer is at fault here, which is worth
-saying plainly because both were suspected first. `lure/6->all` is the
-policy's number one of 45 legal actions for that seat (logit 25.08
-against squirt's 11.54), and `_quick_score` prices the lure line at
-831.7 against 472.7. Both wanted it. The search between them lost it.
+**A correction, because the first version of this section was wrong.**
+It claimed the best plan was `lure/6->all + squirt/7->all` at 831.7, one
+seat-move from the start and unreachable through a 3-wide window. Seat 1
+holds no level 7 Squirt, so that plan is ILLEGAL and was never
+available. `_quick_score` does not check playability -- `_playable` is a
+separate function -- so a hand-built plan will happily score a gag the
+toon does not own. The climb never had this problem: `_logits` masks
+illegal actions to -inf and the sweep skips them.
+
+Two readings in that draft came from the same mistake. "squirt/7->all
+ranks 49 for seat 1, unmoved by whether its partner lured" was not a
+finding about the policy: seat 1 had 48 legal actions, so rank 49 meant
+illegal, three times over.
+
+**Coordination itself is live and correct**, which was the other thing
+suspected. Every sweep recomputes each seat's logits with the current
+joint plan visible and that seat blanked:
+
+    pending = list(plan)
+    pending[seat] = None
+    values = _logits(model, state, seat, pending)
+
+and the rankings do move in response -- committing seat 0 to a Lure
+lifts `throw/5->3` to second for seat 1 and drops `drop/6->0` from
+second to fifth. This is the class of bug that hit the DAgger run, where
+seat k was labelled against the teacher's stale earlier moves, and it is
+not present here.
 
 **Widening does not pay.** Raw `width` is worse, because `budget` counts
 scorer calls and a sweep costs about seats x width of them -- so width 8
