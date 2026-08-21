@@ -321,6 +321,63 @@ distinction is the point: an earlier policy in this repo was shipped
 after choosing its seed on a set that was never reported, and the commit
 title still says so.
 
+## Refuted -- that the CEO is lost by not healing
+
+It never heals on a boss board. Zero Toon-Ups in 1446 decisions across
+40 CEO sides, including 99 rounds with the party under 35% laff, while
+each toon carries eleven heals and a level 7 restores 210 laff to
+EVERYONE -- more than a full bar. In a losing trace the party sits at
+25 and 23 laff and throws Sound and Drop.
+
+That looks like a glaring hole. It is correct play.
+
+Two experiments, in the order they were run, because the first one
+answered a different question than it was asked:
+
+**Raising `QUICK_W["heal"]` does nothing.** From 2 to 40 -- twenty times
+-- CEO clears 88.3% -> 89.2% at zero leftovers and 37.5% -> 39.2% at
+five, and the agent still heals 0.1 times a side. It could not have
+worked: **the climb can only reorder what the policy proposes**, its own
+docstring says so, and Toon-Up gets essentially no probability on these
+boards. The weight was never reached. Tuning a term that never fires
+produces exactly this: a flat sweep that looks like evidence.
+
+**`probe_tracks` reaches it, and then loses.** That flag offers each
+seat the best action of every track it HOLDS, so a heal becomes a
+candidate however the policy ranks it. It has been off since it was
+measured and refuted -- but the recorded reason was that `_quick_score`
+"plays one all-hit round, and a trap pays the round after, so it scores
+near zero", and that scorer no longer exists. Re-run against the
+expectation scorer, 120 sides a cell:
+
+| set | probes off | probes on | Toon-Up/side | |
+|---|---|---|---|---|
+| buildings | 71.7% | 70.0% | 1.31 -> 1.82 | +4/-6, p=0.38 |
+| VP | 100.0% | 98.3% | 0.00 -> 0.39 | +0/-2 |
+| CEO 0 | **88.3%** | 80.8% | 0.00 -> 0.56 | +4/-13, p=0.025 |
+| CEO 5 | **37.5%** | 30.8% | 0.01 -> 0.91 | +15/-23, p=0.13 |
+
+The mechanism works -- it heals now -- and it costs 7.5 points on the
+CEO. So the scorer was right to decline: at laff [25,23] it prices the
+attack at 851 against 227 for a double heal, and on a board where
+incoming damage scales with the number of cogs still standing, killing
+IS the prevention. A round spent healing is a round four cogs swing for
+free.
+
+`probe_tracks` stays off, now refuted twice for two different reasons.
+
+**"It never heals" is CEO-specific.** On buildings the policy proposes
+1.31 heals a side unprompted. It declines on boss boards particularly,
+and that is a judgement rather than a blind spot.
+
+What is left is duller than what was being looked for. The waiter battle
+is a damage race with no slack -- twenty cogs at levels 9-14 against 217
+laff -- and the two traced sides play structurally the same game with
+the same nine or ten slips. One leaves for the Big Cheese on 139 laff
+and one on 6. The loser is not making an identifiable mistake; it is on
+the wrong side of the accuracy rolls, which is the same reason the
+opening draw does not predict the outcome either.
+
 ## Two notes on method
 
 **A 40-seed sample overstated the effect twice, by roughly 2x, in the
