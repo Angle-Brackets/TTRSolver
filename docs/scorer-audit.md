@@ -384,10 +384,90 @@ and one on 6. The loser is not making an identifiable mistake; it is on
 the wrong side of the accuracy rolls, which is the same reason the
 opening draw does not predict the outcome either.
 
+## Refuted -- widening the climb's candidate window
+
+The climb offers each seat only the policy's top `width` actions,
+default 3. On the opening round of the CEO's second battle that is
+demonstrably too narrow, and the instance is worth keeping even though
+the fix is not:
+
+    board  c0:14=254V c1:9=110V c2:10=132V c3:12=196V   laff 71/65
+
+    431.3  START, both seats' argmax:  lure/6 all + squirt/6 c0
+    831.7  seat 1 -> squirt/7 all      <- one single-seat move
+    468.7  seat 0 -> squirt/7 all      (abandons the lure)
+    472.7  seat 1 -> drop/6 c0         <- what it played
+
+The best plan is ONE seat-move from the start, so coordinate ascent
+should walk into it. It cannot: `squirt/7->all` is ranked 6th for seat 1
+and the window is 3 wide. So the sweep takes the only improving move it
+can see, which is to move the OTHER seat off the lure, and settles at
+473 instead of 832. Every individual step is correct -- a lure with no
+follow-up really is worth less than an attack.
+
+Neither the policy nor the scorer is at fault here, which is worth
+saying plainly because both were suspected first. `lure/6->all` is the
+policy's number one of 45 legal actions for that seat (logit 25.08
+against squirt's 11.54), and `_quick_score` prices the lure line at
+831.7 against 472.7. Both wanted it. The search between them lost it.
+
+**Widening does not pay.** Raw `width` is worse, because `budget` counts
+scorer calls and a sweep costs about seats x width of them -- so width 8
+at budget 8 buys candidates out of convergence and drops buildings to
+65.8% (p=0.033) and CEO 0 to 75.0% (p=0.0019). At MATCHED sweeps it
+looked like a win: CEO 5 37.5% -> 50.0% (p=0.022), CEO 0 +4.2,
+buildings +1.6, nothing harmed.
+
+It did not replicate. On 240 fresh sides a set, seeds never used to find
+it:
+
+| set | w3 b8 | w5 b14 | flips |
+|---|---|---|---|
+| buildings | 69.2% | 70.0% | +12/-10 |
+| VP | 98.8% | 100.0% | +3/-0 |
+| CEO 0 | 90.4% | 91.2% | +12/-10 |
+| CEO 5 | 48.8% | 48.8% | **+50/-50** |
+
+Exactly zero on the cell that motivated it. The baseline itself moved
+37.5% -> 48.8% between the two seed sets, so the discovery set was a
+hard draw and `w5` was fitting it.
+
+**Budget alone buys nothing** -- +0/-0 on CEO 0, +1/-1 on CEO 5, at
+three times the budget. That is a real result rather than a null one: it
+says the climb converges long before budget 8, so the wall was never how
+long it looks. Combined with the width result, the wall is not obviously
+the window either.
+
+A pattern is now visible across three attempts. Everything that widens
+what the climb CONSIDERS -- `probe_tracks`, raw width, matched width --
+either loses or does nothing, while the one thing that improved it this
+session was making the scorer more accurate about the plans it already
+saw. The suggestion is that `_quick_score` ranks a few plausible plans
+well and a wide field badly, which would make widening the window a way
+of feeding it exactly the comparisons it is worst at. That is a
+hypothesis and has not been tested.
+
+**A prediction I got wrong, recorded because it was specific.** I
+expected a wider window to lure MORE, having traced a lure being
+abandoned. Lures per side went DOWN wherever the window widened -- 6.65
+-> 6.11 on CEO 5, 4.44 -> 4.11 on CEO 0 -- while the win rate rose on
+the discovery set. So it was never "the lure gets rescued"; wider
+windows find better PAIRINGS, and one well-supported lure replaces two
+poorly-supported ones. The r11 case is a true instance of the mechanism
+and a misleading guide to its effect.
+
 ## Two notes on method
 
-**A 40-seed sample overstated the effect twice, by roughly 2x, in the
-same session** -- once for the expected-value scorer (+12.5 claimed,
+**Small samples overstated an effect three times in one session.** A
+40-seed run claimed +12.5 for the expectation scorer (+5.5 real) and
++7.5 for the slip price (+3.5, not significant); a 120-side run claimed
++12.5 for a wider climb window, which came back at EXACTLY zero on 240
+fresh sides. The third one was on its way to being shipped. Nothing goes
+in without a held-out set now.
+
+**The original note, kept because it understated the problem:** a
+40-seed sample overstated the effect twice, by roughly 2x, in the
+same session -- once for the expected-value scorer (+12.5 claimed,
 +5.5 real) and once for the slip price (+7.5 claimed, +3.5 real, not
 significant). Paired 200-side runs with common random numbers and a sign
 test are the minimum for anything that gets quoted.
