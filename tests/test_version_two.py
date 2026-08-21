@@ -103,6 +103,32 @@ class VersionTwoTest(unittest.TestCase):
         st = _state(cog)
         self.assertTrue(st.clone().cogs[0].status.suited)
 
+    def test_stripping_the_suit_counts_as_damage(self):
+        """The scorers measure progress as a drop in hp, and breaking a
+        suit takes hp from 90 to 90 -- the Skelecog steps out at full.
+        The naive difference is ZERO, so a gag that stripped a suit
+        scored nothing and every 1-damage poke outranked it, on the one
+        fight built entirely out of 2.0s."""
+        from solver.search.party_search import remaining_hp
+
+        cog = v2(8)
+        self.assertEqual(remaining_hp(cog), 180, "both layers")
+        before = remaining_hp(cog)
+        cog.take_damage(90)
+        self.assertEqual(before - remaining_hp(cog), 90,
+                         "stripping the suit is 90 points of progress")
+        cog.take_damage(90)
+        self.assertEqual(remaining_hp(cog), 0)
+
+    def test_remaining_hp_matches_hp_for_an_ordinary_cog(self):
+        from solver.search.party_search import remaining_hp
+
+        cog = CogState(cog_type="Flunky", department="bossbot",
+                       level=8, hp=90, max_hp=90)
+        self.assertEqual(remaining_hp(cog), 90)
+        cog.take_damage(90)
+        self.assertEqual(remaining_hp(cog), 0)
+
     def test_a_suited_cog_keys_differently(self):
         """A suited cog at 90 hp has 180 left to give; a bare one has 90.
         Collapsing them would let the memo answer a v2.0 with a

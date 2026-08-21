@@ -584,6 +584,24 @@ def plans(state: BattleState, mode: Mode = Mode.PICKUP,
     return out
 
 
+def remaining_hp(cog) -> int:
+    """Health this cog still has to lose, BOTH layers of a Version 2.0.
+
+    A v2.0 carries its hp again behind the one on show, so a suited cog
+    at 90 has 180 left to give. Every scorer that measures progress as a
+    drop in hp needs this instead of `cog.hp`, because breaking a suit
+    takes hp from 90 to... 90: the Skelecog steps out at full health and
+    the naive difference reads ZERO.
+
+    That is not "undervalued", it is invisible. A gag that stripped a 90
+    hp suit scored nothing at all and every 1-damage poke outranked it,
+    which is precisely backwards on the one fight built out of 2.0s.
+    """
+    if cog.status.is_dead:
+        return 0
+    return cog.hp + (cog.max_hp if cog.status.suited else 0)
+
+
 def _cog_threat(cog) -> float:
     """Expected damage one cog deals in a round, if it is awake."""
     from .. import outcomes as outcomes_mod
@@ -819,7 +837,7 @@ def _quick_score(state: BattleState, plan) -> float:
     for amount, before in zip(healed, state.toons):
         if amount > 0 and before.laff > 0:
             restored += min(amount, before.max_laff - before.laff)
-    landed = sum(max(0, before.hp) - max(0, after.hp)
+    landed = sum(remaining_hp(before) - remaining_hp(after)
                  for before, after in zip(state.cogs, probe.cogs))
     killed = sum(1 for before, after in zip(state.cogs, probe.cogs)
                  if not before.status.is_dead and after.status.is_dead)
@@ -1490,7 +1508,7 @@ def _greedy_score(state: BattleState, trial, objective) -> float:
     for amount, before in zip(healed, state.toons):
         if amount > 0 and before.laff > 0:
             restored += min(amount, before.max_laff - before.laff)
-    landed = sum(before.hp - max(0, after.hp)
+    landed = sum(remaining_hp(before) - remaining_hp(after)
                  for before, after in zip(state.cogs, probe.cogs))
     killed = sum(1 for before, after in zip(state.cogs, probe.cogs)
                  if not before.status.is_dead and after.status.is_dead)
