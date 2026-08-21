@@ -13,6 +13,7 @@ rather than leaving loose.
 import unittest
 
 from solver import simulator
+from solver.search import party_search as ps
 from solver.state import Action, BattleState, CogState, Track, ToonState
 
 
@@ -103,3 +104,52 @@ class FireTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SlipsAreFinite(unittest.TestCase):
+    """A pink slip is charged for, and charged by what is still coming.
+
+    Nothing restocks slips, so they are the same kind of resource as a
+    gag, and `_cheap_score` used to say outright that it charged nothing
+    for one. The party duly spent all ten on the CEO's waiter battle and
+    reached the Big Cheese holding 0.3 of 10 -- with battle two needing
+    them badly enough that having them is worth 42 points of clear rate.
+
+    The SHAPE is the part to protect. A flat price also suppressed slips
+    in the final battle, and a slip carried out of the fight unspent is
+    worth nothing at all.
+    """
+
+    def position(self, cogs_remaining):
+        toon = ToonState(laff=100, max_laff=100,
+                         track_exp={t: 7 for t in Track},
+                         gag_counts={(t, l): 5 for t in Track
+                                     for l in range(1, 8)},
+                         organic_tracks=frozenset(), fires=5)
+        return BattleState(
+            toons=[toon],
+            cogs=[CogState("head_hunter", "bossbot", 10, 132, 132)],
+            cogs_remaining=cogs_remaining)
+
+    def test_a_slip_costs_more_when_more_cogs_are_coming(self):
+        fire = Action(track=None, level=0, target_index=0, fire=True)
+        near = ps._cheap_score(self.position(0), 0, fire)
+        far = ps._cheap_score(self.position(20), 0, fire)
+        self.assertGreater(near, far,
+                           "a slip should be dearer with a fight still "
+                           "ahead of it")
+
+    def test_a_slip_is_free_in_the_last_battle(self):
+        """cogs_remaining == 0 means nothing left to save for, so the
+        price must fall away entirely rather than to some floor."""
+        fire = Action(track=None, level=0, target_index=0, fire=True)
+        state = self.position(0)
+        original = ps.FIRE_PRICE
+        try:
+            ps.FIRE_PRICE = 0.0
+            free = ps._cheap_score(state, 0, fire)
+            ps.FIRE_PRICE = 1000.0
+            priced = ps._cheap_score(state, 0, fire)
+        finally:
+            ps.FIRE_PRICE = original
+        self.assertEqual(free, priced)

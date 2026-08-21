@@ -811,6 +811,36 @@ def armed_credit(before: BattleState, after: BattleState) -> float:
     return total
 
 
+# What one pink slip costs the scorers, PER COG STILL TO COME. A slip is finite and nothing restocks it, so it is
+# the same kind of resource as a gag and belongs in the same term --
+# `_cheap_score` used to say outright that "scarcity across a whole
+# fight belongs to the objective's price, which charges nothing for a
+# fire", and left it there.
+#
+# Measured, not guessed: with slips free the party spent all ten on the
+# waiter battle and arrived at the Big Cheese holding 0.3 of 10, which
+# is why the CEO sat at 0% for ten banquet leftovers. Battle two alone
+# from full resources clears 93% there, so the fight was never the
+# problem -- arriving disarmed was.
+#
+# PROPORTIONAL TO WHAT IS LEFT, with no constant term, and that shape is
+# the point rather than a detail. A flat price was tried first and it
+# helped at five leftovers (38.0% -> 49.5%, p=0.008) while HURTING at
+# zero (88.5% -> 82.0%, p=0.021), because it also suppressed slips in
+# the last battle -- and a slip carried out of the fight unspent is
+# worth exactly nothing. Scaling by `cogs_remaining` makes the price
+# fall to zero once there is nothing left to save for, so the rule
+# reads: hoard while cogs are still coming, spend freely at the end.
+#
+# 20 is directionally supported rather than proven, and the distinction
+# is worth keeping: across 200 CEO sides it is neutral at zero leftovers
+# (88.5% -> 88.0%, p=0.50) and positive but not significant at five
+# (38.0% -> 41.5%, p=0.22). What it clearly does is unstick ten
+# leftovers from exactly 0%, at every non-zero price tried. A 40-side
+# sweep said +7.5 there and 200 sides said +3.5; trust the larger one.
+FIRE_PRICE = 20.0
+
+
 # A branch this unlikely is not worth a probe. The pruned mass is
 # renormalised away, so this trades a little accuracy in the tail for
 # skipping leaves that cannot move a ranking.
@@ -872,6 +902,10 @@ def _score_leaf(state: BattleState, plan, hits, record=None) -> float:
     # shortlist-truncation bug this file has had three times already.
     price *= 1.0 + objective_mod.Objective().horizon_cost * float(
         state.cogs_remaining)
+    # A slip spent now is one not held for the cogs still to come, so it
+    # costs what is still coming -- and nothing at all when nothing is.
+    price += (FIRE_PRICE * float(state.cogs_remaining)
+              * _fires_spent(state, probe))
     return (landed
             + QUICK_W["heal"] * restored
             + QUICK_W["armed"] * armed_credit(state, probe)
@@ -884,45 +918,46 @@ def _score_leaf(state: BattleState, plan, hits, record=None) -> float:
             - QUICK_W["price"] * price)
 
 
-def _quick_score(state: BattleState, plan) -> float:
-    """Expected value of the round over every way the dice can fall.
+def _expected_over_rolls(state: BattleState, plan, leaf) -> float:
+    """Average `leaf` over every way this round's dice can fall.
 
-    This used to play ONE ALL-HIT round, and that assumption is what
-    lost the CEO. In a cog building it is nearly true -- accuracy runs
-    70-95% and hardly varies by track -- so ranking by damage and
-    ranking by expected damage pick the same gag. Against level 13-14
-    cogs accuracy spans 51% (a level 7 Drop) to 95%, and they stop
-    agreeing: the all-hit score prefers the biggest number on the gag,
-    which is reliably the least likely one to arrive. Measured on 40 CEO
-    sides, believing the dice is worth 70% -> 85% cleared, and it did
-    not lose a single side it used to win.
+    `leaf(hits, record)` scores ONE fixed outcome of the round and must
+    pass `record` through to `apply_party_round`, which fills it with the
+    accuracy each roll group was actually resolved against.
 
-    Enumerated, not sampled. A party is at most four toons and each
-    toon rolls at most one die, so there are at most 16 branches -- few
-    enough to take exactly, and taking them exactly means the ranking
-    does not wobble between two calls on the same position, which a
-    sampled score does. Correlated dice come out right for free, because
-    the branch is over ROLL GROUPS rather than over toons.
+    Enumerated, not sampled. A party is at most four toons and each rolls
+    at most one die, so at most 16 branches -- few enough to take
+    exactly, and exact means a ranking cannot wobble between two calls on
+    the same position, which a sampled score does. Branching over ROLL
+    GROUPS rather than over toons gets the correlated dice right for
+    free: two toons throwing one track at one cog land or miss together,
+    so a plan cannot hedge by stacking a track on a target.
 
     The probabilities come from the simulator's own `record` rather than
-    being recomputed here, so the two cannot drift apart. They are read
-    per branch because accuracy is conditional: a gag that lands stuns
-    the cog and raises what follows it.
+    being recomputed here, and they are read PER BRANCH, because accuracy
+    is conditional and the conditions are not small: a landed Throw lifts
+    a following Drop from 54% to 79%, a second Lure lifts the pair from
+    79% to 95%, a trapped target lifts a Lure from 79% to 95%. A table of
+    per-gag accuracies would get all three wrong. Reading the simulator's
+    own numbers also means the two cannot drift apart -- a second
+    implementation of the accuracy rules is what put a 5% miss on an
+    always-hit Trap.
 
-    It still looks one step past the round for a trap, and only a trap:
-    see `armed_credit`.
+    One function rather than one per scorer for that same reason.
     """
     groups = _roll_groups(plan)
     keys = list(dict.fromkeys(groups.values()))
     if not keys:
         # Nothing rolls -- fires and passes only. One branch, and `hits`
         # is never consulted for either.
-        return _score_leaf(state, plan, [True] * len(plan))
+        return leaf([True] * len(plan), None)
 
     # The all-hit branch first. It doubles as the accuracy estimate that
-    # decides which branches are worth a probe at all.
+    # decides which branches are worth a probe at all, and it IS one of
+    # the branches, so it is scored once and reused rather than replayed.
+    all_hit_bits = (1 << len(keys)) - 1
     seed_record: List = []
-    all_hit = _score_leaf(state, plan, [True] * len(plan), seed_record)
+    all_hit = leaf([True] * len(plan), seed_record)
     if all_hit == float("-inf"):
         return all_hit
     approx = {(track, key): min(max(accuracy, 0), 100) / 100.0
@@ -937,14 +972,17 @@ def _quick_score(state: BattleState, plan) -> float:
             guess *= chance if hit else 1.0 - chance
         if guess < MIN_LEAF_PROB:
             continue
-        hits = [landed.get(groups.get(i), True) for i in range(len(plan))]
-        record: List = []
-        score = _score_leaf(state, plan, hits, record)
+        if bits == all_hit_bits:
+            score, record = all_hit, seed_record
+        else:
+            hits = [landed.get(groups.get(i), True) for i in range(len(plan))]
+            record = []
+            score = leaf(hits, record)
         if score == float("-inf"):
             continue
         # Chain rule: each group's accuracy is the one THIS branch
-        # resolved it against, so the conditioning on earlier hits is
-        # already baked in.
+        # resolved it against, so conditioning on earlier hits is already
+        # baked in.
         chance = 1.0
         for track, key, accuracy in record:
             hit = landed.get((track, key))
@@ -959,6 +997,30 @@ def _quick_score(state: BattleState, plan) -> float:
     # Renormalise: pruning above removes a little mass, and a plan must
     # not score lower merely because more of its branches were skipped.
     return total / mass
+
+
+def _quick_score(state: BattleState, plan) -> float:
+    """Expected value of the round over every way the dice can fall.
+
+    This used to play ONE ALL-HIT round, and that assumption is what lost
+    the CEO. In a cog building it is nearly true -- accuracy runs 70-95%
+    and hardly varies by track -- so ranking by damage and ranking by
+    expected damage pick the same gag. Against level 13-14 cogs accuracy
+    spans 51% (a level 7 Drop) to 95% and they stop agreeing: the all-hit
+    score prefers the biggest number printed on the gag, which is
+    reliably the least likely one to arrive.
+
+    Measured on 200 CEO sides with common random numbers, 0 leftovers:
+    69.5% -> 75.0% cleared, +24 won against 13 lost, sign test p=0.049.
+    Cog buildings unchanged, which is the result that mattered -- the
+    weights were fitted there.
+
+    It still looks one step past the round for a trap, and only a trap:
+    see `armed_credit`.
+    """
+    return _expected_over_rolls(
+        state, plan,
+        lambda hits, record: _score_leaf(state, plan, hits, record))
 
 
 def _playable(state: BattleState, plan) -> bool:
@@ -1278,6 +1340,12 @@ def _spent(before: BattleState, after: BattleState):
     return out
 
 
+def _fires_spent(before: BattleState, after: BattleState) -> int:
+    """Pink slips used this round, across the party."""
+    return sum(max(0, old.fires - new.fires)
+               for old, new in zip(before.toons, after.toons))
+
+
 # Rounds a rollout will play before giving up and calling the position
 # unresolved. A real battle ends well inside this; the cap only stops a
 # pathological position (mutual inability to finish) spinning forever.
@@ -1439,7 +1507,8 @@ def _cheap_score(state: BattleState, index: int, action: Action) -> float:
         removed = float(max(0, target.hp))
         if target.status.suited:
             removed += float(target.max_hp)     # the Skelecog goes too
-        return removed + QUICK_W["kill"] + _cog_threat(target)
+        held = FIRE_PRICE * float(state.cogs_remaining)
+        return removed + QUICK_W["kill"] + _cog_threat(target) - held
 
     toon = state.toons[index]
 
@@ -1587,42 +1656,58 @@ def _greedy_score(state: BattleState, trial, objective) -> float:
     Laff restored is priced at `HEAL_VALUE`, shared with the other two
     scorers so there is one number for what laff is worth rather than
     three.
+
+    It also used to play one ALL-HIT round, the same assumption that lost
+    the CEO in `_quick_score`, and it matters more here than the branch
+    count suggests: `rollout_value` IS `greedy_plan` played forward, so
+    an all-hit rollout values every position as though the party never
+    misses. A trial is one toon throwing one gag, so this is two
+    branches, not sixteen.
     """
+    # Neither depends on how the dice fall, so they are computed once
+    # rather than once per branch.
     wasted, scarcity = plan_waste(state, trial)
-    probe = state.clone()
-    try:
-        healed = simulator.apply_party_round(
-            probe, list(trial), hits=[a is not None for a in trial])
-    except (NotImplementedError, ValueError, KeyError):
-        return float("-inf")
-
-    # Capped at the headroom actually available, so healing a toon who
-    # is nearly full is worth what it really restores rather than the
-    # gag's nominal value. Overhealing should not look like value.
-    restored = 0.0
-    for amount, before in zip(healed, state.toons):
-        if amount > 0 and before.laff > 0:
-            restored += min(amount, before.max_laff - before.laff)
-    landed = sum(remaining_hp(before) - remaining_hp(after)
-                 for before, after in zip(state.cogs, probe.cogs))
-    killed = sum(1 for before, after in zip(state.cogs, probe.cogs)
-                 if not before.status.is_dead and after.status.is_dead)
-
     # Price the action directly. This called `_spent`, which diffs every
     # toon's whole gag dictionary against the probe's -- forty-odd
     # lookups to rediscover a fact the caller already had, on a trial
     # where exactly one toon throws exactly one gag.
     price = 0.0
     for action in trial:
-        if action is not None:
+        if action is None:
+            continue
+        if action.fire:
+            price += FIRE_PRICE * float(state.cogs_remaining)
+        else:
             price += objective.gag_price(action.track, action.level,
                                          state.cogs_remaining)
-    return (landed
-            + GREEDY_W["heal"] * restored
-            + GREEDY_W["kill"] * killed
-            + GREEDY_W["prevent"] * prevented(state, probe)
-            - GREEDY_W["price"] * price
-            - GREEDY_W["waste"] * wasted * scarcity)
+
+    def leaf(hits, record) -> float:
+        probe = state.clone()
+        try:
+            healed = simulator.apply_party_round(
+                probe, list(trial), hits=hits, record=record)
+        except (NotImplementedError, ValueError, KeyError):
+            return float("-inf")
+
+        # Capped at the headroom actually available, so healing a toon
+        # who is nearly full is worth what it really restores rather than
+        # the gag's nominal value. Overhealing should not look like value.
+        restored = 0.0
+        for amount, before in zip(healed, state.toons):
+            if amount > 0 and before.laff > 0:
+                restored += min(amount, before.max_laff - before.laff)
+        landed = sum(remaining_hp(before) - remaining_hp(after)
+                     for before, after in zip(state.cogs, probe.cogs))
+        killed = sum(1 for before, after in zip(state.cogs, probe.cogs)
+                     if not before.status.is_dead and after.status.is_dead)
+        return (landed
+                + GREEDY_W["heal"] * restored
+                + GREEDY_W["kill"] * killed
+                + GREEDY_W["prevent"] * prevented(state, probe)
+                - GREEDY_W["price"] * price
+                - GREEDY_W["waste"] * wasted * scarcity)
+
+    return _expected_over_rolls(state, trial, leaf)
 
 
 def rollout_value(state: BattleState, objective, rng,
