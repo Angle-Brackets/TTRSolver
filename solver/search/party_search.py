@@ -811,22 +811,40 @@ def armed_credit(before: BattleState, after: BattleState) -> float:
     return total
 
 
-def _quick_score(state: BattleState, plan) -> float:
-    """One all-hit round, scored on damage landed against gag price.
+# A branch this unlikely is not worth a probe. The pruned mass is
+# renormalised away, so this trades a little accuracy in the tail for
+# skipping leaves that cannot move a ranking.
+MIN_LEAF_PROB = 1e-3
 
-    Deliberately cheap and deliberately not the real evaluation: it
-    decides which plans get sampled, and a plan it ranks badly is never
-    looked at again, so it must not be *wrong* -- only rough.
 
-    It does look one step past the round for a trap, and only a trap:
-    see `armed_credit`.
+def _roll_groups(plan) -> Dict[int, tuple]:
+    """Toon index -> the shared die that toon's gag resolves on.
+
+    Accuracy is rolled per track per target, so two toons throwing the
+    same track at the same cog land or miss TOGETHER. That correlation
+    is the whole reason this mapping exists rather than a per-toon hit
+    probability: treating the two rolls as independent lets a plan hedge
+    in a way the game does not allow, and overvalues stacking a track on
+    one target -- the error `apply_party_round` was written to avoid.
+
+    Fires and passes never roll, so they are absent.
     """
+    groups: Dict[int, tuple] = {}
+    for index, action in enumerate(plan):
+        if action is None or action.is_pass or action.fire:
+            continue
+        groups[index] = (action.track, action.target_index)
+    return groups
+
+
+def _score_leaf(state: BattleState, plan, hits, record=None) -> float:
+    """Score one fixed outcome of the round -- who hit and who missed."""
     from .. import data
 
     probe = state.clone()
     try:
         healed = simulator.apply_party_round(
-            probe, list(plan), hits=[a is not None for a in plan])
+            probe, list(plan), hits=hits, record=record)
     except (NotImplementedError, ValueError, KeyError):
         return float("-inf")
     # Healing counts here too. This ranks which PLANS get sampled at
@@ -864,6 +882,83 @@ def _quick_score(state: BattleState, plan) -> float:
             - (QUICK_W["risk"] * toons_at_risk(probe)
                if QUICK_W["risk"] else 0.0)
             - QUICK_W["price"] * price)
+
+
+def _quick_score(state: BattleState, plan) -> float:
+    """Expected value of the round over every way the dice can fall.
+
+    This used to play ONE ALL-HIT round, and that assumption is what
+    lost the CEO. In a cog building it is nearly true -- accuracy runs
+    70-95% and hardly varies by track -- so ranking by damage and
+    ranking by expected damage pick the same gag. Against level 13-14
+    cogs accuracy spans 51% (a level 7 Drop) to 95%, and they stop
+    agreeing: the all-hit score prefers the biggest number on the gag,
+    which is reliably the least likely one to arrive. Measured on 40 CEO
+    sides, believing the dice is worth 70% -> 85% cleared, and it did
+    not lose a single side it used to win.
+
+    Enumerated, not sampled. A party is at most four toons and each
+    toon rolls at most one die, so there are at most 16 branches -- few
+    enough to take exactly, and taking them exactly means the ranking
+    does not wobble between two calls on the same position, which a
+    sampled score does. Correlated dice come out right for free, because
+    the branch is over ROLL GROUPS rather than over toons.
+
+    The probabilities come from the simulator's own `record` rather than
+    being recomputed here, so the two cannot drift apart. They are read
+    per branch because accuracy is conditional: a gag that lands stuns
+    the cog and raises what follows it.
+
+    It still looks one step past the round for a trap, and only a trap:
+    see `armed_credit`.
+    """
+    groups = _roll_groups(plan)
+    keys = list(dict.fromkeys(groups.values()))
+    if not keys:
+        # Nothing rolls -- fires and passes only. One branch, and `hits`
+        # is never consulted for either.
+        return _score_leaf(state, plan, [True] * len(plan))
+
+    # The all-hit branch first. It doubles as the accuracy estimate that
+    # decides which branches are worth a probe at all.
+    seed_record: List = []
+    all_hit = _score_leaf(state, plan, [True] * len(plan), seed_record)
+    if all_hit == float("-inf"):
+        return all_hit
+    approx = {(track, key): min(max(accuracy, 0), 100) / 100.0
+              for track, key, accuracy in seed_record}
+
+    total = mass = 0.0
+    for bits in range(1 << len(keys)):
+        landed = {key: bool(bits >> i & 1) for i, key in enumerate(keys)}
+        guess = 1.0
+        for key, hit in landed.items():
+            chance = approx.get(key, 1.0)
+            guess *= chance if hit else 1.0 - chance
+        if guess < MIN_LEAF_PROB:
+            continue
+        hits = [landed.get(groups.get(i), True) for i in range(len(plan))]
+        record: List = []
+        score = _score_leaf(state, plan, hits, record)
+        if score == float("-inf"):
+            continue
+        # Chain rule: each group's accuracy is the one THIS branch
+        # resolved it against, so the conditioning on earlier hits is
+        # already baked in.
+        chance = 1.0
+        for track, key, accuracy in record:
+            hit = landed.get((track, key))
+            if hit is None:
+                continue
+            landed_p = min(max(accuracy, 0), 100) / 100.0
+            chance *= landed_p if hit else 1.0 - landed_p
+        total += chance * score
+        mass += chance
+    if mass <= 0.0:
+        return all_hit
+    # Renormalise: pruning above removes a little mass, and a plan must
+    # not score lower merely because more of its branches were skipped.
+    return total / mass
 
 
 def _playable(state: BattleState, plan) -> bool:
