@@ -217,6 +217,13 @@ class CogStatus:
             trap_level=self.trap_level,
             trap_organic=self.trap_organic,
             is_dead=self.is_dead,
+            # The outer suit. Omitting it silently un-2.0'd every Version
+            # 2.0 after ONE round -- the flag survived only until the
+            # first copy, so a CEO's second battle, which is entirely
+            # 2.0s, was fought against ordinary cogs with half the health.
+            # Same omission as `fires` in ToonState.clone, found the same
+            # way: a marker that appeared on round one and never again.
+            suited=self.suited,
             damage_by_toon=(dict(self.damage_by_toon)
                             if self.damage_by_toon else None),
         )

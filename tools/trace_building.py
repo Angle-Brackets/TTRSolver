@@ -55,6 +55,12 @@ def board(state) -> str:
         if c.status.is_dead:
             continue
         marks = ""
+        # V marks a Version 2.0 still wearing its suit -- it has this hp
+        # AGAIN behind the one shown. Without it a v2.0 and an ordinary
+        # cog print identically, which made a CEO trace look like it
+        # barely contained any.
+        if c.status.suited:
+            marks += "V"
         if c.status.lured:
             marks += "L"
         if c.status.trapped:

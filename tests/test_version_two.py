@@ -92,6 +92,17 @@ class VersionTwoTest(unittest.TestCase):
         self.assertTrue(cog.status.is_dead)
         self.assertFalse(cog.status.suited)
 
+    def test_the_suit_survives_a_copy(self):
+        """It did not, and that quietly un-2.0'd every Version 2.0 after
+        ONE round: the flag lived until the first `copy`, so a CEO's
+        second battle -- which is entirely 2.0s -- was fought against
+        ordinary cogs with half the health. The tell was a trace marker
+        that appeared on round one of each floor and never again."""
+        cog = v2(12)
+        self.assertTrue(cog.copy().status.suited)
+        st = _state(cog)
+        self.assertTrue(st.clone().cogs[0].status.suited)
+
     def test_a_suited_cog_keys_differently(self):
         """A suited cog at 90 hp has 180 left to give; a bare one has 90.
         Collapsing them would let the memo answer a v2.0 with a
