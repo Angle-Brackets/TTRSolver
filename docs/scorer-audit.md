@@ -260,6 +260,67 @@ on plain and not on the climb. The exception worth testing is slip
 discipline, where the proposal really does drive behaviour: the climb
 trims 10.07 proposed slips only to 9.42.
 
+## Retraining on boss sides -- and the first policy change to reach the climb
+
+Six runs, 6M steps each, three seeds an arm. The control arm exists
+because the observation widened at the same time: without it, "boss
+positions helped" and "the wider observation helped" are one number.
+Both arms `--coordinated --facility-fraction 0.5 --fire-fraction 0.25
+--hidden 256`; the treatment adds `--boss-fraction 0.25`.
+
+120 sides a cell, common random numbers, per-seed figures in brackets.
+
+| set | mode | control | boss |
+|---|---|---|---|
+| buildings | plain | 63.3% [64/63/62] | 60.3% [56/64/61] |
+| buildings | climb | 72.5% [72/73/72] | 69.2% [63/72/72] |
+| VP | plain | 95.0% | 96.4% |
+| VP | climb | 98.1% | **99.7%** |
+| CEO 0 | plain | 43.3% [34/56/40] | **76.4%** [68/78/83] |
+| CEO 0 | climb | 79.2% | **88.1%** [88/88/88] |
+| CEO 5 | plain | 10.0% [5/10/15] | **31.9%** [19/37/40] |
+| CEO 5 | climb | 28.6% | **40.0%** |
+| CEO 10 | either | ~0.5% | ~1.2% |
+
+Paired over sides, boss against control: CEO 0 plain **+33.1**
+(+140/-21, p<0.0001), CEO 0 climb **+8.9** (+45/-13, p<0.0001), CEO 5
+plain **+21.9** (p<0.0001), CEO 5 climb **+11.4** (+90/-49, p=0.0003),
+VP climb +1.7 (p=0.035), buildings climb **-3.3** (p=0.033).
+
+**This is the first policy-side change that has ever moved the climb**,
+and it refutes a prediction made in this document three sections ago.
+The reasoning there was that the climb is saturated on CEO boards --
+budget 8, 16, 32 and 64 all score identically -- so a better proposal
+would show up on plain and not on the agent. Budget saturation turns out
+to say only that more ITERATIONS do not help. It says nothing about
+where the climb starts, and coordinate ascent from a different starting
+plan reaches a different local optimum. +8.9 and +11.4 on the climb is
+that difference.
+
+`reward-experiments.md`'s finding still stands for everything tried
+there -- five changes that moved plain and not the climb -- but it is
+now bounded: it held because those changes were all on positions the
+climb already handled well. On the CEO it does not hold.
+
+**The buildings cost is one seed, not a trend.** Boss climb reads
+[63/72/72] against control's [72/73/72]: two of three seeds match the
+control exactly and seed 1 is an outlier. Worth more seeds before
+calling it a real regression -- and it has a confound either way, since
+at `--boss-fraction 0.25` the treatment arm gets a quarter fewer
+facility episodes (0.375 against 0.500 effective). Holding building
+exposure constant would need `--facility-fraction 0.667` in the boss
+arm, which has not been run.
+
+**CEO 10 did not move**, from either side. Four sections of this
+document have now failed to shift it.
+
+Shipped `boss_s2`, **selected on the in-training facility eval** (+44.76
+return, 84.5% win, 70.0% of floors finished -- the best of the three
+boss seeds there) rather than on any set reported above. That
+distinction is the point: an earlier policy in this repo was shipped
+after choosing its seed on a set that was never reported, and the commit
+title still says so.
+
 ## Two notes on method
 
 **A 40-seed sample overstated the effect twice, by roughly 2x, in the
