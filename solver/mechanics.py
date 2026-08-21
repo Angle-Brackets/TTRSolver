@@ -235,6 +235,28 @@ def lure_hit_override(track: Track, target_cogs):
     return None
 
 
+def forced_accuracy(track: Track, target_cogs):
+    """Accuracy FIXED by a rule, or None when it has to be rolled up.
+
+    Three outcomes the rules state outright: Trap always hits, Throw and
+    Squirt are guaranteed against fully lured cogs, and Drop always
+    misses them. Because they are stated rather than computed, nothing
+    may adjust them afterwards -- not the same-round stun bonus, not the
+    95 cap.
+
+    This exists as one function because the party round had its own copy
+    of the decision and got it wrong in all three directions: it added
+    stun to the forced number and then capped the sum, which gave an
+    always-hit Trap a 5% miss, gave a guaranteed Throw a 5% miss, and
+    gave a Drop that "always misses on lured Cogs" a 25% chance to land
+    whenever anything else hit earlier in the round. Solo play was
+    right the whole time, which is what made it hard to see.
+    """
+    if track == Track.TRAP:
+        return 100  # [CONFIRMED] trap is always-hit
+    return lure_hit_override(track, target_cogs)
+
+
 def calc_toon_accuracy(track: Track, level: int, toon: ToonState,
                         target_cogs, lure_tree_planted: bool = False,
                         all_cogs=None) -> int:
@@ -244,10 +266,7 @@ def calc_toon_accuracy(track: Track, level: int, toon: ToonState,
 
     Pass `all_cogs=state.cogs` to get the luredRatio accuracy bonus; without
     it the bonus term is 0, as it was before luredRatio was modeled."""
-    if track == Track.TRAP:
-        return 100  # [CONFIRMED] trap is always-hit
-
-    forced = lure_hit_override(track, target_cogs)
+    forced = forced_accuracy(track, target_cogs)
     if forced is not None:
         return forced
 

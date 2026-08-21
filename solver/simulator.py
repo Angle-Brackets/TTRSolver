@@ -626,7 +626,8 @@ def _prev_hits_apply(prev_group: bool, prev_targets, this_group: bool,
 def apply_party_round(state: BattleState,
                       actions: Sequence[Optional[Action]],
                       hits: Optional[Sequence[bool]] = None,
-                      rng=random) -> List[int]:
+                      rng=random,
+                      record: Optional[List] = None) -> List[int]:
     """Resolve every toon's action for one round, in the game's order.
 
     `actions[i]` is `state.toons[i]`'s choice, or None to sit the round
@@ -650,6 +651,16 @@ def apply_party_round(state: BattleState,
     Accuracy is rolled per attack at the moment it resolves, because the
     stun bonus depends on what has already landed. Passing `hits` fixes
     the rolls instead, which is what an enumerating caller wants.
+
+    `record`, if given, is appended with one `(track, key, accuracy)` per
+    ROLL GROUP -- the shared die, not the gag -- carrying the accuracy
+    this round actually resolved it against, stun bonus and Lure bonus
+    included. A caller that fixes `hits` and wants to know what that
+    branch was worth needs the accuracy the simulator used, and deriving
+    it a second time outside this function would be a second
+    implementation of the same rule, free to disagree with this one
+    while both looked right. `(track, key)` is unique per round: tracks
+    resolve in ATTACK_ORDER, so one track is prepared exactly once.
     """
     healed = [0 for _ in state.toons]
 
@@ -716,16 +727,25 @@ def apply_party_round(state: BattleState,
         prepared = []
         for toon_index in same_track:
             action = actions[toon_index]
-            targets = [where[id(c)] for c in _targets_for(state, action)]
+            target_cogs = _targets_for(state, action)
+            targets = [where[id(c)] for c in target_cogs]
             group = action.target_index is None
             prior = sum(
                 1 for prev_track, prev_group, prev_targets in landed
                 if prev_track != track and prev_track != Track.TRAP
                 and _prev_hits_apply(prev_group, prev_targets, group, targets))
-            accuracy = min(
-                toon_action_accuracy(state, action)
-                + mechanics.calc_same_round_prev_hits(prior),
-                data.ACCURACY_CAP)
+            # A forced accuracy is an outcome the rules state, not a
+            # total to adjust. Adding stun to it and capping the sum is
+            # what gave an always-hit Trap a 5% miss and let a Drop land
+            # on a lured cog -- see mechanics.forced_accuracy.
+            forced = mechanics.forced_accuracy(action.track, target_cogs)
+            if forced is not None:
+                accuracy = forced
+            else:
+                accuracy = min(
+                    toon_action_accuracy(state, action)
+                    + mechanics.calc_same_round_prev_hits(prior),
+                    data.ACCURACY_CAP)
             key = None if group else action.target_index
             prepared.append((toon_index, action, targets, group, key,
                              accuracy))
@@ -751,6 +771,10 @@ def apply_party_round(state: BattleState,
                 bonus = mechanics.multi_lure_bonus(levels)
                 if bonus:
                     best[key] = min(best[key] + bonus, data.ACCURACY_CAP)
+
+        if record is not None:
+            for key, accuracy in best.items():
+                record.append((track, key, accuracy))
 
         rolls: Dict[Optional[int], int] = {}
         resolved = []
