@@ -15,6 +15,7 @@ import unittest
 
 from solver import data, outcomes, simulator
 from solver.search import expectimax
+from solver.search import party_search as ps
 from solver.state import Action, BattleState, CogState, ToonState, Track
 
 
@@ -257,3 +258,72 @@ class DepthBudgetTest(unittest.TestCase):
         value, _action = expectimax.solve(state)
         self.assertIsInstance(value, float)
         self.assertGreaterEqual(gags + state.free_passes, 4)
+
+
+class AnEmptyPouchCannotBeSpent(unittest.TestCase):
+    """A gag with a count of zero is not a gag.
+
+    A pouch holds explicit zeroes -- `{(SQUIRT, 7): 0}` is an ordinary
+    entry for a toon who has used them all -- so a bare decrement raised
+    KeyError on a MISSING key while the same spend on a ZERO count went
+    quietly to -1 and dealt full damage. Two spellings of one mistake,
+    one loud and one silent, and the silent one returned a plausible
+    score for an impossible plan.
+
+    Nothing in normal play reaches this: `legal_actions` only offers a
+    gag with a positive count. Hand-built plans do, and they are the
+    ones with nobody to check them.
+    """
+
+    def toon(self, counts):
+        return ToonState(laff=100, max_laff=100,
+                         track_exp={t: 7 for t in Track},
+                         gag_counts=counts, organic_tracks=frozenset())
+
+    def fight(self, counts):
+        return BattleState(
+            toons=[self.toon(counts)],
+            cogs=[CogState("head_hunter", "bossbot", 10, 132, 132)])
+
+    def test_a_zero_count_raises_like_a_missing_one(self):
+        for label, counts in (("missing", {}),
+                              ("zero", {(Track.SQUIRT, 7): 0})):
+            state = self.fight(counts)
+            with self.assertRaises(KeyError, msg=label):
+                simulator.apply_party_round(
+                    state, [Action(Track.SQUIRT, 7, None)], hits=[True])
+
+    def test_the_pouch_never_goes_negative(self):
+        state = self.fight({(Track.SQUIRT, 7): 0})
+        try:
+            simulator.apply_party_round(
+                state, [Action(Track.SQUIRT, 7, None)], hits=[True])
+        except KeyError:
+            pass
+        self.assertGreaterEqual(
+            state.toons[0].gag_counts.get((Track.SQUIRT, 7), 0), 0)
+
+    def test_the_cog_takes_no_damage_from_a_gag_that_is_not_there(self):
+        state = self.fight({(Track.SQUIRT, 7): 0})
+        before = state.cogs[0].hp
+        try:
+            simulator.apply_party_round(
+                state, [Action(Track.SQUIRT, 7, None)], hits=[True])
+        except KeyError:
+            pass
+        self.assertEqual(state.cogs[0].hp, before)
+
+    def test_a_real_gag_still_spends(self):
+        state = self.fight({(Track.SQUIRT, 7): 2})
+        simulator.apply_party_round(
+            state, [Action(Track.SQUIRT, 7, None)], hits=[True])
+        self.assertEqual(state.toons[0].gag_counts[(Track.SQUIRT, 7)], 1)
+        self.assertLess(state.cogs[0].hp, 132)
+
+    def test_the_scorer_refuses_an_impossible_plan(self):
+        """`_quick_score` catches KeyError and returns -inf, so an
+        impossible plan can never outrank a real one. Before this, a
+        zero count scored 72.8 and looked entirely reasonable."""
+        state = self.fight({(Track.SQUIRT, 7): 0})
+        self.assertEqual(ps._quick_score(state, [Action(Track.SQUIRT, 7, None)]),
+                         float("-inf"))

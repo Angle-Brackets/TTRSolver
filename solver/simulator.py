@@ -381,9 +381,7 @@ def apply_toon_action(state: BattleState, action: Action,
     # action into one. This is the ONLY place gag_counts is mutated; if
     # that ever stops being true, every sibling state silently shares the
     # edit. tests/test_state.py pins the invariant.
-    counts = dict(toon.gag_counts)
-    counts[(action.track, action.level)] -= 1
-    toon.gag_counts = counts
+    _spend_gag(toon, action.track, action.level)
 
     healed = 0
     dealt = 0
@@ -633,6 +631,33 @@ def _prev_hits_apply(prev_group: bool, prev_targets, this_group: bool,
     return bool(set(prev_targets) & set(this_targets))
 
 
+def _spend_gag(toon, track, level) -> None:
+    """Take one gag out of the pouch, refusing to take one that is not
+    there.
+
+    A pouch holds explicit zeroes -- `{(SQUIRT, 7): 0}` is an ordinary
+    entry for a toon who has used them all -- so a bare `-= 1` on a
+    missing key raised KeyError while the same spend on a ZERO count
+    went quietly to -1 and dealt full damage. Two spellings of the same
+    mistake, one loud and one silent.
+
+    Nothing in normal play reaches this: `legal_actions` only offers a
+    gag with a positive count, and `legal_mask` derives from it. It is
+    hand-built plans that get here, and they are exactly the ones with
+    nobody to check them -- a scorer handed an impossible plan returned
+    a plausible number, which cost an afternoon and a wrong commit.
+
+    KeyError rather than a new exception type because every caller that
+    scores a speculative plan already catches it, and this is the same
+    fact those catches are for: the plan cannot be played.
+    """
+    counts = dict(toon.gag_counts)
+    if counts.get((track, level), 0) <= 0:
+        raise KeyError((track, level))
+    counts[(track, level)] -= 1
+    toon.gag_counts = counts
+
+
 def apply_party_round(state: BattleState,
                       actions: Sequence[Optional[Action]],
                       hits: Optional[Sequence[bool]] = None,
@@ -814,9 +839,7 @@ def _apply_track_group(state: BattleState, track: Track, resolved,
             # slots with Feathers thrown at toons already on full laff,
             # purely because they cost nothing.
             toon = state.toons[toon_index]
-            counts = dict(toon.gag_counts)
-            counts[(action.track, action.level)] -= 1
-            toon.gag_counts = counts
+            _spend_gag(toon, action.track, action.level)
 
             # [CONFIRMED] TTR wiki (Toon-Up): "Toons cannot use Toon-Up
             # gags to restore their own laff"; they "restore each
@@ -869,9 +892,7 @@ def _apply_track_group(state: BattleState, track: Track, resolved,
     for toon_index, action, targets, _g, hit in resolved:
         toon = state.toons[toon_index]
         # Spend the gag whether or not it landed.
-        counts = dict(toon.gag_counts)
-        counts[(action.track, action.level)] -= 1
-        toon.gag_counts = counts
+        _spend_gag(toon, action.track, action.level)
         if not hit:
             continue
         for cog_index in targets:

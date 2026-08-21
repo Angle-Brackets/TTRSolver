@@ -410,7 +410,23 @@ holds no level 7 Squirt, so that plan is ILLEGAL and was never
 available. `_quick_score` does not check playability -- `_playable` is a
 separate function -- so a hand-built plan will happily score a gag the
 toon does not own. The climb never had this problem: `_logits` masks
-illegal actions to -inf and the sweep skips them.
+illegal actions to -inf and the sweep skips them, and across 3198
+actions played on buildings, the VP and the CEO, zero were illegal.
+
+The design is generate-legal-then-score, which is right: legality is
+settled by `legal_actions` and `legal_mask` upstream, and re-deriving it
+inside a function called thousands of times per decision would be pure
+cost. What made it a trap was an INCONSISTENCY underneath. A pouch holds
+explicit zeroes -- `{(SQUIRT, 7): 0}` is an ordinary entry for a toon
+who has spent them all -- so spending a MISSING key raised KeyError,
+which `_quick_score` catches into -inf, while spending a ZERO count went
+quietly to -1 and dealt full damage:
+
+    key absent      _quick_score  -inf    simulator KeyError
+    key present, 0  _quick_score  72.8    count -> -1, damage dealt
+
+Both are the same impossible plan and `_playable` refuses both; only one
+of them said so. `simulator._spend_gag` now refuses both alike.
 
 Two readings in that draft came from the same mistake. "squirt/7->all
 ranks 49 for seat 1, unmoved by whether its partner lured" was not a
