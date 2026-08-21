@@ -386,3 +386,45 @@ class SharedAccuracyIsTheBestGagTest(unittest.TestCase):
                    + self.lure_accuracy(state, 5)) // 2
         self.roll_with(state, [Action(Track.LURE, 1, 0)], value=between)
         self.assertFalse(state.cogs[0].status.lured)
+
+
+class AccuracyBelongsToTheThrower(unittest.TestCase):
+    """Each toon's gag is scored with THAT toon's training.
+
+    `toon_action_accuracy` read `state.toon` -- toons[0] -- for every gag
+    in the round, so a party's accuracy was toon 0's accuracy wearing
+    everyone's gags. Invisible on a maxed team, which is every boss
+    position modelled so far, and wrong for any mixed party. Targets
+    differ here on purpose: same track at the same cog shares one die and
+    the BEST accuracy wins it, which would hide the difference.
+    """
+
+    def build(self):
+        def toon(throw_exp):
+            return ToonState(
+                laff=110, max_laff=110,
+                track_exp={t: 7 for t in Track} | {Track.THROW: throw_exp},
+                gag_counts={(t, l): 5 for t in Track for l in range(1, 8)},
+                organic_tracks=frozenset())
+        cogs = [CogState("flunky", "bossbot", 6, 90, 90) for _ in range(2)]
+        return BattleState(toons=[toon(7), toon(1)], cogs=cogs)
+
+    def test_an_untrained_thrower_is_less_accurate(self):
+        state = self.build()
+        record = []
+        simulator.apply_party_round(
+            state,
+            [Action(Track.THROW, 3, 0), Action(Track.THROW, 3, 1)],
+            hits=[True, True], record=record)
+        by_target = {key: accuracy for _track, key, accuracy in record}
+        self.assertGreater(
+            by_target[0], by_target[1],
+            "the maxed thrower and the untrained one scored the same, so "
+            "both were read off toons[0]")
+
+    def test_the_solo_default_is_unchanged(self):
+        state = self.build()
+        self.assertEqual(
+            simulator.toon_action_accuracy(state, Action(Track.THROW, 3, 0)),
+            simulator.toon_action_accuracy(state, Action(Track.THROW, 3, 0),
+                                           actor=0))

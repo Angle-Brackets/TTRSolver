@@ -283,21 +283,31 @@ def _apply_trap_trigger(cog: CogState) -> int:
     return dmg
 
 
-def toon_action_accuracy(state: BattleState, action: Action) -> int:
-    """The gag's hit chance, 0-100.
+def toon_action_accuracy(state: BattleState, action: Action,
+                         actor: int = 0) -> int:
+    """The gag's hit chance, 0-100, for the toon THROWING it.
 
     Passes all_cogs (not just the targets) so the luredRatio half of `bonus`
     sees the whole battle -- its denominator is every cog in play.
 
     A pass always "hits": it has one outcome, so the search should not
     split a chance node over it.
+
+    `actor` indexes `state.toons`, and defaults to 0 because solo play is
+    the whole of every other caller. A party round must pass it: accuracy
+    reads the thrower's TRAINING and whether the track is organic to
+    them, and both are per toon. This read `state.toon` unconditionally,
+    so every gag in a party round was scored with toon 0's training --
+    invisible on a maxed team, which is every boss position modelled so
+    far, and wrong for any mixed party.
     """
     if action.is_pass:
         return 100
+    toon = state.toons[actor]
     return mechanics.calc_toon_accuracy(
-        action.track, action.level, state.toon,
+        action.track, action.level, toon,
         _targets_for(state, action), all_cogs=state.cogs,
-        lure_tree_planted=state.toon.is_organic(action.track))
+        lure_tree_planted=toon.is_organic(action.track))
 
 
 def apply_toon_action(state: BattleState, action: Action,
@@ -743,7 +753,7 @@ def apply_party_round(state: BattleState,
                 accuracy = forced
             else:
                 accuracy = min(
-                    toon_action_accuracy(state, action)
+                    toon_action_accuracy(state, action, toon_index)
                     + mechanics.calc_same_round_prev_hits(prior),
                     data.ACCURACY_CAP)
             key = None if group else action.target_index
