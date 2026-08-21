@@ -830,13 +830,19 @@ def _apply_track_group(state: BattleState, track: Track, resolved,
                 continue
 
             if data.gag(Track.TOON_UP, action.level).group:
-                # [CONFIRMED] "Group Toon-Up gags provide laff evenly
-                # between Toons."
+                # [CONFIRMED] TTR wiki: "Group Toon-Up gags provide laff
+                # evenly between Toons."
                 #
-                # [TODO] Whether the even split rounds up or down, and
-                # whether the denominator counts the thrower, are not
-                # stated. Floor over the other toons is the reading that
-                # cannot overpay; if the wiki pins it down, fix it here.
+                # EVENLY BETWEEN THE RECIPIENTS, not the party. The wiki
+                # never says among whom, which stood as a [TODO] here;
+                # [CONFIRMED] by the owner from play: it is split across
+                # the toons being healed, and the thrower is not one of
+                # them. So one gag over a four-toon party is three
+                # shares, not four -- nothing is lost to the thrower.
+                #
+                # A two-toon party therefore hands its single recipient
+                # the full value: a level 7 is 210 to the other toon.
+                # That is not a special case, it is one recipient.
                 share = amount // len(others)
                 for index in others:
                     healed[index] += share

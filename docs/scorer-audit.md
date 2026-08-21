@@ -325,9 +325,15 @@ title still says so.
 
 It never heals on a boss board. Zero Toon-Ups in 1446 decisions across
 40 CEO sides, including 99 rounds with the party under 35% laff, while
-each toon carries eleven heals and a level 7 restores 210 laff to
-EVERYONE -- more than a full bar. In a losing trace the party sits at
-25 and 23 laff and throws Sound and Drop.
+each toon carries eleven heals and a level 7 group Toon-Up restores 210
+laff to the OTHER toon -- more than a full bar. In a losing trace the
+party sits at 25 and 23 laff and throws Sound and Drop.
+
+(A group Toon-Up is split evenly between its recipients, and the thrower
+is not one of them. A two-toon party has a single recipient, so it does
+receive the whole 210; a four-toon party gets three shares of 70. An
+earlier draft of this section said "210 to everyone", which is wrong in
+any party -- the thrower always heals nobody, including themselves.)
 
 That looks like a glaring hole. It is correct play.
 
