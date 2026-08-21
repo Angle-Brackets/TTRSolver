@@ -302,14 +302,34 @@ there -- five changes that moved plain and not the climb -- but it is
 now bounded: it held because those changes were all on positions the
 climb already handled well. On the CEO it does not hold.
 
-**The buildings cost is one seed, not a trend.** Boss climb reads
-[63/72/72] against control's [72/73/72]: two of three seeds match the
-control exactly and seed 1 is an outlier. Worth more seeds before
-calling it a real regression -- and it has a confound either way, since
-at `--boss-fraction 0.25` the treatment arm gets a quarter fewer
-facility episodes (0.375 against 0.500 effective). Holding building
-exposure constant would need `--facility-fraction 0.667` in the boss
-arm, which has not been run.
+**The buildings cost was seed noise.** It read -3.3 (p=0.033) on the
+first set, from a single outlying seed -- [63/72/72] against control's
+[72/73/72]. Two explanations were open: real harm, or displacement,
+since at `--boss-fraction 0.25` the boss arm also gets a quarter fewer
+facility episodes (0.375 against 0.500 effective). A third arm at
+`--facility-fraction 0.667` restores the exposure, and all three were
+re-scored on 180 HELD-OUT sides a cell:
+
+| set | mode | control | boss | bossmatched |
+|---|---|---|---|---|
+| buildings | climb | 66.3% | **69.6%** | 66.9% |
+| buildings | plain | 61.7% | 60.6% | 59.6% |
+| VP | climb | 99.4% | 99.4% | 99.3% |
+| CEO 0 | climb | 78.7% | **88.9%** | 87.6% |
+| CEO 0 | plain | 46.7% | **73.9%** | 79.6% |
+| CEO 5 | climb | 32.4% | **43.1%** | 46.9% |
+| CEO 5 | plain | 7.8% | **35.2%** | 30.6% |
+
+The sign FLIPS: on seeds nobody tuned against, boss is 3.3 points ABOVE
+control on buildings. So there was nothing to fix, and `bossmatched`
+duly fixes nothing -- it lands between the other two with the widest
+per-seed spread of the three, [71/63/66].
+
+**The CEO win replicates, and it is the session's most robust result.**
++10.2 at CEO 0 on the climb, +10.7 at CEO 5, +27 on both plain cells,
+with per-seed ranges that do not overlap at all: boss [67/76/79] against
+control [37/57/47]. Everything else measured today shrank or vanished on
+a larger sample. This did not.
 
 **CEO 10 did not move**, from either side. Four sections of this
 document have now failed to shift it.
@@ -491,6 +511,41 @@ the discovery set. So it was never "the lure gets rescued"; wider
 windows find better PAIRINGS, and one well-supported lure replaces two
 poorly-supported ones. The r11 case is a true instance of the mechanism
 and a misleading guide to its effect.
+
+## What training can and cannot teach about pink slips
+
+Lookahead into the next floor is ruled out on realism grounds -- a
+player cannot see it, so neither may the solver, and a clear rate earned
+by peeking would not transfer. That leaves training, and training got
+exactly half of it.
+
+Measured on the policy alone (plain argmax, so the scorer's `FIRE_PRICE`
+is not what is being read), over CEO sides at 0, 5 and 10 leftovers:
+
+| board | P(fire) |
+|---|---|
+| a Version 2.0 present | **62.2%** (n=779) |
+| no 2.0s | 47.0% (n=790) |
+
+**Target choice is learned.** It fires 15 points more readily at a cog
+with two health bars, which is right -- a slip removes both. And it is
+newly learnABLE: before the observation widened, a v2.0 and an ordinary
+cog encoded identically, so this could not have been picked up at any
+amount of training.
+
+**Timing is not.** Discipline would fire less while cogs are still to
+come and more in the last battle. It reads 51/55/58% with a fight ahead
+against 33/53/0% at the end -- flat to backwards, and the right-hand
+column has small n and should not be leaned on.
+
+The split is the shape credit assignment predicts. `suited` is a fact
+about the board in front of the agent, one step from its reward. "Hold
+this slip for a battle eight rounds and a floor boundary away" is the
+opposite, and it is where PPO at gamma=0.99 is weakest.
+
+So the 42 points that slip conservation is worth are, for now,
+unreachable from either direction: the lookahead route is closed by
+realism and the training route reaches the target and not the timing.
 
 ## Two notes on method
 
