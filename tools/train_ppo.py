@@ -122,6 +122,21 @@ def main():
                     help="share of episodes that are multi-floor "
                          "facilities, where a gag saved on one floor is "
                          "spent on the next and conserving finally pays")
+    ap.add_argument("--boss-fraction", type=float, default=0.0,
+                    help="share of episodes that are one side of a boss "
+                         "-- the Sellbot VP or the CEO. These are the "
+                         "only positions with Version 2.0 cogs, pink "
+                         "slips as standard and cogs above level 12, so "
+                         "without them the policy never sees any of it")
+    ap.add_argument("--ceo-share", type=float, default=0.5,
+                    help="of the boss episodes, the share that are CEO "
+                         "rather than VP")
+    ap.add_argument("--ceo-leftovers", default="0,10",
+                    help="lo,hi range of banquet survivors drawn per CEO "
+                         "episode. Fixing it at the shipped default of "
+                         "10 would train almost entirely on a position "
+                         "the agent clears 4%% of the time, which is "
+                         "nearly no gradient at all")
     ap.add_argument("--strange-fraction", type=float, default=0.25,
                     help="mid-fight boards: already lured, armed traps, "
                          "picked-over pouches, someone nearly sad")
@@ -139,9 +154,26 @@ def main():
     print(f"  device: {device}"
           + (f" ({torch.cuda.get_device_name(0)})" if device == "cuda" else ""))
 
+    boss = args.boss_fraction
+    if boss > 0:
+        # The Big Cheese has a [TODO] accuracy, and `enable_big_cheese`
+        # is the explicit opt-in that accepts a borrowed one. It is
+        # ONE-WAY -- half a process holding borrowed accuracy and half
+        # not is worse than either -- so it is called here, once, and
+        # announced.
+        from solver import ceo as ceo_mod
+        from solver import vp as vp_mod
+        ceo_mod.enable_big_cheese()
+        lo_left, _, hi_left = args.ceo_leftovers.partition(",")
+        lo_left, hi_left = int(lo_left), int(hi_left)
+        ceo_share = args.ceo_share
+        print(f"  boss positions: {boss:.0%} of episodes, "
+              f"{ceo_share:.0%} of those CEO "
+              f"({lo_left}-{hi_left} banquet leftovers), rest VP")
+
     sampler = None
     if (args.hard_fraction > 0 or args.combo_fraction > 0
-            or args.facility_fraction > 0):
+            or args.facility_fraction > 0 or boss > 0):
         frac = args.hard_fraction
         strange = args.strange_fraction
         combo = args.combo_fraction
@@ -150,7 +182,21 @@ def main():
         fire_fraction = args.fire_fraction
         fire_max = args.fire_max
 
-        def sampler(r, _f=frac, _s=strange, _c=combo, _fa=fac):
+        def sampler(r, _f=frac, _s=strange, _c=combo, _fa=fac, _b=boss):
+            # A boss side is a two-floor facility with Version 2.0 cogs,
+            # pink slips as standard and cogs above level 12 -- none of
+            # which appears anywhere else in the mix. `BattleEnv.reset`
+            # reads `kind` and builds the right plan.
+            if _b and r.random() < _b:
+                if r.random() < ceo_share:
+                    # Drawn per episode. `ceo_plan` reads the module
+                    # global when `reset` builds the floors, immediately
+                    # after this returns, so setting it here is what
+                    # that episode gets.
+                    ceo_mod.LEFTOVERS = r.randint(lo_left, hi_left)
+                    return ceo_mod.ceo_position(r)
+                return vp_mod.vp_position(r)
+
             # A facility position becomes a multi-floor episode in
             # `BattleEnv.reset`, which is the only place a saved gag can
             # actually be spent later.
@@ -172,6 +218,11 @@ def main():
             # party holding twenty slips plays as though it holds none --
             # which is exactly what the first CEO run showed, a toon
             # dying on 7 laff with five slips in hand.
+            # Boss sides have already returned above, and deliberately:
+            # the CEO issues its own five slips a toon, which is the real
+            # number, and overwriting that with a training default would
+            # teach the wrong budget on the one fight where the budget is
+            # known.
             if fire_fraction and r.random() < fire_fraction:
                 count = r.randint(1, fire_max)
                 for toon in state.toons:
