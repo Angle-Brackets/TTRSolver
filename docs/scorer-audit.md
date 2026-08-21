@@ -159,6 +159,42 @@ flat price's harm is gone) and positive but not significant at five
 (38.0% -> 41.5%, p=0.22). What it clearly does is unstick ten leftovers
 from 0%, at every non-zero price tried.
 
+## Refuted -- pricing a slip at the use it gives up
+
+The obvious objection to a count is that a count cannot tell a level 10
+waiter from a level 14 Version 2.0, and only one of those is worth a
+slip. So the price should be the **opportunity cost**: rank every cog
+you could fire instead -- those standing and those in the `holdout` --
+and, holding F slips, charge the F-th best, because that is the use you
+are settling away. No tuned constant at all, just a comparison.
+
+It was built and it lost, decisively, on 200 sides per row:
+
+| | count price (20/cog) | opportunity cost |
+|---|---|---|
+| 0 leftovers | **88.0%** | 76.0% (+11/-35, p=0.0003) |
+| 5 leftovers | **41.5%** | 28.5% (+20/-46, p=0.0009) |
+| 10 leftovers | **4.0%** | 2.0% |
+
+Not a broken implementation -- it did exactly what it was designed to.
+On the opening waiter board, firing a cog is worth 241.3 against an
+opportunity cost of 333.9, so it declines. And it barely hoards: 9.00
+slips fired against 9.85, two left at the end against 0.25. It loses six
+sides in forty by declining 0.85 slips.
+
+**Which slips, not how many.** The ones it declines are the EARLY ones,
+and a slip spent early stops that cog attacking for the whole rest of
+the battle. The comparison prices what a slip buys in *removal* and
+ignores what it saves in *laff over time*, which in a twenty-cog battle
+is most of what it is for. `_fire_value` already carries `_cog_threat`
+-- one round of the cog's damage -- but one round is not the horizon a
+slip actually buys.
+
+The idea is not dead, but a working version has to price the damage a
+slip prevents between now and the end of the battle, not the cog it
+deletes. Reverted rather than left behind a `SLIP_OPPORTUNITY = 0.0`
+knob, because that is how `toons_at_risk` became dead code.
+
 ## What is still open
 
 **Ten leftovers is 4%, not solved.** Holding slips costs laff in battle
