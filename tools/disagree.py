@@ -220,7 +220,7 @@ def main():
     args = ap.parse_args()
 
     if not hybrid.available():
-        print("  numpy or the policy is missing; nothing to compare")
+        print(f"  no usable policy: {hybrid.unavailable_reason()}")
         return 1
 
     objective = objective_mod.DEFAULT

@@ -79,8 +79,16 @@ PASS_INDEX = 0
 # actions -- four Lures on the same board. Coordination needs the
 # pending plan to be visible.
 PENDING_DIM = MAX_TOONS * (len(TRACKS) + 2)      # track one-hot, group, none
-OBS_DIM = (MAX_COGS * 9 + MAX_TOONS * (3 + 49) + 6
+OBS_DIM = (MAX_COGS * 11 + MAX_TOONS * (4 + 49) + 6
            + MAX_TOONS + PENDING_DIM)
+
+# Cog level and max hp were scaled by 12 and 200, which is the top of a
+# cog BUILDING and nowhere near the top of the game. A level 15 Big
+# Cheese read 1.25 and 1.43 -- outside the range every other feature
+# lives in, on exactly the fights the scaling was never checked against.
+# 20 and 476 are the highest the tables go.
+LEVEL_SCALE = 20.0
+MAX_HP_SCALE = 476.0
 
 
 def check_export(payload) -> Optional[str]:
@@ -141,10 +149,26 @@ def encode(state: BattleState, actor: int = 0,
     for i in range(MAX_COGS):
         if i < len(state.cogs) and not state.cogs[i].status.is_dead:
             cog = state.cogs[i]
+            # A Version 2.0 has this much health AGAIN behind what is
+            # shown. Without these two entries a v2.0 and an ordinary
+            # cog encoded IDENTICALLY -- 0 differing floats out of 290
+            # -- so the policy could not see the single thing that
+            # defines the CEO's banquet round, and no amount of training
+            # on those positions could have taught it.
+            #
+            # The flag alone would not do it. Remaining health is
+            # `hp + max_hp if suited`, a PRODUCT of two inputs, and a
+            # linear layer cannot multiply. So the work still to do on
+            # this cog is handed over directly, the same reasoning as
+            # `trap_damage / hp` below.
+            suited = 1.0 if cog.status.suited else 0.0
+            remaining = cog.hp + (cog.max_hp if cog.status.suited else 0)
             out += [1.0,
-                    cog.level / 12.0,
+                    cog.level / LEVEL_SCALE,
                     cog.hp / max(1, cog.max_hp),
-                    cog.max_hp / 200.0,
+                    cog.max_hp / MAX_HP_SCALE,
+                    suited,
+                    remaining / max(1, 2 * cog.max_hp),
                     1.0 if cog.status.lured else 0.0,
                     1.0 if cog.status.trapped else 0.0,
                     min(cog.status.lure_rounds_remaining, 8) / 8.0,
@@ -162,20 +186,27 @@ def encode(state: BattleState, actor: int = 0,
                     # actually matters, which is whether it kills.
                     _trap_damage(cog) / max(1, cog.hp)]
         else:
-            out += [0.0] * 9
+            out += [0.0] * 11
 
     for i in range(MAX_TOONS):
         if i < len(state.toons) and state.toons[i].laff > 0:
             toon = state.toons[i]
+            # Pink slips. The action table has offered fire actions
+            # since they were modelled, but the observation never said
+            # whether the toon HELD any -- 0 slips and 5 encoded
+            # identically. The policy proposed 10.07 of its 10 slips per
+            # CEO side, firing everything, because the legality mask was
+            # the only thing that ever told it no.
             out += [1.0,
                     toon.laff / max(1, toon.max_laff),
-                    toon.max_laff / 137.0]
+                    toon.max_laff / 137.0,
+                    min(toon.fires, 10) / 10.0]
             for track in TRACKS:
                 for level in range(1, 8):
                     out.append(min(toon.gag_counts.get((track, level), 0),
                                    8) / 8.0)
         else:
-            out += [0.0] * (3 + 49)
+            out += [0.0] * (4 + 49)
 
     out += [min(state.round_num, 12) / 12.0,
             len(state.active_cogs()) / MAX_COGS,

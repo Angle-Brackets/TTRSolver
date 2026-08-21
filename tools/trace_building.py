@@ -170,7 +170,7 @@ def main():
     args = ap.parse_args()
 
     if not hybrid.available():
-        print("  numpy or the policy is missing")
+        print(f"  no usable policy: {hybrid.unavailable_reason()}")
         return 1
 
     if args.stats:

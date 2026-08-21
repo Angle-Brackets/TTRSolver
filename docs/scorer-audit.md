@@ -214,6 +214,52 @@ reinforcements; the facility plan lives in the env. So "save exactly as
 many slips as the last battle needs" is not expressible from a state,
 which is why the price has to be a smooth function of a count instead.
 
+## What the policy could not see
+
+Asked whether the training mix should be enriched with CEO and VP
+positions, the prerequisite turned out to be missing. Measured on the
+290-wide observation:
+
+- **A Version 2.0 and an ordinary cog encoded identically** -- 0
+  differing floats. The suit is the single thing that defines the CEO's
+  banquet round.
+- **Holding 0 pink slips and holding 5 encoded identically.** The action
+  table has offered fire actions since they were modelled; nothing ever
+  told the policy whether it had any. It duly proposed 10.07 of its 10
+  slips per CEO side, firing everything, with the legality mask as the
+  only thing that ever said no.
+- **Level 14-15 cogs fell outside the normalisation.** `level / 12.0`
+  and `max_hp / 200.0` are the top of a cog BUILDING; a level 15 Big
+  Cheese read 1.25 and 1.43.
+
+So enriching the training mix first would have taught the policy to
+guess: the positions differ in what it cannot perceive. The observation
+is now 302 wide -- a `suited` flag and the remaining-work ratio per cog,
+a slip count per toon, and scales of 20 and 476, which is where the
+tables actually end.
+
+The ratio is given rather than implied because remaining health is
+`hp + max_hp if suited`, a PRODUCT of two inputs, and a linear layer
+cannot form one. Same reasoning as `trap_damage / hp`.
+
+**This invalidates every exported policy**, exactly as the 246 -> 250
+action change did, so it forces the retrain rather than merely enabling
+it. `check_export` refuses the mismatch, and the reason -- which used to
+be computed and thrown away, leaving the tools to report "numpy or the
+policy is missing" -- now reaches the user: *observation is 302 wide,
+policy was trained on 290 -- retrain*.
+
+Two measurements to set expectations for that retrain. The climb is
+**saturated** on CEO boards: budget 8, 16, 32 and 64 all give 88/88/88/88
+at zero leftovers and 38/37/37/37 at five, converging well before budget
+8. And plain argmax scores 55% and 10% where the climb scores 88% and
+38%. So the policy is far worse than the agent, and the agent does not
+depend on it much -- which is `reward-experiments.md`'s finding again,
+now with a fourth piece of evidence. Expect a better policy to show up
+on plain and not on the climb. The exception worth testing is slip
+discipline, where the proposal really does drive behaviour: the climb
+trims 10.07 proposed slips only to 9.42.
+
 ## Two notes on method
 
 **A 40-seed sample overstated the effect twice, by roughly 2x, in the

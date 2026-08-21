@@ -113,30 +113,43 @@ DISCOUNT = 0.95
 _EXPORT = Path(__file__).resolve().parents[1] / "rl" / "ppo_facility.json"
 _MODEL: Optional[dict] = None
 _TRIED = False
+# Why the last load attempt failed, for `unavailable_reason`.
+_REASON: Optional[str] = None
 
 
 def _load():
     """The exported policy, or None if it is missing or unusable."""
-    global _MODEL, _TRIED
+    global _MODEL, _TRIED, _REASON
     if _TRIED:
         return _MODEL
     _TRIED = True
     try:
         import numpy as np                                   # noqa: F401
     except ImportError:
+        _REASON = "numpy is not installed"
         return None
     if not _EXPORT.exists():
+        _REASON = f"no exported policy at {_EXPORT}"
         return None
     try:
         payload = json.loads(_EXPORT.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except (OSError, ValueError) as exc:
+        _REASON = f"{_EXPORT.name} could not be read: {exc}"
         return None
 
     from ..rl import env as env_mod
-    if env_mod.check_export(payload):
+    mismatch = env_mod.check_export(payload)
+    if mismatch:
         # Trained against a different observation or action table. A
-        # silent mismatch reads 290 floats through weights expecting
-        # 288 and returns confident nonsense.
+        # silent mismatch reads 302 floats through weights expecting
+        # 290 and returns confident nonsense.
+        #
+        # The REASON is kept rather than discarded. It used to be
+        # thrown away, so a policy invalidated by an observation change
+        # was reported to the user as "numpy or the policy is missing"
+        # -- which is not what happened and sends them looking in the
+        # wrong place entirely.
+        _REASON = mismatch
         return None
 
     import numpy as np
@@ -156,6 +169,17 @@ def _load():
 def available() -> bool:
     """Is a usable policy loadable? False means fall back, not fail."""
     return _load() is not None
+
+
+def unavailable_reason() -> Optional[str]:
+    """Why `available()` is False, in words, or None if it is True.
+
+    Every caller that reports the failure should print this rather than
+    guessing at the cause.
+    """
+    if _load() is not None:
+        return None
+    return _REASON or "the policy could not be loaded"
 
 
 def _logits(model, state: BattleState, seat: int, pending):
