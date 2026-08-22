@@ -598,6 +598,55 @@ on 139 laff and the other on 6. It is the accuracy rolls, which is
 consistent with the opening draw not predicting the outcome either --
 nothing about the POSITION predicts it.
 
+## An open anomaly: the wrongly-trained policy is better
+
+The shipped policy, `boss_s2`, was trained under the BROKEN Lure rule --
+back when a lured cog stayed asleep through damage. Three policies
+trained under the corrected rule lose to it badly on the CEO, on 150
+held-out sides with probes and pairs on:
+
+| set | boss_s2 | v2_s1 | v2_s2 | v2_s3 |
+|---|---|---|---|---|
+| buildings | 72.7% | 69.3% | 70.7% | 72.0% |
+| VP | 99.3% | 99.3% | 100.0% | 99.3% |
+| CEO 0 | **88.0%** | 37.3% | 42.0% | 63.3% |
+| CEO 4 | **46.7%** | 3.3% | 6.7% | 26.0% |
+
+**It is not the scorer weight, though that was partly co-adapted.**
+`prevent=9` was swept against `boss_s2`, because it was the only policy
+winning CEO sides at the time -- fitting a weight to one policy and then
+judging others by it is the policy-shaped version of tuning on the set
+you report. Re-swept per policy:
+
+| policy | 2 | 5 | 9 | 14 | 20 | 30 |
+|---|---|---|---|---|---|---|
+| boss_s2 | 35.8% | 45.0% | **88.3%** | 84.2% | 84.2% | 82.5% |
+| v2_s3 | 31.7% | 30.0% | 62.5% | **71.7%** | 67.5% | 65.0% |
+
+The optima differ -- 9 against 14 -- so the co-adaptation is real and
+worth 9 points to v2_s3. Each at its own best weight still leaves
+`boss_s2` ahead by 17. Lure shares are within two points at every
+weight, so it is not a lure-propensity story either.
+
+**The likely cause is a training change I made on reasoning rather than
+measurement.** `boss_s2` drew CEO leftovers from 0-10. I narrowed the
+retrain to 0-3, arguing that under the corrected rule 0-10 spans 13%
+down to 0% and nearly every episode is a loss carrying no gradient. The
+evidence contradicts it: the policy that saw the harder, wider spread
+proposes better. PPO learns from the critic as well as from wins, so
+losing episodes still shape behaviour, and removing variety cost more
+than the thin gradient was worth.
+
+Also unexplained: the v2 seeds spread 37.3 / 42.0 / 63.3 on CEO 0, far
+wider than the ~1 point training-seed noise this project has measured
+elsewhere. Whatever is going on, three seeds cannot resolve it.
+
+**Shipped as-is, labelled.** `boss_s2` is the best measured proposer and
+the configuration is honestly reported, but it was trained against a
+rule the game does not have. The next retrain should use the WIDER
+leftover range, more seeds, and fit `prevent` jointly with the policy
+rather than after it.
+
 ## Two notes on method
 
 **Small samples overstated an effect three times in one session.** A
