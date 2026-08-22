@@ -643,108 +643,60 @@ def expected_incoming(state: BattleState) -> float:
 def prevented(before: BattleState, after: BattleState) -> float:
     """Incoming damage a round removed, by luring or by killing.
 
-    ONE KNOWN DEFECT REMAINS. There were two.
+    REMODELLED, because the rule underneath it changed. A landed attack
+    wakes a lured cog -- see `mechanics.LURE_ENDS_ON_DAMAGE` -- so a Lure
+    does not buy `lure_rounds_remaining` rounds of quiet. It buys quiet
+    on the cogs the party does not get round to hitting, for as long as
+    it does not get round to them.
 
-      * FIXED: kills were multiplied by the lure duration, since they
-        sit in the same difference -- so a kill scored several times
-        more while any lure happened to be running. A plain accounting
-        error rather than an approximation, and it is now split out and
-        counted once. This was fixed TOGETHER with a refit of the
-        weights, which is the condition the rest of this docstring sets.
-      * [TODO] `rounds` is still one mean `lure_rounds_remaining` over
-        every asleep cog, applied to the lure part. A cog already lured
-        with one round left drags the multiplier down for a cog this
-        plan just put to sleep for four.
+    The old version multiplied the whole difference by one mean
+    `lure_rounds_remaining`, which was defensible only while a lured cog
+    stayed asleep through damage. It does not.
 
-    A third correction was tried with them: weighting the prevention by
-    whether the lure actually LANDS, since `_quick_score` plays one
-    all-hit round and so pays a 50% accurate Lure what it pays a 95%
-    one.
+    WHY THE OLD REFUTATIONS DO NOT APPLY. This docstring used to record
+    three corrections, all mechanically right and all losing 2-3 points,
+    and concluded the term should stay wrong until somebody refit the
+    evaluator as a whole. Every one of those was measured under the old
+    lure rule, where the multiplier was roughly correct and a correction
+    really was noise. That evidence is void. This change is made
+    together with a retrain and a refit, which is the condition the old
+    note set.
 
-    All three are right about the mechanics. Measured over 180 held-out
-    buildings, the search finished:
+    THREE PARTS, EACH COUNTED FOR WHAT IT ACTUALLY BUYS:
 
-        67.8%   as written here, defects and all
-        64.4%   + accuracy weighting
-        65.0%   + per-cog rounds
-        65.6%   + both, with HEAL_VALUE and the kill weight re-swept
+      * A KILL removes a cog's threat permanently, and is counted once.
+        `QUICK_W["kill"]` prices removal separately, so this is only the
+        damage-per-round it silences.
+      * A NEWLY LURED cog is quiet until somebody hits it or the lure
+        runs out, whichever comes first. `reach` estimates the former:
+        with `k` toons standing and `n` cogs asleep, the party works
+        through them in about `n / k` rounds.
+      * AN ALREADY-LURED cog buys nothing new. It was paid for when the
+        lure landed, and paying again every round it stays asleep is how
+        a plan that does nothing scores well.
 
-    The hybrid climb gained 1.1 points on fresh seeds, inside this
-    sample's noise; the search lost two to three, outside it.
-
-    WHY. `_greedy_score` shares this function, and it is not really a
-    scorer -- `greedy_plan` uses it to play the ROLLOUTS that grade
-    every plan the search considers. Making it more careful about lures
-    makes the search's model of the future passive rather than the
-    search itself careful: holds went 11.0% to 17.4% and lure use 9.5%
-    to 15.6%, and plans stopped being distinguishable from one another.
-    The constants around this term -- HEAL_VALUE, the kill weights, the
-    prices -- were all chosen while it read as it does now, and they
-    absorb its errors. Correcting one term without refitting the rest
-    is not a partial improvement, it is a miscalibration.
-
-    So this stays wrong on purpose until somebody refits the evaluator
-    as a whole, which is a bigger job than one term. Do not "fix" it in
-    isolation; the numbers above are what that costs.
-
-    THE WEIGHT WAS TRIED TOO, AND IT IS THE BETTER CAUTIONARY TALE.
-    Raising `QUICK_W["prevent"]` changes no shape, so none of the above
-    applies to it. The case for raising it was the strongest this project
-    has had: a building is decided by the first toon loss (intact party
-    100% cleared, anyone sad ~7%), the search wins those rounds by
-    removing threats rather than out-healing them, and the climb heals
-    55% more than the search while losing more toons. Swept on 50
-    buildings, prevent=8 gave:
-
-        cleared   62.0% -> 68.0%
-        toons lost 1.02 -> 0.82
-        lures       150 -> 182
-        heals        79 -> 71
-
-    Every number moved the way the mechanism predicted, and the owner's
-    own observation of live play said the same thing independently.
-
-    On three sets that were NOT used to find it: -0.8, -3.3, -1.7, mean
-    -1.9, and toons lost went UP by 0.056 -- the metric it was meant to
-    fix. The sweep set had by then also carried a trace, the toon-loss
-    statistics, a level-7 baseline and a price sweep. It was a tuning
-    set and nobody had said so out loud.
-
-    A mechanism that is coherent, predicts the right direction on every
-    intermediate variable, and matches independent human observation is
-    still not evidence, if it was measured where it was found.
-
-    Counted for the whole lure, not one round of it: a cog asleep for
-    three rounds is three rounds of its attacks that never land, which
-    is the actual reason Lure is the answer to a four-cog floor.
+    Per cog rather than a mean over them, which was the other standing
+    [TODO]: a cog with one round left no longer drags down the
+    multiplier for one just put to sleep for four.
     """
-    gain = expected_incoming(before) - expected_incoming(after)
-    if gain <= 0:
-        return 0.0
+    standing = max(1, len(before.active_toons()))
+    asleep = sum(1 for c in after.active_cogs() if c.status.lured)
+    # How many rounds before the party gets round to any given sleeper.
+    reach = max(1.0, asleep / float(standing))
 
-    # A KILL IS NOT A LURE AND MUST NOT BE PAID LIKE ONE. Both show up
-    # in `gain`, because both reduce next round's incoming, and the
-    # whole difference used to be multiplied by the lure duration -- so
-    # the same kill scored several times more while any lure happened to
-    # be running, and nothing at all otherwise. That is the accounting
-    # error this docstring used to describe and leave in place.
-    #
-    # Counted once here rather than scaled by the rest of the fight.
-    # Removing a cog IS permanent and arguably worth more than one
-    # round, but the length of somebody else's lure is not the number to
-    # multiply it by, and `QUICK_W["kill"]` already prices removal
-    # directly.
-    killed = sum(_cog_threat(old)
-                 for old, new in zip(before.cogs, after.cogs)
-                 if new.status.is_dead and not old.status.is_dead)
-    lured_gain = max(0.0, gain - killed)
-
-    rounds = 1.0
-    asleep = [c for c in after.active_cogs() if c.status.lured]
-    if asleep:
-        rounds = max(1.0, sum(c.status.lure_rounds_remaining
-                              for c in asleep) / float(len(asleep)))
-    return killed + lured_gain * rounds
+    total = 0.0
+    for old, new in zip(before.cogs, after.cogs):
+        if old.status.is_dead:
+            continue
+        threat = _cog_threat(old)
+        if not threat:
+            continue
+        if new.status.is_dead:
+            total += threat                      # silenced for good
+        elif new.status.lured and not old.status.lured:
+            rounds = min(float(new.status.lure_rounds_remaining), reach)
+            total += threat * max(0.0, rounds)
+    return total
 
 
 def killed_threat(before: BattleState, after: BattleState) -> float:
