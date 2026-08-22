@@ -1077,10 +1077,11 @@ def _playable(state: BattleState, plan) -> bool:
         # additional Lure gags". Stacking Lure is a real TTR play and
         # the search must be allowed to find it.
         #
-        # [TODO] That bonus is not modelled -- see
-        # mechanics.MULTI_LURE_ACCURACY_BONUS -- so a stacked Lure is
-        # currently searched at single-Lure accuracy and is undervalued.
-        # Rejecting it outright was worse: it was unreachable.
+        # That bonus IS modelled -- `mechanics.multi_lure_bonus`,
+        # applied to the shared roll in `apply_party_round`. Its
+        # MAGNITUDE is [ASSUMED]; its existence and eligibility are
+        # [CONFIRMED]. This comment used to claim the bonus was missing
+        # entirely, which made a stacked Lure look like pure cost.
         if action.track == Track.TRAP:
             if action.target_index in trapped:
                 return False

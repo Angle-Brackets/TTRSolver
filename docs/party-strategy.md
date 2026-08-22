@@ -260,10 +260,13 @@ depending on the gag level discrepancies of the additional Lure gags,
 with the bonus being smaller if low-level Lure gags are used."*
 
 Stacking Lure is a real TTR play. The playout said otherwise because
-**the bonus is not modelled** (`mechanics.MULTI_LURE_ACCURACY_BONUS` is
-`[TODO]`), so the second Lure was simulated as pure cost with none of
-its benefit — the measurement faithfully reported a defect in the model
-as a fact about the game.
+**this explanation was wrong and is kept here as the correction.** The
+bonus *is* modelled — `mechanics.multi_lure_bonus`, applied to the
+shared roll, taking two group Lure 6s from 80% to 95%. Only its
+magnitude is `[ASSUMED]`. The comment in `mechanics.py` claimed the
+bonus was missing, this page believed it, and a measurement was
+explained away as a model defect when the model was fine. Whatever that
+result means, it does not mean this.
 
 The lesson is narrower than "measure things": a measurement taken
 *through* a model can only be as true as the model. A playout is

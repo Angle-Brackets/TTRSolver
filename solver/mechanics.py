@@ -634,9 +634,15 @@ DROP_MISSES_LURED_COGS = True
 # land. Trap and Lure place effects rather than damage; Toon-Up heals.
 DAMAGE_TRACKS = (Track.SOUND, Track.THROW, Track.SQUIRT, Track.DROP)
 
-# [TODO] Multiple Lure gags thrown in the same round raise each other's
-# accuracy, and this is NOT modelled -- a stacked Lure is currently
-# searched at single-Lure accuracy and so is undervalued.
+# Multiple Lure gags thrown in the same round raise each other's
+# accuracy. This IS modelled -- `multi_lure_bonus` below, applied in
+# `simulator.apply_party_round` to the shared roll. Two group Lure 6s go
+# from 80% to 95%, measured.
+#
+# This comment used to say the opposite, and said it for long enough
+# that `docs/party-strategy.md` cited it to explain away a measurement
+# it did not like. Only the MAGNITUDE is open, and it is [ASSUMED]
+# rather than [TODO] -- see MULTI_LURE_ACCURACY_BONUS.
 #
 # [CONFIRMED] that it exists. TTR wiki (Lure), opening paragraph:
 # "Using multiple Lure gags simultaneously increases the accuracy." The
