@@ -645,14 +645,33 @@ worth 9 points to v2_s3. Each at its own best weight still leaves
 `boss_s2` ahead by 17. Lure shares are within two points at every
 weight, so it is not a lure-propensity story either.
 
-**The likely cause is a training change I made on reasoning rather than
-measurement.** `boss_s2` drew CEO leftovers from 0-10. I narrowed the
-retrain to 0-3, arguing that under the corrected rule 0-10 spans 13%
-down to 0% and nearly every episode is a loss carrying no gradient. The
-evidence contradicts it: the policy that saw the harder, wider spread
-proposes better. PPO learns from the critic as well as from wins, so
-losing episodes still shape behaviour, and removing variety cost more
-than the thin gradient was worth.
+**The CEO leftover range matters, and narrowing it HELPS** -- the
+opposite of what the first version of this section said. `boss_s2` drew
+0-10. Retraining at 0-3 and at 0-10 under the corrected rule, same seeds,
+same evaluation:
+
+| seed | 0-3 | 0-10 |
+|---|---|---|
+| 1 | **37.3%** | 25.3% |
+| 2 | **42.0%** | 22.7% |
+| 3 | **63.3%** | 39.3% |
+
+Twelve to twenty-four points a seed. The reasoning behind narrowing it
+was sound: under the corrected rule 0-10 spans about 13% down to 0%, so
+most episodes are losses with little gradient in them.
+
+This section previously retracted that, on a comparison between a "0,10"
+number and a "0,3" number where BOTH came from the 0-3 policy -- a
+script that loaded `v2_s3` and a reading that recorded it as the other
+arm. The retraction was wrong and the six extra training runs it
+motivated confirmed nothing. Check which artefact a number came from
+before building a theory on the difference between two of them.
+
+**The anomaly survives the correction.** Six seeds at 0-10 and three at
+0-3, and `boss_s2` still beats every one of them: 88.0% against a best
+of 63.3% and a median near 36%. Buildings and VP are level across all of
+them, so it is specific to the CEO. Whatever `boss_s2` has, it is not
+the leftover range.
 
 Also unexplained: the v2 seeds spread 37.3 / 42.0 / 63.3 on CEO 0, far
 wider than the ~1 point training-seed noise this project has measured
