@@ -6,18 +6,35 @@ This is that work. It started from a different question -- *what is
 actually making the toons fail?* -- asked before running another CEO
 difficulty sweep, and the answer was four bugs rather than one.
 
-**All four are in the party path only.** Solo play was right throughout,
-which is most of why they survived so long.
+**All four are in the party path only.** Solo play was correct
+throughout, which is most of why they survived so long.
 
-| | before | after |
+**AND A FIFTH, FOUND LATER, THAT DWARFS THEM.** A landed attack wakes a
+lured cog -- any attack, not only Sound. `LURE_ENDS_ON_DAMAGE` was
+`None`, an unfilled gap, and the model let a lured field stay asleep
+while the party dismantled it. That is worth about 35 points on the CEO
+on its own, and it means **every figure in the first version of this
+document was inflated**. They are corrected below; the narrative of the
+four bugs still stands, but the numbers attached to it did not.
+
+| | first published | corrected rule, all fixes |
 |---|---|---|
-| CEO, 0 leftovers | 69.5% | **88.0%** |
-| CEO, 5 leftovers | 38.0% | 41.5% |
-| CEO, 10 leftovers | 0.0% | 4.0% |
-| CEO, 15 / 20 leftovers | 0.0% | 0.0% |
-| cog buildings | ~70% | 71.5% |
+| cog buildings | 71.5% | **73.5%** |
+| Sellbot VP | 99.4% | **99.5%** |
+| CEO, banquet cleared | 88.9% | **88.5%** |
+| CEO, 2 leftovers | -- | 73.5% |
+| CEO, 4 leftovers | -- | 45.0% |
+| CEO, 5 leftovers | 43.1% | 32.5% |
+| CEO, 10 leftovers | 2.0% | 3.0% |
 
-200 sides per row, common random numbers, `PPO + climb`.
+Held-out seeds, 200 sides a cell. The CEO figure is one side of two; the
+four-toon fight needs both, so a clean banquet is 78.3% overall.
+
+Read that table carefully: the headline is unchanged, and that is the
+point. The old 88.9% was manufactured by a Lure that survived being hit.
+Strip the exploit out and the same configuration collapsed to 54%. Four
+further corrections -- the term, the weight, and reachability -- put it
+back to 88.5% playing by the real rules.
 
 ## What the audit ruled out first
 
