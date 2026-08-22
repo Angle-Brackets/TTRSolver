@@ -1,0 +1,37 @@
+@import "tailwindcss";
+@plugin "daisyui";
+
+/* One theme, dark, tuned for sitting on top of the game rather than for
+   a page. Named rather than using a stock daisyUI theme so the accent
+   colours below are the only place track colour is defined. */
+@plugin "daisyui/theme" {
+  name: "ttr";
+  default: true;
+  color-scheme: dark;
+  --color-base-100: oklch(16% 0.012 258);
+  --color-base-200: oklch(20% 0.014 258);
+  --color-base-300: oklch(26% 0.016 258);
+  --color-base-content: oklch(93% 0.008 258);
+  --color-primary: oklch(64% 0.13 232);
+  --color-primary-content: oklch(98% 0.01 232);
+  --color-success: oklch(76% 0.15 158);
+  --color-warning: oklch(80% 0.13 76);
+  --color-error: oklch(66% 0.18 22);
+  --radius-box: 0.75rem;
+  --radius-field: 0.5rem;
+}
+
+html, body, #root { height: 100%; }
+body { font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif; }
+
+/* Track accents. Chosen for contrast on this background and NOT taken
+   from the game -- TTR's gag menu palette is not confirmed anywhere in
+   this project. */
+.track-toon_up { --accent: #e08ac4; }
+.track-trap    { --accent: #e8834a; }
+.track-lure    { --accent: #6fc96f; }
+.track-sound   { --accent: #5ba8e8; }
+.track-throw   { --accent: #e8c34a; }
+.track-squirt  { --accent: #4fcdd6; }
+.track-drop    { --accent: #9b8ee8; }
+.track-none    { --accent: oklch(45% 0.02 258); }
