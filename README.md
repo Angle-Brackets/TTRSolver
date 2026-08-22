@@ -17,29 +17,6 @@ outcome space cannot be enumerated.
 > luredRatio rule. Everything in `solver/data/` has been audited against the
 > wiki.
 
-## The rule that shapes everything here
-
-**A number that isn't confirmed is `None`, and the code raises rather than
-substituting.** No plausible-looking fills, and when sources conflict the
-cell stays open with a note on what looked wrong rather than being averaged
-or guessed.
-
-That sounds pedantic until you see what it catches. Toon-Up was modelled
-healing the *thrower* — the rule exactly backwards, since
-[the wiki says](https://toontownrewritten.wiki/Toon-Up) toons cannot heal
-themselves. Group cog attacks weren't modelled at all, so parties took
-strictly less damage than the game deals. Both were found because a search
-produced advice a human looked at and said "nobody plays that."
-
-Two things are deliberate exceptions, both tagged `[ASSUMED]` so they can
-never read as data: the multi-Lure accuracy bonus, where the patch notes
-give the magnitudes `(20/15/10)%` but never say which level gap selects
-which; and the accuracy and frequency of twelve cog attacks that the wiki
-confirms exist and publishes damage for, but never gives those two
-columns. Nine of the twelve are group attacks, so leaving them unfired
-understated cog threat — the exception is there because silence was the
-worse error.
-
 ## Quick start
 
 Standard library only — no install step.
@@ -104,28 +81,16 @@ A single round expands into three layers. The toon picks a gag, the gag
 hits or misses, then every living cog attacks:
 
 ```mermaid
-graph TD
-    S["MAX<br/>toon to act<br/>62 laff, 2 cogs"]
-
-    S -->|"Throw lvl 5"| A["CHANCE<br/>accuracy roll"]
-    S -->|"group Lure"| B["CHANCE<br/>accuracy roll"]
-    S -->|"Squirt lvl 4"| C["CHANCE<br/>..."]
-
-    A -->|"hit  p=0.83"| A1["cog 40 to 0, DEAD"]
-    A -->|"miss p=0.17"| A2["no change"]
-
-    A1 --> D["CHANCE<br/>cog phase"]
-    A2 --> E["CHANCE<br/>cog phase"]
-
-    D -->|"Bite  p=0.50"| D1["MAX<br/>-8 laff"]
-    D -->|"Chomp p=0.50"| D2["MAX<br/>-11 laff"]
-
-    style S fill:#2d6a4f,color:#fff
-    style A fill:#6a4c93,color:#fff
-    style B fill:#6a4c93,color:#fff
-    style C fill:#6a4c93,color:#fff
-    style D fill:#6a4c93,color:#fff
-    style E fill:#6a4c93,color:#fff
+flowchart TD
+    S[MAX: toon to act, 62 laff, 2 cogs]
+    S -->|Throw lvl 5| A[CHANCE: accuracy roll]
+    S -->|group Lure| B[CHANCE: accuracy roll]
+    A -->|hit p=0.83| A1[cog 40 to 0, dead]
+    A -->|miss p=0.17| A2[no change]
+    A1 --> D[CHANCE: cog phase]
+    A2 --> E[CHANCE: cog phase]
+    D -->|Bite p=0.50| D1[MAX: minus 8 laff]
+    D -->|Chomp p=0.50| D2[MAX: minus 11 laff]
 ```
 
 Green is a choice, purple is a roll. The value of a CHANCE node is the
@@ -263,219 +228,254 @@ yet tell you.
 
 ## The two agents
 
-There are two ways to pick a move here, and they fail differently. Both
-share the same rules engine (`solver/simulator.py`) and the same
-objective; they disagree about how to search.
+Both share `solver/simulator.py` and `solver/search/objective.py`. They
+differ in how they search.
 
 ```mermaid
-graph LR
-    P["battle position"] --> A["classical search"]
-    P --> B["PPO policy"]
-
-    A --> A1["enumerate legal moves"]
-    A1 --> A2["shortlist by _cheap_score"]
-    A2 --> A3["expectimax over<br/>accuracy and cog rolls"]
-    A3 --> A4["rollouts graded by<br/>_greedy_score"]
-    A4 --> M["chosen plan"]
-
-    B --> B1["one forward pass<br/>gives a ranked action list"]
-    B1 --> B2["coordinate ascent<br/>the climb"]
-    B2 --> B3["each candidate scored<br/>by _quick_score"]
+flowchart TD
+    P[battle position] --> A[classical search]
+    P --> B[PPO policy]
+    A --> A1[enumerate legal moves]
+    A1 --> A2[shortlist by cheap_score]
+    A2 --> A3[expectimax over rolls]
+    A3 --> A4[rollouts graded by greedy_score]
+    A4 --> M[chosen plan]
+    B --> B1[one forward pass, ranked actions]
+    B1 --> B2[coordinate ascent, the climb]
+    B2 --> B3[candidates scored by quick_score]
     B3 --> M
-
-    style A fill:#1f4d38,color:#fff
-    style B fill:#4a3670,color:#fff
-    style M fill:#7a5c12,color:#fff
 ```
 
-The shipped agent is **PPO + climb**. The classical search is kept
-because it is exact for solo battles and because a second opinion has
-caught bugs neither would find alone.
+Shipped agent: **PPO + climb**. The search is kept because it is exact
+for solo and because a second opinion catches bugs.
 
-### Agent 1: the classical search
+### Classical search
 
-**Solo battles are solved exactly.** No heuristic, no evaluation
-function. Every gag is spent and the pouch only shrinks, so the game
-tree is finite and `expectimax.solve` returns a true value with a
-transposition memo and star1/star2 pruning over the chance nodes.
+Solo is exact: every gag is spent, the pouch only shrinks, so the tree
+is finite. `expectimax.solve` returns a true value with a transposition
+memo and star1/star2 pruning over chance nodes.
 
-**Party battles are not.** The joint action space is every toon's move
-crossed with every other's, and the chance layer is the accuracy rolls
-times each cog's attack times its choice of target. `party_search`
-therefore *samples* rather than enumerates, which makes its numbers
+Party is not. The joint action space is every toon's move crossed with
+every other's; the chance layer is accuracy rolls times each cog's
+attack times its target choice. `party_search` samples. Its values are
 estimates and **not comparable with `solve()`'s**.
 
-Move generation, in order:
-
 ```mermaid
-graph TD
-    L["simulator.legal_actions<br/>one toon's moves"] --> C["_cheap_score<br/>arithmetic, no simulation"]
-    C --> S["shortlist: PER_TRACK=4 per track,<br/>MAX_PLANS=60 joint plans"]
-    S --> Q["_quick_score<br/>ranks which plans get sampled"]
-    Q --> R["rollout_value<br/>ROLLOUT_ROUNDS=12 played forward"]
-    R --> G["_greedy_score<br/>picks each rollout round"]
-
-    style C fill:#4a3670,color:#fff
-    style Q fill:#4a3670,color:#fff
-    style G fill:#4a3670,color:#fff
+flowchart TD
+    L[legal_actions per toon] --> C[cheap_score, arithmetic only]
+    C --> S[shortlist 4 per track, 60 joint plans]
+    S --> Q[quick_score ranks plans]
+    Q --> R[rollout_value, 12 rounds forward]
+    R --> G[greedy_score picks each round]
 ```
 
-The three scorers are deliberately different functions with different
-weights, because they answer different questions:
+Three scorers, three weight sets, three jobs:
 
 | scorer | job | weights |
 | --- | --- | --- |
 | `_cheap_score` | shortlist one action, no simulation | `HEAL_VALUE`, `TRAP_DISCOUNT` |
-| `_quick_score` | rank whole joint plans | `QUICK_W` |
-| `_greedy_score` | choose each round of a rollout | `GREEDY_W` |
+| `_quick_score` | rank joint plans | `QUICK_W` |
+| `_greedy_score` | choose each rollout round | `GREEDY_W` |
 
-`_greedy_score` is **not** a scorer in the usual sense. `rollout_value`
-*is* `greedy_plan` played forward, so it decides what the future looks
-like, and making it more careful makes the search's model of the future
-passive rather than the search itself careful. That is why it keeps its
-own weights and is not fitted alongside `_quick_score`.
+`_greedy_score` is not a plan scorer. `rollout_value` *is* `greedy_plan`
+played forward, so it defines the simulated future. Making it careful
+makes the future passive rather than the search careful — hence its own
+weights, not fitted with `_quick_score`.
 
-### Agent 2: PPO plus the climb
+### PPO
 
-**Observation, 302 floats.** Per cog (x4): alive, level, hp fraction,
-max hp, lured, trapped, lure rounds, dead, **suited** (Version 2.0),
-**remaining work across both health bars**, armed trap damage as a
-fraction of hp. Per toon (x4): alive, laff fraction, max laff, **pink
-slips**, and 49 gag counts. Then six globals, the acting seat, and a
-36-float block of what the other toons have already committed to this
-round.
+**Observation, 302 floats.**
 
-That `pending` block is what makes coordination possible: without it,
-four toons sharing one policy see identical observations and throw four
-identical Lures.
+| block | size | contents |
+| --- | --- | --- |
+| cogs | 4 x 11 | alive, level, hp fraction, max hp, lured, trapped, lure rounds, dead, **suited**, **work left across both bars**, armed trap damage / hp |
+| toons | 4 x 53 | alive, laff fraction, max laff, **pink slips**, 49 gag counts |
+| globals | 6 | round, cogs alive, toons alive, cogs remaining, is-facility, holdout size |
+| actor | 4 | one-hot of the deciding seat |
+| pending | 36 | what each toon has already committed this round |
 
-**Action table, 250 entries.** Every (track, level, target) the game
-allows, plus a pass, plus four fire actions. Illegal actions get
-`-inf` logits so they carry no probability at all — masking lives
-*inside* the distribution, never as a penalty, because a penalty lets
-the agent learn to want an illegal move and be taxed for it.
+`pending` is what makes coordination possible. Without it four toons
+sharing one policy see identical observations and throw four identical
+Lures.
 
-**Architecture: two separate towers.**
+**Actions, 250.** Every legal (track, level, target), a pass, and four
+fires. Illegal actions get `-inf` logits: masking lives inside the
+distribution, never as a penalty, or the agent learns to want an illegal
+move and be taxed for it.
+
+**Architecture.** Two separate towers, 256 wide, tanh.
 
 ```mermaid
-graph TD
-    O["observation, 302"] --> T1["actor trunk<br/>Linear 302 to 256, tanh<br/>Linear 256 to 256, tanh"]
-    O --> T2["critic trunk<br/>Linear 302 to 256, tanh<br/>Linear 256 to 256, tanh"]
-    T1 --> A["actor head<br/>Linear 256 to 250"]
-    T2 --> V["critic head<br/>Linear 256 to 1"]
-    A --> MK["legality mask<br/>illegal set to -inf"]
-    MK --> D["categorical over legal moves"]
-
-    style T1 fill:#4a3670,color:#fff
-    style T2 fill:#1f4d38,color:#fff
-    style MK fill:#7a5c12,color:#fff
+flowchart TD
+    O[observation 302] --> T1[actor trunk 302-256-256]
+    O --> T2[critic trunk 302-256-256]
+    T1 --> A[actor head 256 to 250]
+    T2 --> V[critic head 256 to 1]
+    A --> MK[legality mask, illegal to -inf]
+    MK --> D[categorical over legal moves]
 ```
 
-Sharing one trunk was the first version and it trained **backwards** —
-eval return fell from +47.9 to +22.5 while the win rate dropped 88% to
-78%. Returns run to about plus or minus 100, so the value loss is of
-order 10,000 against a policy loss of order 0.1: the shared trunk
-followed the critic and the policy was noise riding on top. Separate
-towers plus reward scaling keep the two gradients comparable.
+A shared trunk trained backwards: eval return fell +47.9 to +22.5 while
+win rate dropped 88% to 78%. Returns run to about +/-100, so value loss
+is order 10,000 against policy loss order 0.1 — the trunk followed the
+critic. Separate towers plus reward scaling keep the gradients
+comparable.
 
-**Training.** PPO with GAE, on 32 parallel environments.
+### Training
 
-| | |
+**Toon generation** (`env.random_toon`) — deliberately not maxed:
+
+- Throw and Squirt always, plus 0-4 of the other five. Never all seven:
+  a toon picks six at most, and a one-track toon is an impossible puzzle
+  rather than a hard one.
+- Each owned track gets training 1-7, which feeds `calc_track_exp`, so
+  an unmaxed track is genuinely less accurate rather than merely
+  smaller.
+- Gag counts drawn per level under that track's carry limit.
+- 10% chance the damage tracks are emptied, leaving Lure/Trap/Toon-Up
+  only. A spent pouch, not an untrained track — real play reaches it
+  constantly and it forces Lure, Trap or a pass.
+- Pouch capacity sampled per toon from the confirmed table, then the
+  pouch trimmed to fit. Without this, 62% of generated toons would not
+  have fitted a starting 20-gag bag.
+- Laff from a fixed ladder (15 to 137), current laff 15-100% of it.
+- 40% chance one track is organic.
+
+**Situation generation** — five samplers, blended by CLI fraction:
+
+| sampler | what it produces |
+| --- | --- |
+| `default_position` | a fresh street battle |
+| `hard_position` | solo against level 10-12 cogs, where Lure stops being optional |
+| `strange_position` | mid-fight: cogs already lured with 1-4 rounds left, armed traps with a real `trap_level`, cogs at 10-60% hp, toons at 5-25% laff, pouches with the cheap gags spent, `round_num` 0-5 |
+| `combo_position` | trap armed and a Lure in hand, payoff one move away |
+| `facility_position` | multi-floor, one pouch and one laff bar across floors |
+| boss sides | VP and CEO, the only source of Version 2.0 cogs, pink slips and cogs above level 12 |
+
+`strange_position` matters because training only on round-one boards
+teaches round-one habits, and advice is asked for mid-fight. Every
+modifier it applies is reachable — a `trapped` flag without a
+`trap_level` would build a state the simulator cannot resolve.
+
+Cog pools are restricted to `SAFE_COGS` and `SAFE_GAGS`, entries whose
+data tables are complete, so a `[TODO]` cell cannot raise mid-episode
+and bias the sample toward whatever happens to be filled in.
+
+**Trajectories.** 32 environments stepped in lockstep, 128 steps each
+per update.
+
+```mermaid
+flowchart TD
+    R[reset, sampler draws a position] --> S[seat 0 chooses]
+    S --> S2[seat 1 chooses, sees pending]
+    S2 --> S3[all seats chosen]
+    S3 --> RES[round resolves: gags by track order, then cogs attack]
+    RES --> RW[reward from objective]
+    RW --> Q{battle over}
+    Q -->|no| S
+    Q -->|floor cleared| NF[next floor, pouch and laff carry over]
+    NF --> S
+    Q -->|yes| R
+```
+
+One step is **one seat's decision**, not one round. Intermediate seats
+resolve nothing and score no reward; the round's reward lands on the
+last seat. GAE runs over the seat sequence, so credit for a joint plan
+is spread across the toons that formed it.
+
+**Truncation is not termination.** An episode cut at the round cap still
+has value ahead and is bootstrapped from the critic. Treating it as
+terminal zero teaches that surviving to the cap is worthless.
+`info["truncated"]` distinguishes them, and the cap is per floor, since
+a five-floor building legitimately runs past 20 rounds.
+
+| hyperparameter | value |
 | --- | --- |
 | steps | 6,000,000 |
-| envs / rollout / epochs | 32 / 128 / 4 |
-| minibatch | 1024 |
-| learning rate | 3e-4 |
+| envs / rollout / epochs / minibatch | 32 / 128 / 4 / 1024 |
+| lr | 3e-4 |
 | gamma / lambda | 0.99 / 0.95 |
 | clip / entropy / value coef | 0.2 / 0.01 / 0.5 |
 | reward scaling | running standard deviation |
-| throughput | about 3,500 steps a second on a 3070 Ti |
+| throughput | ~3500 steps/s, RTX 3070 Ti |
 
-The training distribution is mixed deliberately: half multi-floor
-facilities, a quarter boss sides (VP and CEO), pink slips in a quarter
-of positions, and mid-fight "strange" boards with armed traps and
-picked-over pouches. **Truncation is not termination** — an episode cut
-off at the round cap still has value ahead of it and is bootstrapped;
-treating it as a terminal zero teaches the agent that surviving to the
-cap is worthless.
+Entropy is over actions, which is not entropy over tracks: sweeping the
+flat coefficient 0.01 / 0.04 / 0.10 moved gag entropy not at all, 3.79 at
+every setting, because the policy satisfies it by spreading mass over
+levels and targets within one track. `--track-entropy` puts the bonus on
+the track marginal instead.
 
-**The climb.** The policy alone is not the agent. `hybrid.climb` starts
-from the policy's argmax joint plan and does coordinate ascent, judged
-by `_quick_score`:
+### The climb
+
+The policy alone is not the agent.
 
 ```mermaid
-graph TD
-    S["policy argmax plan<br/>one action per toon"] --> L["sweep each seat in turn"]
-    L --> W["offer that seat its top 3<br/>plus the best of every track it holds"]
-    W --> K["keep any change _quick_score prefers"]
-    K --> Z{"did a full sweep<br/>change nothing?"}
-    Z -->|"no"| L
-    Z -->|"yes"| J["try JOINT moves:<br/>two seats changed together"]
-    J --> Z2{"still nothing<br/>or budget spent?"}
-    Z2 -->|"no"| L
-    Z2 -->|"yes"| OUT["chosen plan"]
-
-    style S fill:#4a3670,color:#fff
-    style J fill:#7a5c12,color:#fff
-    style OUT fill:#1f4d38,color:#fff
+flowchart TD
+    S[policy argmax joint plan] --> L[sweep each seat]
+    L --> W[offer top 3 plus best of every track held]
+    W --> K[keep any change quick_score prefers]
+    K --> Z{sweep changed nothing}
+    Z -->|no| L
+    Z -->|yes| J[try joint moves, two seats at once]
+    J --> Z2{nothing left or budget spent}
+    Z2 -->|no| L
+    Z2 -->|yes| OUT[chosen plan]
 ```
 
 The joint step exists because coordinate ascent cannot cross a valley.
 Both toons luring scores 366; either one switching to Sound scores 178,
-because Sound resolves after Lure and wakes what Lure put to sleep; both
-switching scores 672. Every single-seat edit is downhill and the joint
-edit nearly doubles the score.
+since Sound resolves after Lure and wakes what Lure put to sleep; both
+switching scores 672.
 
-### How a move is evaluated
+Track probes exist because three tracks were unreachable: Trap sat at
+median rank 25 in the policy's ranking and entered the 3-wide window 0
+times in 521 seats, Toon-Up at rank 10 and 1%. No weight fixes that — an
+earlier heal sweep read flat at twenty times the weight because the
+search never consulted it.
 
-`_quick_score` takes the **expectation over every way the dice can
-fall**, enumerated rather than sampled. A party is at most four toons
-and each rolls at most one die, so there are at most sixteen branches.
+### Move evaluation
 
-Branching is over **roll groups**, not toons, because accuracy is rolled
-per track per target: two toons throwing the same track at the same cog
-land or miss *together*. Treating those as independent lets a plan hedge
-in a way the game does not allow.
+`_quick_score` takes the expectation over every way the dice fall,
+enumerated, not sampled. At most four toons, one die each, so at most 16
+branches.
 
-The probabilities are read from the simulator's own record rather than
-recomputed, because accuracy is conditional and the conditions are
-large: a landed Throw lifts a following Drop from 54% to 79%, a second
-Lure lifts the pair from 79% to 95%, a trapped target lifts a Lure from
-79% to 95%.
+Branching is over **roll groups**, not toons: accuracy is rolled per
+track per target, so two toons throwing one track at one cog land or
+miss together. Treating them as independent lets a plan hedge in a way
+the game forbids.
 
-The score itself:
+Probabilities come from the simulator's own record, not a recomputation,
+because accuracy is conditional: a landed Throw lifts a following Drop
+54% to 79%, a second Lure lifts the pair 79% to 95%, a trapped target
+lifts a Lure 79% to 95%.
 
 ```
-  damage landed (counting BOTH layers of a Version 2.0)
+  damage landed, counting BOTH layers of a Version 2.0
 + 2   x laff restored, capped at real headroom
-+ 1   x damage an armed trap will deal when a lure springs it
++ 1   x damage an armed trap will deal when a Lure springs it
 + 120 x cogs killed
 + 9   x damage prevented by luring or killing
-- 1   x gag price, scaled by how many cogs are still to come
+- 1   x gag price, scaled by cogs still to come
 ```
-
-`prevent` at 9 rather than 2 is the single largest correction this
-project has made — see below.
 
 ### Performance
 
-Held-out seeds, 200 sides a cell, `PPO + climb` at budget 24. A boss
-side is two toons; the full fight needs both sides to clear.
+Held-out seeds, 200 sides a cell, PPO + climb at budget 24. A boss side
+is two toons; the full fight needs both sides.
 
 | fight | one side | full fight |
 | --- | --- | --- |
-| cog buildings | **73.5%** | n/a |
-| Sellbot VP | **99.5%** | 99.0% |
-| CEO, banquet cleared | **88.5%** | 78.3% |
+| cog buildings | 73.5% | n/a |
+| Sellbot VP | 99.5% | 99.0% |
+| CEO, banquet cleared | 88.5% | 78.3% |
 | CEO, 2 leftovers | 73.5% | 54.0% |
 | CEO, 4 leftovers | 45.0% | 20.2% |
 | CEO, 5 leftovers | 32.5% | 10.6% |
 | CEO, 10 leftovers | 3.0% | 0.1% |
 
-Cost: **5.8 ms a decision**. The classical search is 794–1245 ms on the
-same boards and does not do better — on buildings the two are within
-noise, and on a 20-cog CEO waiter battle the search scores 10% against
-the climb's 90%.
+5.8 ms a decision. The classical search costs 794-1245 ms on the same
+boards and does not do better: within noise on buildings, 10% against
+the climb's 90% on a CEO waiter battle.
 
 ## Things worth knowing before trusting a number
 
