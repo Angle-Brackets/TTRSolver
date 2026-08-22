@@ -395,10 +395,10 @@ def _judge(state: BattleState, plan, deep: bool) -> float:
 
 
 def climb(state: BattleState, rng=random, budget: int = 16,
-          width: int = 3, probe_tracks: bool = False,
+          width: int = 3, probe_tracks: bool = True,
           deep: bool = False, rollout: int = 0,
           fixed: Optional[Mapping[int, Optional[Action]]] = None,
-          pairs: bool = False, pair_width: int = 7
+          pairs: bool = True, pair_width: int = 7
           ) -> Optional[Sequence[Optional[Action]]]:
     """Coordinate ascent on the joint plan, instead of independent draws.
 
@@ -412,6 +412,102 @@ def climb(state: BattleState, rng=random, budget: int = 16,
     offering each the policy's top `width` alternatives and keeping any
     that `_quick_score` prefers. Repeats until a full sweep changes
     nothing or the budget of scorer calls runs out.
+
+    Budget is counted in `_quick_score` calls so this can be compared
+    with `best_plan` at equal cost, which is the only fair comparison
+    between two search strategies.
+
+    `pairs` lets two seats change TOGETHER once the single-seat sweeps
+    settle, which is the one move coordinate ascent structurally cannot
+    make. Measured on a real no-level-7 board:
+
+        366.4   both toons lure/6 -- where the sweep stops
+        177.8   change either ONE to sound/6
+        672.1   change BOTH to sound/6
+
+    Sound resolves after Lure and wakes what Lure put to sleep, so the
+    mixed plan is far worse than either pure one. Every single-seat edit
+    is downhill and the joint edit nearly doubles the score, so the
+    sweep sits at 366 and stops. Over 43 sampled no-7 rounds the best
+    plan needed BOTH seats to move 72% of the time, and the climb
+    captured 68.4% of the reachable score.
+
+    This is why widening what each seat is OFFERED never helped --
+    `probe_tracks` and larger `width` were both refuted twice. They add
+    candidates to a menu whose problem is that the two choices have to
+    be made at the same time. Note the pair menu is built BY TRACK for
+    the same reason: `sound/6->all` sits 22nd and 16th for the two seats
+    on the board above, so no top-k reaches it. Each fix alone is
+    blocked by the other wall, which is why both were refuted
+    separately.
+
+    OFF, having been measured on 240 held-out sides a set:
+
+        set              shipped   +pairs
+        buildings          68.3%    70.4%   (= budget control)
+        VP                 98.8%    99.6%
+        CEO 0              92.5%    90.4%
+        CEO 5              44.2%    35.4%   p=0.020
+        CEO 0, no lvl 7s   21.7%    27.5%   p=0.041
+
+    It works exactly where predicted and loses where the agent is
+    already good. Both significant, opposite directions.
+
+    WHY, AND IT IS THE GENERAL LESSON. A joint move lets the search
+    reach plans `_quick_score` rates highly, and `_quick_score` is an
+    approximation -- so more reach means more scope to act on its own
+    errors. On a no-level-7 board the policy has never trained on, its
+    proposals are bad and the extra reach rescues them. Everywhere else
+    the proposals are good and the reach mostly finds the scorer's
+    mistakes.
+
+    So the narrow window is not a limitation to be removed, it is a
+    REGULARISER holding an imperfect scorer near a well-trained policy's
+    suggestions. `probe_tracks`, wider `width` and this are the same
+    move, and all three fail in-distribution for the same reason.
+
+    The prerequisite for any of them is an evaluator worth widening --
+    and `prevented` documents why that cannot be done one term at a
+    time. Turn this on only for positions outside the policy's training
+    distribution, where there is nothing good to stay near.
+
+    `probe_tracks` offers each seat the best action of every track it
+    holds, not just the policy's top `width`. It is ON, and the story of
+    how it got there is the most useful thing in this file.
+
+    IT WAS REFUTED TWICE. The reason was always the same: more reach for
+    an approximate scorer is more scope to act on its errors. On 180
+    buildings it read 66.1% against 63.3% with probes, and on the CEO it
+    lost 7.5 points.
+
+    WHAT CHANGED IS THE SCORER, NOT THE PROBE. A landed attack now wakes
+    a lured cog (`mechanics.LURE_ENDS_ON_DAMAGE`), `prevented` counts
+    what a Lure actually buys instead of multiplying by a duration it
+    never delivers, and `QUICK_W["prevent"]` moved 2 -> 9 for +45 points
+    on the CEO. With the scorer worth widening, the same flag pays, on
+    200 held-out sides a set:
+
+        set          plain   +probes+pairs
+        buildings    65.0%       73.5%      p=0.0002
+        VP           99.0%       99.5%      ns
+        CEO 0        54.0%       88.5%      p<0.0001
+        CEO 2        18.5%       73.5%      p<0.0001
+        CEO 4         7.0%       45.0%      p<0.0001
+
+    WHY IT MATTERS SO MUCH: three tracks were structurally invisible.
+    Trap sat at median rank 25 in the policy's ranking and entered the
+    3-wide window 0 times in 521 seats; Toon-Up at rank 10, 1% of the
+    time. The scorer wanted both -- `Railroad + group Lure` was the
+    highest-scoring plan on the board where it was measured, and heal
+    use goes 0% -> 15% once reachable. No weight could ever have fixed
+    that, which is why the earlier heal sweep read flat at twenty times
+    the weight.
+
+    THE LESSON, WHICH GENERALISES: do not widen a search to compensate
+    for a scorer you have not checked. Fix the model, then the weights,
+    then the reach -- in that order. Reversed, each stage measures the
+    previous stage's errors and refutes the right idea for the wrong
+    reason.
 
     Budget is counted in `_quick_score` calls so this can be compared
     with `best_plan` at equal cost, which is the only fair comparison
