@@ -98,7 +98,7 @@ class Thinker:
     already about a position that no longer exists.
     """
 
-    def __init__(self, on_result: Callable[[str, object], None]):
+    def __init__(self, on_result: Callable[[list, object, object], None]):
         self.on_result = on_result
         self._generation = itertools.count()
         self._current = -1
@@ -116,7 +116,7 @@ class Thinker:
     def _run(self, token, frame, readings, snapshot, objective, depth,
              budget, ignore_checksum=False):
         try:
-            lines, state = advise(frame, readings, snapshot=snapshot,
+            lines, state, action = advise(frame, readings, snapshot=snapshot,
                                   objective=objective, depth=depth,
                                   budget=budget,
                                   ignore_checksum=ignore_checksum)
@@ -130,10 +130,11 @@ class Thinker:
             lines = [f"the search failed: {exc.__class__.__name__}: {exc}",
                      *traceback.format_exc().strip().splitlines()[-3:]]
             state = None
+            action = None
         with self._lock:
             superseded = token != self._current
         if not superseded:
-            self.on_result(lines, state)
+            self.on_result(lines, state, action)
 
     @property
     def busy(self) -> bool:
@@ -246,7 +247,7 @@ def advise(frame, readings, snapshot=None, objective=None,
     result = build_state(snapshot=snapshot, panel=panel, readings=readings,
                          ignore_checksum=ignore_checksum)
     if not result:
-        return result.problems, None
+        return result.problems, None, None
 
     state = result.state
     objective = objective or objectives.DEFAULT
@@ -255,14 +256,22 @@ def advise(frame, readings, snapshot=None, objective=None,
         epsilon=DEFAULT_EPSILON, time_budget=budget,
         exact_plies=DEFAULT_EXACT_PLIES)
     if action is None:
-        return ["no legal move -- nothing left to throw"], state
-    return [_render(action, state)], state
+        return ["no legal move -- nothing left to throw"], state, None
+    return [_render(action, state)], state, action
 
 
 def _panel_with_training(frame, snapshot):
     from .gagpanel import read_panel
 
     return read_panel(frame, track_exp=snapshot.track_exp())
+
+
+def track_of(action) -> Optional[str]:
+    """The recommended gag's track name, for a caller that wants to
+    colour it. None for a pass or a pink slip, which have no track."""
+    if action is None or action.is_pass or getattr(action, "fire", False):
+        return None
+    return action.track.value
 
 
 def _render(action, state) -> str:
@@ -372,7 +381,7 @@ def _report(frame, readings, objective, depth,
             last_problems: Optional[List[str]] = None,
             budget: float = DEFAULT_BUDGET,
             ignore_checksum: bool = False) -> List[str]:
-    lines, state = advise(frame, readings, objective=objective, depth=depth,
+    lines, state, _action = advise(frame, readings, objective=objective, depth=depth,
                           budget=budget, ignore_checksum=ignore_checksum)
     if state is None:
         # Don't repeat the same complaint every poll.
