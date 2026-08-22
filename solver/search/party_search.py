@@ -198,7 +198,19 @@ QUICK_W = {
     "armed": 1.0,       # trap laid this round, via `armed_credit`
     "kill": 120.0,      # per cog killed, regardless of which
     "kill_threat": 0.0, # per point of threat the kills removed
-    "prevent": 2.0,     # incoming damage removed, via `prevented`
+    # 9.0, and the journey there is the point. It sat at 2.0, fitted
+    # against a `prevented` that multiplied by the FULL lure duration
+    # under a rule where a lured cog stayed asleep through damage. That
+    # term wildly overstated Lure, so the fit crushed the weight down to
+    # offset it -- two errors pointing opposite ways, and reading either
+    # alone gave the wrong answer about the other.
+    #
+    # With the rule corrected and the term remodelled, swept and then
+    # confirmed on untouched seeds at 200 sides a cell: CEO at zero
+    # leftovers 9.0% -> 54.0% (+96/-6, p<0.0001), lure share 21% -> 37%,
+    # buildings 66.0% -> 67.0% and VP unchanged. The largest confirmed
+    # effect measured in this project.
+    "prevent": 9.0,     # incoming damage removed, via `prevented`
     "risk": 0.0,        # CHARGED, per standing toon a round could sink
     "price": 1.0,       # gags spent
 }
