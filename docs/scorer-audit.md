@@ -547,6 +547,57 @@ So the 42 points that slip conservation is worth are, for now,
 unreachable from either direction: the lookahead route is closed by
 realism and the training route reaches the target and not the timing.
 
+## What actually ends a losing CEO side
+
+Re-measured on the current agent, 80 held-out sides a difficulty, after
+the fixes -- the earlier answer was taken when fights ended in 8 to 13
+rounds and they now run 17 to 31.
+
+| | 5 leftovers | 10 leftovers |
+|---|---|---|
+| party wiped (laff zero) | 40/40 | 71/79 |
+| no way left to damage a cog | 0/40 | 0/79 |
+| truncated, too slow | 0/40 | 8/79 |
+| gags left at the end | 150 of 172 | 140 of 172 |
+| ATTACK gags left | 104 | 96 |
+
+**Gag exhaustion is not merely unobserved, it is unreachable.** Two
+toons throw two gags a round, so a twenty-round fight spends about forty
+of a hundred and seventy-two. Emptying the pouch would take eighty-six
+rounds. No sweep needs to test this again.
+
+**Nor is it Toon-Up**, which is the other thing that looks wrong from a
+trace -- see the refutation above: forcing it to consider healing makes
+it heal and costs 7.5 points.
+
+**Running low on the HEAVY gags is real and is not the cause.** The
+level 4s and 5s are barely touched across a whole run (45.5 -> 44.3),
+because they cannot dent a 254 hp suit. The ammunition that matters is
+about seven level-7 attack gags and nineteen level-6s, and 60% of the
+level 7s go on ordinary single-bar waiters: 7.1 at the start, 2.9
+entering battle two. That looked like the pink-slip allocation error
+repeating on a second resource, and it is not, because it does not
+discriminate:
+
+| carried INTO battle two | level 6+ attack gags | laff |
+|---|---|---|
+| cleared | 20.6 | **172** |
+| lost | 19.3 | **116** |
+
+Seven percent apart on gags, forty-eight percent apart on laff.
+
+**It is laff attrition in the WAITER battle.** Every loss is a wipe, and
+the whole separation is how much laff survives the first battle -- a
+fight against twenty ordinary cogs, not the boss round anyone would look
+at first. The Big Cheese battle is winnable from 172 laff and lost from
+116, and by the time it starts the outcome is largely fixed.
+
+What varies is not the plan. A traced win and a traced loss play the
+same game with the same nine or ten slips; one leaves the waiter battle
+on 139 laff and the other on 6. It is the accuracy rolls, which is
+consistent with the opening draw not predicting the outcome either --
+nothing about the POSITION predicts it.
+
 ## Two notes on method
 
 **Small samples overstated an effect three times in one session.** A
