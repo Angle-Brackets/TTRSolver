@@ -78,39 +78,73 @@ SCALE = {"heal": 2.0, "armed": 1.0, "kill": 120.0, "kill_threat": 5.0,
          "prevent": 2.0, "risk": 20.0, "price": 1.0}
 
 
-def finished(seeds, budget: int) -> float:
-    """Percentage of buildings the climb finishes, at the current weights."""
-    won = []
-    for seed in seeds:
-        e = env_mod.BattleEnv(rng=random.Random(seed),
-                              sampler=env_mod.facility_position,
-                              coordinated=True)
-        obs, mask = e.reset()
-        rng = random.Random(seed)
-        plan, done, guard, info = None, False, 0, {}
-        while not done and guard < 250:
-            guard += 1
-            if all(a is None for a in e.pending):
-                plan = hybrid.climb(e.state, rng, budget=budget)
-            action = plan[e.actor] if plan and e.actor < len(plan) else None
+def play(seed, sampler, budget: int) -> bool:
+    """One side, at the current weights. True if it cleared.
+
+    TWO BUGS LIVED HERE and both mattered for what this fits.
+
+    The round was detected with `all(a is None for a in e.pending)`. A
+    seat that HOLDS stores None, so that cannot tell "nobody has chosen
+    yet" from "everyone so far held", and the plan was recomputed
+    mid-round whenever seat 0 held -- see the same warning in
+    `tools/trace_building.py`. `e.rounds` is the round number and says
+    it directly.
+
+    And fire actions had no branch, so a pink slip silently became a
+    pass. That made every boss position unscoreable: the fitter would
+    have graded a CEO side by watching the party decline to use the
+    twenty slips it was holding.
+    """
+    e = env_mod.BattleEnv(rng=random.Random(seed), sampler=sampler,
+                          coordinated=True)
+    obs, mask = e.reset()
+    rng = random.Random(seed)
+    plan, done, guard, info, seen = None, False, 0, {}, -1
+    while not done and guard < 900:
+        guard += 1
+        if e.rounds != seen:
+            seen = e.rounds
+            plan = hybrid.climb(e.state, rng, budget=budget)
+        action = plan[e.actor] if plan and e.actor < len(plan) else None
+        index = env_mod.PASS_INDEX
+        if action is not None and action.fire:
+            index = env_mod._FIRE_INDEX.get(action.target_index,
+                                            env_mod.PASS_INDEX)
+        elif action is not None and not action.is_pass:
+            for i, cand in enumerate(env_mod.ACTIONS):
+                if (cand is not None and not cand.fire
+                        and cand.track == action.track
+                        and cand.level == action.level
+                        and cand.target_index == action.target_index):
+                    index = i
+                    break
+        if not mask[index]:
             index = env_mod.PASS_INDEX
-            if action is not None and not action.is_pass:
-                for i, cand in enumerate(env_mod.ACTIONS):
-                    if (cand is not None and cand.track == action.track
-                            and cand.level == action.level
-                            and cand.target_index == action.target_index):
-                        index = i
-                        break
-            if not mask[index]:
-                index = env_mod.PASS_INDEX
-            obs, mask, _r, done, info = e.step(index)
-        won.append(1.0 if info.get("win") else 0.0)
-    return statistics.mean(won) * 100.0
+        obs, mask, _r, done, info = e.step(index)
+    return bool(info.get("win"))
 
 
-def evaluate(vector, seeds, budget: int) -> float:
+def finished(seeds, budget: int, sets=None) -> float:
+    """Mean clear rate over the objective's fight types.
+
+    `sets` is a list of (sampler, weight). The weights fitted before
+    this were fitted on BUILDINGS ALONE, which is why they are
+    miscalibrated on a boss: nothing in the objective ever contained a
+    Version 2.0, a pink slip or a cog above level 12.
+    """
+    if sets is None:
+        sets = [(env_mod.facility_position, 1.0)]
+    total = weight_total = 0.0
+    for sampler, weight in sets:
+        won = [1.0 if play(s, sampler, budget) else 0.0 for s in seeds]
+        total += statistics.mean(won) * 100.0 * weight
+        weight_total += weight
+    return total / max(1e-9, weight_total)
+
+
+def evaluate(vector, seeds, budget: int, sets=None) -> float:
     ps.QUICK_W = {k: float(v) for k, v in zip(KEYS, vector)}
-    return finished(seeds, budget)
+    return finished(seeds, budget, sets)
 
 
 def main():
@@ -121,6 +155,18 @@ def main():
     ap.add_argument("--fit-seeds", type=int, default=240)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", default="")
+    ap.add_argument("--boss-weight", type=float, default=0.0,
+                    help="weight on VP and CEO sides in the objective, "
+                         "against 1.0 on buildings. The shipped weights "
+                         "were fitted on buildings ALONE, so nothing in "
+                         "the objective ever held a Version 2.0, a pink "
+                         "slip or a cog above level 12")
+    ap.add_argument("--ceo-leftovers", type=int, default=5,
+                    help="banquet survivors for the CEO half of the boss "
+                         "objective. 5 is the difficulty with room to "
+                         "move in both directions; 0 is nearly solved and "
+                         "10 is nearly hopeless, so neither carries a "
+                         "usable gradient")
     args = ap.parse_args()
 
     import numpy as np
@@ -130,13 +176,29 @@ def main():
     # whether a candidate is real.
     validate = list(range(34000, 34000 + args.fit_seeds))
 
+    sets = [(env_mod.facility_position, 1.0)]
+    if args.boss_weight > 0:
+        from solver import ceo as ceo_mod
+        from solver import vp as vp_mod
+        ceo_mod.enable_big_cheese()
+
+        def ceo_side(rng, _n=args.ceo_leftovers):
+            ceo_mod.LEFTOVERS = _n
+            return ceo_mod.ceo_position(rng)
+
+        sets.append((vp_mod.vp_position, args.boss_weight / 2.0))
+        sets.append((ceo_side, args.boss_weight / 2.0))
+        print(f"  objective: buildings 1.0, VP and CEO "
+              f"{args.boss_weight / 2.0:.2f} each "
+              f"({args.ceo_leftovers} leftovers)")
+
     rng = np.random.default_rng(args.seed)
     start = np.array([ps.QUICK_W[k] for k in KEYS], dtype=float)
     scale = np.array([SCALE[k] for k in KEYS], dtype=float)
 
     best = start.copy()
-    best_score = evaluate(best, fit, args.budget)
-    base_validate = evaluate(best, validate, args.budget)
+    best_score = evaluate(best, fit, args.budget, sets)
+    base_validate = evaluate(best, validate, args.budget, sets)
     print("  start " + str({k: round(float(v), 2)
                             for k, v in zip(KEYS, best)}))
     print(f"  fit {best_score:.1f}%   validate {base_validate:.1f}%\n")
@@ -148,7 +210,7 @@ def main():
         for _ in range(args.children):
             step = rng.normal(0.0, sigma, size=len(KEYS)) * scale
             child = np.maximum(best + step, 0.0)
-            children.append((evaluate(child, fit, args.budget), child))
+            children.append((evaluate(child, fit, args.budget, sets), child))
         score, child = max(children, key=lambda row: row[0])
         wins = sum(1 for s, _c in children if s > best_score)
 
@@ -161,13 +223,13 @@ def main():
             sigma = 0.30          # restart from the incumbent
 
         if generation % 10 == 0 or generation == args.generations:
-            held = evaluate(best, validate, args.budget)
+            held = evaluate(best, validate, args.budget, sets)
             print(f"    gen {generation:4d}  fit {best_score:5.1f}%  "
                   f"validate {held:5.1f}%  sigma {sigma:.3f}  "
                   f"({time.time() - began:.0f}s)", flush=True)
 
-    final_fit = evaluate(best, fit, args.budget)
-    final_validate = evaluate(best, validate, args.budget)
+    final_fit = evaluate(best, fit, args.budget, sets)
+    final_validate = evaluate(best, validate, args.budget, sets)
     weights = {k: round(float(v), 3) for k, v in zip(KEYS, best)}
     print(f"\n  best {weights}")
     print(f"    fit      {final_fit:5.1f}%   (started {best_score:.1f})")

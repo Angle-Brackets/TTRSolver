@@ -611,8 +611,28 @@ def lure_can_expire_early(level: int, lure_tree_planted: bool = False) -> bool:
     return base < data.EARLY_EXPIRY_ACCURACY_FLOOR
 
 
-LURE_ENDS_ON_DAMAGE = None
-DROP_MISSES_LURED_COGS = None
+# [CONFIRMED] by the owner from play: ANY attack gag that lands on a
+# lured cog wakes it immediately -- not just Sound. The knockback bonus
+# is applied FIRST, so a Throw or Squirt still gets its +50% against the
+# sleeping cog, and only then does the lure end. If the cog survives it
+# attacks that same round, because by then it is awake.
+#
+# Drop is the exception that proves it: it always MISSES a lured cog, so
+# it never lands and never wakes anything.
+#
+# This was `None` -- an unfilled gap -- and only Sound cleared the lure,
+# on the reading that the wiki names Sound explicitly. The wiki naming
+# one track is not the wiki excluding the others. The cost of the gap
+# was not small: `prevented` multiplies by `lure_rounds_remaining`, so
+# every lure was paid for rounds it would never actually deliver once
+# anybody hit the cog, which made a lure-and-grind line look far
+# stronger than it plays.
+LURE_ENDS_ON_DAMAGE = True
+DROP_MISSES_LURED_COGS = True
+
+# The tracks that DEAL damage, and therefore wake a lured cog when they
+# land. Trap and Lure place effects rather than damage; Toon-Up heals.
+DAMAGE_TRACKS = (Track.SOUND, Track.THROW, Track.SQUIRT, Track.DROP)
 
 # [TODO] Multiple Lure gags thrown in the same round raise each other's
 # accuracy, and this is NOT modelled -- a stacked Lure is currently

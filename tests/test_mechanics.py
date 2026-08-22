@@ -586,24 +586,52 @@ class PrevHitsFromTrapTest(unittest.TestCase):
         self.assertEqual(state.cogs[0].hp, 200 - base)
 
 
-class TestDamageDoesNotEndLure(unittest.TestCase):
-    """Not a claim that this is right -- a guard that the unconfirmed
-    mechanic stays unimplemented and visible. See
-    mechanics.LURE_ENDS_ON_DAMAGE; flip both if the source is nailed down."""
+class TestDamageEndsLure(unittest.TestCase):
+    """A landed attack wakes a lured cog. [CONFIRMED] by the owner from
+    play: ANY attack gag does this, not only Sound.
 
-    def test_open_questions_are_still_open(self):
-        self.assertIsNone(mechanics.LURE_ENDS_ON_DAMAGE)
-        self.assertIsNone(mechanics.DROP_MISSES_LURED_COGS)
+    This class used to be `TestDamageDoesNotEndLure` and guarded the
+    opposite -- `LURE_ENDS_ON_DAMAGE` was `None`, an unfilled gap, and
+    only Sound cleared the lure on the reading that the wiki names Sound
+    explicitly. Naming one track is not excluding the others, and the
+    gap was expensive: `prevented` multiplies by `lure_rounds_remaining`,
+    so every lure was paid for rounds it could never deliver once
+    anything hit the cog.
+    """
 
-    def test_surviving_damaged_cog_keeps_its_lure(self):
+    def test_the_questions_are_answered(self):
+        self.assertTrue(mechanics.LURE_ENDS_ON_DAMAGE)
+        self.assertTrue(mechanics.DROP_MISSES_LURED_COGS)
+
+    def test_a_surviving_cog_wakes_up(self):
         lured = _lured_cog(105, rounds=3, hp=200)
         state = _state_with([lured])
-        with mock.patch.object(mechanics, "roll_hit", return_value=True), \
-                mock.patch.object(mechanics, "cog_attack_damage_and_accuracy",
+        with mock.patch.object(mechanics, "roll_hit", return_value=True),                 mock.patch.object(mechanics, "cog_attack_damage_and_accuracy",
                                   return_value=(0, 100)):
             state, _r, _done = simulator.step(
                 state, Action(track=Track.THROW, level=3, target_index=0))
-        self.assertTrue(state.cogs[0].status.lured)
+        self.assertFalse(state.cogs[0].status.lured,
+                         "a landed Throw has to wake it")
+
+    def test_the_knockback_is_collected_before_it_wakes(self):
+        """Order matters and the owner was explicit about it: the +50%
+        lands against the SLEEPING cog, and only then does the lure end.
+        Waking it first would quietly delete the bonus."""
+        lured = _lured_cog(105, rounds=3, hp=400)
+        plain = _lured_cog(105, rounds=0, hp=400)
+        plain.status.lured = False
+        hurt = []
+        for cog in (lured, plain):
+            state = _state_with([cog])
+            before = state.cogs[0].hp
+            with mock.patch.object(mechanics, "roll_hit", return_value=True),                     mock.patch.object(mechanics,
+                                      "cog_attack_damage_and_accuracy",
+                                      return_value=(0, 100)):
+                state, _r, _done = simulator.step(
+                    state, Action(track=Track.THROW, level=3, target_index=0))
+            hurt.append(before - state.cogs[0].hp)
+        self.assertGreater(hurt[0], hurt[1],
+                           "the lured cog should still take knockback")
 
     def test_killed_lured_cog_has_its_lure_cleared(self):
         lured = _lured_cog(105, rounds=3, hp=5)
@@ -614,6 +642,17 @@ class TestDamageDoesNotEndLure(unittest.TestCase):
         self.assertTrue(state.cogs[0].status.is_dead)
         self.assertFalse(state.cogs[0].status.lured)
         self.assertIsNone(state.cogs[0].status.lure_acc_before_bonus)
+
+    def test_a_lure_does_not_wake_anybody(self):
+        """Only DAMAGE wakes. Trap and Lure place effects, so a second
+        Lure landing on a sleeping field must leave it asleep."""
+        cogs = [_lured_cog(105, rounds=3, hp=200) for _ in range(2)]
+        state = _state_with(cogs)
+        with mock.patch.object(mechanics, "roll_hit", return_value=True),                 mock.patch.object(mechanics, "cog_attack_damage_and_accuracy",
+                                  return_value=(0, 100)):
+            state, _r, _done = simulator.step(
+                state, Action(track=Track.LURE, level=2, target_index=None))
+        self.assertTrue(any(c.status.lured for c in state.cogs))
 
 
 if __name__ == "__main__":

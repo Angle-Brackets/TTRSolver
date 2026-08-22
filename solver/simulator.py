@@ -479,15 +479,13 @@ def apply_toon_action(state: BattleState, action: Action,
             # bites when kbBonus lands on an odd base damage.
             dmg = int(total)
             dealt += cog.take_damage(dmg)
-            if cog.status.is_dead:
-                cog.status.clear_lure()
-            elif action.track == Track.SOUND and cog.status.lured:
-                # [CONFIRMED] TTR wiki: "Lured Cogs are awakened by Sound
-                # gags without a damage bonus." Sound is the one track the
-                # wiki names explicitly, which is why it's handled here and
-                # not as a blanket damage-ends-lure rule -- see
-                # mechanics.LURE_ENDS_ON_DAMAGE for the still-open question
-                # of whether Throw/Squirt knock a cog out of lure too.
+            # THE KNOCKBACK IS ALREADY IN `total` ABOVE, AND THE LURE
+            # ENDS HERE. A landed attack of any damage track wakes the
+            # cog -- [CONFIRMED] by the owner, see
+            # mechanics.LURE_ENDS_ON_DAMAGE. So a Throw collects its +50%
+            # against the sleeping cog and then the cog is awake, and if
+            # it survived it attacks this round.
+            if cog.status.is_dead or action.track in mechanics.DAMAGE_TRACKS:
                 cog.status.clear_lure()
 
     return healed, dealt
@@ -921,7 +919,8 @@ def _apply_track_group(state: BattleState, track: Track, resolved,
         for toon_index, damage in contributions:
             cog.status.record_damage(toon_index, damage)
         cog.take_damage(int(total))
-        if cog.status.is_dead:
-            pass
-        elif track == Track.SOUND and cog.status.lured:
+        # Same rule as the solo path, and for the same reason: the
+        # knockback above is collected against the sleeping cog, then the
+        # cog wakes. Only Sound used to do this.
+        if cog.status.is_dead or track in mechanics.DAMAGE_TRACKS:
             cog.status.clear_lure()

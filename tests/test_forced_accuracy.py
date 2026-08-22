@@ -77,14 +77,31 @@ class ForcedAccuracySurvivesAPartyRound(unittest.TestCase):
                          "guaranteed against lured cogs means guaranteed, "
                          "not 95%")
 
-    def test_drop_still_always_misses_a_lured_cog(self):
+    def test_drop_always_misses_a_lured_cog(self):
+        """Nothing lands before the Drop here, so the cogs are still
+        asleep when it resolves.
+
+        This test used to pair the Drop with a Throw, which was a
+        stronger scenario until the lure rule was corrected: a landed
+        Throw now WAKES the cogs, so by the time Drop resolves they are
+        no longer lured and it rolls normally. That is right, and it
+        stopped testing what it was written for."""
+        acc = resolved(board(lured=True),
+                       [Action(track=Track.DROP, level=7, target_index=None),
+                        None],
+                       [True, True])
+        self.assertEqual(acc[Track.DROP], 0)
+
+    def test_a_landed_throw_wakes_them_and_the_drop_can_then_hit(self):
+        """The corrected rule, stated as its own case so the interaction
+        is pinned rather than implied."""
         acc = resolved(board(lured=True),
                        [Action(track=Track.THROW, level=7, target_index=None),
                         Action(track=Track.DROP, level=7, target_index=None)],
                        [True, True])
-        self.assertEqual(acc[Track.DROP], 0,
-                         "the Throw landing gave a Drop that always misses "
-                         "a 25% chance to hit")
+        self.assertGreater(acc[Track.DROP], 0,
+                           "the Throw woke them, so Drop is no longer "
+                           "facing a lured cog")
 
     def test_the_stun_bonus_still_applies_where_it_should(self):
         """The fix must not switch stun off -- only stop it reaching a

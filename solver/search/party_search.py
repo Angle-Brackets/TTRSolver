@@ -643,18 +643,18 @@ def expected_incoming(state: BattleState) -> float:
 def prevented(before: BattleState, after: BattleState) -> float:
     """Incoming damage a round removed, by luring or by killing.
 
-    [TODO] TWO KNOWN DEFECTS, DELIBERATELY LEFT IN. Both were fixed and
-    the fix was reverted, because fixing them alone made the search
-    WORSE and the reason is instructive.
+    ONE KNOWN DEFECT REMAINS. There were two.
 
-      * `rounds` is one mean `lure_rounds_remaining` over every asleep
-        cog, applied to the whole difference. A cog already lured with
-        one round left drags the multiplier down for a cog this plan
-        just put to sleep for four.
-      * KILLS are multiplied by that lure duration too, since they sit
-        in the same difference -- so a kill scores several times more
-        while any lure happens to be running. That one is a plain
-        accounting error, not an approximation.
+      * FIXED: kills were multiplied by the lure duration, since they
+        sit in the same difference -- so a kill scored several times
+        more while any lure happened to be running. A plain accounting
+        error rather than an approximation, and it is now split out and
+        counted once. This was fixed TOGETHER with a refit of the
+        weights, which is the condition the rest of this docstring sets.
+      * [TODO] `rounds` is still one mean `lure_rounds_remaining` over
+        every asleep cog, applied to the lure part. A cog already lured
+        with one round left drags the multiplier down for a cog this
+        plan just put to sleep for four.
 
     A third correction was tried with them: weighting the prevention by
     whether the lure actually LANDS, since `_quick_score` plays one
@@ -721,12 +721,30 @@ def prevented(before: BattleState, after: BattleState) -> float:
     gain = expected_incoming(before) - expected_incoming(after)
     if gain <= 0:
         return 0.0
+
+    # A KILL IS NOT A LURE AND MUST NOT BE PAID LIKE ONE. Both show up
+    # in `gain`, because both reduce next round's incoming, and the
+    # whole difference used to be multiplied by the lure duration -- so
+    # the same kill scored several times more while any lure happened to
+    # be running, and nothing at all otherwise. That is the accounting
+    # error this docstring used to describe and leave in place.
+    #
+    # Counted once here rather than scaled by the rest of the fight.
+    # Removing a cog IS permanent and arguably worth more than one
+    # round, but the length of somebody else's lure is not the number to
+    # multiply it by, and `QUICK_W["kill"]` already prices removal
+    # directly.
+    killed = sum(_cog_threat(old)
+                 for old, new in zip(before.cogs, after.cogs)
+                 if new.status.is_dead and not old.status.is_dead)
+    lured_gain = max(0.0, gain - killed)
+
     rounds = 1.0
     asleep = [c for c in after.active_cogs() if c.status.lured]
     if asleep:
         rounds = max(1.0, sum(c.status.lure_rounds_remaining
                               for c in asleep) / float(len(asleep)))
-    return gain * rounds
+    return killed + lured_gain * rounds
 
 
 def killed_threat(before: BattleState, after: BattleState) -> float:
