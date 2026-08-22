@@ -111,13 +111,13 @@ graph TD
     S -->|"group Lure"| B["CHANCE<br/>accuracy roll"]
     S -->|"Squirt lvl 4"| C["CHANCE<br/>..."]
 
-    A -->|"hit&nbsp;&nbsp;p=0.83"| A1["cog 40→0 DEAD"]
+    A -->|"hit  p=0.83"| A1["cog 40 to 0, DEAD"]
     A -->|"miss p=0.17"| A2["no change"]
 
     A1 --> D["CHANCE<br/>cog phase"]
     A2 --> E["CHANCE<br/>cog phase"]
 
-    D -->|"Bite&nbsp;&nbsp;p=0.50"| D1["MAX<br/>-8 laff"]
+    D -->|"Bite  p=0.50"| D1["MAX<br/>-8 laff"]
     D -->|"Chomp p=0.50"| D2["MAX<br/>-11 laff"]
 
     style S fill:#2d6a4f,color:#fff
@@ -261,23 +261,221 @@ Some of it was surprising, which is the point of building one:
 `docs/party-strategy.md` has the numbers, and more usefully what they cannot
 yet tell you.
 
-## Machine learning
+## The two agents
 
-Two heads trained on searched positions — a **value** head (how good is this
-position) and a **policy** head (which plans are worth searching). Both are
-distilled from the search, not learned by reinforcement: for solo there is an
-exact oracle to imitate, and for party the search is a cheaper teacher than
-RL exploration would be.
+There are two ways to pick a move here, and they fail differently. Both
+share the same rules engine (`solver/simulator.py`) and the same
+objective; they disagree about how to search.
 
-The policy ranks plans about **3× better** than the hand-written heuristic
-(regret@6 of 3.2 against 9.9, with random at 12.1) — and that number about
-the *incumbent* is the more useful one, since a heuristic barely better than
-random at choosing a shortlist is the mechanism behind most of this
-project's silent-deletion bugs.
+```mermaid
+graph LR
+    P["battle position"] --> A["classical search"]
+    P --> B["PPO policy"]
 
-It is **off by default**, because wired in it made the search worse: the
-policy's ranking is currently discarded before the final cut. Off until that
-is fixed and re-measured. See `docs/ml-design.md`.
+    A --> A1["enumerate legal moves"]
+    A1 --> A2["shortlist by _cheap_score"]
+    A2 --> A3["expectimax over<br/>accuracy and cog rolls"]
+    A3 --> A4["rollouts graded by<br/>_greedy_score"]
+    A4 --> M["chosen plan"]
+
+    B --> B1["one forward pass<br/>gives a ranked action list"]
+    B1 --> B2["coordinate ascent<br/>the climb"]
+    B2 --> B3["each candidate scored<br/>by _quick_score"]
+    B3 --> M
+
+    style A fill:#1f4d38,color:#fff
+    style B fill:#4a3670,color:#fff
+    style M fill:#7a5c12,color:#fff
+```
+
+The shipped agent is **PPO + climb**. The classical search is kept
+because it is exact for solo battles and because a second opinion has
+caught bugs neither would find alone.
+
+### Agent 1: the classical search
+
+**Solo battles are solved exactly.** No heuristic, no evaluation
+function. Every gag is spent and the pouch only shrinks, so the game
+tree is finite and `expectimax.solve` returns a true value with a
+transposition memo and star1/star2 pruning over the chance nodes.
+
+**Party battles are not.** The joint action space is every toon's move
+crossed with every other's, and the chance layer is the accuracy rolls
+times each cog's attack times its choice of target. `party_search`
+therefore *samples* rather than enumerates, which makes its numbers
+estimates and **not comparable with `solve()`'s**.
+
+Move generation, in order:
+
+```mermaid
+graph TD
+    L["simulator.legal_actions<br/>one toon's moves"] --> C["_cheap_score<br/>arithmetic, no simulation"]
+    C --> S["shortlist: PER_TRACK=4 per track,<br/>MAX_PLANS=60 joint plans"]
+    S --> Q["_quick_score<br/>ranks which plans get sampled"]
+    Q --> R["rollout_value<br/>ROLLOUT_ROUNDS=12 played forward"]
+    R --> G["_greedy_score<br/>picks each rollout round"]
+
+    style C fill:#4a3670,color:#fff
+    style Q fill:#4a3670,color:#fff
+    style G fill:#4a3670,color:#fff
+```
+
+The three scorers are deliberately different functions with different
+weights, because they answer different questions:
+
+| scorer | job | weights |
+| --- | --- | --- |
+| `_cheap_score` | shortlist one action, no simulation | `HEAL_VALUE`, `TRAP_DISCOUNT` |
+| `_quick_score` | rank whole joint plans | `QUICK_W` |
+| `_greedy_score` | choose each round of a rollout | `GREEDY_W` |
+
+`_greedy_score` is **not** a scorer in the usual sense. `rollout_value`
+*is* `greedy_plan` played forward, so it decides what the future looks
+like, and making it more careful makes the search's model of the future
+passive rather than the search itself careful. That is why it keeps its
+own weights and is not fitted alongside `_quick_score`.
+
+### Agent 2: PPO plus the climb
+
+**Observation, 302 floats.** Per cog (x4): alive, level, hp fraction,
+max hp, lured, trapped, lure rounds, dead, **suited** (Version 2.0),
+**remaining work across both health bars**, armed trap damage as a
+fraction of hp. Per toon (x4): alive, laff fraction, max laff, **pink
+slips**, and 49 gag counts. Then six globals, the acting seat, and a
+36-float block of what the other toons have already committed to this
+round.
+
+That `pending` block is what makes coordination possible: without it,
+four toons sharing one policy see identical observations and throw four
+identical Lures.
+
+**Action table, 250 entries.** Every (track, level, target) the game
+allows, plus a pass, plus four fire actions. Illegal actions get
+`-inf` logits so they carry no probability at all — masking lives
+*inside* the distribution, never as a penalty, because a penalty lets
+the agent learn to want an illegal move and be taxed for it.
+
+**Architecture: two separate towers.**
+
+```mermaid
+graph TD
+    O["observation, 302"] --> T1["actor trunk<br/>Linear 302 to 256, tanh<br/>Linear 256 to 256, tanh"]
+    O --> T2["critic trunk<br/>Linear 302 to 256, tanh<br/>Linear 256 to 256, tanh"]
+    T1 --> A["actor head<br/>Linear 256 to 250"]
+    T2 --> V["critic head<br/>Linear 256 to 1"]
+    A --> MK["legality mask<br/>illegal set to -inf"]
+    MK --> D["categorical over legal moves"]
+
+    style T1 fill:#4a3670,color:#fff
+    style T2 fill:#1f4d38,color:#fff
+    style MK fill:#7a5c12,color:#fff
+```
+
+Sharing one trunk was the first version and it trained **backwards** —
+eval return fell from +47.9 to +22.5 while the win rate dropped 88% to
+78%. Returns run to about plus or minus 100, so the value loss is of
+order 10,000 against a policy loss of order 0.1: the shared trunk
+followed the critic and the policy was noise riding on top. Separate
+towers plus reward scaling keep the two gradients comparable.
+
+**Training.** PPO with GAE, on 32 parallel environments.
+
+| | |
+| --- | --- |
+| steps | 6,000,000 |
+| envs / rollout / epochs | 32 / 128 / 4 |
+| minibatch | 1024 |
+| learning rate | 3e-4 |
+| gamma / lambda | 0.99 / 0.95 |
+| clip / entropy / value coef | 0.2 / 0.01 / 0.5 |
+| reward scaling | running standard deviation |
+| throughput | about 3,500 steps a second on a 3070 Ti |
+
+The training distribution is mixed deliberately: half multi-floor
+facilities, a quarter boss sides (VP and CEO), pink slips in a quarter
+of positions, and mid-fight "strange" boards with armed traps and
+picked-over pouches. **Truncation is not termination** — an episode cut
+off at the round cap still has value ahead of it and is bootstrapped;
+treating it as a terminal zero teaches the agent that surviving to the
+cap is worthless.
+
+**The climb.** The policy alone is not the agent. `hybrid.climb` starts
+from the policy's argmax joint plan and does coordinate ascent, judged
+by `_quick_score`:
+
+```mermaid
+graph TD
+    S["policy argmax plan<br/>one action per toon"] --> L["sweep each seat in turn"]
+    L --> W["offer that seat its top 3<br/>plus the best of every track it holds"]
+    W --> K["keep any change _quick_score prefers"]
+    K --> Z{"did a full sweep<br/>change nothing?"}
+    Z -->|"no"| L
+    Z -->|"yes"| J["try JOINT moves:<br/>two seats changed together"]
+    J --> Z2{"still nothing<br/>or budget spent?"}
+    Z2 -->|"no"| L
+    Z2 -->|"yes"| OUT["chosen plan"]
+
+    style S fill:#4a3670,color:#fff
+    style J fill:#7a5c12,color:#fff
+    style OUT fill:#1f4d38,color:#fff
+```
+
+The joint step exists because coordinate ascent cannot cross a valley.
+Both toons luring scores 366; either one switching to Sound scores 178,
+because Sound resolves after Lure and wakes what Lure put to sleep; both
+switching scores 672. Every single-seat edit is downhill and the joint
+edit nearly doubles the score.
+
+### How a move is evaluated
+
+`_quick_score` takes the **expectation over every way the dice can
+fall**, enumerated rather than sampled. A party is at most four toons
+and each rolls at most one die, so there are at most sixteen branches.
+
+Branching is over **roll groups**, not toons, because accuracy is rolled
+per track per target: two toons throwing the same track at the same cog
+land or miss *together*. Treating those as independent lets a plan hedge
+in a way the game does not allow.
+
+The probabilities are read from the simulator's own record rather than
+recomputed, because accuracy is conditional and the conditions are
+large: a landed Throw lifts a following Drop from 54% to 79%, a second
+Lure lifts the pair from 79% to 95%, a trapped target lifts a Lure from
+79% to 95%.
+
+The score itself:
+
+```
+  damage landed (counting BOTH layers of a Version 2.0)
++ 2   x laff restored, capped at real headroom
++ 1   x damage an armed trap will deal when a lure springs it
++ 120 x cogs killed
++ 9   x damage prevented by luring or killing
+- 1   x gag price, scaled by how many cogs are still to come
+```
+
+`prevent` at 9 rather than 2 is the single largest correction this
+project has made — see below.
+
+### Performance
+
+Held-out seeds, 200 sides a cell, `PPO + climb` at budget 24. A boss
+side is two toons; the full fight needs both sides to clear.
+
+| fight | one side | full fight |
+| --- | --- | --- |
+| cog buildings | **73.5%** | n/a |
+| Sellbot VP | **99.5%** | 99.0% |
+| CEO, banquet cleared | **88.5%** | 78.3% |
+| CEO, 2 leftovers | 73.5% | 54.0% |
+| CEO, 4 leftovers | 45.0% | 20.2% |
+| CEO, 5 leftovers | 32.5% | 10.6% |
+| CEO, 10 leftovers | 3.0% | 0.1% |
+
+Cost: **5.8 ms a decision**. The classical search is 794–1245 ms on the
+same boards and does not do better — on buildings the two are within
+noise, and on a 20-cog CEO waiter battle the search scores 10% against
+the climb's 90%.
 
 ## Things worth knowing before trusting a number
 
