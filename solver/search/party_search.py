@@ -753,17 +753,42 @@ def toons_at_risk(state: BattleState) -> float:
     later floor -- and the only way it registered was indirectly,
     through prevention they no longer contribute.
 
-    Approximate on purpose: the cogs' expected damage shared evenly
-    over whoever is standing. `mechanics.pick_cog_target` does not
-    spread it evenly, but the scorers do not simulate the cog phase at
-    all, and a rough count of who is one bad round from sad is the
-    thing that was missing.
+    THIS RETURNED ZERO EVERYWHERE and that is why the feature read as
+    worthless. It used to take `expected_incoming` -- already
+    probability-weighted -- and divide it again by the number of toons
+    standing, asking whether a toon could survive their share of the
+    AVERAGE. Nothing goes sad to an average. Measured over 2000 sampled
+    facility starts it was non-zero in exactly none of them, and it was
+    zero in a hand-built position of four toons on 22 laff facing four
+    level 12s, where every toon is one group attack from sad. A sweep
+    of the weight over 0, 2, 5, 10 changed not one decision in 900
+    games, because no weight moves a constant.
+
+    So the old ES result that zeroed `QUICK_W["risk"]` was never
+    evidence about risk. It was evidence about this function.
+
+    What sinks a toon is one bad ROUND, not a share of an expectation,
+    which is the rule `features.one_hit_from_death` already uses:
+    `outcomes.worst_case_damage` per cog, summed, against the smallest
+    laff. Same rule here, with one difference that is the whole point of
+    the term -- a LURED cog is skipped, because it does not swing, so
+    luring visibly lowers the count and the scorer can finally see that
+    it does.
     """
+    from .. import outcomes as outcomes_mod
+
     standing = [t for t in state.toons if t.laff > 0]
     if not standing:
         return 0.0
-    share = expected_incoming(state) / float(len(standing))
-    return sum(1.0 for t in standing if t.laff <= share)
+    worst = 0
+    for cog in state.active_cogs():
+        if cog.status.lured:
+            continue
+        try:
+            worst += outcomes_mod.worst_case_damage(cog)
+        except NotImplementedError:      # a [TODO] attack table
+            pass
+    return sum(1.0 for t in standing if t.laff <= worst)
 
 
 def armed_credit(before: BattleState, after: BattleState) -> float:
