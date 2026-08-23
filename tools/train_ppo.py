@@ -122,12 +122,17 @@ def main():
                     help="share of episodes that are multi-floor "
                          "facilities, where a gag saved on one floor is "
                          "spent on the next and conserving finally pays")
-    ap.add_argument("--boss-fraction", type=float, default=0.0,
+    ap.add_argument("--boss-fraction", type=float, default=0.25,
                     help="share of episodes that are one side of a boss "
                          "-- the Sellbot VP or the CEO. These are the "
                          "only positions with Version 2.0 cogs, pink "
                          "slips as standard and cogs above level 12, so "
-                         "without them the policy never sees any of it")
+                         "without them the policy never sees any of it. "
+                         "DEFAULTS ON: it was 0.0, which meant the "
+                         "obvious training command produced a policy "
+                         "blind to all three, and every shipped policy "
+                         "since e835148 has passed 0.25 by hand anyway. "
+                         "Pass 0.0 to train facilities only")
     ap.add_argument("--ceo-share", type=float, default=0.5,
                     help="of the boss episodes, the share that are CEO "
                          "rather than VP")
