@@ -936,9 +936,50 @@ def _apply_track_group(state: BattleState, track: Track, resolved,
         return
 
     if track == Track.LURE:
-        # No damage, so no combo; the single-action path has its rules.
-        for toon_index, action, _t, _g, hit in resolved:
-            apply_toon_action(state, action, hit, actor=toon_index)
+        # SIMULTANEOUS, which is not the same as sequential. Two Lures in
+        # one round are ONE effect on each cog, and this used to call
+        # `apply_toon_action` per toon: the first Lure sprang the trap
+        # and left the cog awake, and the second then saw an untrapped
+        # cog and lured it. [CONFIRMED] by the owner that this is wrong
+        # -- the Lures fire together, the trap springs once, and the cog
+        # stays awake.
+        #
+        # It mattered: a teammate trapping a cog about to be lured
+        # throws the lure away, and sequential resolution let a second
+        # Lure quietly undo that. It also made a group Lure look like an
+        # answer to a badly-placed Trap, which it is not.
+        #
+        # What a second Lure DOES buy is accuracy -- see
+        # `mechanics.multi_lure_bonus`, already applied to the shared
+        # roll above.
+        claims: Dict[int, Tuple[int, object]] = {}
+        for toon_index, action, targets, _g, hit in resolved:
+            _spend_gag(state.toons[toon_index], action.track, action.level)
+            if not hit:
+                continue
+            for cog_index in targets:
+                held = claims.get(cog_index)
+                # The strongest Lure on a cog sets its duration, the same
+                # rule by which the best gag sharing a roll sets accuracy.
+                if held is None or action.level > held[1].level:
+                    claims[cog_index] = (toon_index, action)
+
+        for cog_index, (toon_index, action) in claims.items():
+            cog = state.cogs[cog_index]
+            if cog.status.is_dead:
+                continue
+            if cog.status.trapped:
+                # Springing SPENDS the lure: the damage is the trade for
+                # the rounds asleep, and no other Lure this round can buy
+                # them back.
+                cog.take_damage(_apply_trap_trigger(cog))
+                continue
+            toon = state.toons[toon_index]
+            cog.status.apply_lure(
+                mechanics.lure_accuracy_before_bonus(
+                    action.track, action.level, toon, [cog]),
+                mechanics.lure_duration_rounds(action.level),
+                action.level)
         return
 
     # A damage track. Sum by target first, then bonus the total.

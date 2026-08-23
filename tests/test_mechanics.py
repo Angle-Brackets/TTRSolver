@@ -797,3 +797,117 @@ class TestTwoTrapsCancel(unittest.TestCase):
                         "nilling the trap leaves the Lure intact")
         self.assertEqual(state.cogs[0].hp, state.cogs[0].max_hp,
                          "and nothing sprang")
+
+
+class TestSimultaneousLures(unittest.TestCase):
+    """Two Lures in one round are ONE effect per cog, not two in order.
+
+    [CONFIRMED] by the owner from play: "those lures fire simultaneously
+    and the toons go sad."
+
+    `apply_party_round` used to hand Lure to `apply_toon_action` once per
+    toon. On a trapped cog that read as a sequence -- the first Lure
+    sprang the trap and correctly left the cog awake, and the second then
+    saw a bare cog and lured it. The party ended the round safe from a
+    cog that in the real game is awake and swinging.
+
+    The cost of the bug was strategic, not cosmetic. It made a group Lure
+    look like an answer to a teammate's badly-placed Trap, so a policy
+    trained against it learned to reach for one; the actual answers are
+    nilling the Trap or overwriting it with a Railroad.
+
+    What a second Lure legitimately buys is accuracy, via
+    `mechanics.multi_lure_bonus`, and that is applied to the shared roll
+    before any of this.
+    """
+
+    def _party(self, n=4, trapped_level=None):
+        toons = [ToonState(laff=80, max_laff=80,
+                           track_exp={t: 7 for t in Track},
+                           gag_counts={(t, l): 3 for t in Track
+                                       for l in range(1, 8)},
+                           organic_tracks=frozenset())
+                 for _ in range(n)]
+        hp = data.cog_max_hp(12)
+        cogs = [CogState(cog_type="mr_hollywood", department="sellbot",
+                         level=12, hp=hp, max_hp=hp) for _ in range(2)]
+        if trapped_level is not None:
+            cogs[0].status.trapped = True
+            cogs[0].status.trap_track = Track.TRAP
+            cogs[0].status.trap_level = trapped_level
+        return BattleState(toons=toons, cogs=cogs)
+
+    def _round(self, state, actions):
+        simulator.apply_party_round(state, actions, hits=[True] * 4)
+
+    def test_the_second_lure_does_not_recatch_a_sprung_cog(self):
+        """The bug, stated directly."""
+        state = self._party(trapped_level=1)
+        self._round(state, [Action(Track.LURE, 6, None),
+                            Action(Track.LURE, 4, None), None, None])
+        self.assertFalse(state.cogs[0].status.lured,
+                         "the trap sprang; no simultaneous Lure re-catches it")
+
+    def test_the_trap_still_springs(self):
+        state = self._party(trapped_level=1)
+        before = state.cogs[0].hp
+        self._round(state, [Action(Track.LURE, 6, None),
+                            Action(Track.LURE, 4, None), None, None])
+        self.assertLess(state.cogs[0].hp, before)
+
+    def test_the_trap_springs_exactly_once(self):
+        """Two Lures are not two triggers -- there is one trap.
+
+        Measured against the one-Lure case rather than against a damage
+        number recomputed here, so organic and level rules stay in one
+        place.
+        """
+        one = self._party(trapped_level=1)
+        self._round(one, [Action(Track.LURE, 6, None), None, None, None])
+        two = self._party(trapped_level=1)
+        self._round(two, [Action(Track.LURE, 6, None),
+                          Action(Track.LURE, 4, None), None, None])
+        self.assertEqual(two.cogs[0].hp, one.cogs[0].hp)
+
+    def test_untrapped_cogs_are_still_lured(self):
+        """Only the sprung cog stays awake; the rest of a group Lure works."""
+        state = self._party(trapped_level=1)
+        self._round(state, [Action(Track.LURE, 6, None),
+                            Action(Track.LURE, 4, None), None, None])
+        self.assertTrue(state.cogs[1].status.lured)
+
+    def test_both_lures_are_spent(self):
+        state = self._party(trapped_level=1)
+        self._round(state, [Action(Track.LURE, 6, None),
+                            Action(Track.LURE, 4, None), None, None])
+        self.assertEqual(state.toons[0].gag_counts[(Track.LURE, 6)], 2)
+        self.assertEqual(state.toons[1].gag_counts[(Track.LURE, 4)], 2)
+
+    def test_a_missed_lure_is_spent_and_does_nothing(self):
+        state = self._party()
+        simulator.apply_party_round(
+            state, [Action(Track.LURE, 6, None), None, None, None],
+            hits=[False] * 4)
+        self.assertFalse(state.cogs[0].status.lured)
+        self.assertEqual(state.toons[0].gag_counts[(Track.LURE, 6)], 2)
+
+    def test_the_strongest_lure_sets_the_duration(self):
+        """Same rule by which the best gag sharing a roll sets accuracy."""
+        state = self._party()
+        self._round(state, [Action(Track.LURE, 1, 0),
+                            Action(Track.LURE, 6, 0), None, None])
+        self.assertEqual(state.cogs[0].status.lure_rounds_remaining,
+                         mechanics.lure_duration_rounds(6))
+
+    def test_one_lure_on_a_trapped_cog_is_unchanged(self):
+        """The single-Lure path was already right; keep it that way."""
+        state = self._party(trapped_level=1)
+        self._round(state, [Action(Track.LURE, 6, None), None, None, None])
+        self.assertFalse(state.cogs[0].status.lured)
+        self.assertFalse(state.cogs[0].status.trapped)
+
+    def test_lures_alone_still_lure(self):
+        state = self._party()
+        self._round(state, [Action(Track.LURE, 6, None),
+                            Action(Track.LURE, 4, None), None, None])
+        self.assertTrue(all(c.status.lured for c in state.cogs))
