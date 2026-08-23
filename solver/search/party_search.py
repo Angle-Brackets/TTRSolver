@@ -215,10 +215,29 @@ QUICK_W = {
     "price": 1.0,       # gags spent
 }
 
-# `kill_threat` and `risk` STAY AT ZERO. They are the two things the
-# equations could not say -- which cog was worth killing, and whether
-# the plan leaves somebody about to go sad -- and they were fitted and
-# measured, and they do nothing.
+# `kill_threat` and `risk` are at zero, and THE REFUTATION BELOW IS
+# STALE. It was measured on 2026-08-17, before the three rule fixes of
+# 2026-08-22 -- the Railroad waking the field, two Traps cancelling, and
+# simultaneous Lures resolving as one effect. The last of those is the
+# one that matters here: a group Lure used to re-catch a cog whose trap
+# had just sprung, so "the plan leaves a cog awake" was a state the
+# simulator largely could not reach, and an optimiser cannot price a
+# risk the model does not produce.
+#
+# A worked case, 4 toons at 22 laff against level 12s, one seat having
+# trapped a full-health cog about to be lured. Nilling that trap is the
+# only move of the top six that leaves every cog asleep: 0% chance of
+# losing a toon against 25% for the five ranked above it, which the
+# scorer puts ~100 points below its favourite. Under the old rule the
+# second Lure covered the mistake and the difference did not exist.
+#
+# So re-run the sweep once the policies finish retraining, and do not
+# read what follows as settled.
+#
+# WHAT THE OLD MEASUREMENT FOUND. They are the two things the equations
+# could not say -- which cog was worth killing, and whether the plan
+# leaves somebody about to go sad -- and they were fitted and measured,
+# and they did nothing.
 #
 # 120 generations of a (1+lambda) ES with both available returned
 # `kill_threat` 0.044 against a cog threatening 8-15 damage a round, and
