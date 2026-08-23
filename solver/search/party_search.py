@@ -680,6 +680,31 @@ def expected_incoming(state: BattleState) -> float:
     return total
 
 
+# Charge a plan for waking cogs it had asleep. ON, measured.
+#
+# The fourth correction to `prevented` and the first to survive. The
+# three before it were arithmetic refinements to the CREDIT -- how many
+# rounds a lure buys, how to average them -- and each lost 2-3 points.
+# This adds a term that was absent: nothing charged for quiet SPENT, so
+# a plan could hand four sleeping cogs their attacks back for free.
+#
+# Paired, 200 sides a cell:
+#
+#     cell             off      on
+#     buildings      64.5%   67.0%
+#     buildings      68.5%   71.5%   p=0.031
+#     CEO 0          69.5%   73.0%
+#     CEO 2          54.5%   61.5%   p=0.038
+#     CEO 4          31.0%   36.5%
+#     VP             98.5%   98.5%   at the ceiling
+#     pooled         76 up / 33 down, p<0.0001
+#
+# The weight did NOT need rescaling, which was the obvious guess and was
+# wrong: sweeping `prevent` with this on, 9.0 beats 4, 2, 1 and 0.5
+# monotonically and significantly.
+WAKE_COSTS_PREVENTED = True
+
+
 def prevented(before: BattleState, after: BattleState) -> float:
     """Incoming damage a round removed, by luring or by killing.
 
@@ -736,6 +761,26 @@ def prevented(before: BattleState, after: BattleState) -> float:
         elif new.status.lured and not old.status.lured:
             rounds = min(float(new.status.lure_rounds_remaining), reach)
             total += threat * max(0.0, rounds)
+        elif WAKE_COSTS_PREVENTED and old.status.lured                 and not new.status.lured:
+            # WOKEN, and this used to be free. The three cases above
+            # credit quiet bought; nothing charged for quiet spent, so a
+            # plan could hand four sleeping cogs their attacks back and
+            # the term stayed at zero. Solo on a lured field the scorer
+            # read `Foghorn -> all` at 142.8 against `Whole Cream Pie ->
+            # c0` at 36.8 purely on damage dealt, while the Foghorn left
+            # four cogs awake threatening 61.8 a round and the Cream Pie
+            # left one threatening 13.4.
+            #
+            # Symmetric with the credit: the rounds of quiet the lure
+            # would still have delivered, capped by `reach` for the same
+            # reason.
+            #
+            # This does NOT make attacking a lured cog bad. It makes it
+            # cost something, which is true -- knockback is paid for with
+            # the lure -- and leaves the damage and kill terms to decide
+            # whether the trade is worth taking.
+            rounds = min(float(old.status.lure_rounds_remaining), reach)
+            total -= threat * max(0.0, rounds)
     return total
 
 
