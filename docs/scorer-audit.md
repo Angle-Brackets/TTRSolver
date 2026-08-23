@@ -640,14 +640,27 @@ It learned that where Lure was overpowered, and `prevent=9` -- validated,
 worth +45 -- wants precisely that behaviour. Its wrong training happens
 to produce what the climb is looking for.
 
-**THE STRUCTURAL CAUSE, WHICH IS NOT A BUG IN EITHER HALF.** PPO trains
-the policy playing ALONE and ships it as a PROPOSER FOR A SEARCH, and
-the two roles want different behaviour. A Lure with no follow-up is
-weak, so a policy scored on its own play correctly declines to throw
-one. A climb that can pair a Lure with the attack exploiting it wants
-them constantly. The correctly trained policies are not worse: they are
-right about the game they were scored in and wrong about the job they
-were given.
+**THE STRUCTURAL CAUSE, WHICH IS NOT A BUG IN EITHER HALF.** Training
+scores the policy on ITS OWN argmax play. Deployment scores it as a
+PROPOSER the climb then refines. Those two jobs reward different
+behaviour.
+
+To be exact, because "plays alone" is the wrong phrase for it: PPO is
+trained on parties throughout -- 16% of positions are solo, 31% two
+toons, 26% three, 28% four, and both boss sides are two. The policy is
+`coordinated`, so one network chooses for every toon in turn while
+seeing a 36-float `pending` block of what its teammates have already
+committed this round. It coordinates with itself perfectly well. What it
+never sees during training is THE CLIMB.
+
+So a Lure it throws in training is a Lure followed by whatever its own
+argmax picks next, which is usually another attack rather than the
+attack that exploits it. Scored that way, Lure genuinely is weak and the
+policy correctly learns to skip it. In deployment the climb can pair the
+Lure with its follow-up, at which point Lure is the best move on the
+board. The correctly trained policies are not worse: they are right
+about the game they were scored in and wrong about the job they were
+given.
 
 It also explains why probes and pairs do not close the gap. They can
 reach a Lure the policy ranks low, but the climb still STARTS from the
