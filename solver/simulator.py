@@ -409,16 +409,29 @@ def apply_toon_action(state: BattleState, action: Action,
         # quietly turned the best trap in the game into a single-target one,
         # which made the Railroad+Lure combo look far weaker than it is.
         #
-        # A lured cog is skipped: you cannot place a trap under a cog that
-        # has already been pulled off its square, which is the same rule
-        # legal_actions applies to single-target traps. An existing trap is
-        # overwritten -- [CONFIRMED] TTR 3.0.0, "if there are active Trap
-        # gags on Cogs, and a Railroad gag is placed in a subsequent round
-        # by itself, it will override the previously placed Trap gags
-        # rather than fizzling out".
+        # An existing trap is overwritten -- [CONFIRMED] TTR 3.0.0, "if
+        # there are active Trap gags on Cogs, and a Railroad gag is placed
+        # in a subsequent round by itself, it will override the previously
+        # placed Trap gags rather than fizzling out".
+        #
+        # THE RAILROAD WAKES THE FIELD TO LAY ITSELF. [CONFIRMED] by the
+        # owner from play: a group Trap needs only ONE unlured cog to go
+        # down, and placing it un-lures every lured cog so the track can
+        # be laid under all of them. A single-target Trap cannot do this
+        # and is still refused on a lured cog.
+        #
+        # That is what makes Railroad-then-Lure work IN ONE ROUND: Trap
+        # resolves before Lure, the Railroad wakes the field and arms it,
+        # and the Lure lands afterwards and springs it. Skipping lured
+        # cogs -- which this used to do -- made the strongest combination
+        # in the game unplayable whenever anything was already asleep.
+        group = data.gag(action.track, action.level).group
+        if group and not all(c.status.lured for c in targets):
+            for cog in targets:
+                cog.status.clear_lure()
         for cog in targets:
             if cog.status.lured:
-                continue
+                continue          # single-target Trap, cog off its square
             cog.status.trapped = True
             cog.status.trap_track = action.track
             cog.status.trap_level = action.level

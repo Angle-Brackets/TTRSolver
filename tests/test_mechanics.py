@@ -368,14 +368,70 @@ class TestGroupTrap(unittest.TestCase):
         self.assertTrue(all(c.status.is_dead for c in state.cogs))
         self.assertTrue(done)
 
-    def test_a_lured_cog_cannot_be_trapped(self):
-        """Same rule legal_actions applies to single-target traps."""
+    def test_railroad_wakes_the_field_to_lay_itself(self):
+        """[CONFIRMED] by the owner: a group Trap needs one unlured cog
+        to go down, and laying it un-lures every lured cog so the track
+        runs under all of them.
+
+        This test asserted the opposite -- that a lured cog is skipped,
+        the rule single-target Traps follow. Skipping made the strongest
+        combination in the game unplayable whenever anything happened to
+        be asleep already."""
         state = self._field()
         state.cogs[0].status.apply_lure(110, 2, 2)
         state, _r, _d = simulator.step(
             state, Action(track=Track.TRAP, level=7, target_index=None))
+        self.assertTrue(all(c.status.trapped for c in state.cogs))
+        self.assertFalse(any(c.status.lured for c in state.cogs),
+                         "laying the Railroad wakes them")
+
+    def test_railroad_needs_one_unlured_cog(self):
+        """With the whole field asleep there is nowhere to lay it."""
+        state = self._field()
+        for cog in state.cogs:
+            cog.status.apply_lure(110, 2, 2)
+        state, _r, _d = simulator.step(
+            state, Action(track=Track.TRAP, level=7, target_index=None))
+        self.assertFalse(any(c.status.trapped for c in state.cogs))
+        self.assertTrue(all(c.status.lured for c in state.cogs),
+                        "and it does not wake them either")
+
+    def test_a_single_target_trap_still_refuses_a_lured_cog(self):
+        """The waking rule belongs to the group Trap alone."""
+        state = self._field()
+        state.toon.gag_counts[(Track.TRAP, 3)] = 1
+        state.cogs[0].status.apply_lure(110, 2, 2)
+        state, _r, _d = simulator.step(
+            state, Action(track=Track.TRAP, level=3, target_index=0))
         self.assertFalse(state.cogs[0].status.trapped)
-        self.assertTrue(state.cogs[1].status.trapped)
+        self.assertTrue(state.cogs[0].status.lured)
+
+    def test_railroad_and_lure_in_ONE_round_clears_the_field(self):
+        """Trap resolves before Lure, so the Railroad wakes and arms the
+        field and the Lure then springs it -- in a single round. This is
+        what the waking rule is for, and it was unreachable while lured
+        cogs were skipped."""
+        from solver.state import ToonState as _T
+
+        toon = _T(laff=45, max_laff=45,
+                  track_exp={Track.TRAP: 7, Track.LURE: 7},
+                  gag_counts={(Track.TRAP, 7): 1, (Track.LURE, 2): 2},
+                  organic_tracks=frozenset())
+        mate = _T(laff=45, max_laff=45,
+                  track_exp={Track.TRAP: 7, Track.LURE: 7},
+                  gag_counts={(Track.TRAP, 7): 1, (Track.LURE, 2): 2},
+                  organic_tracks=frozenset())
+        cogs = [CogState(cog_type="flunky", department="bossbot", level=lvl,
+                         hp=data.cog_max_hp(lvl), max_hp=data.cog_max_hp(lvl))
+                for lvl in (4, 5)]
+        state = BattleState(toons=[toon, mate], cogs=cogs)
+        state.cogs[0].status.apply_lure(110, 2, 2)
+        simulator.apply_party_round(
+            state,
+            [Action(track=Track.TRAP, level=7, target_index=None),
+             Action(track=Track.LURE, level=2, target_index=None)],
+            hits=[True, True])
+        self.assertTrue(all(c.status.is_dead for c in state.cogs))
 
 
 class TestLuredRatioBonus(unittest.TestCase):
