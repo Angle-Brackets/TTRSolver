@@ -39,6 +39,8 @@ FIGHTS = {
     "CEO0": ("ceo", 0, 92000),
     "CEO2": ("ceo", 2, 92000),
     "CEO4": ("ceo", 4, 92000),
+    "CEO6": ("ceo", 6, 92000),
+    "CEO10": ("ceo", 10, 92000),
     "VP": ("vp", None, 91000),
     # Facilities run at the deployed climb budget of 8, not 24. A boss
     # side is worth thinking longer about and the shipped advisor spends
