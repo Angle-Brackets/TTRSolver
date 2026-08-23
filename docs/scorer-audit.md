@@ -683,6 +683,41 @@ rule the game does not have. The next retrain should use the WIDER
 leftover range, more seeds, and fit `prevent` jointly with the policy
 rather than after it.
 
+## Refuted -- training more seeds and picking the best
+
+Eight seeds at the better leftover range, scored on a SELECTION set, and
+the winner re-measured on held-out seeds it was not chosen on.
+
+The selection spread is the first thing to look at: CEO at zero
+leftovers ran from **23.3% to 62.5%** across eight policies differing
+only in their training seed, while buildings sat inside a two-point band
+(73.3-75.0%). A thirty-nine point range on one fight.
+
+`v4_s18` won the selection at 62.5%. On 200 held-out sides a cell it
+lost:
+
+| set | v2_s3 | v4_s18 | |
+|---|---|---|---|
+| buildings | **72.5%** | 66.0% | +5/-18, p=0.005 |
+| VP | 99.5% | 99.0% | ns |
+| CEO 0 | 63.5% | 67.5% | +37/-29, p=0.19 |
+| CEO 2 | **53.0%** | 42.0% | +24/-46, p=0.006 |
+| CEO 4 | 24.0% | 18.0% | +19/-31, p=0.06 |
+
+**Taking the maximum of eight draws from a distribution that wide
+selects the friendliest selection draw, not the better policy**, and the
+advantage does not transfer -- it is worse on buildings and on CEO 2,
+both significantly.
+
+This is the same shape as fitting a weight on the set you then report,
+and it is worth naming separately because "train more seeds and keep the
+best" is the obvious next move and it does not work here. What the
+spread actually says is that a single CEO number cannot distinguish two
+policies at this sample size. Distinguishing them needs either many more
+evaluation sides or an evaluation that is not one high-variance fight.
+
+`v2_s3` stays shipped.
+
 ## Two notes on method
 
 **Small samples overstated an effect three times in one session.** A
