@@ -215,34 +215,43 @@ QUICK_W = {
     "price": 1.0,       # gags spent
 }
 
-# `kill_threat` and `risk` are at zero, and THE REFUTATION BELOW IS
-# STALE. It was measured on 2026-08-17, before the three rule fixes of
-# 2026-08-22 -- the Railroad waking the field, two Traps cancelling, and
-# simultaneous Lures resolving as one effect. The last of those is the
-# one that matters here: a group Lure used to re-catch a cog whose trap
-# had just sprung, so "the plan leaves a cog awake" was a state the
-# simulator largely could not reach, and an optimiser cannot price a
-# risk the model does not produce.
+# `kill_threat` and `risk` STAY AT ZERO, and `risk` has now been
+# refuted twice -- but only the second refutation is worth anything, and
+# the difference between them is the useful part of this comment.
 #
-# A worked case, 4 toons at 22 laff against level 12s, one seat having
-# trapped a full-health cog about to be lured. Nilling that trap is the
-# only move of the top six that leaves every cog asleep: 0% chance of
-# losing a toon against 25% for the five ranked above it, which the
-# scorer puts ~100 points below its favourite. Under the old rule the
-# second Lure covered the mistake and the difference did not exist.
+# THE FIRST REFUTATION WAS MEASURING NOTHING. A (1+lambda) ES on
+# 2026-08-17 ran 120 generations with both terms available and returned
+# `kill_threat` 0.044 and `risk` 0.592, against a landed-damage term in
+# the tens. Read as "the optimiser was handed the new directions and
+# declined them". It could not have done anything else: `toons_at_risk`
+# was returning 0.0 on every position in existence -- 0 of 2000 sampled
+# facility starts -- because it divided an already-probability-weighted
+# expectation by the party size and asked whether a toon could survive
+# their share of the average. Sweeping the weight over 0, 2, 5 and 10
+# changed not one decision in 900 paired games. No weight moves a
+# constant. See `toons_at_risk` for the fix.
 #
-# So re-run the sweep once the policies finish retraining, and do not
-# read what follows as settled.
+# THE SECOND ONE IS REAL, and it is also a lesson in how these numbers
+# lie. With the feature fixed and non-zero in 39.4% of positions, a
+# paired sweep over 900 positions looked convincing: monotone in the
+# weight, +0.6/+0.8/+1.0% at 5/10/20, all three sets agreeing in sign,
+# p = 0.012 at 20, and a PLATEAU across 10-40 rather than a spike at one
+# lucky value. Every shape-based argument for believing it was present.
 #
-# WHAT THE OLD MEASUREMENT FOUND. They are the two things the equations
-# could not say -- which cog was worth killing, and whether the plan
-# leaves somebody about to go sad -- and they were fitted and measured,
-# and they did nothing.
+# It did not replicate. Confirming risk=20 on 1600 positions with seeds
+# it had not been chosen on: +0.1%, 21 discordant games split near
+# evenly, p = 1.000, mixed signs. The +1.0% was the maximum of six
+# values measured on one sample, which is a selection and not a
+# measurement, and the plateau was not the protection it appeared to be.
 #
-# 120 generations of a (1+lambda) ES with both available returned
-# `kill_threat` 0.044 against a cog threatening 8-15 damage a round, and
-# `risk` 0.592 against a landed-damage term in the tens. The optimiser
-# was handed the new directions and declined them.
+# So: 0.0, on evidence this time. What would change the answer is a
+# distribution where the term bites -- it is the low-laff, one-group-
+# attack-from-sad positions that carry it, and sampled facility starts
+# are mostly not those. A 4-toon 22-laff position against level 12s
+# ranks the correct defensive move 6th of 130 at risk=0 and 2nd at
+# risk=20. That is a real improvement on a real position and it is worth
+# nothing here, because tuning a weight until one hand-built case comes
+# out right is how the first refutation happened.
 #
 # On 240 buildings used for neither fitting nor validation:
 #
