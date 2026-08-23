@@ -615,73 +615,55 @@ on 139 laff and the other on 6. It is the accuracy rolls, which is
 consistent with the opening draw not predicting the outcome either --
 nothing about the POSITION predicts it.
 
-## An open anomaly: the wrongly-trained policy is better
+## The anomaly explained: trained solo, deployed as a proposer
 
-The shipped policy, `boss_s2`, was trained under the BROKEN Lure rule --
-back when a lured cog stayed asleep through damage. Three policies
-trained under the corrected rule lose to it badly on the CEO, on 150
-held-out sides with probes and pairs on:
+`boss_s2` was trained under the BROKEN Lure rule and beat every
+correctly-trained policy on the CEO -- 88.0% against a best of 63.3%
+across nine of them, while matching on buildings and VP. It is not the
+leftover range, not seed noise, and not the scorer weight.
 
-| set | boss_s2 | v2_s1 | v2_s2 | v2_s3 |
-|---|---|---|---|---|
-| buildings | 72.7% | 69.3% | 70.7% | 72.0% |
-| VP | 99.3% | 99.3% | 100.0% | 99.3% |
-| CEO 0 | **88.0%** | 37.3% | 42.0% | 63.3% |
-| CEO 4 | **46.7%** | 3.3% | 6.7% | 26.0% |
+The cause shows up the moment every policy is asked about the SAME
+positions rather than about boards each built itself. 273 shared CEO
+positions, argmax proposal per seat:
 
-**It is not the scorer weight, though that was partly co-adapted.**
-`prevent=9` was swept against `boss_s2`, because it was the only policy
-winning CEO sides at the time -- fitting a weight to one policy and then
-judging others by it is the policy-shaped version of tuning on the set
-you report. Re-swept per policy:
-
-| policy | 2 | 5 | 9 | 14 | 20 | 30 |
+| policy | lure | trap | throw | squirt | group | fires |
 |---|---|---|---|---|---|---|
-| boss_s2 | 35.8% | 45.0% | **88.3%** | 84.2% | 84.2% | 82.5% |
-| v2_s3 | 31.7% | 30.0% | 62.5% | **71.7%** | 67.5% | 65.0% |
+| **boss_s2** | **83%** | 0% | 8% | 1% | **98%** | 218 |
+| v2_s3 | 14% | 12% | 33% | 27% | 37% | 478 |
+| v4_s18 | 0% | 0% | 55% | 30% | 30% | 471 |
+| v3_s5 | 0% | 11% | 63% | 24% | 42% | 427 |
 
-The optima differ -- 9 against 14 -- so the co-adaptation is real and
-worth 9 points to v2_s3. Each at its own best weight still leaves
-`boss_s2` ahead by 17. Lure shares are within two points at every
-weight, so it is not a lure-propensity story either.
+`boss_s2` proposes a group Lure four times in five. Every correctly
+trained policy proposes single-target attacks and lures 0-14%.
 
-**The CEO leftover range matters, and narrowing it HELPS** -- the
-opposite of what the first version of this section said. `boss_s2` drew
-0-10. Retraining at 0-3 and at 0-10 under the corrected rule, same seeds,
-same evaluation:
+It learned that where Lure was overpowered, and `prevent=9` -- validated,
+worth +45 -- wants precisely that behaviour. Its wrong training happens
+to produce what the climb is looking for.
 
-| seed | 0-3 | 0-10 |
-|---|---|---|
-| 1 | **37.3%** | 25.3% |
-| 2 | **42.0%** | 22.7% |
-| 3 | **63.3%** | 39.3% |
+**THE STRUCTURAL CAUSE, WHICH IS NOT A BUG IN EITHER HALF.** PPO trains
+the policy playing ALONE and ships it as a PROPOSER FOR A SEARCH, and
+the two roles want different behaviour. A Lure with no follow-up is
+weak, so a policy scored on its own play correctly declines to throw
+one. A climb that can pair a Lure with the attack exploiting it wants
+them constantly. The correctly trained policies are not worse: they are
+right about the game they were scored in and wrong about the job they
+were given.
 
-Twelve to twenty-four points a seed. The reasoning behind narrowing it
-was sound: under the corrected rule 0-10 spans about 13% down to 0%, so
-most episodes are losses with little gradient in them.
+It also explains why probes and pairs do not close the gap. They can
+reach a Lure the policy ranks low, but the climb still STARTS from the
+policy's argmax plan, and a sweep beginning on four single-target
+attacks does not walk to a coordinated Lure line -- the same
+starting-point argument that motivated joint moves.
 
-This section previously retracted that, on a comparison between a "0,10"
-number and a "0,3" number where BOTH came from the 0-3 policy -- a
-script that loaded `v2_s3` and a reading that recorded it as the other
-arm. The retraction was wrong and the six extra training runs it
-motivated confirmed nothing. Check which artefact a number came from
-before building a theory on the difference between two of them.
+**What would fix it**, none of it cheap: train with the climb in the
+loop, so the policy is scored on the play it ENABLES rather than the
+play it performs; or shape training toward what a searcher wants, which
+means deciding that in advance rather than learning it; or generate boss
+candidates without the policy at all.
 
-**The anomaly survives the correction.** Six seeds at 0-10 and three at
-0-3, and `boss_s2` still beats every one of them: 88.0% against a best
-of 63.3% and a median near 36%. Buildings and VP are level across all of
-them, so it is specific to the CEO. Whatever `boss_s2` has, it is not
-the leftover range.
-
-Also unexplained: the v2 seeds spread 37.3 / 42.0 / 63.3 on CEO 0, far
-wider than the ~1 point training-seed noise this project has measured
-elsewhere. Whatever is going on, three seeds cannot resolve it.
-
-**Shipped as-is, labelled.** `boss_s2` is the best measured proposer and
-the configuration is honestly reported, but it was trained against a
-rule the game does not have. The next retrain should use the WIDER
-leftover range, more seeds, and fit `prevent` jointly with the policy
-rather than after it.
+Shipped: `v2_s3`, correctly trained, 63.5% on CEO 0. `boss_s2` is not
+shipped and should not be -- an 88% resting on a rule the game does not
+have is a number about our old bug.
 
 ## Refuted -- training more seeds and picking the best
 
