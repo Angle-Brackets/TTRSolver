@@ -394,6 +394,41 @@ def _judge(state: BattleState, plan, deep: bool) -> float:
         return first
 
 
+# Whether a probe menu distinguishes a group gag from a single-target
+# one of the same track. Toggleable because the effect is still being
+# measured and the honest state of it is "unproven": see the A/B in
+# `_track_key`.
+GROUP_PROBES = True
+
+
+def _track_key(entry):
+    """What counts as a distinct kind of move for probing purposes.
+
+    TRACK ALONE IS NOT ENOUGH, and this was measured. Probing one action
+    per track offers the policy's favourite within that track, and on a
+    CEO board that was `Birthday Cake -> c2` for Throw and `TNT -> c2`
+    for Trap -- scoring 342 apiece, while `Wedding Cake -> all` scored
+    1103 and `Railroad -> all` 1159 and neither was ever offered. A group
+    gag hits four cogs and a single-target one hits one; they are not
+    two orderings of the same move, and collapsing them hides whichever
+    the policy happens to rank lower.
+
+    So the key is (track, group). At most fourteen entries instead of
+    seven, and in practice far fewer, because a toon holding no group
+    gag in a track contributes one entry for it as before.
+    """
+    from .. import data
+
+    if not GROUP_PROBES:
+        return entry.track
+
+    try:
+        group = bool(data.gag(entry.track, entry.level).group)
+    except (KeyError, ValueError, NotImplementedError):
+        group = entry.target_index is None
+    return (entry.track, group)
+
+
 def climb(state: BattleState, rng=random, budget: int = 16,
           width: int = 3, probe_tracks: bool = True,
           deep: bool = False, rollout: int = 0,
@@ -513,90 +548,42 @@ def climb(state: BattleState, rng=random, budget: int = 16,
     with `best_plan` at equal cost, which is the only fair comparison
     between two search strategies.
 
-    `pairs` lets two seats change TOGETHER once the single-seat sweeps
-    settle, which is the one move coordinate ascent structurally cannot
-    make. Measured on a real no-level-7 board:
+    GROUP AND SINGLE-TARGET ARE DIFFERENT MOVES, and probing by track
+    alone hid one of them. The menu took the policy's favourite action
+    per TRACK, so on a CEO board seat 1 was offered `Birthday Cake -> c2`
+    for Throw and `TNT -> c2` for Trap -- 342 apiece by `_quick_score`,
+    while `Wedding Cake -> all` scored 1103 and `Railroad -> all` 1159
+    and neither was ever put in front of the judge. A gag that hits four
+    cogs is not a reordering of one that hits one. `_track_key` now keys
+    on (track, group); `GROUP_PROBES` turns it off.
 
-        366.4   both toons lure/6 -- where the sweep stops
-        177.8   change either ONE to sound/6
-        672.1   change BOTH to sound/6
+    It is ON, on this evidence, paired on identical positions:
 
-    Sound resolves after Lure and wakes what Lure put to sleep, so the
-    mixed plan is far worse than either pure one. Every single-seat edit
-    is downhill and the joint edit nearly doubles the score, so the
-    sweep sits at 366 and stops. Over 43 sampled no-7 rounds the best
-    plan needed BOTH seats to move 72% of the time, and the climb
-    captured 68.4% of the reachable score.
+        board            budget 24   budget 36
+        facilities          -0.2        +1.3
+        CEO 0               -1.7        +4.5
+        CEO 2               +8.8         --
+        CEO 4               +9.0         --
 
-    This is why widening what each seat is OFFERED never helped --
-    `probe_tracks` and larger `width` were both refuted twice. They add
-    candidates to a menu whose problem is that the two choices have to
-    be made at the same time. Note the pair menu is built BY TRACK for
-    the same reason: `sound/6->all` sits 22nd and 16th for the two seats
-    on the board above, so no top-k reaches it. Each fix alone is
-    blocked by the other wall, which is why both were refuted
-    separately.
+    Two effects pulling opposite ways, and they separate cleanly. The
+    GAIN scales with cogs alive, because that is what a group gag is
+    for -- CEO 4 pays at budget 24 where CEO 0 needs 36. The COST is
+    fixed, about four extra menu entries a seat, spent whether they help
+    or not. Starve the search and the cost is all you get: at budget 24
+    the wider menu is 88 up / 98 down on CEO 0 (p=0.51), and at 36 it is
+    100 up / 73 down (p=0.048). The trace that showed why is worth
+    keeping -- on side 92008 the starved arm picked `Geyser -> all` over
+    `Toontanic -> all`, left three cogs alive on 5 hp, and took 75 laff
+    for it.
 
-    OFF, having been measured on 240 held-out sides a set:
+    Facilities are untouched at every budget: 46 discordant games in
+    1800. Few cogs and often no group gag in the track, so the extra key
+    usually adds no candidate at all. That is the difference from the
+    three earlier refutations of "widen the menu" -- this one is neutral
+    where it cannot help rather than costly everywhere.
 
-        set              shipped   +pairs
-        buildings          68.3%    70.4%   (= budget control)
-        VP                 98.8%    99.6%
-        CEO 0              92.5%    90.4%
-        CEO 5              44.2%    35.4%   p=0.020
-        CEO 0, no lvl 7s   21.7%    27.5%   p=0.041
-
-    It works exactly where predicted and loses where the agent is
-    already good. Both significant, opposite directions.
-
-    WHY, AND IT IS THE GENERAL LESSON. A joint move lets the search
-    reach plans `_quick_score` rates highly, and `_quick_score` is an
-    approximation -- so more reach means more scope to act on its own
-    errors. On a no-level-7 board the policy has never trained on, its
-    proposals are bad and the extra reach rescues them. Everywhere else
-    the proposals are good and the reach mostly finds the scorer's
-    mistakes.
-
-    So the narrow window is not a limitation to be removed, it is a
-    REGULARISER holding an imperfect scorer near a well-trained policy's
-    suggestions. `probe_tracks`, wider `width` and this are the same
-    move, and all three fail in-distribution for the same reason.
-
-    The prerequisite for any of them is an evaluator worth widening --
-    and `prevented` documents why that cannot be done one term at a
-    time. Turn this on only for positions outside the policy's training
-    distribution, where there is nothing good to stay near.
-
-    `probe_tracks` offers each seat the best action of every track it
-    holds, not just the policy's top `width`. It is OFF, having been
-    tried and measured, and the reason it fails is worth more than the
-    feature would have been.
-
-    The motivation was real. The climb can only reorder what the policy
-    proposes, and PPO gives Trap essentially no probability, so a plan
-    containing one is unreachable however much budget is spent -- while
-    the search opens the same position with `trap5` and a hold. Probing
-    does fix that: on the position in question the climb goes from
-    `sound5 + squirt5 + squirt4 + throw7` to `trap5 + sound5 + squirt4
-    + throw7`, matching the search on three seats of four.
-
-    It does not help, over 180 held-out buildings:
-
-        no probes, budget 8      66.1% finished   trap 1.0%
-        probes,    budget 8      63.3%            trap 1.2%
-        no probes, budget 12     65.0%            trap 0.9%
-        probes,    budget 12     65.0%            trap 1.2%
-
-    Trap use barely moves, so the probes are being OFFERED and
-    `_quick_score` is declining them -- it plays one all-hit round, and
-    a trap pays the round after, so it scores near zero. Widening a
-    proposal cannot help when the judge is blind to what was added, and
-    the probes cost budget that the seat-swaps were using, which is why
-    budget 8 gets worse rather than merely staying flat.
-
-    The evaluator is the ceiling here, not the proposal width. Same
-    conclusion the budget sweep reached from the other side: climbing
-    `_quick_score` harder stops helping, because it is a proxy.
+    Boss analysis wants budget 36 or better. `advise.DEFAULT_BUDGET` is
+    15 and is not measured here.
     """
     import numpy as np
 
@@ -638,7 +625,7 @@ def climb(state: BattleState, rng=random, budget: int = 16,
                 for i in order:
                     entry = env_mod.ACTIONS[int(i)]
                     if entry is not None and np.isfinite(values[int(i)]):
-                        seen_tracks.add(entry.track)
+                        seen_tracks.add(_track_key(entry))
                 for index in np.argsort(values)[::-1]:
                     index = int(index)
                     if not np.isfinite(values[index]):
@@ -646,10 +633,10 @@ def climb(state: BattleState, rng=random, budget: int = 16,
                     entry = env_mod.ACTIONS[index]
                     if entry is None:
                         continue          # ACTIONS has gaps
-                    track = entry.track
-                    if track in seen_tracks:
+                    key = _track_key(entry)
+                    if key in seen_tracks:
                         continue
-                    seen_tracks.add(track)
+                    seen_tracks.add(key)
                     order.append(index)
             for index in order:
                 if not np.isfinite(values[index]):
@@ -702,9 +689,10 @@ def climb(state: BattleState, rng=random, budget: int = 16,
                     entry = env_mod.ACTIONS[index]
                     if entry is None:
                         continue          # ACTIONS has gaps
-                    if entry.track in seen_tracks:
+                    key = _track_key(entry)
+                    if key in seen_tracks:
                         continue
-                    seen_tracks.add(entry.track)
+                    seen_tracks.add(key)
                     best_of_track.append(index)
                     if len(best_of_track) >= pair_width:
                         break
