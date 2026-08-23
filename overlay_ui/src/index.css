@@ -21,8 +21,14 @@
   --radius-field: 0.5rem;
 }
 
-html, body, #root { height: 100%; }
-body { font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif; }
+html, body { height: 100%; }
+/* #root deliberately does NOT get height:100%. The panel measures its
+   own content to size the window, and a full-height root reports the
+   viewport back to itself -- so the window could grow and never shrink.
+   The background is painted on body instead, so a window briefly taller
+   than its content still looks right. */
+body { font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+       background: var(--color-base-100); }
 
 /* Track accents. Chosen for contrast on this background and NOT taken
    from the game -- TTR's gag menu palette is not confirmed anywhere in

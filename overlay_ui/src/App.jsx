@@ -1,13 +1,39 @@
 import React, { useEffect, useState } from 'react'
 
-// The model Python posts. Shape matches `overlay.Model.to_json()`; this
-// default is also what the page shows when opened in a browser with no
-// Python behind it, so `npm run dev` is useful on its own.
+// The model Python posts. Shape matches `panel.model_json`; this default
+// is also what the page shows when opened in a browser with no Python
+// behind it, so `npm run dev` is useful on its own.
 const EMPTY = {
   in_battle: false, status: 'waiting', turn: 0,
-  advice: '', track: null, rows: [], problems: [],
+  advice: '', track: null, gag_level: null, rows: [], problems: [],
   evidence: '', can_confirm: false, can_advise: false, thinking: false,
 }
+
+// THE REAL GAME ART, not a generic icon set. Vite fingerprints and
+// bundles whatever these globs match, so the lookups below are plain
+// string keys with no runtime fetch -- which matters, because the panel
+// has no network and sits over a game that may be fullscreen.
+//
+// Gag files are `gag-<track>-<level>.png` and the track slugs are
+// `Track.value` verbatim (toon_up, trap, lure, sound, throw, squirt,
+// drop), so `model.track` and `model.gag_level` index them directly.
+const GAG_ART = import.meta.glob('./assets/gags/*.png', {
+  eager: true, import: 'default',
+})
+const COG_ART = import.meta.glob('./assets/cogs/*.png', {
+  eager: true, import: 'default',
+})
+
+const gagArt = (track, level) =>
+  (track && level) ? GAG_ART[`./assets/gags/gag-${track}-${level}.png`] : null
+
+// Falls back to the department emblem, which is the honest picture when
+// a plate was read to a department but not to a single cog. Drawing a
+// specific cog there would assert more than was actually read.
+const cogArt = (art, department) =>
+  (art && COG_ART[`./assets/cogs/cog-${art}.png`]) ||
+  (department && COG_ART[`./assets/cogs/dept-${department}.png`]) ||
+  null
 
 function healthClass(h) {
   if (h > 0.6) return 'bg-success'
@@ -16,14 +42,26 @@ function healthClass(h) {
 }
 
 function CogRow({ row }) {
+  const art = cogArt(row.art, row.department)
   return (
-    <div className="flex items-center gap-2 py-[3px]">
-      <span className="w-6 text-right font-mono text-[11px] opacity-40">
+    <div className="flex items-center gap-2.5 py-[3px]">
+      <div className="size-7 shrink-0 overflow-hidden rounded-full bg-base-300 ring-1 ring-white/5">
+        {art ? (
+          <img
+            src={art}
+            alt=""
+            className={`size-full object-cover ${
+              row.identified ? '' : 'opacity-45 saturate-50'
+            }`}
+          />
+        ) : null}
+      </div>
+      <span className="w-5 shrink-0 text-right font-mono text-[11px] opacity-40">
         {row.level ?? '?'}
       </span>
       <span
-        className={`w-32 truncate text-[13px] ${
-          row.identified ? 'opacity-70' : 'opacity-40 italic'
+        className={`w-28 shrink-0 truncate text-[13px] ${
+          row.identified ? 'opacity-80' : 'opacity-40 italic'
         }`}
       >
         {row.name}
@@ -36,7 +74,7 @@ function CogRow({ row }) {
           style={{ width: `${Math.max(3, row.health * 100)}%` }}
         />
       </div>
-      <span className="w-9 text-right font-mono text-[11px] opacity-60">
+      <span className="w-9 shrink-0 text-right font-mono text-[11px] opacity-60">
         {Math.round(row.health * 100)}%
       </span>
     </div>
@@ -46,39 +84,50 @@ function CogRow({ row }) {
 function Advice({ model }) {
   const showing = Boolean(model.advice) && model.in_battle
   const track = showing && model.track ? model.track : 'none'
+  const art = showing ? gagArt(model.track, model.gag_level) : null
   return (
     <div
-      className={`track-${track} relative overflow-hidden rounded-box bg-base-200 px-4 py-3`}
+      className={`track-${track} relative flex items-center gap-3 overflow-hidden rounded-box bg-base-200 px-4 py-3`}
     >
       <div
         className="absolute inset-y-0 left-0 w-[3px]"
         style={{ background: 'var(--accent)' }}
       />
-      {showing && model.track && (
-        <div
-          className="text-[10px] font-semibold tracking-[0.14em]"
-          style={{ color: 'var(--accent)' }}
-        >
-          {model.track.replace('_', '-').toUpperCase()}
-        </div>
+      {art && (
+        <img
+          src={art}
+          alt=""
+          className="size-11 shrink-0 object-contain drop-shadow"
+        />
       )}
-      <div
-        className={
-          showing
-            ? 'text-[19px] font-bold leading-tight'
-            : 'text-[14px] opacity-50'
-        }
-      >
-        {model.thinking && !showing ? (
-          <span className="inline-flex items-center gap-2">
-            <span className="loading loading-dots loading-sm" />
-            thinking
-          </span>
-        ) : (
-          model.advice || (model.in_battle
-            ? 'no move to recommend'
-            : 'waiting for a battle')
+      <div className="min-w-0">
+        {showing && model.track && (
+          <div
+            className="text-[10px] font-semibold tracking-[0.14em]"
+            style={{ color: 'var(--accent)' }}
+          >
+            {model.track.replace('_', '-').toUpperCase()}
+            {model.gag_level ? ` · ${model.gag_level}` : ''}
+          </div>
         )}
+        <div
+          className={
+            showing
+              ? 'text-[17px] font-bold leading-tight'
+              : 'text-[14px] opacity-50'
+          }
+        >
+          {model.thinking && !showing ? (
+            <span className="inline-flex items-center gap-2">
+              <span className="loading loading-dots loading-sm" />
+              thinking
+            </span>
+          ) : (
+            model.advice || (model.in_battle
+              ? 'no move to recommend'
+              : 'waiting for a battle')
+          )}
+        </div>
       </div>
     </div>
   )
@@ -98,9 +147,15 @@ export default function App() {
   // panel grows and shrinks with the number of cogs and the length of
   // the evidence line, and a fixed height either clips or leaves a dead
   // strip -- which is the bug the Tk version had.
+  //
+  // MEASURE #panel, NOT #root. index.css gives html/body/#root
+  // `height: 100%` so the background fills the window, which also means
+  // #root.scrollHeight can never drop below the current viewport -- ask
+  // it and the window only ever grows. Two cogs left in a fight sat in a
+  // window sized for four, which is the same dead strip in a new place.
   useEffect(() => {
     const send = () => {
-      const h = document.getElementById('root')?.scrollHeight
+      const h = document.getElementById('panel')?.scrollHeight
       if (h && window.pywebview?.api?.set_height) {
         window.pywebview.api.set_height(Math.ceil(h))
       }
@@ -114,7 +169,7 @@ export default function App() {
   }
 
   return (
-    <div className="flex min-h-full flex-col gap-2 bg-base-100 p-4 text-base-content">
+    <div id="panel" className="flex flex-col gap-2 bg-base-100 p-4 text-base-content">
       <div className="flex items-center gap-2">
         <span
           className={`inline-block size-[7px] rounded-full ${
@@ -147,7 +202,7 @@ export default function App() {
         )}
       </div>
 
-      <div className="mt-auto flex items-center gap-2 pt-1">
+      <div className="flex items-center gap-2 pt-1">
         <button
           className="btn btn-sm btn-ghost text-[12px] font-normal"
           disabled={!model.can_confirm}
@@ -167,7 +222,7 @@ export default function App() {
           onClick={() => call('close')}
           title="close"
         >
-          ✕
+          &#10005;
         </button>
       </div>
 

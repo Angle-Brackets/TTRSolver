@@ -112,6 +112,13 @@ class CogRow:
     name: str
     level: Optional[int]
     health: float
+    # `<department>-<key>`, matching visualizer/assets/cog-*.png, or None
+    # when the plate was not identified to a single cog. The view falls
+    # back to the department emblem, which is the honest picture: the
+    # reader knows the department and not the cog, and drawing a
+    # specific cog would assert more than was read.
+    art_key: Optional[str] = None
+    department: Optional[str] = None
     identified: bool = True
 
 
@@ -139,6 +146,11 @@ class Model:
     # The recommended gag's track, for the accent colour. None when the
     # advice is a pass, a pink slip, or absent.
     track: Optional[str] = None
+    # Its level, 1-7. Track and level together name the gag, which is
+    # what `visualizer/assets/gag-<track>-<level>.png` is keyed on. None
+    # in exactly the cases `track` is None -- a pass and a pink slip are
+    # not gags and have no picture.
+    gag_level: Optional[int] = None
     problems: List[str] = field(default_factory=list)
     thinking: bool = False
     turn: int = 0
@@ -319,6 +331,7 @@ class Worker(threading.Thread):
             if lines:
                 model.gag, model.gag_at = lines[0], time.time()
                 model.track = advise_mod.track_of(action)
+                model.gag_level = (action.level if model.track else None)
         self._post()
 
     def _post(self) -> None:
@@ -336,9 +349,12 @@ def _row(reading) -> "CogRow":
     """A reading in the shape the view draws."""
     from .. import data
 
+    art_key = None
     if reading.cog:
         try:
-            name = data.cog(reading.department, reading.cog).display
+            entry = data.cog(reading.department, reading.cog)
+            name = entry.display
+            art_key = f"{entry.department}-{entry.key}"
         except (KeyError, ValueError):            # pragma: no cover
             name = reading.cog
         identified = True
@@ -347,7 +363,8 @@ def _row(reading) -> "CogRow":
         identified = False
     return CogRow(name=name, level=reading.level,
                   health=max(0.0, min(1.0, float(reading.health))),
-                  identified=identified)
+                  identified=identified, art_key=art_key,
+                  department=reading.department)
 
 
 def _describe_reading(reading) -> str:

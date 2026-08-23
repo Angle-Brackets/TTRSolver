@@ -64,8 +64,10 @@ def model_json(model: Model) -> str:
                   or (model.gag and time.time() - model.gag_at < ADVICE_LINGER)
                   else "",
         "track": model.track,
+        "gag_level": model.gag_level,
         "rows": [{"name": r.name, "level": r.level,
-                  "health": r.health, "identified": r.identified}
+                  "health": r.health, "identified": r.identified,
+                  "art": r.art_key, "department": r.department}
                  for r in model.rows],
         "problems": list(model.problems),
         "evidence": model.evidence,
