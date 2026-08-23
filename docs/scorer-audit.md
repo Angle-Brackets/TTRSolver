@@ -718,6 +718,45 @@ evaluation sides or an evaluation that is not one high-variance fight.
 
 `v2_s3` stays shipped.
 
+## Refuted -- refitting all seven weights with the ES
+
+`tools/fit_scorer.py` was fixed first: it dropped fire actions silently
+(so it could not score a boss position at all) and re-planned mid-round
+whenever a seat held. It also grew a `--boss-weight` objective, because
+the shipped weights were fitted on buildings ALONE and nothing in that
+objective ever held a Version 2.0, a pink slip or a cog above level 12.
+
+Run against the shipped configuration -- budget 24, probes and pairs on,
+buildings plus VP plus CEO at 2 leftovers, 45 generations:
+
+    fit set    73.3% -> 79.2%
+    validate   70.4% -> 70.8%
+
+Six points on the set it optimised, nothing on the set it did not. On a
+THIRD set, touched by neither, every cell is inside noise: buildings
+-1.0, VP +0.5, CEO 0 +0.5, CEO 2 +3.0 (p=0.23).
+
+**The optimiser is below the noise floor of its own objective.** The fit
+set is 60 seeds over three fight types -- 180 sides an evaluation --
+against a CEO clear rate that swings 39 points across identically
+trained policy seeds. It converged by generation 10 and spent 35 more
+polishing noise.
+
+Which is exactly why the `prevent` sweep worked where this does not. One
+coefficient, a mechanism behind it, 120-200 sides a point, and an effect
+of +45 -- far above the floor. A seven-dimensional black-box search over
+180 sides cannot resolve anything smaller than that, and everything
+smaller is what is left.
+
+For the record, since the numbers look plausible and someone will want
+to try them: it proposed `kill` 120 -> 79.5, `prevent` 9 -> 7.4, `risk`
+0.0 -> 3.06, the rest near unchanged. None of it validated.
+
+**A useful fit needs a cheaper or quieter objective**, not more
+generations. Either many more sides an evaluation, which multiplies a
+run that already takes an hour, or an objective that is not dominated by
+one high-variance fight.
+
 ## Two notes on method
 
 **Small samples overstated an effect three times in one session.** A
