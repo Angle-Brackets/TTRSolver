@@ -772,3 +772,42 @@ test are the minimum for anything that gets quoted.
 every row regardless of the win flag and can only ever print 100%. It
 was written twice during this audit, and the first time nearly got a
 dead-flat sweep reported as a finding.
+
+## The false-rule policy over-reaches for Lure, measured
+
+`ae8a42e` argued that a policy fitted to a rule the game does not have
+is "a liability whose failures nobody can predict". That was an argument
+from principle. This is the measurement.
+
+On 150 real boards each carrying a TRAPPED cog and a Lure in the pouch
+-- the only situation where the simultaneous-Lure rule can express
+itself -- raw policy proposals, no climb:
+
+| | Lure share |
+|---|---|
+| eleven correct-rule policies | 16-33%, mean 26%, sd 5.0% |
+| `v2_s3`, trained before ace42b2 | **38%** |
+
+`v2_s3` falls outside the entire correct-rule range, +2.4 sd from their
+mean. It reaches for Lure exactly where its training said a Lure could
+recover a cog whose trap had just sprung, and that is not a move.
+
+It is ONE false-rule policy, so this is a consistent pattern rather than
+a demonstrated cause -- CEO win rates vary 42 points on seed alone, and
+nobody has trained several policies under the old rule to see the
+false-rule spread. What makes it more than a coincidence is that the
+same shape was already recorded above for `boss_s2`, trained under an
+even more broken Lure rule, at 83% against 0-14%. Two policies, two
+rules, same direction.
+
+**Two earlier attempts at this measurement found nothing, and both were
+broken rather than negative.** The first ran the climb, which scores
+candidates with the CORRECTED simulator and therefore filters the bad
+proposal before it reaches the plan -- it measures the search, not the
+policy. The second built positions by calling `env.facility_position`
+directly, which returns a floor PLAN with no cogs on the board;
+`BattleEnv.reset()` is what deals the first floor. Every position had
+zero legal actions, `propose` returned all-None, and the totals were
+zero for both arms, which reads exactly like agreement. If a probe
+reports a clean 0% for everything, check that it measured anything at
+all before believing it.
