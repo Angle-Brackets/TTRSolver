@@ -713,3 +713,87 @@ class TestDamageEndsLure(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTwoTrapsCancel(unittest.TestCase):
+    """Two Traps at one cog in one round nil each other, and the gags are
+    still spent. [CONFIRMED] by the owner from play.
+
+    The Railroad is the exception: it nils the other and places anyway.
+
+    This could not live in `apply_toon_action`, which is where Trap used
+    to be resolved one toon at a time -- each call sees only its own
+    trap, so the second silently overwrote the first and a cog that
+    should have ended the round bare ended it armed.
+    """
+
+    def _party(self, n=4):
+        toons = [ToonState(laff=80, max_laff=80,
+                           track_exp={t: 7 for t in Track},
+                           gag_counts={(t, l): 3 for t in Track
+                                       for l in range(1, 8)},
+                           organic_tracks=frozenset())
+                 for _ in range(n)]
+        hp = data.cog_max_hp(12)
+        cogs = [CogState(cog_type="mr_hollywood", department="sellbot",
+                         level=12, hp=hp, max_hp=hp) for _ in range(2)]
+        return BattleState(toons=toons, cogs=cogs)
+
+    def test_two_traps_on_one_cog_leave_it_bare(self):
+        state = self._party()
+        simulator.apply_party_round(
+            state,
+            [Action(Track.TRAP, 1, 0), Action(Track.TRAP, 3, 0), None, None],
+            hits=[True] * 4)
+        self.assertFalse(state.cogs[0].status.trapped)
+        self.assertIsNone(state.cogs[0].status.trap_level)
+
+    def test_both_gags_are_spent_anyway(self):
+        state = self._party()
+        simulator.apply_party_round(
+            state,
+            [Action(Track.TRAP, 1, 0), Action(Track.TRAP, 3, 0), None, None],
+            hits=[True] * 4)
+        self.assertEqual(state.toons[0].gag_counts[(Track.TRAP, 1)], 2)
+        self.assertEqual(state.toons[1].gag_counts[(Track.TRAP, 3)], 2)
+
+    def test_the_railroad_survives_being_nilled(self):
+        state = self._party()
+        simulator.apply_party_round(
+            state,
+            [Action(Track.TRAP, 1, 0), Action(Track.TRAP, 7, None),
+             None, None],
+            hits=[True] * 4)
+        self.assertTrue(state.cogs[0].status.trapped)
+        self.assertEqual(state.cogs[0].status.trap_level, 7,
+                         "the Railroad places, the Banana Peel does not")
+
+    def test_traps_on_different_cogs_both_place(self):
+        state = self._party()
+        simulator.apply_party_round(
+            state,
+            [Action(Track.TRAP, 1, 0), Action(Track.TRAP, 3, 1), None, None],
+            hits=[True] * 4)
+        self.assertEqual([c.status.trap_level for c in state.cogs], [1, 3])
+
+    def test_one_trap_alone_still_places(self):
+        state = self._party()
+        simulator.apply_party_round(
+            state, [Action(Track.TRAP, 6, 0), None, None, None],
+            hits=[True] * 4)
+        self.assertTrue(state.cogs[0].status.trapped)
+
+    def test_a_second_trap_answers_a_badly_placed_one(self):
+        """The reason this rule matters strategically: a teammate who
+        traps a full-health cog about to be lured has thrown the lure
+        away, and the only answer is to trap the same cog again."""
+        state = self._party()
+        simulator.apply_party_round(
+            state,
+            [Action(Track.TRAP, 1, 0), Action(Track.TRAP, 1, 0),
+             Action(Track.LURE, 6, None), None],
+            hits=[True] * 4)
+        self.assertTrue(state.cogs[0].status.lured,
+                        "nilling the trap leaves the Lure intact")
+        self.assertEqual(state.cogs[0].hp, state.cogs[0].max_hp,
+                         "and nothing sprang")

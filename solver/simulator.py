@@ -891,9 +891,52 @@ def _apply_track_group(state: BattleState, track: Track, resolved,
                 healed[target] += amount
         return
 
-    if track in (Track.TRAP, Track.LURE):
-        # Neither deals damage directly, so neither combos; the existing
-        # single-action path already has their rules exactly.
+    if track == Track.TRAP:
+        # TWO TRAPS ON ONE COG CANCEL. [CONFIRMED] by the owner: thrown in
+        # the same round at the same cog, neither is placed and BOTH gags
+        # are still spent. The Railroad is the exception -- it nils the
+        # other trap and places anyway.
+        #
+        # This cannot be delegated to `apply_toon_action` one toon at a
+        # time, which is what it used to do: each call sees only its own
+        # trap, so the second silently overwrote the first and a cog that
+        # should have ended the round bare ended it armed. It is also the
+        # only reason a fourth toon can answer a badly-placed trap at all
+        # -- throwing a second trap at the same cog is how you stop the
+        # first from springing.
+        claims: Dict[int, List[Tuple[int, object]]] = {}
+        for toon_index, action, targets, _g, hit in resolved:
+            _spend_gag(state.toons[toon_index], action.track, action.level)
+            if not hit:
+                continue
+            for cog_index in targets:
+                claims.setdefault(cog_index, []).append((toon_index, action))
+
+        for cog_index, bids in claims.items():
+            cog = state.cogs[cog_index]
+            if cog.status.is_dead:
+                continue
+            group = [(i, a) for i, a in bids
+                     if data.gag(a.track, a.level).group]
+            if len(bids) > 1 and not group:
+                cog.status.clear_trap()       # both nilled, gags gone
+                continue
+            toon_index, action = group[0] if group else bids[0]
+            # The group Trap wakes what it lays under; a single-target one
+            # cannot be placed on a cog already off its square.
+            if group:
+                cog.status.clear_lure()
+            elif cog.status.lured:
+                continue
+            cog.status.trapped = True
+            cog.status.trap_track = action.track
+            cog.status.trap_level = action.level
+            cog.status.trap_organic = state.toons[toon_index].is_organic(
+                action.track)
+        return
+
+    if track == Track.LURE:
+        # No damage, so no combo; the single-action path has its rules.
         for toon_index, action, _t, _g, hit in resolved:
             apply_toon_action(state, action, hit, actor=toon_index)
         return

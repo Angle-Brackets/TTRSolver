@@ -206,6 +206,18 @@ class CogStatus:
         self.lure_acc_before_bonus = None
         self.lure_level = None
 
+    def clear_trap(self) -> None:
+        """No trap under this cog -- sprung, or cancelled by a second one.
+
+        Every field together, because a stale `trap_level` under a
+        `trapped=False` cog is the shape that makes a later Lure look up
+        damage for a trap that is not there.
+        """
+        self.trapped = False
+        self.trap_track = None
+        self.trap_level = None
+        self.trap_organic = False
+
     def copy(self) -> "CogStatus":
         return CogStatus(
             lured=self.lured,
