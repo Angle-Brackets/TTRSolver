@@ -402,6 +402,17 @@ def calc_hp_bonus(total_damage: int, gags_on_target: int = 1) -> int:
     `gags_on_target` defaults to 1, which is the solo case and yields 0,
     so nothing about solo play changes.
 
+    PER COG, NOT PER ROUND, and this is where Toontown Online had a bug
+    that must not be copied back in. The bonus counts the gags of one
+    track landing on THAT cog. A group Geyser plus a single Storm Cloud
+    at one cog gives that cog 105 + 80 = 185 and the 20% on top; the
+    three cogs the Geyser alone reached take a flat 105 with no bonus.
+    Applying the multiplier to every cog a group gag touched, because
+    two same-track gags were used somewhere in the round, is the TTO
+    behaviour and is [CONFIRMED] wrong for TTR by the owner from play.
+    `simulator._apply_track_group` keys its contributions by cog index
+    for this reason, and a test asserts two cogs do not combo.
+
     ROUNDING IS NOT WIKI-CONFIRMED. The wiki says "a 20% damage bonus"
     and does not say how it rounds; `ceil` comes from the QED1224 source
     doc, which describes Toontown Online. It is kept because a bonus has
