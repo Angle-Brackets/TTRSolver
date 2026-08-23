@@ -75,7 +75,14 @@ KEYS = ("heal", "armed", "kill", "kill_threat", "prevent", "risk", "price")
 # `kill_threat` of 5 is worth about half a flat kill; `risk` is charged
 # per toon, against a landed-damage term in the tens.
 SCALE = {"heal": 2.0, "armed": 1.0, "kill": 120.0, "kill_threat": 5.0,
-         "prevent": 2.0, "risk": 20.0, "price": 1.0}
+         "prevent": 6.0, "risk": 20.0, "price": 1.0}
+
+# `prevent` was 2.0 with a scale of 2.0. It is now 9.0, found by a sweep
+# after `prevented` was remodelled, and a scale of 2.0 gives steps of
+# +/-0.6 at sigma 0.30 -- too small to cross its own range, so the fit
+# would have reported it converged when it had barely moved. A scale is
+# a statement about how far a weight might travel, and it goes stale
+# when the weight does.
 
 
 def play(seed, sampler, budget: int) -> bool:
