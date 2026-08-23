@@ -400,6 +400,91 @@ def _judge(state: BattleState, plan, deep: bool) -> float:
 # `_track_key`.
 GROUP_PROBES = True
 
+# MEASURED NEUTRAL, kept as a correctness rule rather than a win. Paired
+# over four cells: 33 up / 31 down, p=0.90. Blocking the move without
+# giving the seat anywhere better to go just changes which gag is spent.
+#
+# Reject a plan that throws a Drop at cogs its OWN Lure puts to sleep.
+# Drop resolves after Lure and always misses a lured cog, so such a gag
+# only lands in the branch where the plan's own Lure missed. The scorer
+# prices that correctly -- on a real board a Grand Piano behind a 70%
+# Lure was worth +90, because in the 30% branch it lands and may kill --
+# and it is still a bad trade: a level 6 Drop is scarce and the fight is
+# long. This is a judgement about gag economy that a one-round scorer
+# cannot make, so it is a rule rather than a weight.
+NO_DROP_INTO_OWN_LURE = True
+
+# MEASURED NEUTRAL: 57 up / 54 down, p=0.85 over six cells. Kept because
+# the move was UNREACHABLE rather than rejected, which is a different
+# defect from being unwanted -- the same one that hid Trap at rank 25 and
+# the group gags. With both this and the Drop rule on, the pair read 53
+# up / 68 down (p=0.20), which neither component supports; three
+# underpowered tests, and the honest summary is that none of them moves
+# the win rate.
+#
+# Note `simulator.legal_actions` predicts the ceiling here: a lured cog
+# does not attack, so on a fully-lured board a pass costs no laff and no
+# gag, and `_quick_score` plays ONE round -- the cost of coasting while
+# the lure lapses is off its horizon. Making the move reachable cannot
+# help until the judge can see that.
+#
+# Always put "hold" in front of the judge. Without it the pass entry is
+# unreachable: it lives in `ACTIONS` as None so the track probes skip it,
+# and the policy ranks it near last on exactly the boards where it is
+# right. Legality was never the constraint.
+ALWAYS_PROBE_PASS = True
+
+
+def _wastes_a_drop(state, plan) -> bool:
+    """Does this plan throw a Drop at cogs that will all be asleep?
+
+    Drop resolves last and always misses a lured cog, so a Drop whose
+    every target is asleep cannot land at all -- there is not even a
+    hedge, because the cogs were already lured before the round or are
+    lured by this plan. On a real CEO board `lure/5 + GrandPiano->c0`
+    scored -29.8 against -11.4 for the same Lure alone: the scorer
+    already ranks it worse and plays it anyway, because `legal_actions`
+    offers a pass only in narrow circumstances and the seat must throw
+    something.
+
+    A WOKEN COG IS DIFFERENT, and this is the whole subtlety. Gags
+    resolve Toon-Up, Trap, Lure, Sound, Throw, Squirt, Drop, and a
+    landed attack ends the lure (`mechanics.LURE_ENDS_ON_DAMAGE`). So a
+    Sound, Throw or Squirt aimed at a sleeping cog wakes it before the
+    Drop arrives, and Drop-behind-Lure is then a real play rather than a
+    wasted Piano. Only Drops with no such partner are rejected.
+    """
+    from .. import data
+    from ..state import Track
+
+    live = {i for i, c in enumerate(state.cogs) if not c.status.is_dead}
+    if not live:
+        return False
+
+    asleep = {i for i in live if state.cogs[i].status.lured}
+    woken = set()
+    for a in plan or ():
+        if a is None or a.is_pass or getattr(a, "fire", False):
+            continue
+        targets = ((live if a.target_index is None else {a.target_index})
+                   & live)
+        if a.track is Track.LURE:
+            asleep |= targets
+        elif a.track in (Track.SOUND, Track.THROW, Track.SQUIRT):
+            # Resolves before Drop and ends the lure on landing.
+            woken |= targets
+
+    for a in plan or ():
+        if a is None or a.is_pass or getattr(a, "fire", False):
+            continue
+        if a.track is not Track.DROP:
+            continue
+        targets = ((live if a.target_index is None else {a.target_index})
+                   & live)
+        if targets and targets <= (asleep - woken):
+            return True
+    return False
+
 
 def _track_key(entry):
     """What counts as a distinct kind of move for probing purposes.
@@ -638,6 +723,18 @@ def climb(state: BattleState, rng=random, budget: int = 16,
                         continue
                     seen_tracks.add(key)
                     order.append(index)
+                # HOLDING IS A MOVE AND HAD NO SLOT. The probe menu is
+                # built from `ACTIONS`, where the pass entry is None, so
+                # the loop above skips it -- and the policy ranks it 31st
+                # of 33 on a board where every cog is already lured, far
+                # outside the 3-wide window. The seat was therefore
+                # forced to throw something, which is how a Grand Piano
+                # gets spent into a sleeping cog for a guaranteed miss.
+                # Legality is not the constraint: `free_passes` was 3.
+                if (ALWAYS_PROBE_PASS
+                        and np.isfinite(values[env_mod.PASS_INDEX])
+                        and env_mod.PASS_INDEX not in order):
+                    order.append(env_mod.PASS_INDEX)
             for index in order:
                 if not np.isfinite(values[index]):
                     continue
@@ -645,6 +742,8 @@ def climb(state: BattleState, rng=random, budget: int = 16,
                 trial = list(plan)
                 trial[seat] = None if action.is_pass else action
                 if trial == plan:
+                    continue
+                if NO_DROP_INTO_OWN_LURE and _wastes_a_drop(state, trial):
                     continue
                 try:
                     score = judge(state, trial)
@@ -708,6 +807,9 @@ def climb(state: BattleState, rng=random, budget: int = 16,
                         trial = [None if a is not None and a.is_pass else a
                                  for a in trial]
                         if trial == plan:
+                            continue
+                        if NO_DROP_INTO_OWN_LURE and _wastes_a_drop(state,
+                                                                    trial):
                             continue
                         try:
                             score = judge(state, trial)
