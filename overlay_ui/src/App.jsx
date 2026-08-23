@@ -7,6 +7,7 @@ const EMPTY = {
   in_battle: false, status: 'waiting', turn: 0,
   advice: '', track: null, gag_level: null, rows: [], problems: [],
   evidence: '', can_confirm: false, can_advise: false, thinking: false,
+  allow_level_7: true,
 }
 
 // THE REAL GAME ART, not a generic icon set. Vite fingerprints and
@@ -164,8 +165,8 @@ export default function App() {
     return () => cancelAnimationFrame(id)
   }, [model])
 
-  const call = (name) => {
-    if (window.pywebview?.api?.[name]) window.pywebview.api[name]()
+  const call = (name, arg) => {
+    if (window.pywebview?.api?.[name]) window.pywebview.api[name](arg)
   }
 
   return (
@@ -186,6 +187,21 @@ export default function App() {
         <span className="ml-auto text-[11px] opacity-35">
           {model.turn ? `turn ~${model.turn}` : ''}
         </span>
+        {/* Holding 7s back is a real decision mid-run -- you save them
+            for the boss -- so it is a toggle rather than only a launch
+            flag. The value comes from the model, not from local state,
+            so the button shows what the solver is actually doing. */}
+        <button
+          className={`btn btn-xs h-[20px] min-h-0 px-2 text-[10px] font-semibold tracking-wide ${
+            model.allow_level_7 ? 'btn-ghost opacity-45' : 'btn-warning'
+          }`}
+          onClick={() => call('set_level_7', !model.allow_level_7)}
+          title={model.allow_level_7
+            ? 'Level 7 gags are being offered — click to hold them back'
+            : 'Level 7 gags are held back — click to allow them'}
+        >
+          {model.allow_level_7 ? '7s ON' : '7s HELD'}
+        </button>
       </div>
 
       <Advice model={model} />

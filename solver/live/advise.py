@@ -298,12 +298,24 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--interval", type=float, default=0.5)
     parser.add_argument("--once", action="store_true",
                         help="read a single frame and stop")
+    parser.add_argument("--no-level-7", action="store_true",
+                        help="advise as if the pouch held no level 7 "
+                             "gags. They are the ones worth saving, so "
+                             "a player holding them for the boss wants "
+                             "advice that does not spend them")
     parser.add_argument("--ignore-checksum", action="store_true",
                         help="advise even when the gag counts disagree "
                              "with the menu's own total. UNSAFE: the "
                              "pouch is known wrong, so the advice is for "
                              "a slightly different fight")
     args = parser.parse_args(argv)
+
+    # A module global read at move-generation time, so setting it here
+    # covers the search, the climb and the scorers without threading a
+    # flag through any of them.
+    if args.no_level_7:
+        from .. import state as state_mod
+        state_mod.ALLOW_LEVEL_7 = False
 
     try:
         objective = objectives.get(args.objective)

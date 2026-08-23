@@ -74,6 +74,7 @@ def model_json(model: Model) -> str:
         "can_confirm": model.can_confirm,
         "can_advise": model.can_advise,
         "thinking": model.thinking,
+        "allow_level_7": model.allow_level_7,
     })
 
 
@@ -93,6 +94,23 @@ class Api:
         self._worker.set_forced(None if self._state.model.in_battle else True)
 
     def ask_now(self) -> None:
+        self._worker.ask_now()
+
+    def set_level_7(self, allow) -> None:
+        """Offer level 7 gags, or hold them back.
+
+        `state.ALLOW_LEVEL_7` is a module global read when moves are
+        generated, so flipping it here reaches the search, the climb and
+        the scorers without threading a flag through any of them. The
+        model carries it so the button reflects the real setting rather
+        than the page's own idea of it.
+        """
+        from .. import state as state_mod
+
+        state_mod.ALLOW_LEVEL_7 = bool(allow)
+        self._state.model.allow_level_7 = bool(allow)
+        # Recompute now: the advice on screen was worked out under the
+        # old setting and is stale the moment this changes.
         self._worker.ask_now()
 
     def close(self) -> None:
@@ -148,6 +166,9 @@ def main(argv: Optional[list] = None) -> int:
     parser.add_argument("--budget", type=float,
                         default=advise_mod.DEFAULT_BUDGET)
     parser.add_argument("--ignore-checksum", action="store_true")
+    parser.add_argument("--no-level-7", action="store_true",
+                        help="start with level 7 gags held back; the "
+                             "panel can toggle it live")
     args = parser.parse_args(argv)
 
     index = DIST / "index.html"
@@ -162,11 +183,16 @@ def main(argv: Optional[list] = None) -> int:
         print("  pywebview is not installed:  pip install pywebview")
         return 1
 
+    if args.no_level_7:
+        from .. import state as state_mod
+        state_mod.ALLOW_LEVEL_7 = False
+
     objective = objectives.PRESETS[args.objective]
     inbox: "queue.Queue" = queue.Queue(maxsize=4)
     worker = Worker(inbox, objective, args.depth, args.budget,
                     args.ignore_checksum)
     state = PanelState()
+    state.model.allow_level_7 = not args.no_level_7
     api = Api(worker, state)
 
     width, height, left, top = _geometry()

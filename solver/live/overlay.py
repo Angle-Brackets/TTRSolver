@@ -153,6 +153,10 @@ class Model:
     gag_level: Optional[int] = None
     problems: List[str] = field(default_factory=list)
     thinking: bool = False
+    # Whether level 7 gags are being offered. Mirrors
+    # `state.ALLOW_LEVEL_7` so the panel can show and toggle it: a player
+    # saving their 7s for a boss wants advice that does not spend them.
+    allow_level_7: bool = True
     turn: int = 0
 
     @property
