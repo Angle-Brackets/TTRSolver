@@ -34,6 +34,34 @@ import random
 from typing import List, Optional, Tuple
 
 from .. import data, facility, party as party_mod, simulator
+from .. import state as state_mod
+
+# Zero a level-7 count the rules forbid, so the pouch looks naturally
+# empty rather than full of unusable gags. OFF: the reasoning was sound
+# and the measurement said no.
+#
+# The mismatch is real. With `state.ALLOW_LEVEL_7` off -- the panel's
+# "hold my 7s for the boss" toggle -- `legal_mask` drops level 7 while
+# the observation still reports the count, so the policy sees resources
+# it cannot spend. That combination never occurs in training: when a
+# training pouch has no 7s the count is genuinely 0, which is 52% of
+# sampled loadouts. Zeroing it should have put the observation back in
+# distribution.
+#
+# It changed nothing worth having, paired over 800 no-7 sides:
+#
+#     cell        shown   zeroed
+#     buildings   62.0%    61.5%
+#     buildings   61.0%    60.0%
+#     CEO 0       24.0%    22.0%
+#     CEO 2        6.5%     6.5%
+#     pooled      35 up / 42 down, p=0.49
+#
+# All four cells lean the wrong way, so it stays off. Kept as a flag
+# because the argument survives the result -- a policy retrained with
+# no-7 play as an explicit arm might use those inputs differently, and
+# this is the knob that would test it.
+MASK_SEVENS_IN_OBS = False
 from ..data import gags as gags_mod
 from ..search import objective as objective_mod
 from ..state import Action, BattleState, CogState, ToonState, Track
@@ -203,8 +231,22 @@ def encode(state: BattleState, actor: int = 0,
                     min(toon.fires, 10) / 10.0]
             for track in TRACKS:
                 for level in range(1, 8):
-                    out.append(min(toon.gag_counts.get((track, level), 0),
-                                   8) / 8.0)
+                    held = toon.gag_counts.get((track, level), 0)
+                    # A GAG THE RULES FORBID IS NOT A GAG YOU HAVE. With
+                    # `state.ALLOW_LEVEL_7` off -- the live panel's "hold
+                    # my 7s for the boss" toggle -- the mask makes level
+                    # 7 illegal while the pouch still contains them, and
+                    # showing the count anyway puts the policy in a
+                    # position it never trained on: resources visible and
+                    # unusable. Zeroing it reproduces the natural empty
+                    # pouch instead, which is 52% of sampled training
+                    # loadouts, so the observation stays in
+                    # distribution.
+                    if (MASK_SEVENS_IN_OBS
+                            and level == state_mod.LEVEL_SEVEN
+                            and not state_mod.ALLOW_LEVEL_7):
+                        held = 0
+                    out.append(min(held, 8) / 8.0)
         else:
             out += [0.0] * (4 + 49)
 
