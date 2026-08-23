@@ -160,3 +160,50 @@ Cog HP at levels 10–12 needs a second source. The non-tier-1 `tgtDef`
 branch at cog levels 4–5 isn't modeled. Multi-toon play would need
 `calc_prev_hits_bonus` and `pick_cog_target` filled in — both are
 deliberate solo-play simplifications today, not stubs.
+
+## Later: training throughput, and why numpy is not the answer
+
+Deferred by the owner, recorded so the profile does not have to be
+rediscovered.
+
+The GPU is not the constraint and never was. Training already runs on
+CUDA (`train_ppo` picks it automatically); the network is a 208K-param
+302->256->256->250 MLP that the card evaluates at ~179,000 steps/s
+against the environment's ~7,400. It idles.
+
+What the environment actually spends its time on, profiled over 6,000
+steps:
+
+| | share |
+|---|---|
+| `rl.env.encode` -- the 302-float observation | 36% |
+| `legal_mask` + `simulator.legal_actions` | ~29% |
+| `simulator.apply_party_round` -- the battle itself | 8.8% |
+
+1.57M `dict.get` and 1.02M `min()` calls for those 6,000 steps, about
+260 dict lookups a step, mostly `gag_counts[(track, level)]` walked 49
+times per toon.
+
+**So numpy would not help.** That is scalar branchy work on 302-element
+lists, where numpy's per-call overhead dominates and would likely be
+slower. numpy only pays once the env steps N battles at a time as
+columns, which is a simulator rewrite rather than a dependency change.
+
+Note also that `rl/env.py` is NOT training-only -- `search/hybrid.py`
+imports it in four places, because the live advisor calls `encode` and
+`legal_mask` to run the policy. So the stdlib rule genuinely binds here.
+Training may depend on torch; this file may not.
+
+In order of return:
+
+1. **Run training seeds in parallel.** One run steps its 32 envs in a
+   sequential Python loop and pins about one core of twelve. Measured
+   four concurrent runs at ~2,050 steps/s each against ~3,500 solo --
+   roughly 2x aggregate, stdlib, no risk.
+2. **Cache the mask and the observation.** `legal_mask` recomputes
+   `legal_actions` the caller often already has, and `encode` rebuilds
+   all 302 floats every step. Algorithmic, stdlib, aimed at 65% of the
+   runtime.
+3. **Then** mypyc or Cython on those two functions -- they suit this
+   branchy shape, perhaps 2-4x, at the cost of a build step and a
+   stdlib fallback to keep the live path honest.
