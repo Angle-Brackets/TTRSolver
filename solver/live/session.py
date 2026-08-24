@@ -48,10 +48,22 @@ from ..state import BattleState, CogState, Track, ToonState
 # the DANGEROUS way: the solver plans 91% of the damage the cog actually
 # needs, throws it, and the cog survives on a sliver.
 #
-# 0.90 covers every full reading seen. The cost is that a cog genuinely
-# on 90-100% reads as full, which is at most a few hit points and errs
-# the safe way -- the solver over-damages rather than under-damages.
-FULL_HEALTH = 0.90
+# Readings of a FULL bar, gathered live: 0.90, 0.91, 0.91, 0.95, 0.96,
+# 0.99, 0.99. Seven observations spanning nine points, with no clean
+# relationship to plate size -- a 65x44 plate read 0.99 and a 70x47 read
+# 0.90 in the same frame.
+#
+# 0.90 sat exactly on the lowest observation, which is no tolerance at
+# all: the next full bar to read 0.89 would be planned against as a
+# damaged cog. 0.85 puts a margin under the whole observed range.
+#
+# The error is asymmetric, which is what decides the direction to round.
+# Reading a full cog as damaged makes the solver plan 90% of the damage
+# the cog needs, throw it, and leave the cog alive on a sliver -- the
+# failure costs the fight. Reading a lightly damaged cog as full makes it
+# over-damage by a few hit points, which costs a gag at worst. So the
+# threshold is set to be wrong in the second direction.
+FULL_HEALTH = 0.85
 
 
 @dataclass(frozen=True)
