@@ -462,8 +462,19 @@ def _row(reading) -> "CogRow":
                                 "department": entry.department})
             except (KeyError, ValueError):        # pragma: no cover
                 continue
+    # SNAPPED THE WAY THE SOLVER SNAPS IT. `session.FULL_HEALTH` treats
+    # anything at or above the tolerance as untouched, because the bar
+    # under-reads by a few percent and the shortfall scales with how
+    # large the plate is. Showing the raw fraction meant the panel said
+    # 91% while the solver was correctly using full HP, which reads as a
+    # bug and prompted exactly that report.
+    from .session import FULL_HEALTH
+
+    shown = max(0.0, min(1.0, float(reading.health)))
+    if shown >= FULL_HEALTH:
+        shown = 1.0
     return CogRow(name=name, level=reading.level,
-                  health=max(0.0, min(1.0, float(reading.health))),
+                  health=shown,
                   identified=identified, art_key=art_key,
                   department=reading.department,
                   index=getattr(reading, "index", None), choices=choices)

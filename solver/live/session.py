@@ -72,11 +72,14 @@ def cog_from_reading(reading) -> Tuple[Optional[CogState], List[str]]:
         problems.append(f"cog {reading.index + 1}: level unreadable")
     if reading.cog is None:
         if reading.department and reading.level is not None:
+            # Points at the panel's dropdown rather than a CLI in
+            # another window: the player is mid-battle looking at the
+            # cog, and naming it there both unblocks this fight and
+            # teaches the library.
             problems.append(
                 f"cog {reading.index + 1}: a {reading.department} level "
                 f"{reading.level}, but which one is not in the head "
-                f"library yet -- run "
-                f"`python -m solver.live.read_battle --label`")
+                f"library yet -- pick it from the dropdown")
         else:
             problems.append(f"cog {reading.index + 1}: unidentified")
     if problems:
