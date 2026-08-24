@@ -245,6 +245,19 @@ def find_plates(frame: np.ndarray,
             continue
         if not ASPECT_RANGE[0] <= box_w / box_h <= ASPECT_RANGE[1]:
             continue
+        # NOT FLUSH WITH THE FRAME EDGE. A cog plate floats above the
+        # cog and always has game behind it on every side; a blob that
+        # runs into the border is the window chrome, a letterboxing bar,
+        # or something clipped by the capture. Measured live: a 58x48
+        # box at (793, 0) passed every test above and read level score
+        # 0.00 with 0% health, which is the documented scenery
+        # signature, while the real second plate went unfound.
+        #
+        # A genuinely clipped plate is rejected too, and should be: the
+        # level and health regions are offsets from this box, so a
+        # truncated one reads garbage rather than nothing.
+        if x0 <= 0 or y0 <= 0 or x1 >= width or y1 >= height:
+            continue
         plates.append(Plate(slot=(x0, y0, x1, y1), filled=filled))
     return plates
 

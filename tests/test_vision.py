@@ -270,3 +270,42 @@ class OverlapAlignmentTest(unittest.TestCase):
     def test_empty_masks_do_not_divide_by_zero(self):
         z = np.zeros((4, 4), bool)
         self.assertEqual(V._overlap(z, z), 0.0)
+
+
+class TestPlatesAtTheFrameEdge(unittest.TestCase):
+    """A blob running into the border is not a cog plate."""
+
+    def setUp(self):
+        try:
+            import numpy  # noqa: F401
+        except ImportError:
+            self.skipTest("numpy is not installed")
+
+    def _frame(self):
+        import numpy as np
+        return np.zeros((1081, 1921, 3), dtype=np.uint8)
+
+    def test_a_blob_touching_the_top_edge_is_rejected(self):
+        """Measured live: a 58x48 box at (793, 0) passed every size and
+        aspect test, read level score 0.00 and 0% health, and displaced a
+        real plate in the panel."""
+        from solver.live.vision import find_plates
+        frame = self._frame()
+        frame[0:48, 793:851] = (60, 140, 150)
+        self.assertEqual([], find_plates(frame))
+
+    def test_a_free_floating_plate_is_kept(self):
+        from solver.live.vision import find_plates
+        frame = self._frame()
+        frame[300:347, 741:810] = (60, 140, 150)
+        self.assertEqual(1, len(find_plates(frame)))
+
+    def test_the_other_three_edges_too(self):
+        from solver.live.vision import find_plates
+        import numpy as np
+        for name, box in (("left", (np.s_[300:347], np.s_[0:69])),
+                          ("right", (np.s_[300:347], np.s_[1852:1921])),
+                          ("bottom", (np.s_[1034:1081], np.s_[741:810]))):
+            frame = self._frame()
+            frame[box[0], box[1]] = (60, 140, 150)
+            self.assertEqual([], find_plates(frame), f"{name} edge")
