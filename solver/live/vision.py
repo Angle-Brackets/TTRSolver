@@ -212,8 +212,22 @@ def _merge(boxes, gap):
     return merged
 
 
+def _reject(log, x0, y0, x1, y1, filled, why: str) -> None:
+    """Record a candidate that did not survive the filters.
+
+    Opt-in: pass a list as `rejects` to `find_plates`. A missing plate is
+    invisible otherwise -- the caller sees a shorter list and no reason --
+    and every filter here is a threshold that a real plate can fall the
+    wrong side of.
+    """
+    if log is not None:
+        log.append({"box": (x0, y0, x1, y1), "w": x1 - x0, "h": y1 - y0,
+                    "filled": filled, "why": why})
+
+
 def find_plates(frame: np.ndarray,
-                reference_area: Optional[int] = None) -> List[Plate]:
+                reference_area: Optional[int] = None,
+                rejects: Optional[List[dict]] = None) -> List[Plate]:
     """Every cog plate in a battle frame, left to right.
 
     `frame` is an (H, W, 3) or (H, W, 4) array of uint8 RGB.
@@ -240,10 +254,19 @@ def find_plates(frame: np.ndarray,
     for x0, y0, x1, y1, filled in sorted(slots):
         box_w, box_h = x1 - x0, y1 - y0
         if not box_h or filled < area * MIN_SLOT_FRAC:
+            _reject(rejects, x0, y0, x1, y1, filled,
+                    f"too little teal: {filled} < "
+                    f"{int(area * MIN_SLOT_FRAC)}")
             continue
         if box_w > width * MAX_SLOT_WIDTH_FRAC:
+            _reject(rejects, x0, y0, x1, y1, filled,
+                    f"too wide: {box_w} > {int(width * MAX_SLOT_WIDTH_FRAC)}"
+                    f" -- teal in the scene merged into the slot?")
             continue
         if not ASPECT_RANGE[0] <= box_w / box_h <= ASPECT_RANGE[1]:
+            _reject(rejects, x0, y0, x1, y1, filled,
+                    f"aspect {box_w / box_h:.2f} outside "
+                    f"{ASPECT_RANGE[0]}-{ASPECT_RANGE[1]}")
             continue
         # NOT FLUSH WITH THE FRAME EDGE. A cog plate floats above the
         # cog and always has game behind it on every side; a blob that
@@ -257,6 +280,7 @@ def find_plates(frame: np.ndarray,
         # level and health regions are offsets from this box, so a
         # truncated one reads garbage rather than nothing.
         if x0 <= 0 or y0 <= 0 or x1 >= width or y1 >= height:
+            _reject(rejects, x0, y0, x1, y1, filled, "touches the frame edge")
             continue
         plates.append(Plate(slot=(x0, y0, x1, y1), filled=filled))
     return plates

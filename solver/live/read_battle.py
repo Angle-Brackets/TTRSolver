@@ -261,15 +261,20 @@ def main(argv: Optional[List[str]] = None) -> int:
         if rect:
             left, top, right, bottom = rect
             print(f"window size : {right - left}x{bottom - top}")
-        plates = find_plates(frame)
+        rejects = []
+        plates = find_plates(frame, rejects=rejects)
         print(f"plates found: {len(plates)}")
         for i, plate in enumerate(plates):
             x0, y0, x1, y1 = plate.slot
             print(f"   plate {i + 1}: {x1 - x0}x{y1 - y0} at ({x0},{y0})")
-        if not plates:
-            print("   -- nothing plate-shaped. The size filter is a "
-                  "fraction of the frame area, so a frame much larger or "
-                  "smaller than the window will find nothing.")
+        if rejects:
+            print(f"rejected    : {len(rejects)} candidate(s)")
+            for r in rejects:
+                x0, y0 = r["box"][0], r["box"][1]
+                print(f"   {r['w']}x{r['h']} at ({x0},{y0})  {r['why']}")
+        if not plates and not rejects:
+            print("   -- no teal survived even as a candidate. Is "
+                  "'show-cog-levels' on?")
     else:
         path = Path(args.image) if args.image else newest_screenshot()
         print(f"reading {path.name}")
