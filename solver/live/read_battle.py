@@ -62,7 +62,8 @@ def describe(frame, catalogue: HeadCatalogue) -> List[dict]:
         match = catalogue.match(frame, plate, among=pool)
         out.append({"plate": plate, "department": dept,
                     "department_margin": margin, "level": level,
-                    "level_score": score, "health": health_fraction(frame,
+                    "level_score": score,
+                    "level_margin": level_margin, "health": health_fraction(frame,
                                                                     plate),
                     "candidates": pool, "match": match})
     return out
@@ -99,8 +100,20 @@ def report(records: List[dict]) -> None:
                   f"(margin {r['department_margin']:.2f} < "
                   f"{MIN_DEPARTMENT_MARGIN})")
         if r["level"] is None:
-            print(f"           level unreadable "
-                  f"(score {r['level_score']:.2f} < {MIN_LEVEL_SCORE})")
+            # SAY WHICH GATE FAILED. This printed the score against
+            # MIN_LEVEL_SCORE whichever test failed, so a margin failure
+            # read as "score 0.78 < 0.55" -- a false statement that sends
+            # you looking at the wrong threshold.
+            score, margin = r["level_score"], r.get("level_margin")
+            if score < MIN_LEVEL_SCORE:
+                print(f"           level unreadable: score {score:.2f} "
+                      f"below {MIN_LEVEL_SCORE} -- nothing legible there")
+            else:
+                print(f"           level unreadable: score {score:.2f} is "
+                      f"fine but margin "
+                      f"{'?' if margin is None else format(margin, '.2f')} "
+                      f"below {MIN_LEVEL_MARGIN} -- legible, but it could "
+                      f"equally be another digit")
 
 
 def comparison_sheet(frame, plate, pool: List[str],
@@ -210,6 +223,12 @@ def status(catalogue: HeadCatalogue) -> None:
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("image", nargs="?", help="screenshot to read")
+    parser.add_argument("--live", action="store_true",
+                        help="grab the game window now instead of reading a "
+                             "saved screenshot. This is the path the panel "
+                             "uses, and it can fail where a saved file "
+                             "succeeds -- the capture is scoped to the "
+                             "window and its size drives every threshold")
     parser.add_argument("--label", action="store_true",
                         help="ask about cogs the library cannot name")
     parser.add_argument("--status", action="store_true",
@@ -222,9 +241,39 @@ def main(argv: Optional[List[str]] = None) -> int:
         status(catalogue)
         return 0
 
-    path = Path(args.image) if args.image else newest_screenshot()
-    print(f"reading {path.name}")
-    frame = load(path)
+    if args.live:
+        # THE PATH THE PANEL USES. A saved screenshot is a plain PNG of
+        # the whole screen; the live grab is scoped to the game window and
+        # every size threshold in `find_plates` is a fraction of what it
+        # returns. So the two can disagree, and when they do this is the
+        # only way to see it.
+        from .watch import Capture
+        from .window import game_rect
+
+        rect = game_rect()
+        cap = Capture()
+        frame = cap.grab()
+        if frame is None:
+            print("  no frame: is the game running?")
+            return 1
+        print(f"live grab   : {frame.shape[1]}x{frame.shape[0]}")
+        print(f"window rect : {rect if rect else 'not found -- full screen'}")
+        if rect:
+            left, top, right, bottom = rect
+            print(f"window size : {right - left}x{bottom - top}")
+        plates = find_plates(frame)
+        print(f"plates found: {len(plates)}")
+        for i, plate in enumerate(plates):
+            x0, y0, x1, y1 = plate.slot
+            print(f"   plate {i + 1}: {x1 - x0}x{y1 - y0} at ({x0},{y0})")
+        if not plates:
+            print("   -- nothing plate-shaped. The size filter is a "
+                  "fraction of the frame area, so a frame much larger or "
+                  "smaller than the window will find nothing.")
+    else:
+        path = Path(args.image) if args.image else newest_screenshot()
+        print(f"reading {path.name}")
+        frame = load(path)
     records = describe(frame, catalogue)
     report(records)
 
