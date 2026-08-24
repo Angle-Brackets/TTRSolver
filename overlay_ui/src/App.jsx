@@ -65,6 +65,20 @@ function CogRow({ row }) {
       <span className="w-5 shrink-0 text-right font-mono text-[11px] opacity-40">
         {row.level ?? '?'}
       </span>
+      {/* Nothing reads the game's lure indicator, and an unlured
+          assumption is wrong four ways at once: Throw and Squirt are
+          forced to 100% with knockback, Drop always misses, and the cog
+          does not attack. Until the plate is read, the player marks it. */}
+      <button
+        className={`shrink-0 rounded px-1 text-[11px] leading-none ${
+          row.lured ? 'bg-warning/25 text-warning' : 'opacity-25 hover:opacity-60'
+        }`}
+        onClick={() => call('mark_lured', row.index, !row.lured)}
+        title={row.lured ? 'Marked as lured — click if it is awake'
+                         : 'Mark this cog as lured'}
+      >
+        {row.lured ? 'z' : 'z'}
+      </button>
       {/* ALWAYS a picker, never a label. The readers can be confidently
           wrong -- a Number Cruncher matched against the Bean Counter the
           library happens to hold -- and a row with no control is a wrong

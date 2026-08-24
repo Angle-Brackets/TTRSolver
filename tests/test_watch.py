@@ -340,3 +340,16 @@ class TestNamingFromThePanel(unittest.TestCase):
         w.name_plate(0, "mr_hollywood")
         w._forget_names(-1)
         self.assertEqual({}, w._named)
+
+    def test_lure_is_marked_and_cleared(self):
+        w = self._watcher()
+        w.mark_lured(1, True)
+        self.assertIn(1, w._lured)
+        w.mark_lured(1, False)
+        self.assertNotIn(1, w._lured)
+
+    def test_lure_marks_expire_with_the_plate(self):
+        w = self._watcher()
+        w.mark_lured(2, True)
+        w._forget_names(-1)
+        self.assertEqual(set(), w._lured)

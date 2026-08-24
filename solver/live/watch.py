@@ -98,6 +98,16 @@ class CogReading:
     health: float
     cog: Optional[str] = None
     slot: Tuple[int, int, int, int] = (0, 0, 0, 0)
+    # Asleep on a Lure. NOT READ FROM THE PLATE YET -- the game draws a
+    # lure indicator and nothing here looks for it, so this arrives only
+    # from the player marking it in the panel.
+    #
+    # It changes the advice completely, which is why it cannot stay
+    # unmodelled: Throw and Squirt are forced to 100% against a lured cog
+    # and collect the knockback bonus, Drop always misses one, and a
+    # lured cog does not attack. Treating a sleeping cog as awake means
+    # planning every one of those wrong.
+    lured: bool = False
 
     @property
     def identified(self) -> bool:
@@ -238,6 +248,9 @@ class BattleWatcher:
         # rather than letting a name slide onto a different cog.
         self._named: dict = {}
         self._low_frames = 0
+        # Plates the player has marked as lured, by plate order. Same
+        # keying and same expiry as `_named`.
+        self._lured: set = set()
         # Slots the player named that are not in the library yet. The
         # panel names a slot without a frame in hand, so the head is
         # recorded on the next frame that reads the slot -- which is
@@ -347,8 +360,19 @@ class BattleWatcher:
             readings.append(CogReading(
                 index=i, department=dept, level=level,
                 health=health_fraction(frame, plate),
-                cog=cog, slot=plate.slot))
+                cog=cog, slot=plate.slot, lured=i in self._lured))
         return readings
+
+    def mark_lured(self, index, lured: bool) -> None:
+        """The player says this cog is asleep, or is not."""
+        try:
+            index = int(index)
+        except (TypeError, ValueError):
+            return
+        if lured:
+            self._lured.add(index)
+        else:
+            self._lured.discard(index)
 
     def _forget_names(self, count: int) -> None:
         """Drop hand-named cogs that no longer have a plate.
@@ -373,6 +397,7 @@ class BattleWatcher:
         if count < 0:                    # explicit reset
             self._named.clear()
             self._learn.clear()
+            self._lured.clear()
             self._low_frames = 0
             return
         # DEBOUNCED. A plate that vanishes for one frame has not gone --
@@ -390,6 +415,7 @@ class BattleWatcher:
         for index in [i for i in self._named if i >= count]:
             self._named.pop(index, None)
             self._learn.pop(index, None)
+        self._lured = {i for i in self._lured if i < count}
 
     def name_plate(self, index, cog: Optional[str], learn: bool = True) -> None:
         """Record what the player says is in this plate slot.

@@ -124,6 +124,8 @@ class CogRow:
     # pixels between frames, so a name keyed on it matched once and never
     # again.
     index: Optional[int] = None
+    # Asleep on a Lure. Marked by the player, not read from the plate.
+    lured: bool = False
     # What this plate could be, given its department and level. Offered
     # in the panel when the readers cannot name it: at most five, often
     # fewer, and the player can simply see which one it is.
@@ -369,6 +371,12 @@ class Worker(threading.Thread):
                 model.gag_level = (action.level if model.track else None)
         self._post()
 
+    def mark_lured(self, index, lured) -> None:
+        """The player says this cog is asleep on a Lure."""
+        watcher = getattr(self, "_watcher", None)
+        if watcher is not None:
+            watcher.mark_lured(index, bool(lured))
+
     def name_cog(self, slot, cog) -> None:
         """The player naming a plate the readers could not."""
         watcher = getattr(self, "_watcher", None)
@@ -527,7 +535,8 @@ def _row(reading) -> "CogRow":
                   health=shown,
                   identified=identified, art_key=art_key,
                   department=reading.department,
-                  index=getattr(reading, "index", None), choices=choices)
+                  index=getattr(reading, "index", None), choices=choices,
+                  lured=bool(getattr(reading, "lured", False)))
 
 
 def _describe_reading(reading) -> str:

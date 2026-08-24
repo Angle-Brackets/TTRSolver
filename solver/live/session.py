@@ -106,10 +106,21 @@ def cog_from_reading(reading) -> Tuple[Optional[CogState], List[str]]:
         # 28, and floor() would quietly shave a point off every cog.
         hp = max(1, min(max_hp, round(max_hp * fraction)))
 
-    return CogState(cog_type=reading.cog,
-                    department=reading.department
-                    or data.department_of(reading.cog),
-                    level=reading.level, hp=hp, max_hp=max_hp), []
+    cog = CogState(cog_type=reading.cog,
+                   department=reading.department
+                   or data.department_of(reading.cog),
+                   level=reading.level, hp=hp, max_hp=max_hp)
+    if getattr(reading, "lured", False):
+        # Duration is unknown -- nothing reads the indicator, let alone
+        # how many rounds are left on it -- so one round is assumed. That
+        # is the conservative end: it credits the forced accuracy and the
+        # knockback that apply THIS round, which is what the advice turns
+        # on, without promising quiet the party may not get.
+        # The accuracy recorded here is the lure's own, used for the
+        # wake-up check; 80 is the mid-range of the Lure gags. It does
+        # not affect the forced accuracies that make this matter.
+        cog.status.apply_lure(80, 1, None)
+    return cog, []
 
 
 def build_state(snapshot=None, panel=None, readings: Sequence = (),

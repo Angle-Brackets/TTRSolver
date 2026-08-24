@@ -170,3 +170,38 @@ class BuildStateTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestLuredCogsFromTheLive(unittest.TestCase):
+    """A cog marked lured must reach the solver asleep.
+
+    Nothing reads the game's lure indicator, so this arrives from the
+    player. It is not cosmetic: Throw and Squirt are forced to 100%
+    against a lured cog and take the knockback bonus, Drop always misses
+    one, and a lured cog does not attack.
+    """
+
+    def _reading(self, lured):
+        from solver.live.watch import CogReading
+        return CogReading(index=0, department="cashbot", level=7,
+                          health=1.0, cog="money_bags", lured=lured)
+
+    def test_awake_by_default(self):
+        from solver.live import session
+        cog, _ = session.cog_from_reading(self._reading(False))
+        self.assertFalse(cog.status.lured)
+
+    def test_marked_lured_arrives_asleep(self):
+        from solver.live import session
+        cog, _ = session.cog_from_reading(self._reading(True))
+        self.assertTrue(cog.status.lured)
+
+    def test_it_changes_the_forced_accuracy(self):
+        """The reason it matters, stated as the rule it changes."""
+        from solver import mechanics
+        from solver.live import session
+        from solver.state import Track
+        awake, _ = session.cog_from_reading(self._reading(False))
+        asleep, _ = session.cog_from_reading(self._reading(True))
+        self.assertIsNone(mechanics.forced_accuracy(Track.THROW, [awake]))
+        self.assertEqual(100, mechanics.forced_accuracy(Track.THROW, [asleep]))

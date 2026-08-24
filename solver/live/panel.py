@@ -68,7 +68,7 @@ def model_json(model: Model) -> str:
         "rows": [{"name": r.name, "level": r.level,
                   "health": r.health, "identified": r.identified,
                   "art": r.art_key, "department": r.department,
-                  "index": r.index, "choices": r.choices}
+                  "index": r.index, "choices": r.choices, "lured": r.lured}
                  for r in model.rows],
         "problems": list(model.problems),
         "evidence": model.evidence,
@@ -121,6 +121,18 @@ class Api:
 
     def close(self) -> None:
         self._state.closing = True
+
+    def mark_lured(self, index, lured) -> None:
+        """Mark a cog asleep on a Lure, or awake again.
+
+        Nothing reads the game's lure indicator yet, and the difference
+        is not cosmetic: Throw and Squirt are forced to 100% against a
+        lured cog and collect the knockback bonus, Drop always misses
+        one, and a lured cog does not attack. Advice given for an awake
+        cog that is actually asleep is wrong in all four ways.
+        """
+        self._worker.mark_lured(index, bool(lured))
+        self._worker.ask_now()
 
     def name_cog(self, slot, cog) -> None:
         """The player naming a plate the readers could not.
