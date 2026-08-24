@@ -37,9 +37,21 @@ from typing import Dict, List, Optional, Sequence, Tuple
 from .. import data
 from ..state import BattleState, CogState, Track, ToonState
 
-# A cog at full health should read 1.0; allow for the bar's own noise
-# before rounding down to a number of hit points.
-FULL_HEALTH = 0.97
+# A cog at full health does NOT read 1.0, and the shortfall varies with
+# how large the plate is on screen. Measured on live frames at 1900px
+# wide: a single full cog read 0.91 and 0.96 on different frames, and two
+# full cogs read 0.99 each. `health_fraction` counts saturated columns
+# across the health region, and the region is a little wider than the bar
+# it contains, so the ends never light.
+#
+# 0.97 was too tight and turned a full cog into a 91% one. The error runs
+# the DANGEROUS way: the solver plans 91% of the damage the cog actually
+# needs, throws it, and the cog survives on a sliver.
+#
+# 0.90 covers every full reading seen. The cost is that a cog genuinely
+# on 90-100% reads as full, which is at most a few hit points and errs
+# the safe way -- the solver over-damages rather than under-damages.
+FULL_HEALTH = 0.90
 
 
 @dataclass(frozen=True)

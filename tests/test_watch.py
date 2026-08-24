@@ -304,3 +304,17 @@ class TestNamingFromThePanel(unittest.TestCase):
         w.name_plate((0, 0, 10, 10), "mr_hollywood", learn=False)
         self.assertNotIn((0, 0, 10, 10), w._learn)
         self.assertEqual("mr_hollywood", w._named[(0, 0, 10, 10)])
+
+    def test_slot_arriving_as_a_list_is_accepted(self):
+        """The panel sends `plate.slot` through JSON, which makes it a
+        list. A list cannot be a dict key, so this used to raise
+        TypeError and the pick silently did nothing."""
+        w = self._watcher()
+        w.name_plate([100, 200, 160, 260], "bloodsucker")
+        self.assertEqual("bloodsucker", w._named[(100, 200, 160, 260)])
+
+    def test_clearing_by_list_slot_also_works(self):
+        w = self._watcher()
+        w.name_plate((100, 200, 160, 260), "bloodsucker")
+        w.name_plate([100, 200, 160, 260], None)
+        self.assertNotIn((100, 200, 160, 260), w._named)

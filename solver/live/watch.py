@@ -342,6 +342,12 @@ class BattleWatcher:
         frame in hand, so the head is recorded on the next frame that
         reads the slot.
         """
+        # TUPLE. `plate.slot` is a tuple, but this arrives from the panel
+        # through JSON, which makes it a list -- and a list cannot be a
+        # dict key. The name was raising TypeError and silently doing
+        # nothing, which looked like the dropdown refusing the pick.
+        if isinstance(slot, list):
+            slot = tuple(slot)
         if cog:
             self._named[slot] = cog
             if learn and cog not in self.catalogue.entries:
