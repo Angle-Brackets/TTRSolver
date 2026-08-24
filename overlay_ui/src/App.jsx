@@ -81,13 +81,27 @@ function CogRow({ row }) {
         <select
           className="select select-xs h-[22px] min-h-0 w-28 shrink-0 bg-base-300 px-1 text-[11px] italic"
           value=""
-          onChange={(e) => call('name_cog', row.slot, e.target.value)}
+          onChange={(e) => call('name_cog', row.index, e.target.value)}
           title={`Unidentified ${row.department || 'cog'} — pick which one`}
         >
           <option value="">{row.name}?</option>
-          {row.choices.map((c) => (
-            <option key={c.key} value={c.key}>{c.display}</option>
-          ))}
+          {/* Two groups. The reader's department guess orders the list
+              but must not limit it -- when that guess is wrong, the cog
+              on screen is the one name the player cannot pick. */}
+          {row.choices.some((c) => c.likely) && (
+            <optgroup label="likely">
+              {row.choices.filter((c) => c.likely).map((c) => (
+                <option key={c.key} value={c.key}>{c.display}</option>
+              ))}
+            </optgroup>
+          )}
+          <optgroup label="all cogs">
+            {row.choices.filter((c) => !c.likely).map((c) => (
+              <option key={c.key} value={c.key}>
+                {c.display}
+              </option>
+            ))}
+          </optgroup>
         </select>
       )}
       <div className="h-[6px] flex-1 overflow-hidden rounded-full bg-base-300">

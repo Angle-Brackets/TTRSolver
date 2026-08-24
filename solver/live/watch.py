@@ -218,12 +218,22 @@ class BattleWatcher:
                  collect: bool = True, panel_present=None,
                  battle_over=None, force_battle=None):
         self.catalogue = catalogue if catalogue is not None else HeadCatalogue()
-        # Cogs the player named by hand, keyed by plate slot. The
+        # Cogs the player named by hand, keyed by PLATE ORDER. The
         # catalogue has 4 of 32 heads, so `match` usually fails and
         # `eliminate` usually cannot deduce -- and the player can see the
-        # cog perfectly well. Keyed on SLOT rather than plate index
-        # because the index shifts when a cog dies and the slot does not.
+        # cog perfectly well.
+        #
+        # NOT keyed on `plate.slot`, which was the first attempt and does
+        # not work: the slot is a detected bounding box and `find_plates`
+        # says itself that antialiased edge pixels move it by a few
+        # pixels between frames. The name matched on the frame it was
+        # given and never again, so the pick appeared to be refused.
+        #
+        # Order is stable frame to frame and unstable across a death, so
+        # `_forget_names` clears them whenever the plate count changes
+        # rather than letting a name slide onto a different cog.
         self._named: dict = {}
+        self._plate_count = 0
         # Slots the player named that are not in the library yet. The
         # panel names a slot without a frame in hand, so the head is
         # recorded on the next frame that reads the slot -- which is
@@ -280,7 +290,9 @@ class BattleWatcher:
 
     def read_frame(self, frame: np.ndarray) -> List[CogReading]:
         readings = []
-        for i, plate in enumerate(self._locate(frame)):
+        plates = self._locate(frame)
+        self._forget_names(len(plates))
+        for i, plate in enumerate(plates):
             dept, margin = read_department(frame, plate)
             if margin < MIN_DEPARTMENT_MARGIN:
                 dept = None
@@ -306,7 +318,7 @@ class BattleWatcher:
                 # still consistent with what the plate reads -- if the
                 # slot now holds a different department or level, the cog
                 # that was named is gone and the name goes with it.
-                named = self._named.get(plate.slot)
+                named = self._named.get(i)
                 if named and named in pool:
                     cog = named
                     # LEARN IT. Owner-authorised: the player is looking
@@ -315,7 +327,7 @@ class BattleWatcher:
                     # so a mis-click is correctable and visible rather
                     # than silently permanent -- which is the property
                     # that makes writing here acceptable at all.
-                    if self._learn.pop(plate.slot, None) == named:
+                    if self._learn.pop(i, None) == named:
                         try:
                             self.catalogue.add(named, frame, plate)
                         except (KeyError, ValueError, OSError):
@@ -326,7 +338,19 @@ class BattleWatcher:
                 cog=cog, slot=plate.slot))
         return readings
 
-    def name_plate(self, slot, cog: Optional[str], learn: bool = True) -> None:
+    def _forget_names(self, count: int) -> None:
+        """Drop hand-named cogs when the lineup changes.
+
+        Plate order is only meaningful while the same cogs are on screen.
+        One dying renumbers the rest, so a name kept across that would
+        describe the wrong cog -- worse than having no name at all.
+        """
+        if count != self._plate_count:
+            self._plate_count = count
+            self._named.clear()
+            self._learn.clear()
+
+    def name_plate(self, index, cog: Optional[str], learn: bool = True) -> None:
         """Record what the player says is in this plate slot.
 
         WRITTEN TO THE HEAD LIBRARY, on the owner's instruction. The
@@ -342,19 +366,17 @@ class BattleWatcher:
         frame in hand, so the head is recorded on the next frame that
         reads the slot.
         """
-        # TUPLE. `plate.slot` is a tuple, but this arrives from the panel
-        # through JSON, which makes it a list -- and a list cannot be a
-        # dict key. The name was raising TypeError and silently doing
-        # nothing, which looked like the dropdown refusing the pick.
-        if isinstance(slot, list):
-            slot = tuple(slot)
+        try:
+            index = int(index)
+        except (TypeError, ValueError):
+            return
         if cog:
-            self._named[slot] = cog
+            self._named[index] = cog
             if learn and cog not in self.catalogue.entries:
-                self._learn[slot] = cog
+                self._learn[index] = cog
         else:
-            self._named.pop(slot, None)
-            self._learn.pop(slot, None)
+            self._named.pop(index, None)
+            self._learn.pop(index, None)
 
     def _locate(self, frame: np.ndarray) -> List[Plate]:
         """Plates in the frame, preferring the band they were last in.

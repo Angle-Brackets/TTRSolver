@@ -119,9 +119,11 @@ class CogRow:
     # specific cog would assert more than was read.
     art_key: Optional[str] = None
     department: Optional[str] = None
-    # Plate slot, which is what a hand-named cog is keyed on -- it
-    # survives a cog dying, where the row index does not.
-    slot: Optional[int] = None
+    # Plate order, which is what a hand-named cog is keyed on. The slot
+    # was tried first and is a detected bounding box that moves by a few
+    # pixels between frames, so a name keyed on it matched once and never
+    # again.
+    index: Optional[int] = None
     # What this plate could be, given its department and level. Offered
     # in the panel when the readers cannot name it: at most five, often
     # fewer, and the player can simply see which one it is.
@@ -435,20 +437,36 @@ def _row(reading) -> "CogRow":
         identified = False
     choices = []
     if not identified:
+        # EVERY COG, with the likely ones first. Narrowing to the pool the
+        # plate allows is right for automatic matching and wrong for
+        # asking a person: the department read can be wrong, and then the
+        # cog actually on screen is the one option never offered. That is
+        # the failure CLAUDE.md warns about -- "narrowing to the wrong
+        # five cogs is worse than not narrowing at all" -- and it showed
+        # up immediately: a plate misread as Cashbot could not be named
+        # Head Hunter, which is a Bossbot.
+        #
+        # The player can see the cog. The reader's guess orders the list;
+        # it does not limit it.
         from .catalogue import candidates
 
-        for key in candidates(reading.department, reading.level):
+        likely = list(candidates(reading.department, reading.level))
+        rank = {key: i for i, key in enumerate(likely)}
+        every = [c.key for dept in data.COG_DEPARTMENTS.values()
+                 for c in dept.cogs]
+        for key in sorted(every, key=lambda k: (rank.get(k, len(rank)), k)):
             try:
                 entry = data.cog(data.department_of(key), key)
                 choices.append({"key": key, "display": entry.display,
-                                "art": f"{entry.department}-{entry.key}"})
+                                "likely": key in rank,
+                                "department": entry.department})
             except (KeyError, ValueError):        # pragma: no cover
-                choices.append({"key": key, "display": key, "art": None})
+                continue
     return CogRow(name=name, level=reading.level,
                   health=max(0.0, min(1.0, float(reading.health))),
                   identified=identified, art_key=art_key,
                   department=reading.department,
-                  slot=getattr(reading, "slot", None), choices=choices)
+                  index=getattr(reading, "index", None), choices=choices)
 
 
 def _describe_reading(reading) -> str:
