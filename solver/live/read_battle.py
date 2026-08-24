@@ -25,6 +25,7 @@ from .catalogue import HeadCatalogue, candidates
 from .vision import (
     MIN_DEPARTMENT_MARGIN, find_plates, health_fraction, read_department,
     read_level,
+    lure_indicator,
     MIN_LEVEL_MARGIN,
 )
 
@@ -62,6 +63,7 @@ def describe(frame, catalogue: HeadCatalogue) -> List[dict]:
         match = catalogue.match(frame, plate, among=pool)
         out.append({"plate": plate, "department": dept,
                     "department_margin": margin, "level": level,
+                    "lured": lure_indicator(frame, plate),
                     "level_score": score,
                     "level_margin": level_margin, "health": health_fraction(frame,
                                                                     plate),
@@ -94,7 +96,8 @@ def report(records: List[dict]) -> None:
         else:
             who = "unknown"
         print(f"  cog {i + 1}: {dept:8s} level {str(level):>2}  "
-              f"hp {r['health']:>4.0%}  {who}")
+              f"hp {r['health']:>4.0%}"
+              f"{'  LURED' if r.get('lured') else ''}  {who}")
         if r["department"] is None:
             print(f"           department unreadable "
                   f"(margin {r['department_margin']:.2f} < "

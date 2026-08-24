@@ -87,6 +87,15 @@ PARTS: Dict[str, Tuple[float, float, float, float]] = {
     # agreed to within 0.03 slot widths. A hand-drawn box read a full
     # bar as 83% full, which would have made every use of this wrong.
     "health": (1.03, 1.42, 2.18, 1.83),
+    # The lure indicator: a red-bordered tile the game floats ABOVE the
+    # plate, centred on the whole sign rather than on the portrait slot,
+    # carrying the rounds the cog has left asleep.
+    #
+    # Negative y because it sits above the slot's own top edge. The
+    # bounds are generous on purpose -- this is a presence test for
+    # saturated red, not a template match, so a few slot-widths of slack
+    # costs nothing and covers the tile drifting with plate size.
+    "lure": (0.55, -1.30, 1.75, -0.15),
 }
 
 
@@ -654,6 +663,43 @@ def locate_plates(frame: np.ndarray,
     if not any_plates(frame, divisor):
         return []
     return find_plates(frame)
+
+
+# The tile is a saturated red that nothing else near a plate wears. Set
+# from the live frame the owner supplied rather than from the art files,
+# which are not extractable for this element.
+LURE_RED_MIN = 140          # red channel floor
+LURE_RED_DOMINANCE = 55     # how far red must lead both other channels
+LURE_MIN_PIXELS = 40        # below this it is a stray highlight
+
+
+def lure_indicator(frame: np.ndarray, plate: Plate) -> bool:
+    """Is this cog asleep on a Lure?
+
+    The game draws a red tile above the plate showing the rounds left.
+    Nothing read it, so the live advisor treated every cog as awake --
+    and against a lured cog Throw and Squirt are forced to 100% with
+    knockback, Drop always misses, and the cog does not attack. Four
+    rules wrong at once, which is why the advice looked odd rather than
+    merely suboptimal.
+
+    A PRESENCE TEST, not a digit read. The tile also carries the rounds
+    remaining, and reading it would be better -- but the digit reader
+    already declines a plate's own level at these sizes, so promising a
+    duration would be promising precision this cannot deliver. Asleep or
+    awake is the part the forced accuracies turn on.
+    """
+    x0, y0, x1, y1 = plate.region("lure")
+    height, width = frame.shape[:2]
+    x0, y0 = max(0, x0), max(0, y0)
+    x1, y1 = min(width, x1), min(height, y1)
+    if x1 <= x0 or y1 <= y0:
+        return False
+    patch = frame[y0:y1, x0:x1, :3].astype(np.int16)
+    red = patch[:, :, 0]
+    lead = red - np.maximum(patch[:, :, 1], patch[:, :, 2])
+    hits = (red > LURE_RED_MIN) & (lead > LURE_RED_DOMINANCE)
+    return int(hits.sum()) >= LURE_MIN_PIXELS
 
 
 def health_fraction(frame: np.ndarray, plate: Plate) -> float:

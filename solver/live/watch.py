@@ -61,6 +61,7 @@ from .catalogue import HeadCatalogue, candidates
 # dropped. Detection flickers; a pick must not.
 FORGET_AFTER_FRAMES = 5
 from .vision import (
+    lure_indicator,
     MIN_DEPARTMENT_MARGIN, Plate, find_plates, health_fraction,
     locate_plates, read_department, read_level, MIN_LEVEL_MARGIN,
 )
@@ -251,6 +252,14 @@ class BattleWatcher:
         # Plates the player has marked as lured, by plate order. Same
         # keying and same expiry as `_named`.
         self._lured: set = set()
+        # Levels the player typed in, by plate order. `read_level` gates
+        # on a margin over the runner-up and refuses when a digit could
+        # equally be another -- a live "Level 8" reads at score 0.73 with
+        # a margin of 0.02 against a 0.05 floor. Refusing is right; the
+        # gate exists because a Level 8 was once read as a 6. But the
+        # plate says "Level 8" in plain text to the player, so let them
+        # say so.
+        self._levels: dict = {}
         # Slots the player named that are not in the library yet. The
         # panel names a slot without a frame in hand, so the head is
         # recorded on the next frame that reads the slot -- which is
@@ -314,6 +323,7 @@ class BattleWatcher:
             if margin < MIN_DEPARTMENT_MARGIN:
                 dept = None
             level, score, level_margin = read_level(frame, plate)
+            told = self._levels.get(i)
             # Both gates. A low score means the region holds nothing
             # legible; a low margin means it holds something legible
             # that could equally be another digit. The second is the
@@ -321,6 +331,8 @@ class BattleWatcher:
             # as 6 at score 0.709, over a runner-up of 0.670.
             if score < MIN_LEVEL_SCORE or level_margin < MIN_LEVEL_MARGIN:
                 level = None
+            if told is not None:
+                level = told
             pool = candidates(dept, level)
             match = self.catalogue.match(frame, plate, among=pool)
             cog = match.cog if match and match.confident else None
@@ -360,8 +372,28 @@ class BattleWatcher:
             readings.append(CogReading(
                 index=i, department=dept, level=level,
                 health=health_fraction(frame, plate),
-                cog=cog, slot=plate.slot, lured=i in self._lured))
+                cog=cog, slot=plate.slot,
+                # Read from the plate, with the player's mark as an
+                # override -- the detector is new and a false negative
+                # must not leave them unable to say otherwise.
+                lured=(i in self._lured) or lure_indicator(frame, plate)))
         return readings
+
+    def set_level(self, index, level) -> None:
+        """The player reading the level off the plate for us."""
+        try:
+            index = int(index)
+        except (TypeError, ValueError):
+            return
+        if level in (None, "", 0):
+            self._levels.pop(index, None)
+            return
+        try:
+            value = int(level)
+        except (TypeError, ValueError):
+            return
+        if 1 <= value <= 20:
+            self._levels[index] = value
 
     def mark_lured(self, index, lured: bool) -> None:
         """The player says this cog is asleep, or is not."""
@@ -398,6 +430,7 @@ class BattleWatcher:
             self._named.clear()
             self._learn.clear()
             self._lured.clear()
+            self._levels.clear()
             self._low_frames = 0
             return
         # DEBOUNCED. A plate that vanishes for one frame has not gone --
@@ -416,6 +449,8 @@ class BattleWatcher:
             self._named.pop(index, None)
             self._learn.pop(index, None)
         self._lured = {i for i in self._lured if i < count}
+        for index in [i for i in self._levels if i >= count]:
+            self._levels.pop(index, None)
 
     def name_plate(self, index, cog: Optional[str], learn: bool = True) -> None:
         """Record what the player says is in this plate slot.

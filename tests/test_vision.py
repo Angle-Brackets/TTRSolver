@@ -309,3 +309,54 @@ class TestPlatesAtTheFrameEdge(unittest.TestCase):
             frame = self._frame()
             frame[box[0], box[1]] = (60, 140, 150)
             self.assertEqual([], find_plates(frame), f"{name} edge")
+
+
+class TestLureIndicator(unittest.TestCase):
+    """The red tile the game floats above a lured cog's plate."""
+
+    def setUp(self):
+        try:
+            import numpy  # noqa: F401
+        except ImportError:
+            self.skipTest("numpy is not installed")
+
+    def _plate(self):
+        from solver.live.vision import Plate
+        return Plate(slot=(877, 119, 947, 166), filled=1500)
+
+    def _frame(self):
+        import numpy as np
+        return np.zeros((1081, 1921, 3), dtype=np.uint8)
+
+    def test_absent_on_an_empty_frame(self):
+        from solver.live.vision import lure_indicator
+        self.assertFalse(lure_indicator(self._frame(), self._plate()))
+
+    def test_found_when_the_tile_is_there(self):
+        from solver.live.vision import lure_indicator
+        plate, frame = self._plate(), self._frame()
+        x0, y0, _x1, _y1 = plate.region("lure")
+        frame[y0 + 5:y0 + 25, x0 + 5:x0 + 45] = (220, 40, 40)
+        self.assertTrue(lure_indicator(frame, plate))
+
+    def test_the_region_sits_above_the_plate(self):
+        """Negative offsets: the tile floats over the sign, not on it."""
+        plate = self._plate()
+        _lx0, ly0, _lx1, ly1 = plate.region("lure")
+        self.assertLess(ly1, plate.slot[1])
+
+    def test_a_stray_red_highlight_is_not_enough(self):
+        from solver.live.vision import lure_indicator
+        plate, frame = self._plate(), self._frame()
+        x0, y0, _x1, _y1 = plate.region("lure")
+        frame[y0 + 5:y0 + 7, x0 + 5:x0 + 8] = (220, 40, 40)
+        self.assertFalse(lure_indicator(frame, plate))
+
+    def test_the_health_bar_green_does_not_trigger_it(self):
+        """The bar is bright and saturated but not red, and it is below
+        the plate rather than above it."""
+        from solver.live.vision import lure_indicator
+        plate, frame = self._plate(), self._frame()
+        hx0, hy0, hx1, hy1 = plate.region("health")
+        frame[hy0:hy1, hx0:hx1] = (40, 220, 60)
+        self.assertFalse(lure_indicator(frame, plate))
