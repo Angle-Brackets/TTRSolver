@@ -258,10 +258,19 @@ export default function App() {
       <Advice model={model} />
 
       <div className="min-h-[10px]">
-        {model.in_battle && model.rows.length > 0 ? (
-          model.rows.slice(0, 4).map((row, i) => <CogRow key={i} row={row} />)
-        ) : (
-          <div className="space-y-[2px] pt-1 text-[12px] opacity-50">
+        {model.in_battle && model.rows.length > 0
+          ? model.rows.slice(0, 4).map((row, i) => <CogRow key={i} row={row} />)
+          : null}
+        {/* ALWAYS SHOWN when there are any. These used to render only
+            when NOT in a battle, so an in-battle refusal -- an
+            unidentified cog, a gag-count checksum that does not add up --
+            produced "no move to recommend" with the reason hidden. The
+            reason is the most useful thing on the panel at that moment,
+            because every one of them is something the player can fix. */}
+        {model.problems.length > 0 && (
+          <div className={`space-y-[2px] text-[12px] ${
+            model.in_battle ? 'pt-2 text-warning opacity-90' : 'pt-1 opacity-50'
+          }`}>
             {model.problems.slice(0, 4).map((line, i) => (
               <div key={i}>{line}</div>
             ))}
