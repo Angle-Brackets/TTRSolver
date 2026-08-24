@@ -56,6 +56,10 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 from .catalogue import HeadCatalogue, candidates
+
+# Frames a plate must stay missing before a name given for it is
+# dropped. Detection flickers; a pick must not.
+FORGET_AFTER_FRAMES = 5
 from .vision import (
     MIN_DEPARTMENT_MARGIN, Plate, find_plates, health_fraction,
     locate_plates, read_department, read_level, MIN_LEVEL_MARGIN,
@@ -233,7 +237,7 @@ class BattleWatcher:
         # `_forget_names` clears them whenever the plate count changes
         # rather than letting a name slide onto a different cog.
         self._named: dict = {}
-        self._plate_count = 0
+        self._low_frames = 0
         # Slots the player named that are not in the library yet. The
         # panel names a slot without a frame in hand, so the head is
         # recorded on the next frame that reads the slot -- which is
@@ -347,16 +351,45 @@ class BattleWatcher:
         return readings
 
     def _forget_names(self, count: int) -> None:
-        """Drop hand-named cogs when the lineup changes.
+        """Drop hand-named cogs that no longer have a plate.
 
-        Plate order is only meaningful while the same cogs are on screen.
-        One dying renumbers the rest, so a name kept across that would
-        describe the wrong cog -- worse than having no name at all.
+        ONLY THE OUT-OF-RANGE ONES. The first version cleared every name
+        whenever the plate count changed, which sounds safe and destroyed
+        the feature: `find_plates` is a heuristic on teal pixels and drops
+        a plate for a frame whenever a cog is mid-animation or obscured --
+        one of those, and the pick the player had just made was gone. The
+        panel showing "1 cog plate" with two cogs on screen is the same
+        flicker.
+
+        A name for a plate that is no longer there is stale and goes. A
+        name for a plate that still exists is kept, even if the count
+        moved, because the alternative is losing every pick to noise.
+
+        Indices do shift when a cog dies, so a surviving name can end up
+        on the wrong cog. That is visible -- the dropdown shows it and the
+        player can change it -- where a silently discarded pick is not.
+        `end_fight` clears the lot.
         """
-        if count != self._plate_count:
-            self._plate_count = count
+        if count < 0:                    # explicit reset
             self._named.clear()
             self._learn.clear()
+            self._low_frames = 0
+            return
+        # DEBOUNCED. A plate that vanishes for one frame has not gone --
+        # it is mid-animation, or something walked in front of it. Acting
+        # on the first frame meant one dropout threw the pick away, which
+        # is indistinguishable from the dropdown not working.
+        highest = max(self._named, default=-1)
+        if highest < count:
+            self._low_frames = 0
+            return
+        self._low_frames = getattr(self, "_low_frames", 0) + 1
+        if self._low_frames < FORGET_AFTER_FRAMES:
+            return
+        self._low_frames = 0
+        for index in [i for i in self._named if i >= count]:
+            self._named.pop(index, None)
+            self._learn.pop(index, None)
 
     def name_plate(self, index, cog: Optional[str], learn: bool = True) -> None:
         """Record what the player says is in this plate slot.

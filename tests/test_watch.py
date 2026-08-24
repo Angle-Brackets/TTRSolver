@@ -306,30 +306,37 @@ class TestNamingFromThePanel(unittest.TestCase):
         self.assertEqual("mr_hollywood", w._named[0])
 
 
-    def test_names_are_dropped_when_the_lineup_changes(self):
-        """Plate order only means something while the same cogs are up.
-        One dying renumbers the rest, so a kept name would land on the
-        wrong cog."""
+    def test_a_name_survives_a_detection_flicker(self):
+        """`find_plates` drops a plate for a frame when a cog is
+        mid-animation. Acting on that threw the pick away, which looked
+        exactly like the dropdown not working."""
+        from solver.live.watch import FORGET_AFTER_FRAMES
         w = self._watcher()
-        w._forget_names(4)
-        w.name_plate(0, "mr_hollywood")
-        w._forget_names(4)
-        self.assertEqual("mr_hollywood", w._named[0])
-        w._forget_names(3)
+        w.name_plate(1, "number_cruncher")
+        for count in (2, 1, 2, 2, 1, 2):
+            w._forget_names(count)
+        self.assertEqual("number_cruncher", w._named[1])
+        self.assertGreater(FORGET_AFTER_FRAMES, 1)
+
+    def test_a_name_is_dropped_once_the_plate_really_goes(self):
+        from solver.live.watch import FORGET_AFTER_FRAMES
+        w = self._watcher()
+        w.name_plate(1, "number_cruncher")
+        for _ in range(FORGET_AFTER_FRAMES + 1):
+            w._forget_names(1)
         self.assertEqual({}, w._named)
 
-    def test_a_pick_outside_the_read_department_is_honoured(self):
-        """The dropdown offers every cog because the department read can
-        be wrong. Gating the answer on that same read threw the pick
-        away, silently, which is the bug three times over."""
+    def test_a_name_on_a_plate_that_still_exists_is_kept(self):
+        """Only the out-of-range names are stale. Clearing all of them
+        on any count change is what broke the feature."""
         w = self._watcher()
-        w._forget_names(1)
-        w.name_plate(0, "head_hunter")          # bossbot
-        self.assertEqual("head_hunter", w._named[0])
-
-    def test_a_pick_can_be_changed(self):
-        w = self._watcher()
-        w._forget_names(1)
         w.name_plate(0, "mr_hollywood")
-        w.name_plate(0, "head_hunter")
-        self.assertEqual("head_hunter", w._named[0])
+        for _ in range(10):
+            w._forget_names(3)
+        self.assertEqual("mr_hollywood", w._named[0])
+
+    def test_an_explicit_reset_clears_everything(self):
+        w = self._watcher()
+        w.name_plate(0, "mr_hollywood")
+        w._forget_names(-1)
+        self.assertEqual({}, w._named)
