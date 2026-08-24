@@ -224,6 +224,11 @@ class BattleWatcher:
         # cog perfectly well. Keyed on SLOT rather than plate index
         # because the index shifts when a cog dies and the slot does not.
         self._named: dict = {}
+        # Slots the player named that are not in the library yet. The
+        # panel names a slot without a frame in hand, so the head is
+        # recorded on the next frame that reads the slot -- which is
+        # also the check that the plate is still there.
+        self._learn: dict = {}
         self.capture = capture or Capture()
         self.agree = agree
         self.collect = collect
@@ -304,26 +309,46 @@ class BattleWatcher:
                 named = self._named.get(plate.slot)
                 if named and named in pool:
                     cog = named
+                    # LEARN IT. Owner-authorised: the player is looking
+                    # at the cog, which is better evidence than any
+                    # signature match. `add` overwrites and keeps a crop,
+                    # so a mis-click is correctable and visible rather
+                    # than silently permanent -- which is the property
+                    # that makes writing here acceptable at all.
+                    if self._learn.pop(plate.slot, None) == named:
+                        try:
+                            self.catalogue.add(named, frame, plate)
+                        except (KeyError, ValueError, OSError):
+                            pass
             readings.append(CogReading(
                 index=i, department=dept, level=level,
                 health=health_fraction(frame, plate),
                 cog=cog, slot=plate.slot))
         return readings
 
-    def name_plate(self, slot, cog: Optional[str]) -> None:
+    def name_plate(self, slot, cog: Optional[str], learn: bool = True) -> None:
         """Record what the player says is in this plate slot.
 
-        Deliberately NOT written to the head catalogue. A signature is
-        consulted forever, so a wrong entry poisons every later match,
-        while a wrong name here costs one battle -- the same asymmetry
-        `HeadCatalogue.eliminate` is built on. Labelling the library is
-        `read_battle --label`, where the plate and the candidates are
-        shown side by side.
+        WRITTEN TO THE HEAD LIBRARY, on the owner's instruction. The
+        default used to be not to: a signature is consulted forever, so a
+        wrong entry poisons every later match, while a wrong name costs
+        one battle. What makes writing acceptable is that `add`
+        overwrites rather than accumulates and keeps the source crop in
+        the catalogue directory, so a mis-click can be seen and
+        corrected -- and the player naming a cog they are looking at is
+        better evidence than a signature match against four known heads.
+
+        The write is deferred: this is called from the UI thread with no
+        frame in hand, so the head is recorded on the next frame that
+        reads the slot.
         """
         if cog:
             self._named[slot] = cog
+            if learn and cog not in self.catalogue.entries:
+                self._learn[slot] = cog
         else:
             self._named.pop(slot, None)
+            self._learn.pop(slot, None)
 
     def _locate(self, frame: np.ndarray) -> List[Plate]:
         """Plates in the frame, preferring the band they were last in.

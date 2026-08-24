@@ -263,3 +263,44 @@ class DamageTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestNamingFromThePanel(unittest.TestCase):
+    """Naming a plate applies it, and teaches the head library."""
+
+    def _watcher(self):
+        from solver.live.watch import BattleWatcher
+        return BattleWatcher()
+
+    def test_name_is_remembered_by_slot(self):
+        w = self._watcher()
+        w.name_plate((0, 0, 10, 10), "mr_hollywood")
+        self.assertEqual("mr_hollywood", w._named[(0, 0, 10, 10)])
+
+    def test_naming_queues_it_for_the_library(self):
+        w = self._watcher()
+        w.name_plate((0, 0, 10, 10), "mr_hollywood")
+        self.assertEqual("mr_hollywood", w._learn[(0, 0, 10, 10)])
+
+    def test_a_cog_already_known_is_not_relearned(self):
+        """No point rewriting a signature the library already has."""
+        w = self._watcher()
+        if not w.catalogue.entries:
+            self.skipTest("no catalogue entries shipped")
+        known = sorted(w.catalogue.entries)[0]
+        w.name_plate((0, 0, 10, 10), known)
+        self.assertNotIn((0, 0, 10, 10), w._learn)
+        self.assertEqual(known, w._named[(0, 0, 10, 10)])
+
+    def test_clearing_a_name_drops_the_pending_write(self):
+        w = self._watcher()
+        w.name_plate((0, 0, 10, 10), "mr_hollywood")
+        w.name_plate((0, 0, 10, 10), None)
+        self.assertNotIn((0, 0, 10, 10), w._named)
+        self.assertNotIn((0, 0, 10, 10), w._learn)
+
+    def test_learn_can_be_declined(self):
+        w = self._watcher()
+        w.name_plate((0, 0, 10, 10), "mr_hollywood", learn=False)
+        self.assertNotIn((0, 0, 10, 10), w._learn)
+        self.assertEqual("mr_hollywood", w._named[(0, 0, 10, 10)])
