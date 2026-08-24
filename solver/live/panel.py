@@ -75,6 +75,8 @@ def model_json(model: Model) -> str:
         "can_advise": model.can_advise,
         "thinking": model.thinking,
         "allow_level_7": model.allow_level_7,
+        "objective": model.objective,
+        "budget": model.budget,
     })
 
 
@@ -99,22 +101,24 @@ class Api:
     def set_level_7(self, allow) -> None:
         """Offer level 7 gags, or hold them back.
 
-        `state.ALLOW_LEVEL_7` is a module global read when moves are
-        generated, so flipping it here reaches the search, the climb and
-        the scorers without threading a flag through any of them. The
-        model carries it so the button reflects the real setting rather
-        than the page's own idea of it.
+        Delegates to the Worker, which owns the flag: `Worker._post`
+        ships a fresh Model every cycle, so setting it on the UI's copy
+        here would be overwritten within 250ms and the button would
+        spring back. Recomputes too -- the advice on screen was worked
+        out under the old setting.
         """
-        from .. import state as state_mod
-
-        state_mod.ALLOW_LEVEL_7 = bool(allow)
-        self._state.model.allow_level_7 = bool(allow)
-        # Recompute now: the advice on screen was worked out under the
-        # old setting and is stale the moment this changes.
+        self._worker.set_level_7(bool(allow))
         self._worker.ask_now()
 
     def close(self) -> None:
         self._state.closing = True
+
+    def set_objective(self, name) -> None:
+        self._worker.set_objective(str(name))
+        self._worker.ask_now()
+
+    def set_budget(self, seconds) -> None:
+        self._worker.set_budget(seconds)
 
     def set_height(self, height: int) -> None:
         """Size the window to the page, rather than guessing at it.
@@ -190,11 +194,15 @@ def main(argv: Optional[list] = None) -> int:
         state_mod.ALLOW_LEVEL_7 = False
 
     objective = objectives.PRESETS[args.objective]
+    objective_name = args.objective
     inbox: "queue.Queue" = queue.Queue(maxsize=4)
     worker = Worker(inbox, objective, args.depth, args.budget,
                     args.ignore_checksum)
     state = PanelState()
     state.model.allow_level_7 = not args.no_level_7
+    state.model.objective = objective_name
+    state.model.budget = args.budget
+    worker.objective_name = objective_name
     api = Api(worker, state)
 
     width, height, left, top = _geometry()

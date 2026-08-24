@@ -7,7 +7,7 @@ const EMPTY = {
   in_battle: false, status: 'waiting', turn: 0,
   advice: '', track: null, gag_level: null, rows: [], problems: [],
   evidence: '', can_confirm: false, can_advise: false, thinking: false,
-  allow_level_7: true,
+  allow_level_7: true, objective: 'balanced', budget: 15,
 }
 
 // THE REAL GAME ART, not a generic icon set. Vite fingerprints and
@@ -35,6 +35,11 @@ const cogArt = (art, department) =>
   (art && COG_ART[`./assets/cogs/cog-${art}.png`]) ||
   (department && COG_ART[`./assets/cogs/dept-${department}.png`]) ||
   null
+
+// Matches `search.objective.PRESETS`. Kept in the same order the
+// help text lists them so the dropdown reads predictably.
+const OBJECTIVES = ['balanced', 'conserve', 'glass cannon', 'speedrun',
+                    'survive']
 
 function healthClass(h) {
   if (h > 0.6) return 'bg-success'
@@ -191,12 +196,36 @@ export default function App() {
         <span className="ml-auto text-[11px] opacity-35">
           {model.turn ? `turn ~${model.turn}` : ''}
         </span>
-        {/* Holding 7s back is a real decision mid-run -- you save them
-            for the boss -- so it is a toggle rather than only a launch
-            flag. The value comes from the model, not from local state,
-            so the button shows what the solver is actually doing. */}
+      </div>
+
+      {/* Live controls. Every value comes from the model, never from
+          local state, so a control shows what the solver is actually
+          doing rather than what the page last asked for. */}
+      <div className="flex items-center gap-1.5 text-[11px]">
+        <select
+          className="select select-xs h-[22px] min-h-0 w-[7.5rem] bg-base-200 text-[11px]"
+          value={model.objective}
+          onChange={(e) => call('set_objective', e.target.value)}
+          title="How to play: balanced, conserve gags, all-out, fastest, safest"
+        >
+          {OBJECTIVES.map((o) => (
+            <option key={o} value={o}>{o}</option>
+          ))}
+        </select>
+
+        <div className="flex items-center gap-1 opacity-70">
+          <span className="opacity-60">think</span>
+          <input
+            type="range" min="3" max="45" step="1"
+            className="range range-xs w-[5.5rem]"
+            value={model.budget}
+            onChange={(e) => call('set_budget', Number(e.target.value))}
+          />
+          <span className="w-7 font-mono tabular-nums">{Math.round(model.budget)}s</span>
+        </div>
+
         <button
-          className={`btn btn-xs h-[20px] min-h-0 px-2 text-[10px] font-semibold tracking-wide ${
+          className={`btn btn-xs ml-auto h-[22px] min-h-0 px-2 text-[10px] font-semibold tracking-wide ${
             model.allow_level_7 ? 'btn-ghost opacity-45' : 'btn-warning'
           }`}
           onClick={() => call('set_level_7', !model.allow_level_7)}

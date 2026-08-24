@@ -157,6 +157,11 @@ class Model:
     # `state.ALLOW_LEVEL_7` so the panel can show and toggle it: a player
     # saving their 7s for a boss wants advice that does not spend them.
     allow_level_7: bool = True
+    # The live controls. Mirrored from the Worker, which owns them, so
+    # the buttons show what the solver is doing rather than what the page
+    # last asked for.
+    objective: str = "balanced"
+    budget: float = 15.0
     turn: int = 0
 
     @property
@@ -252,9 +257,17 @@ class Worker(threading.Thread):
         super().__init__(daemon=True)
         self.outbox = outbox
         self.objective = objective
+        self.objective_name = getattr(objective, "name", "balanced")
         self.depth = depth
         self.budget = budget
         self.ignore_checksum = ignore_checksum
+        # OWNED HERE, not on the Model the UI holds. `_post` ships a
+        # fresh copy every cycle, so anything written onto the UI's model
+        # from outside is overwritten within 250ms -- which is what made
+        # the level-7 button look dead even though the solver was
+        # honouring it.
+        from .. import state as state_mod
+        self.allow_level_7 = state_mod.ALLOW_LEVEL_7
         self._forced: Optional[bool] = None
         self._lock = threading.Lock()
         self._stop = threading.Event()
@@ -338,11 +351,50 @@ class Worker(threading.Thread):
                 model.gag_level = (action.level if model.track else None)
         self._post()
 
+    def set_objective(self, name: str) -> None:
+        """Switch how the solver is being asked to play, mid-fight."""
+        from ..search import objective as objectives
+
+        preset = objectives.PRESETS.get(name)
+        if preset is None:
+            return
+        with self._lock:
+            self.objective = preset
+            self.objective_name = name
+        self.model.objective = name
+        self._post()
+
+    def set_budget(self, seconds) -> None:
+        """Seconds per search. Clamped: below a second nothing finishes,
+        and past a minute the advice arrives after the round."""
+        try:
+            value = float(seconds)
+        except (TypeError, ValueError):
+            return
+        value = max(1.0, min(60.0, value))
+        with self._lock:
+            self.budget = value
+        self.model.budget = value
+        self._post()
+
+    def set_level_7(self, allow: bool) -> None:
+        """Offer level 7 gags, or hold them back for a boss."""
+        from .. import state as state_mod
+
+        with self._lock:
+            self.allow_level_7 = bool(allow)
+        state_mod.ALLOW_LEVEL_7 = bool(allow)
+        self.model.allow_level_7 = bool(allow)
+        self._post()
+
     def _post(self) -> None:
         # A shallow copy per post: the UI must never read a Model that
         # the worker is halfway through updating.
         from copy import copy
 
+        self.model.allow_level_7 = self.allow_level_7
+        self.model.objective = self.objective_name
+        self.model.budget = self.budget
         try:
             self.outbox.put_nowait(copy(self.model))
         except queue.Full:                        # pragma: no cover
