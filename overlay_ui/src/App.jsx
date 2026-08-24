@@ -65,29 +65,25 @@ function CogRow({ row }) {
       <span className="w-5 shrink-0 text-right font-mono text-[11px] opacity-40">
         {row.level ?? '?'}
       </span>
-      {row.identified || !row.choices?.length ? (
-        <span
-          className={`w-28 shrink-0 truncate text-[13px] ${
-            row.identified ? 'opacity-80' : 'opacity-40 italic'
-          }`}
-        >
-          {row.name}
-        </span>
-      ) : (
-        /* The readers could not name it, so ask. The plate narrows the
-           cog to at most five and the player can simply see which it is.
-           Applies to this battle only -- teaching the head library is
-           `read_battle --label`, where a wrong entry would be permanent. */
+      {/* ALWAYS a picker, never a label. The readers can be confidently
+          wrong -- a Number Cruncher matched against the Bean Counter the
+          library happens to hold -- and a row with no control is a wrong
+          answer the player cannot correct. Identified rows read as plain
+          text until you touch them. */}
+      {row.choices?.length ? (
         <select
-          className="select select-xs h-[22px] min-h-0 w-28 shrink-0 bg-base-300 px-1 text-[11px] italic"
-          value=""
+          className={`select select-xs h-[22px] min-h-0 w-28 shrink-0 border-0 bg-transparent px-1 text-[12px] hover:bg-base-300 focus:bg-base-300 ${
+            row.identified ? 'opacity-80' : 'italic opacity-60'
+          }`}
+          value={row.choices.find((c) => c.current)?.key ?? ''}
           onChange={(e) => call('name_cog', row.index, e.target.value)}
-          title={`Unidentified ${row.department || 'cog'} — pick which one`}
+          title={row.identified
+            ? `Read as ${row.name} — change it if that is wrong`
+            : `Unidentified — pick which cog this is`}
         >
-          <option value="">{row.name}?</option>
-          {/* Two groups. The reader's department guess orders the list
-              but must not limit it -- when that guess is wrong, the cog
-              on screen is the one name the player cannot pick. */}
+          {!row.choices.some((c) => c.current) && (
+            <option value="">{row.name}?</option>
+          )}
           {row.choices.some((c) => c.likely) && (
             <optgroup label="likely">
               {row.choices.filter((c) => c.likely).map((c) => (
@@ -97,12 +93,14 @@ function CogRow({ row }) {
           )}
           <optgroup label="all cogs">
             {row.choices.filter((c) => !c.likely).map((c) => (
-              <option key={c.key} value={c.key}>
-                {c.display}
-              </option>
+              <option key={c.key} value={c.key}>{c.display}</option>
             ))}
           </optgroup>
         </select>
+      ) : (
+        <span className="w-28 shrink-0 truncate text-[13px] opacity-80">
+          {row.name}
+        </span>
       )}
       <div className="h-[6px] flex-1 overflow-hidden rounded-full bg-base-300">
         <div

@@ -435,8 +435,15 @@ def _row(reading) -> "CogRow":
     else:
         name = (reading.department or "unknown").title()
         identified = False
+    # OFFERED ON EVERY ROW, not only unidentified ones. A confident
+    # wrong answer is worse than no answer: the library holds six of
+    # thirty-two heads, so a cog it has never seen can match the nearest
+    # one it has -- a Number Cruncher read as a Bean Counter, both
+    # Cashbots. With the dropdown hidden on identified rows there was no
+    # way to say otherwise, and the solver planned the whole fight
+    # against the wrong cog's attacks.
     choices = []
-    if not identified:
+    if True:
         # EVERY COG, with the likely ones first. Narrowing to the pool the
         # plate allows is right for automatic matching and wrong for
         # asking a person: the department read can be wrong, and then the
@@ -451,6 +458,8 @@ def _row(reading) -> "CogRow":
         from .catalogue import candidates
 
         likely = list(candidates(reading.department, reading.level))
+        if reading.cog and reading.cog not in likely:
+            likely.insert(0, reading.cog)
         rank = {key: i for i, key in enumerate(likely)}
         every = [c.key for dept in data.COG_DEPARTMENTS.values()
                  for c in dept.cogs]
@@ -459,6 +468,7 @@ def _row(reading) -> "CogRow":
                 entry = data.cog(data.department_of(key), key)
                 choices.append({"key": key, "display": entry.display,
                                 "likely": key in rank,
+                                "current": key == reading.cog,
                                 "department": entry.department})
             except (KeyError, ValueError):        # pragma: no cover
                 continue
