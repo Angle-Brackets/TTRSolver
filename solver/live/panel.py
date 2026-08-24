@@ -67,7 +67,8 @@ def model_json(model: Model) -> str:
         "gag_level": model.gag_level,
         "rows": [{"name": r.name, "level": r.level,
                   "health": r.health, "identified": r.identified,
-                  "art": r.art_key, "department": r.department}
+                  "art": r.art_key, "department": r.department,
+                  "slot": r.slot, "choices": r.choices}
                  for r in model.rows],
         "problems": list(model.problems),
         "evidence": model.evidence,
@@ -112,6 +113,17 @@ class Api:
 
     def close(self) -> None:
         self._state.closing = True
+
+    def name_cog(self, slot, cog) -> None:
+        """The player naming a plate the readers could not.
+
+        Applies to this battle only. It is deliberately not written to
+        the head catalogue -- a signature there is consulted forever, so
+        a wrong entry poisons every later match, while a wrong name here
+        costs one fight. `read_battle --label` is the way to teach it.
+        """
+        self._worker.name_cog(slot, cog)
+        self._worker.ask_now()
 
     def set_objective(self, name) -> None:
         self._worker.set_objective(str(name))

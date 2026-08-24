@@ -33,15 +33,24 @@ class TestPanelBridge(unittest.TestCase):
     def test_every_call_site_exists_with_the_right_arity(self):
         source = APP.read_text(encoding="utf-8")
         api = self._api()
-        # call('name') and call('name', arg)
-        for match in re.finditer(r"call\(\s*'([a-z_0-9]+)'\s*(,)?", source):
-            name, comma = match.group(1), match.group(2)
+        # call('name'), call('name', a), call('name', a, b) -- count the
+        # top-level commas in the argument list rather than looking for
+        # one, since `name_cog` takes two.
+        for match in re.finditer(r"call\(\s*'([a-z_0-9]+)'([^)]*)\)", source):
+            name, rest = match.group(1), match.group(2)
             self.assertIn(name, api, f"App.jsx calls Api.{name}, which "
                                      f"does not exist")
-            self.assertEqual(1 if comma else 0, api[name],
-                             f"App.jsx calls Api.{name} with "
-                             f"{1 if comma else 0} argument(s), but it "
-                             f"takes {api[name]}")
+            depth, given = 0, 0
+            for ch in rest:
+                if ch in "([{":
+                    depth += 1
+                elif ch in ")]}":
+                    depth -= 1
+                elif ch == "," and depth == 0:
+                    given += 1
+            self.assertEqual(given, api[name],
+                             f"App.jsx calls Api.{name} with {given} "
+                             f"argument(s), but it takes {api[name]}")
 
     def test_model_json_covers_what_the_page_reads(self):
         """Every model field the page destructures must be posted."""

@@ -119,6 +119,13 @@ class CogRow:
     # specific cog would assert more than was read.
     art_key: Optional[str] = None
     department: Optional[str] = None
+    # Plate slot, which is what a hand-named cog is keyed on -- it
+    # survives a cog dying, where the row index does not.
+    slot: Optional[int] = None
+    # What this plate could be, given its department and level. Offered
+    # in the panel when the readers cannot name it: at most five, often
+    # fewer, and the player can simply see which one it is.
+    choices: List[dict] = field(default_factory=list)
     identified: bool = True
 
 
@@ -306,6 +313,9 @@ class Worker(threading.Thread):
 
         watcher = BattleWatcher(battle_over=advise_mod._paid_out,
                                 force_battle=self.forced)
+        # Held so `name_cog` can reach it: the panel names a plate
+        # the readers could not, and the watcher applies it per frame.
+        self._watcher = watcher
         thinker = advise_mod.Thinker(self._on_advice)
         try:
             while not self._stop.is_set():
@@ -350,6 +360,12 @@ class Worker(threading.Thread):
                 model.track = advise_mod.track_of(action)
                 model.gag_level = (action.level if model.track else None)
         self._post()
+
+    def name_cog(self, slot, cog) -> None:
+        """The player naming a plate the readers could not."""
+        watcher = getattr(self, "_watcher", None)
+        if watcher is not None:
+            watcher.name_plate(slot, cog or None)
 
     def set_objective(self, name: str) -> None:
         """Switch how the solver is being asked to play, mid-fight."""
@@ -417,10 +433,22 @@ def _row(reading) -> "CogRow":
     else:
         name = (reading.department or "unknown").title()
         identified = False
+    choices = []
+    if not identified:
+        from .catalogue import candidates
+
+        for key in candidates(reading.department, reading.level):
+            try:
+                entry = data.cog(data.department_of(key), key)
+                choices.append({"key": key, "display": entry.display,
+                                "art": f"{entry.department}-{entry.key}"})
+            except (KeyError, ValueError):        # pragma: no cover
+                choices.append({"key": key, "display": key, "art": None})
     return CogRow(name=name, level=reading.level,
                   health=max(0.0, min(1.0, float(reading.health))),
                   identified=identified, art_key=art_key,
-                  department=reading.department)
+                  department=reading.department,
+                  slot=getattr(reading, "slot", None), choices=choices)
 
 
 def _describe_reading(reading) -> str:

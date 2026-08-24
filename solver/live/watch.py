@@ -218,6 +218,12 @@ class BattleWatcher:
                  collect: bool = True, panel_present=None,
                  battle_over=None, force_battle=None):
         self.catalogue = catalogue if catalogue is not None else HeadCatalogue()
+        # Cogs the player named by hand, keyed by plate slot. The
+        # catalogue has 4 of 32 heads, so `match` usually fails and
+        # `eliminate` usually cannot deduce -- and the player can see the
+        # cog perfectly well. Keyed on SLOT rather than plate index
+        # because the index shifts when a cog dies and the slot does not.
+        self._named: dict = {}
         self.capture = capture or Capture()
         self.agree = agree
         self.collect = collect
@@ -290,11 +296,34 @@ class BattleWatcher:
                 # one is left, that is the cog. See
                 # HeadCatalogue.eliminate.
                 cog = self.catalogue.eliminate(frame, plate, among=pool)
+            if cog is None:
+                # The player may have named it. Only honoured while it is
+                # still consistent with what the plate reads -- if the
+                # slot now holds a different department or level, the cog
+                # that was named is gone and the name goes with it.
+                named = self._named.get(plate.slot)
+                if named and named in pool:
+                    cog = named
             readings.append(CogReading(
                 index=i, department=dept, level=level,
                 health=health_fraction(frame, plate),
                 cog=cog, slot=plate.slot))
         return readings
+
+    def name_plate(self, slot, cog: Optional[str]) -> None:
+        """Record what the player says is in this plate slot.
+
+        Deliberately NOT written to the head catalogue. A signature is
+        consulted forever, so a wrong entry poisons every later match,
+        while a wrong name here costs one battle -- the same asymmetry
+        `HeadCatalogue.eliminate` is built on. Labelling the library is
+        `read_battle --label`, where the plate and the candidates are
+        shown side by side.
+        """
+        if cog:
+            self._named[slot] = cog
+        else:
+            self._named.pop(slot, None)
 
     def _locate(self, frame: np.ndarray) -> List[Plate]:
         """Plates in the frame, preferring the band they were last in.

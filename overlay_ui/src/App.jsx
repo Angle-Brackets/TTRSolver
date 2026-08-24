@@ -65,13 +65,31 @@ function CogRow({ row }) {
       <span className="w-5 shrink-0 text-right font-mono text-[11px] opacity-40">
         {row.level ?? '?'}
       </span>
-      <span
-        className={`w-28 shrink-0 truncate text-[13px] ${
-          row.identified ? 'opacity-80' : 'opacity-40 italic'
-        }`}
-      >
-        {row.name}
-      </span>
+      {row.identified || !row.choices?.length ? (
+        <span
+          className={`w-28 shrink-0 truncate text-[13px] ${
+            row.identified ? 'opacity-80' : 'opacity-40 italic'
+          }`}
+        >
+          {row.name}
+        </span>
+      ) : (
+        /* The readers could not name it, so ask. The plate narrows the
+           cog to at most five and the player can simply see which it is.
+           Applies to this battle only -- teaching the head library is
+           `read_battle --label`, where a wrong entry would be permanent. */
+        <select
+          className="select select-xs h-[22px] min-h-0 w-28 shrink-0 bg-base-300 px-1 text-[11px] italic"
+          value=""
+          onChange={(e) => call('name_cog', row.slot, e.target.value)}
+          title={`Unidentified ${row.department || 'cog'} — pick which one`}
+        >
+          <option value="">{row.name}?</option>
+          {row.choices.map((c) => (
+            <option key={c.key} value={c.key}>{c.display}</option>
+          ))}
+        </select>
+      )}
       <div className="h-[6px] flex-1 overflow-hidden rounded-full bg-base-300">
         <div
           className={`h-full rounded-full transition-[width] duration-300 ${healthClass(
