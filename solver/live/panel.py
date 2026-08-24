@@ -156,7 +156,9 @@ def _geometry() -> tuple[int, int, int, int]:
 
 
 def main(argv: Optional[list] = None) -> int:
-    from .. import objectives
+    # `solver.objectives` does not exist -- the presets live in
+    # `search.objective`, which is how `advise` imports them.
+    from ..search import objective as objectives
     from . import advise as advise_mod
 
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
