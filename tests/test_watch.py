@@ -317,3 +317,19 @@ class TestNamingFromThePanel(unittest.TestCase):
         self.assertEqual("mr_hollywood", w._named[0])
         w._forget_names(3)
         self.assertEqual({}, w._named)
+
+    def test_a_pick_outside_the_read_department_is_honoured(self):
+        """The dropdown offers every cog because the department read can
+        be wrong. Gating the answer on that same read threw the pick
+        away, silently, which is the bug three times over."""
+        w = self._watcher()
+        w._forget_names(1)
+        w.name_plate(0, "head_hunter")          # bossbot
+        self.assertEqual("head_hunter", w._named[0])
+
+    def test_a_pick_can_be_changed(self):
+        w = self._watcher()
+        w._forget_names(1)
+        w.name_plate(0, "mr_hollywood")
+        w.name_plate(0, "head_hunter")
+        self.assertEqual("head_hunter", w._named[0])

@@ -314,12 +314,20 @@ class BattleWatcher:
                 # HeadCatalogue.eliminate.
                 cog = self.catalogue.eliminate(frame, plate, among=pool)
             if cog is None:
-                # The player may have named it. Only honoured while it is
-                # still consistent with what the plate reads -- if the
-                # slot now holds a different department or level, the cog
-                # that was named is gone and the name goes with it.
+                # The player may have named it. HONOURED WHATEVER THE
+                # PLATE READ, which is the third time this feature has
+                # been broken by trusting the reader over the person.
+                # The dropdown offers every cog precisely because the
+                # department read can be wrong, and then gating the
+                # answer on `named in pool` throws the pick away again --
+                # silently, which is what makes it maddening.
+                #
+                # Nothing needs the guard any more: names are keyed on
+                # plate order and `_forget_names` drops them the moment
+                # the lineup changes, so a stale name cannot survive to
+                # describe a different cog.
                 named = self._named.get(i)
-                if named and named in pool:
+                if named:
                     cog = named
                     # LEARN IT. Owner-authorised: the player is looking
                     # at the cog, which is better evidence than any
