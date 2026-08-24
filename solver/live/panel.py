@@ -92,9 +92,17 @@ class Api:
         return model_json(self._state.model)
 
     def toggle_fight(self) -> None:
-        # Tri-state underneath: confirming sets True, ending goes back to
-        # None so detection resumes rather than staying suppressed.
-        self._worker.set_forced(None if self._state.model.in_battle else True)
+        """Confirm a fight, or end one and reset.
+
+        Reads the WORKER's view rather than the UI's Model: `_post` ships
+        a fresh copy every cycle, so a decision made from the panel's
+        copy races the next frame.
+        """
+        if self._worker.model.in_battle:
+            self._worker.end_fight()
+        else:
+            self._worker.set_forced(True)
+            self._worker.ask_now()
 
     def ask_now(self) -> None:
         self._worker.ask_now()

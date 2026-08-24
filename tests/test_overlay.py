@@ -244,3 +244,51 @@ class _NoCapture:
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestEndingAFight(unittest.TestCase):
+    """"Fight is over" must actually end it, and wipe what it left."""
+
+    def _worker(self):
+        import queue
+        from solver.live.overlay import Worker
+        from solver.search import objective as objectives
+        return Worker(queue.Queue(maxsize=4), objectives.PRESETS["balanced"],
+                      2, 15.0)
+
+    def _mid_fight(self, w):
+        from solver.live.overlay import Model
+        w.model = Model(detected_battle=True, plates=2, menu_visible=True,
+                        gag="Wedding Cake on all cogs", track="throw",
+                        gag_level=7, turn=4, problems=["cog 1: unidentified"])
+        return w.model
+
+    def test_it_leaves_the_battle(self):
+        w = self._worker()
+        self._mid_fight(w)
+        w.end_fight()
+        self.assertFalse(w.model.in_battle)
+
+    def test_it_suppresses_rather_than_deferring(self):
+        """None means 'decide for yourself', and the readers still see
+        plates -- so the battle came straight back."""
+        w = self._worker()
+        self._mid_fight(w)
+        w.end_fight()
+        self.assertIs(False, w.forced())
+
+    def test_it_clears_the_advice_and_the_reasons(self):
+        w = self._worker()
+        self._mid_fight(w)
+        w.end_fight()
+        self.assertIsNone(w.model.gag)
+        self.assertIsNone(w.model.track)
+        self.assertEqual([], w.model.problems)
+        self.assertEqual(0, w.model.turn)
+
+    def test_the_player_can_start_another(self):
+        w = self._worker()
+        self._mid_fight(w)
+        w.end_fight()
+        w.set_forced(True)
+        self.assertIs(True, w.forced())

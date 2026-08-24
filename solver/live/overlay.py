@@ -327,6 +327,12 @@ class Worker(threading.Thread):
                 model = self.model
                 model.window_found = game_rect() is not None
                 model.plates = len(watcher.view.cogs)
+                # RELEASE THE SUPPRESSION once the screen agrees. "Fight
+                # is over" sets forced False so detection stops arguing
+                # while the plates are still up; holding it there would
+                # mean the next fight is never noticed.
+                if self.forced() is False and not watcher.view.cogs:
+                    self.set_forced(None)
                 model.menu_visible = find_panel(frame) is not None
                 model.detected_battle = watcher.view.active
                 model.forced = self.forced()
@@ -393,6 +399,40 @@ class Worker(threading.Thread):
         with self._lock:
             self.budget = value
         self.model.budget = value
+        self._post()
+
+    def end_fight(self) -> None:
+        """The player says the fight is over. Wipe it and stop advising.
+
+        `set_forced(None)` was not enough: None means "decide for
+        yourself", and the readers still see plates on screen, so the
+        battle re-asserted on the very next poll and the button did
+        nothing. False actually suppresses -- see
+        `BattleWatcher.in_battle`, where `forced is False` returns early.
+        It is released automatically once the plates are gone, so the
+        next fight is detected normally rather than staying suppressed.
+
+        Everything derived from the old fight goes with it. A cog named
+        by hand, an advice line, a refusal -- all describe a battle that
+        has ended, and carrying any of it into the next one is how a name
+        lands on the wrong cog.
+        """
+        self.set_forced(False)
+        watcher = getattr(self, "_watcher", None)
+        if watcher is not None:
+            watcher._forget_names(-1)
+        model = self.model
+        # BOTH copies of the flag. `Worker._forced` is what the watcher
+        # consults; `Model.forced` is what `Model.in_battle` reads. Setting
+        # only the first left the panel still saying IN BATTLE.
+        model.forced = False
+        model.detected_battle = False
+        model.plates = 0
+        model.gag, model.gag_at, model.track = None, 0.0, None
+        model.gag_level = None
+        model.problems, model.rows, model.cogs = [], [], []
+        model.turn = 0
+        model.thinking = False
         self._post()
 
     def set_level_7(self, allow: bool) -> None:
