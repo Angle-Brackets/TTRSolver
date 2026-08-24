@@ -165,8 +165,12 @@ export default function App() {
     return () => cancelAnimationFrame(id)
   }, [model])
 
-  const call = (name, arg) => {
-    if (window.pywebview?.api?.[name]) window.pywebview.api[name](arg)
+  // Spread, not a fixed `arg`. Passing `undefined` explicitly still
+  // sends pywebview a positional argument, and `ask_now()` /
+  // `toggle_fight()` / `close()` take none -- which crashed the bridge
+  // with "takes 1 positional argument but 2 were given".
+  const call = (name, ...args) => {
+    if (window.pywebview?.api?.[name]) window.pywebview.api[name](...args)
   }
 
   return (
