@@ -12,7 +12,8 @@ import re
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-APP = ROOT / "overlay_ui" / "src" / "App.jsx"
+SRC = ROOT / "overlay_ui" / "src"
+APP = SRC / "App.jsx"
 
 
 class TestPanelBridge(unittest.TestCase):
@@ -31,7 +32,11 @@ class TestPanelBridge(unittest.TestCase):
             panel.main(["--help"])
 
     def test_every_call_site_exists_with_the_right_arity(self):
-        source = APP.read_text(encoding="utf-8")
+        # Every source file, not just App.jsx -- the cog picker is its
+        # own component and its call sites must match too.
+        source = "
+".join(f.read_text(encoding="utf-8")
+                           for f in SRC.glob("*.jsx"))
         api = self._api()
         # call('name'), call('name', a), call('name', a, b) -- count the
         # top-level commas in the argument list rather than looking for
@@ -57,7 +62,9 @@ class TestPanelBridge(unittest.TestCase):
         import json
         from solver.live import overlay, panel
         posted = set(json.loads(panel.model_json(overlay.Model())))
-        source = APP.read_text(encoding="utf-8")
+        source = "
+".join(f.read_text(encoding="utf-8")
+                           for f in SRC.glob("*.jsx"))
         for field in re.findall(r"model\.([a-z_0-9]+)", source):
             self.assertIn(field, posted,
                           f"App.jsx reads model.{field}, which "

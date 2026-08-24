@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import CogPicker from './CogPicker'
 
 // The model Python posts. Shape matches `panel.model_json`; this default
 // is also what the page shows when opened in a browser with no Python
@@ -70,52 +71,20 @@ function CogRow({ row }) {
           forced to 100% with knockback, Drop always misses, and the cog
           does not attack. Until the plate is read, the player marks it. */}
       <button
-        className={`shrink-0 rounded px-1 text-[11px] leading-none ${
-          row.lured ? 'bg-warning/25 text-warning' : 'opacity-25 hover:opacity-60'
+        className={`shrink-0 rounded px-1 py-[1px] text-[9px] font-semibold uppercase leading-none tracking-wide ${
+          row.lured ? 'bg-warning/25 text-warning' : 'opacity-20 hover:opacity-60'
         }`}
         onClick={() => call('mark_lured', row.index, !row.lured)}
-        title={row.lured ? 'Marked as lured — click if it is awake'
-                         : 'Mark this cog as lured'}
+        title={row.lured
+          ? 'Asleep on a Lure: Throw and Squirt hit for certain with knockback, Drop misses, and it will not attack. Click if it is actually awake.'
+          : 'Not lured. Click to mark it asleep if the reader missed the indicator.'}
       >
-        {row.lured ? 'z' : 'z'}
+        {row.lured ? 'LURED' : 'lure?'}
       </button>
-      {/* ALWAYS a picker, never a label. The readers can be confidently
-          wrong -- a Number Cruncher matched against the Bean Counter the
-          library happens to hold -- and a row with no control is a wrong
-          answer the player cannot correct. Identified rows read as plain
-          text until you touch them. */}
-      {row.choices?.length ? (
-        <select
-          className={`select select-xs h-[22px] min-h-0 w-28 shrink-0 border-0 bg-transparent px-1 text-[12px] hover:bg-base-300 focus:bg-base-300 ${
-            row.identified ? 'opacity-80' : 'italic opacity-60'
-          }`}
-          value={row.choices.find((c) => c.current)?.key ?? ''}
-          onChange={(e) => call('name_cog', row.index, e.target.value)}
-          title={row.identified
-            ? `Read as ${row.name} — change it if that is wrong`
-            : `Unidentified — pick which cog this is`}
-        >
-          {!row.choices.some((c) => c.current) && (
-            <option value="">{row.name}?</option>
-          )}
-          {row.choices.some((c) => c.likely) && (
-            <optgroup label="likely">
-              {row.choices.filter((c) => c.likely).map((c) => (
-                <option key={c.key} value={c.key}>{c.display}</option>
-              ))}
-            </optgroup>
-          )}
-          <optgroup label="all cogs">
-            {row.choices.filter((c) => !c.likely).map((c) => (
-              <option key={c.key} value={c.key}>{c.display}</option>
-            ))}
-          </optgroup>
-        </select>
-      ) : (
-        <span className="w-28 shrink-0 truncate text-[13px] opacity-80">
-          {row.name}
-        </span>
-      )}
+      <CogPicker
+        row={row}
+        onPick={(key) => call('name_cog', row.index, key)}
+      />
       <div className="h-[6px] flex-1 overflow-hidden rounded-full bg-base-300">
         <div
           className={`h-full rounded-full transition-[width] duration-300 ${healthClass(
