@@ -377,11 +377,36 @@ class Worker(threading.Thread):
         if watcher is not None:
             watcher.mark_lured(index, bool(lured))
 
-    def name_cog(self, slot, cog) -> None:
-        """The player naming a plate the readers could not."""
+    def name_cog(self, index, cog) -> None:
+        """The player naming a plate, applied at once.
+
+        PAINTED IMMEDIATELY rather than waiting for the watcher's next
+        frame. Until it lands the row looks untouched, which is
+        indistinguishable from the click having been lost -- and that
+        ambiguity cost several rounds of debugging. Showing it now means
+        a pick that arrives is visible instantly, so a pick that does not
+        is a real bug rather than a guess.
+        """
+        from .. import data
+
         watcher = getattr(self, "_watcher", None)
         if watcher is not None:
-            watcher.name_plate(slot, cog or None)
+            watcher.name_plate(index, cog or None)
+        try:
+            row = self.model.rows[int(index)]
+        except (TypeError, ValueError, IndexError):
+            return
+        if cog:
+            try:
+                entry = data.cog(data.department_of(cog), cog)
+            except (KeyError, ValueError):
+                return
+            row.name = entry.display
+            row.identified = True
+            row.art_key = f"{entry.department}-{entry.key}"
+            for choice in row.choices:
+                choice["current"] = choice["key"] == cog
+        self._post()
 
     def set_objective(self, name: str) -> None:
         """Switch how the solver is being asked to play, mid-fight."""

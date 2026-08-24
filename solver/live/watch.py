@@ -334,41 +334,30 @@ class BattleWatcher:
             if told is not None:
                 level = told
             pool = candidates(dept, level)
-            match = self.catalogue.match(frame, plate, among=pool)
-            cog = match.cog if match and match.confident else None
-            if cog is None:
-                # Nothing in the library resembles it. It may still be
-                # deducible: if every known candidate is ruled out and
-                # one is left, that is the cog. See
-                # HeadCatalogue.eliminate.
-                cog = self.catalogue.eliminate(frame, plate, among=pool)
-            if cog is None:
-                # The player may have named it. HONOURED WHATEVER THE
-                # PLATE READ, which is the third time this feature has
-                # been broken by trusting the reader over the person.
-                # The dropdown offers every cog precisely because the
-                # department read can be wrong, and then gating the
-                # answer on `named in pool` throws the pick away again --
-                # silently, which is what makes it maddening.
-                #
-                # Nothing needs the guard any more: names are keyed on
-                # plate order and `_forget_names` drops them the moment
-                # the lineup changes, so a stale name cannot survive to
-                # describe a different cog.
-                named = self._named.get(i)
-                if named:
-                    cog = named
-                    # LEARN IT. Owner-authorised: the player is looking
-                    # at the cog, which is better evidence than any
-                    # signature match. `add` overwrites and keeps a crop,
-                    # so a mis-click is correctable and visible rather
-                    # than silently permanent -- which is the property
-                    # that makes writing here acceptable at all.
-                    if self._learn.pop(i, None) == named:
-                        try:
-                            self.catalogue.add(named, frame, plate)
-                        except (KeyError, ValueError, OSError):
-                            pass
+            # THE PLAYER FIRST. They are looking at the cog; the
+            # library holds six heads of thirty-two and will happily
+            # match a Number Cruncher against the Bean Counter it has.
+            # Consulting the name only when nothing else identified the
+            # plate meant a confident wrong answer could not be
+            # corrected -- the exact case reported.
+            cog = self._named.get(i)
+            if cog is not None:
+                if self._learn.pop(i, None) == cog:
+                    # Owner-authorised: overwrite whatever signature
+                    # produced the bad match. `add` keeps the crop, so a
+                    # mis-click is visible and correctable.
+                    try:
+                        self.catalogue.add(cog, frame, plate)
+                    except Exception:
+                        pass
+            else:
+                match = self.catalogue.match(frame, plate, among=pool)
+                cog = match.cog if match and match.confident else None
+                if cog is None:
+                    # Nothing resembles it, but it may be deducible: if
+                    # every known candidate is ruled out and one is
+                    # left, that is the cog. See HeadCatalogue.eliminate.
+                    cog = self.catalogue.eliminate(frame, plate, among=pool)
             readings.append(CogReading(
                 index=i, department=dept, level=level,
                 health=health_fraction(frame, plate),
