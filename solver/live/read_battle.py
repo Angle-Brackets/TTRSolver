@@ -264,6 +264,24 @@ def main(argv: Optional[List[str]] = None) -> int:
         if rect:
             left, top, right, bottom = rect
             print(f"window size : {right - left}x{bottom - top}")
+        # THE PANEL'S OWN GATES, not just find_plates. The watcher does
+        # not call find_plates directly: it goes through `locate_plates`,
+        # which is gated on a subsampled `any_plates`, and then requires
+        # the gag menu as well before it will call it a battle. A reader
+        # that finds a plate here while the panel says "nothing on screen"
+        # means one of those gates is the difference, and each is a
+        # different bug.
+        from .vision import any_plates, locate_plates
+        from .gagpanel import find_panel
+
+        print(f"any_plates  : {any_plates(frame)}"
+              f"   (subsampled presence test the watcher gates on)")
+        print(f"locate_plates: {len(locate_plates(frame))} plate(s)"
+              f"   (what the watcher actually calls)")
+        panel_box = find_panel(frame)
+        print(f"gag menu    : {'found ' + str(panel_box) if panel_box is not None else 'NOT FOUND'}")
+        print(f"              a battle needs plates AND the menu to start")
+
         rejects = []
         plates = find_plates(frame, rejects=rejects)
         print(f"plates found: {len(plates)}")
