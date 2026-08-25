@@ -281,6 +281,28 @@ def main(argv: Optional[List[str]] = None) -> int:
         panel_box = find_panel(frame)
         print(f"gag menu    : {'found ' + str(panel_box) if panel_box is not None else 'NOT FOUND'}")
         print(f"              a battle needs plates AND the menu to start")
+        if panel_box is None:
+            # WHICH ROW, AND BY HOW MUCH. `find_panel` needs all seven
+            # track colours to form a run of MIN_RUN_FRAC of the frame
+            # width, and returns None if one is missing -- without
+            # saying which. A colour the game has shifted and a band too
+            # short are different bugs with the same symptom.
+            import numpy as np
+
+            from .gagpanel import (COLOUR_TOLERANCE, MIN_RUN_FRAC,
+                                   ROW_COLOURS, _longest_run)
+
+            need = int(frame.shape[1] * MIN_RUN_FRAC)
+            print(f"              each row needs an unbroken run of {need}px")
+            for track, colour in ROW_COLOURS:
+                hit = np.all(np.abs(frame[:, :, :3].astype(np.int16)
+                                    - np.array(colour)) < COLOUR_TOLERANCE,
+                             axis=2)
+                rows = np.nonzero(hit.any(axis=1))[0]
+                best = max((_longest_run(hit[y]) for y in rows), default=0)
+                mark = "ok" if best >= need else "FAILS"
+                print(f"                {track.value:<8} longest run "
+                      f"{best:>5}px  {mark}")
 
         rejects = []
         plates = find_plates(frame, rejects=rejects)
