@@ -77,6 +77,12 @@ MIN_BLUE_FRAC = 0.20
 # edges and breaks it into pieces; this is low enough to keep a digit
 # whole while still excluding the cell's own pale highlight.
 WHITE_FLOOR = 150
+# ...but only as a ceiling. The floor actually used is a fraction of the
+# brightest near-grey in the cell's own corner, so a track the game has
+# darkened still reads. WHITE_FLOOR_MIN keeps an empty dark cell from
+# finding ink in its own noise.
+WHITE_FLOOR_FRAC = 0.80
+WHITE_FLOOR_MIN = 70
 
 # Deliberately loose. The count is drawn about 10x14 pixels at 1080p, so
 # even a correct match scores modestly -- a thin "1" reached only 0.37
@@ -456,8 +462,14 @@ def read_pouch_label(frame: np.ndarray,
 
 
 def _read_cell(patch: np.ndarray, track: Track, level: int) -> PanelCell:
-    blue = ((patch[:, :, 2] > 130)
-            & (patch[:, :, 2] - patch[:, :, 0] > 45)).mean()
+    # DOMINANCE, not brightness. `B > 130` was the test, and the game
+    # darkens a whole track when it cannot be used this round -- the blue
+    # drops under the floor, the cell reads as empty, and its gags vanish
+    # from the pouch even though the digit is right there. A dimmed blue
+    # cell is still far more blue than red; a grey empty one is not, and
+    # that difference survives the dimming where brightness does not.
+    blue = ((patch[:, :, 2] > 60)
+            & (patch[:, :, 2] - patch[:, :, 0] > 25)).mean()
     if blue <= MIN_BLUE_FRAC:
         # Greyed: unlocked but empty. A cell that is neither blue nor
         # grey does not reach here -- see the digit check below.
@@ -488,7 +500,20 @@ def _read_count(patch: np.ndarray) -> Tuple[Optional[int], float]:
     if corner.size == 0:
         return None
     hi, lo = corner.max(axis=2), corner.min(axis=2)
-    ink = (lo > WHITE_FLOOR) & ((hi - lo) < 45)
+    # RELATIVE TO THIS CELL, not an absolute white. The game dims whole
+    # tracks -- a row you cannot use this round is drawn darkened -- and
+    # the digit dims with it. A fixed floor of 150 then finds no ink at
+    # all and the count reads as nothing: on a live VP panel the cells
+    # summed to 45 against a menu label of 70, with the darkened TRAP,
+    # LURE and SOUND rows contributing none of their gags.
+    #
+    # The digit is the brightest near-grey in its corner whatever the
+    # cell's brightness, so the floor scales with what is actually there.
+    # The absolute floor stays as a lower bound: without it, an empty
+    # dark cell would find "ink" in its own noise.
+    peak = int(lo.max()) if lo.size else 0
+    floor = max(WHITE_FLOOR_MIN, min(WHITE_FLOOR, int(peak * WHITE_FLOOR_FRAC)))
+    ink = (lo > floor) & ((hi - lo) < 45)
     if ink.sum() < 6:
         return None, 0.0
 

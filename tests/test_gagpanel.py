@@ -190,3 +190,63 @@ class MergeColumnsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestDarkenedTracks(unittest.TestCase):
+    """The game dims a whole track when it cannot be used this round.
+
+    Both cell tests assumed a bright cell: `B > 130` for "holds
+    something", and an absolute white floor of 150 for the digit. A
+    dimmed row failed both, so its gags vanished from the pouch and the
+    checksum refused the state -- on a live VP panel the cells summed to
+    45 against a menu label of 70, the missing 25 being the darkened
+    TRAP, LURE and SOUND rows.
+    """
+
+    def setUp(self):
+        try:
+            import numpy  # noqa: F401
+        except ImportError:
+            self.skipTest("numpy is not installed")
+
+    def _cell(self, bright, digit):
+        import numpy as np
+        h, w = 38, 46
+        p = np.zeros((h, w, 3), dtype=np.uint8)
+        p[:, :] = (int(0.25 * bright), int(0.45 * bright), bright)
+        y0, x0 = int(0.45 * h), int(0.60 * w)
+        p[y0 + 2:y0 + 4, x0 + 2:x0 + 12] = digit
+        p[y0 + 4:y0 + 14, x0 + 8:x0 + 10] = digit
+        return p
+
+    def test_a_bright_cell_reads(self):
+        from solver.live import gagpanel as gp
+        from solver.state import Track
+        cell = gp._read_cell(self._cell(200, 240), Track.TRAP, 5)
+        self.assertTrue(cell.unlocked)
+        self.assertEqual(7, cell.count)
+
+    def test_a_darkened_cell_reads_the_same(self):
+        from solver.live import gagpanel as gp
+        from solver.state import Track
+        cell = gp._read_cell(self._cell(90, 110), Track.TRAP, 5)
+        self.assertTrue(cell.unlocked)
+        self.assertEqual(7, cell.count)
+
+    def test_a_grey_cell_is_still_empty(self):
+        """Dominance, not brightness -- a grey cell has neither."""
+        import numpy as np
+        from solver.live import gagpanel as gp
+        from solver.state import Track
+        grey = np.full((38, 46, 3), 120, dtype=np.uint8)
+        cell = gp._read_cell(grey, Track.TRAP, 5)
+        self.assertEqual(0, cell.count)
+
+    def test_a_dark_empty_cell_finds_no_ink(self):
+        """WHITE_FLOOR_MIN stops a relative floor finding a digit in
+        noise once the cell is dark enough."""
+        import numpy as np
+        from solver.live import gagpanel as gp
+        dark = np.zeros((38, 46, 3), dtype=np.uint8)
+        dark[:, :] = (10, 18, 40)
+        self.assertIn(gp._read_count(dark), (None, (None, 0.0)))
