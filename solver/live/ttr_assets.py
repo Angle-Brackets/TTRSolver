@@ -159,6 +159,18 @@ INTERFACE_FONT = ("ImpressBT.ttf", "phase_3.mf")
 # let it stand. If this order is ever touched, re-verify it against a
 # named source rather than by eye.
 COG_ICONS = ("ttr_t_ara_gen_cogIcons.jpg", "phase_3.5.mf")
+
+# The battle status-effect atlas, 2x2 like the emblems. The lure magnet
+# is the bottom-right cell -- the green horseshoe with white tips, which
+# is what the game floats above a sleeping cog's plate.
+#
+# The alpha lives in a separate `_a.rgb` sibling, which is how Panda3D
+# stores it; without it the icon carries the atlas's black backdrop.
+STATUS_EFFECTS = ("battle_gui_status_effects_remastered_palette_4amla_1.jpg",
+                  "phase_3.5.mf")
+STATUS_ALPHA = ("battle_gui_status_effects_remastered_palette_4amla_1_a.rgb",
+                "phase_3.5.mf")
+LURE_CELL = (1, 1)          # column, row in the 2x2 atlas
 EMBLEM_ORDER = ("sellbot", "cashbot", "lawbot", "bossbot")
 
 
@@ -185,3 +197,41 @@ def department_emblems(override: Optional[str] = None) -> Dict[str, Path]:
             atlas.crop((left, top, left + half_w, top + half_h)).save(target)
             out[dept] = target
     return out
+
+
+def lure_icon(override: Optional[str] = None) -> Path:
+    """The magnet the game shows above a lured cog, as a cut-out PNG.
+
+    Extracted from the player's own installation like the font and the
+    emblems, never vendored: it is TTR's artwork, and a copy in this
+    repository would be a redistribution we have no right to make and
+    would go stale at the next patch.
+
+    Re-cropped every call rather than trusting what is on disk, for the
+    reason `department_emblems` records -- a cached tile cut at the wrong
+    offset makes a corrected offset look like it did nothing.
+    """
+    from PIL import Image
+
+    atlas_path = extract(*STATUS_EFFECTS, override=override)
+    target = atlas_path.parent / "status_lure.png"
+    with Image.open(atlas_path) as atlas:
+        half_w, half_h = atlas.width // 2, atlas.height // 2
+        col, row = LURE_CELL
+        left, top = col * half_w, row * half_h
+        icon = atlas.crop((left, top, left + half_w, top + half_h))
+        icon = icon.convert("RGBA")
+
+        # The alpha is a separate SGI RGB file. If it is missing or
+        # unreadable the icon still works -- it simply keeps the atlas
+        # backdrop -- so this never raises for want of a mask.
+        try:
+            alpha_path = extract(*STATUS_ALPHA, override=override)
+            with Image.open(alpha_path) as mask:
+                mask = mask.convert("L").resize(atlas.size)
+                icon.putalpha(mask.crop(
+                    (left, top, left + half_w, top + half_h)))
+        except Exception:
+            pass
+        icon.save(target)
+    return target

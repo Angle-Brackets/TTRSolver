@@ -44,6 +44,32 @@ from .overlay import ADVICE_LINGER, Model, Worker
 
 DIST = Path(__file__).resolve().parents[2] / "overlay_ui" / "dist"
 
+
+def _lure_icon_uri() -> str:
+    """The game's own lure magnet, as a data URI for the page.
+
+    Read from the player's installation at runtime and handed over
+    inline. It is deliberately NOT bundled into `overlay_ui`: that would
+    put TTR's artwork in this repository, which `ttr_assets` exists to
+    avoid, and would go stale the next time the game is patched.
+
+    Returns "" when the game is not installed or PIL is missing, and the
+    panel falls back to a text badge. A missing decoration must never
+    stop the panel starting.
+    """
+    import base64
+
+    try:
+        from . import ttr_assets
+
+        raw = ttr_assets.lure_icon().read_bytes()
+    except Exception:
+        return ""
+    return "data:image/png;base64," + base64.b64encode(raw).decode("ascii")
+
+
+LURE_ICON = ""
+
 # The webview is told to poll this often. Python cannot push into the
 # page from another thread safely, so the page asks -- which also means
 # a page reloaded by hand recovers on its own.
@@ -76,6 +102,7 @@ def model_json(model: Model) -> str:
         "can_advise": model.can_advise,
         "thinking": model.thinking,
         "allow_level_7": model.allow_level_7,
+        "lure_icon": LURE_ICON,
         "objective": model.objective,
         "budget": model.budget,
     })
@@ -227,6 +254,9 @@ def main(argv: Optional[list] = None) -> int:
     if args.no_level_7:
         from .. import state as state_mod
         state_mod.ALLOW_LEVEL_7 = False
+
+    global LURE_ICON
+    LURE_ICON = _lure_icon_uri()
 
     objective = objectives.PRESETS[args.objective]
     objective_name = args.objective

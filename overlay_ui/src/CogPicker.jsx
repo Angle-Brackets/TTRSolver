@@ -60,7 +60,10 @@ export default function CogPicker({ row, onPick }) {
           ? `Read as ${row.name} — click to correct it`
           : 'Unidentified — click to say which cog this is'}
       >
-        {current ? current.display : `${row.name}?`}
+        {/* The trailing "?" means "the readers could not name this".
+            An identified cog must not wear it just because the choices
+            list has not arrived. */}
+        {current ? current.display : (row.identified ? row.name : `${row.name}?`)}
       </button>
 
       {/* IN FLOW, not absolute. An absolutely-positioned list is out of

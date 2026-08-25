@@ -9,6 +9,7 @@ const EMPTY = {
   advice: '', track: null, gag_level: null, rows: [], problems: [],
   evidence: '', can_confirm: false, can_advise: false, thinking: false,
   allow_level_7: true, objective: 'balanced', budget: 15,
+  lure_icon: '',
 }
 
 // THE REAL GAME ART, not a generic icon set. Vite fingerprints and
@@ -62,7 +63,7 @@ function healthClass(h) {
   return 'bg-error'
 }
 
-function CogRow({ row }) {
+function CogRow({ row, lureIcon }) {
   const art = cogArt(row.art, row.department)
   return (
     <div className="flex items-start gap-2.5 py-[3px]">
@@ -85,15 +86,18 @@ function CogRow({ row }) {
           forced to 100% with knockback, Drop always misses, and the cog
           does not attack. Until the plate is read, the player marks it. */}
       <button
-        className={`shrink-0 rounded px-1 py-[1px] text-[9px] font-semibold uppercase leading-none tracking-wide ${
-          row.lured ? 'bg-warning/25 text-warning' : 'opacity-20 hover:opacity-60'
+        className={`flex shrink-0 items-center rounded px-[3px] py-[2px] text-[9px] font-semibold uppercase leading-none tracking-wide ${
+          row.lured ? 'bg-warning/25 text-warning'
+                    : 'opacity-20 grayscale hover:opacity-60'
         }`}
         onClick={() => call('mark_lured', row.index, !row.lured)}
         title={row.lured
           ? 'Asleep on a Lure: Throw and Squirt hit for certain with knockback, Drop misses, and it will not attack. Click if it is actually awake.'
           : 'Not lured. Click to mark it asleep if the reader missed the indicator.'}
       >
-        {row.lured ? 'LURED' : 'lure?'}
+        {lureIcon
+          ? <img src={lureIcon} alt="lured" className="size-[15px] object-contain" />
+          : (row.lured ? 'LURED' : 'lure?')}
       </button>
       <CogPicker
         row={row}
@@ -268,7 +272,9 @@ export default function App() {
 
       <div className="min-h-[10px]">
         {model.in_battle && model.rows.length > 0
-          ? model.rows.slice(0, 4).map((row, i) => <CogRow key={i} row={row} />)
+          ? model.rows.slice(0, 4).map((row, i) => (
+              <CogRow key={i} row={row} lureIcon={model.lure_icon} />
+            ))
           : null}
         {/* ALWAYS SHOWN when there are any. These used to render only
             when NOT in a battle, so an in-battle refusal -- an
