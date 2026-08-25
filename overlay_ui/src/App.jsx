@@ -9,7 +9,8 @@ const EMPTY = {
   advice: '', track: null, gag_level: null, rows: [], problems: [],
   evidence: '', can_confirm: false, can_advise: false, thinking: false,
   allow_level_7: true, objective: 'balanced', budget: 15,
-  lure_icon: '',
+  lure_icon: '', map_icon: '',
+  zone: '', neighborhood: '', district: '', invasion: '',
 }
 
 // THE REAL GAME ART, not a generic icon set. Vite fingerprints and
@@ -317,13 +318,41 @@ export default function App() {
         </button>
       </div>
 
-      <div
-        className={`text-[11px] ${
-          model.can_confirm ? 'opacity-35' : 'text-warning opacity-80'
-        }`}
-      >
-        {model.evidence}
+      <div className="flex items-end justify-between gap-2">
+        <div
+          className={`text-[11px] ${
+            model.can_confirm ? 'opacity-35' : 'text-warning opacity-80'
+          }`}
+        >
+          {model.evidence}
+        </div>
+
+        {/* Where the toon is, from the Local API. The solver never uses
+            it -- a street does not change a round. It is here because it
+            is the only thing on the panel that proves the API is
+            connected: the cog readers work off pixels and would look
+            exactly the same with it down. */}
+        {model.zone && (
+          <div
+            className="flex shrink-0 items-center gap-1 text-[10px] opacity-40"
+            title={`${model.zone}, ${model.neighborhood} — district ${model.district}`}
+          >
+            {model.map_icon && (
+              <img src={model.map_icon} alt="" className="size-[13px] object-contain" />
+            )}
+            <span className="max-w-[9rem] truncate">{model.zone}</span>
+          </div>
+        )}
       </div>
+
+      {/* An invasion changes which cogs walk in, so it is worth saying
+          out loud rather than hiding in a tooltip. */}
+      {model.invasion && (
+        <div className="flex items-center gap-1 text-[11px] text-warning opacity-90">
+          <span className="font-semibold uppercase tracking-wide">invasion</span>
+          <span className="truncate opacity-80">{model.invasion}</span>
+        </div>
+      )}
     </div>
   )
 }

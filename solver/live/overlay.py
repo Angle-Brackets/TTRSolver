@@ -173,6 +173,15 @@ class Model:
     # last asked for.
     objective: str = "balanced"
     budget: float = 15.0
+    # Where the toon is, from the Local API. The solver does not use it
+    # -- a street does not change a round -- but it tells the player at a
+    # glance whether the panel is talking to the game at all, which the
+    # cog readers cannot: they work off pixels and would look identical
+    # with the API disconnected.
+    zone: str = ""
+    neighborhood: str = ""
+    district: str = ""
+    invasion: str = ""
     turn: int = 0
 
     @property
@@ -339,6 +348,18 @@ class Worker(threading.Thread):
                 model.detected_battle = watcher.view.active
                 model.forced = self.forced()
                 model.cogs = [_describe_reading(r) for r in watcher.view.cogs]
+                # Where the toon is, from the cached Local API session.
+                # `advise._snapshot` is already polled for laff and gag
+                # training and holds the answer for SNAPSHOT_TTL, so this
+                # costs nothing -- and NEVER calls `discover()`, which
+                # pops the game's consent dialog once per client built.
+                snap = advise_mod._SESSION.get("snapshot")
+                if snap is not None:
+                    model.zone = getattr(snap, "zone", "") or ""
+                    model.neighborhood = getattr(snap, "neighborhood", "") or ""
+                    model.district = getattr(snap, "district", "") or ""
+                    invasion = getattr(snap, "invasion", None)
+                    model.invasion = str(invasion) if invasion else ""
                 model.rows = [_row(r) for r in watcher.view.cogs]
                 model.turn = self.turns.observe(model.in_battle,
                                                 model.menu_visible)

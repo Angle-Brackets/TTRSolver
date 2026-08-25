@@ -45,6 +45,17 @@ from .overlay import ADVICE_LINGER, Model, Worker
 DIST = Path(__file__).resolve().parents[2] / "overlay_ui" / "dist"
 
 
+def _icon_uri(getter) -> str:
+    """Any cached game icon, inline for the page. "" if unavailable."""
+    import base64
+
+    try:
+        raw = getter().read_bytes()
+    except Exception:
+        return ""
+    return "data:image/png;base64," + base64.b64encode(raw).decode("ascii")
+
+
 def _lure_icon_uri() -> str:
     """The game's own lure magnet, as a data URI for the page.
 
@@ -69,6 +80,7 @@ def _lure_icon_uri() -> str:
 
 
 LURE_ICON = ""
+MAP_ICON = ""
 
 # The webview is told to poll this often. Python cannot push into the
 # page from another thread safely, so the page asks -- which also means
@@ -103,6 +115,11 @@ def model_json(model: Model) -> str:
         "thinking": model.thinking,
         "allow_level_7": model.allow_level_7,
         "lure_icon": LURE_ICON,
+        "map_icon": MAP_ICON,
+        "zone": model.zone,
+        "neighborhood": model.neighborhood,
+        "district": model.district,
+        "invasion": model.invasion,
         "objective": model.objective,
         "budget": model.budget,
     })
@@ -255,8 +272,11 @@ def main(argv: Optional[list] = None) -> int:
         from .. import state as state_mod
         state_mod.ALLOW_LEVEL_7 = False
 
-    global LURE_ICON
+    global LURE_ICON, MAP_ICON
+    from . import ttr_assets
+
     LURE_ICON = _lure_icon_uri()
+    MAP_ICON = _icon_uri(ttr_assets.map_icon)
 
     objective = objectives.PRESETS[args.objective]
     objective_name = args.objective

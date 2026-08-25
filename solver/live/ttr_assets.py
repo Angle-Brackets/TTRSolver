@@ -171,6 +171,12 @@ STATUS_EFFECTS = ("battle_gui_status_effects_remastered_palette_4amla_1.jpg",
 STATUS_ALPHA = ("battle_gui_status_effects_remastered_palette_4amla_1_a.rgb",
                 "phase_3.5.mf")
 LURE_CELL = (1, 1)          # column, row in the 2x2 atlas
+
+# The shticker book's button icons, 4x2. The green globe at (1, 0) is
+# the map, which is as close to "where you are" as the game draws.
+BUTTON_ICONS = ("ttr_t_gui_sbk_buttonIcons.jpg", "phase_3.5.mf")
+BUTTON_ALPHA = ("ttr_t_gui_sbk_buttonIcons_a.rgb", "phase_3.5.mf")
+MAP_CELL = (1, 0)
 EMBLEM_ORDER = ("sellbot", "cashbot", "lawbot", "bossbot")
 
 
@@ -231,6 +237,33 @@ def lure_icon(override: Optional[str] = None) -> Path:
                 mask = mask.convert("L").resize(atlas.size)
                 icon.putalpha(mask.crop(
                     (left, top, left + half_w, top + half_h)))
+        except Exception:
+            pass
+        icon.save(target)
+    return target
+
+
+def map_icon(override: Optional[str] = None) -> Path:
+    """The shticker book's map globe, cut out of the button atlas.
+
+    Same rule as `lure_icon` and the emblems: read from the player's
+    installation at runtime, cached, never vendored.
+    """
+    from PIL import Image
+
+    atlas_path = extract(*BUTTON_ICONS, override=override)
+    target = atlas_path.parent / "icon_map.png"
+    with Image.open(atlas_path) as atlas:
+        cell_w, cell_h = atlas.width // 4, atlas.height // 2
+        col, row = MAP_CELL
+        left, top = col * cell_w, row * cell_h
+        box = (left, top, left + cell_w, top + cell_h)
+        icon = atlas.crop(box).convert("RGBA")
+        try:
+            alpha_path = extract(*BUTTON_ALPHA, override=override)
+            with Image.open(alpha_path) as mask:
+                mask = mask.convert("L").resize(atlas.size)
+                icon.putalpha(mask.crop(box))
         except Exception:
             pass
         icon.save(target)
