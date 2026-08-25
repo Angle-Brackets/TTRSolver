@@ -61,6 +61,11 @@ COLOUR_TOLERANCE = 26
 # matches them in a long unbroken line.
 MIN_RUN_FRAC = 0.15
 
+# How much of its own span a broken row must actually colour in. A band
+# interrupted by cell badges keeps nearly all of it; a scatter of
+# scenery blobs that happens to span the width does not.
+MIN_SPAN_COVERAGE = 0.65
+
 # Cell grid, as fractions of the panel's width. Measured from a 1080p
 # frame: a 149px label area, then seven 91px cells on a 97.7px pitch.
 CELL_LEFT = 0.2065
@@ -205,11 +210,40 @@ def _row_bands(frame: np.ndarray) -> Dict[Track, int]:
                             - np.array(colour)) < COLOUR_TOLERANCE, axis=2)
         rows = []
         for y in np.nonzero(hit.any(axis=1))[0]:
-            if _longest_run(hit[y]) >= need:
+            if _qualifies(hit[y], need):
                 rows.append(int(y))
         if rows:
             found[track] = rows
     return {track: min(rows) for track, rows in found.items()}
+
+
+def _qualifies(row: np.ndarray, need: int) -> bool:
+    """Does this row of the mask look like a panel band?
+
+    An unbroken run of `need` is the clean case. A row whose cells carry
+    ORGANIC SPROUTS is the other one: the colour is all still there, cut
+    into pieces by the badge on each cell. Live, an organic TRAP row read
+    a longest run of 247px against a 288px requirement while the other
+    six ran 862px -- and `find_panel` returns None the moment one row is
+    missing, so a battle went undetected with the menu wide open.
+
+    Organic is not a corner case. It is a permanent property of a track,
+    so a toon with an organic track would have had every battle in that
+    zone go unnoticed, forever, for as long as they kept the track.
+
+    So a broken row also qualifies, on a stricter test than mere pixel
+    count: it must SPAN at least `need`, and fill most of what it spans.
+    That is what a decorated line looks like and what a patch of scenery
+    does not -- scenery matches these colours in blobs, which neither
+    span far nor fill what they span.
+    """
+    if _longest_run(row) >= need:
+        return True
+    lit = np.flatnonzero(row)
+    if lit.size == 0:
+        return False
+    span = int(lit[-1] - lit[0]) + 1
+    return span >= need and lit.size >= span * MIN_SPAN_COVERAGE
 
 
 def _longest_run(row: np.ndarray) -> int:
@@ -252,8 +286,12 @@ def find_panel(frame: np.ndarray) -> Optional[Tuple[int, int, Dict[Track, int], 
     if bounds is None:
         return None
     tops = sorted(bands.values())
-    spacing = [b - a for a, b in zip(tops, tops[1:])]
-    height = int(round(sum(spacing) / len(spacing))) if spacing else 0
+    spacing = sorted(b - a for a, b in zip(tops, tops[1:]))
+    if not spacing:
+        return None
+    # MEDIAN, not mean. With a row missing one gap is a double, and a
+    # mean folds that into every later calculation; the median ignores it.
+    height = spacing[len(spacing) // 2]
     if height <= 0:
         return None
     return bounds[0], bounds[1], bands, height

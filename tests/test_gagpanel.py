@@ -250,3 +250,59 @@ class TestDarkenedTracks(unittest.TestCase):
         dark = np.zeros((38, 46, 3), dtype=np.uint8)
         dark[:, :] = (10, 18, 40)
         self.assertIn(gp._read_count(dark), (None, (None, 0.0)))
+
+
+class TestOrganicRowBands(unittest.TestCase):
+    """An organic track's sprout badges cut its colour strip to pieces.
+
+    `find_panel` needs all seven rows and returns None if one is short,
+    so an organic track meant the menu was never found and no battle was
+    ever detected -- permanently, since organic is a property of the
+    track rather than of the moment. Live: organic TRAP ran 247px against
+    a 288px requirement while the other six ran 862px.
+    """
+
+    def setUp(self):
+        try:
+            import numpy  # noqa: F401
+        except ImportError:
+            self.skipTest("numpy is not installed")
+
+    def _need(self, width=1921):
+        from solver.live.gagpanel import MIN_RUN_FRAC
+        return int(width * MIN_RUN_FRAC)
+
+    def test_an_unbroken_band_qualifies(self):
+        import numpy as np
+        from solver.live.gagpanel import _qualifies
+        row = np.zeros(1921, dtype=bool)
+        row[400:1262] = True
+        self.assertTrue(_qualifies(row, self._need()))
+
+    def test_a_band_broken_by_badges_qualifies(self):
+        import numpy as np
+        from solver.live.gagpanel import _longest_run, _qualifies
+        row = np.zeros(1921, dtype=bool)
+        row[400:1262] = True
+        for i in range(7):
+            row[500 + i * 110:518 + i * 110] = False
+        self.assertLess(_longest_run(row), self._need(),
+                        "fixture must fail the unbroken test")
+        self.assertTrue(_qualifies(row, self._need()))
+
+    def test_scattered_scenery_does_not(self):
+        """Blobs of the right colour spanning the frame are what the
+        unbroken rule existed to reject; coverage still rejects them."""
+        import numpy as np
+        from solver.live.gagpanel import _qualifies
+        row = np.zeros(1921, dtype=bool)
+        for x in range(200, 1700, 180):
+            row[x:x + 30] = True
+        self.assertFalse(_qualifies(row, self._need()))
+
+    def test_a_short_solid_patch_does_not(self):
+        import numpy as np
+        from solver.live.gagpanel import _qualifies
+        row = np.zeros(1921, dtype=bool)
+        row[400:600] = True
+        self.assertFalse(_qualifies(row, self._need()))
