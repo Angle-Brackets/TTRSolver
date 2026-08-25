@@ -275,6 +275,25 @@ def main(argv: Optional[List[str]] = None) -> int:
             for r in rejects:
                 x0, y0 = r["box"][0], r["box"][1]
                 print(f"   {r['w']}x{r['h']} at ({x0},{y0})  {r['why']}")
+        if not plates:
+            # WHAT COLOUR IS UP THERE. When no candidate forms at all the
+            # mask is the suspect, and the only way to tune it is to know
+            # what it was looking at. Plates sit in the upper middle of
+            # the frame, so sample that band and report the most
+            # teal-leaning pixels in it.
+            import numpy as np
+
+            h, w = frame.shape[:2]
+            band = frame[int(h * 0.08):int(h * 0.28),
+                         int(w * 0.25):int(w * 0.75), :3].astype(np.int16)
+            flat = band.reshape(-1, 3)
+            lead = flat[:, 2] - flat[:, 0]
+            order = np.argsort(lead)[::-1][:5]
+            print("  most blue-over-red pixels where plates live:")
+            for idx in order:
+                r, g, b = (int(v) for v in flat[idx])
+                print(f"     rgb({r:>3},{g:>3},{b:>3})  "
+                      f"B-R {b - r:>4}  G-R {g - r:>4}  B-G {b - g:>4}")
         if not plates and not rejects:
             print("   -- no teal survived even as a candidate. Is "
                   "'show-cog-levels' on?")

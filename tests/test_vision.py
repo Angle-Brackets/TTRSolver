@@ -360,3 +360,52 @@ class TestLureIndicator(unittest.TestCase):
         hx0, hy0, hx1, hy1 = plate.region("health")
         frame[hy0:hy1, hx0:hx1] = (40, 220, 60)
         self.assertFalse(lure_indicator(frame, plate))
+
+
+class TestTealUnderASceneTint(unittest.TestCase):
+    """Lawbot HQ lights its courtroom sepia and the mask stopped seeing
+    plates -- not one candidate, with a cog in plain view.
+
+    An absolute box around a sampled colour cannot survive the game
+    recolouring a whole scene. Channel ORDER can: a tint moves all three
+    together and leaves blue leading green leading red.
+    """
+
+    def setUp(self):
+        try:
+            import numpy  # noqa: F401
+        except ImportError:
+            self.skipTest("numpy is not installed")
+
+    def test_the_untinted_colour_matches(self):
+        import numpy as np
+        from solver.live.vision import TEAL, teal_mask
+        frame = np.full((4, 4, 3), TEAL, dtype=np.uint8)
+        self.assertTrue(teal_mask(frame).all())
+
+    def test_a_shifted_slot_the_old_box_rejects_still_matches(self):
+        """The box is +/-34 per channel around one sampled colour. A
+        scene lit differently moves every channel past that while leaving
+        blue over green over red intact, which is what the relational
+        clause is for."""
+        import numpy as np
+        from solver.live.vision import TEAL, TOLERANCE, teal_mask
+        shifted = (TEAL[0] - 36, TEAL[1] - 20, TEAL[2] - 20)
+        boxed = all(abs(a - b) < TOLERANCE for a, b in zip(shifted, TEAL))
+        self.assertFalse(boxed, "fixture must fall outside the old box")
+        frame = np.full((4, 4, 3), shifted, dtype=np.uint8)
+        self.assertTrue(teal_mask(frame).all())
+
+    def test_brown_is_not_teal(self):
+        import numpy as np
+        from solver.live.vision import teal_mask
+        frame = np.full((4, 4, 3), (150, 110, 70), dtype=np.uint8)
+        self.assertFalse(teal_mask(frame).any())
+
+    def test_a_dark_blue_shadow_is_not_teal(self):
+        """The lightness band keeps the relational clause off shadows,
+        where the leads are meaningless."""
+        import numpy as np
+        from solver.live.vision import teal_mask
+        frame = np.full((4, 4, 3), (5, 30, 60), dtype=np.uint8)
+        self.assertFalse(teal_mask(frame).any())
