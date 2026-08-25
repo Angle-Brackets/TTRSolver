@@ -353,3 +353,65 @@ class TestNamingFromThePanel(unittest.TestCase):
         w.mark_lured(2, True)
         w._forget_names(-1)
         self.assertEqual(set(), w._lured)
+
+    def test_a_read_is_reused_while_the_menu_is_down(self):
+        """Identifying cogs is the expensive part of a poll and was
+        being redone on every animation frame, where the plates are
+        moving and the readings flicker."""
+        import numpy as np
+        from solver.live import watch as wm
+        w = self._watcher()
+        cached = [wm.CogReading(index=0, department="cashbot", level=7,
+                                health=1.0, cog="money_bags")]
+        w._cached_readings = cached
+        w._locate = lambda frame: [object()]          # one plate, as before
+        frame = np.zeros((400, 600, 3), dtype=np.uint8)
+        self.assertIs(cached, w.read_frame(frame, menu_visible=False))
+        self.assertEqual(1, w.reused_reads)
+
+    def test_a_changed_lineup_forces_a_fresh_read(self):
+        """A boss fight walks cogs in with the menu down, so the count
+        changing has to override the cache."""
+        import numpy as np
+        from solver.live import watch as wm
+        w = self._watcher()
+        w._cached_readings = [wm.CogReading(index=0, department="cashbot",
+                                            level=7, health=1.0,
+                                            cog="money_bags")]
+        w._locate = lambda frame: []                  # the cog died
+        frame = np.zeros((400, 600, 3), dtype=np.uint8)
+        self.assertEqual([], w.read_frame(frame, menu_visible=False))
+        self.assertEqual(0, w.reused_reads)
+
+    def test_nothing_is_reused_before_a_first_read(self):
+        import numpy as np
+        from solver.live import watch as wm
+        w = self._watcher()
+        w._locate = lambda frame: []
+        frame = np.zeros((400, 600, 3), dtype=np.uint8)
+        self.assertEqual([], w.read_frame(frame, menu_visible=False))
+        self.assertEqual(0, w.reused_reads)
+
+    def test_the_cache_is_actually_written(self):
+        """The first version never wrote it -- the edit missed and the
+        tests passed because they set the cache by hand. A cache that is
+        only ever read is not a cache."""
+        import numpy as np
+        from solver.live import watch as wm
+        w = self._watcher()
+        w._locate = lambda frame: []
+        frame = np.zeros((400, 600, 3), dtype=np.uint8)
+        w.read_frame(frame, menu_visible=True)
+        self.assertIsNotNone(w._cached_readings)
+
+    def test_a_visible_menu_forces_a_fresh_read(self):
+        import numpy as np
+        from solver.live import watch as wm
+        w = self._watcher()
+        w._cached_readings = [wm.CogReading(index=0, department="cashbot",
+                                            level=7, health=1.0,
+                                            cog="money_bags")]
+        w._locate = lambda frame: []
+        frame = np.zeros((400, 600, 3), dtype=np.uint8)
+        self.assertEqual([], w.read_frame(frame, menu_visible=True))
+        self.assertEqual(0, w.reused_reads)

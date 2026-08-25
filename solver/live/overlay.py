@@ -344,7 +344,10 @@ class Worker(threading.Thread):
                 # mean the next fight is never noticed.
                 if self.forced() is False and not watcher.view.cogs:
                     self.set_forced(None)
-                model.menu_visible = find_panel(frame) is not None
+                # From the watcher, which computed it this poll for its
+                # own read gate. Calling `find_panel` again here doubled
+                # the most expensive scan in the loop.
+                model.menu_visible = watcher.menu_visible
                 model.detected_battle = watcher.view.active
                 model.forced = self.forced()
                 model.cogs = [_describe_reading(r) for r in watcher.view.cogs]

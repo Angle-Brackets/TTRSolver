@@ -60,6 +60,10 @@ from .catalogue import HeadCatalogue, candidates
 # Frames a plate must stay missing before a name given for it is
 # dropped. Detection flickers; a pick must not.
 FORGET_AFTER_FRAMES = 5
+
+# Identify cogs only on frames where the gag menu is open, or where the
+# number of plates has changed. See `read_frame` for why.
+REREAD_ONLY_WITH_MENU = True
 from .vision import (
     lure_indicator,
     MIN_DEPARTMENT_MARGIN, Plate, find_plates, health_fraction,
@@ -260,6 +264,12 @@ class BattleWatcher:
         # plate says "Level 8" in plain text to the player, so let them
         # say so.
         self._levels: dict = {}
+        # Last full read, reused while the board is mid-animation.
+        self._cached_readings = None
+        self.reused_reads = 0
+        # Set once per poll and shared, rather than recomputed by every
+        # caller that wants it.
+        self.menu_visible = False
         # Slots the player named that are not in the library yet. The
         # panel names a slot without a frame in hand, so the head is
         # recorded on the next frame that reads the slot -- which is
@@ -314,10 +324,42 @@ class BattleWatcher:
 
     # -- reading ---------------------------------------------------------
 
-    def read_frame(self, frame: np.ndarray) -> List[CogReading]:
+    def read_frame(self, frame: np.ndarray,
+                   menu_visible: Optional[bool] = None) -> List[CogReading]:
         readings = []
         plates = self._locate(frame)
         self._forget_names(len(plates))
+
+        # RE-READ WHEN THE MENU IS UP, or when the lineup changes.
+        #
+        # Identifying a cog is the expensive part of a poll -- a
+        # department match, a level match and a signature comparison per
+        # plate -- and it was being redone on every frame, including the
+        # ones where TTR is swinging the camera through an attack. Those
+        # frames are the worst possible input: the plates are moving,
+        # half-occluded, and the readings that come back flicker. That
+        # flicker is not just wasted work, it is what wiped a cog the
+        # player had named by hand.
+        #
+        # The gag menu is up exactly when a decision is due and the board
+        # is still, which makes it a good clock for "look properly now".
+        # But a boss fight walks new cogs in mid-round with the menu
+        # down, so a change in the number of plates forces a look too.
+        # Between those, last round's answer is still this round's
+        # answer: cogs do not change identity.
+        if REREAD_ONLY_WITH_MENU and self._cached_readings is not None:
+            # PASSED IN, never computed here. `find_panel` sweeps seven
+            # colours over the whole frame; calling it to decide whether
+            # to skip a read cost 33x what the read did -- 495ms a poll
+            # against 15. The caller already needs the answer for its own
+            # "is the menu up" display, so it computes it once and hands
+            # it over. A gate has to be cheaper than what it gates.
+            if menu_visible is None:
+                menu_visible = self.menu_visible
+            same_lineup = len(self._cached_readings) == len(plates)
+            if same_lineup and not menu_visible:
+                self.reused_reads += 1
+                return self._cached_readings
         for i, plate in enumerate(plates):
             dept, margin = read_department(frame, plate)
             if margin < MIN_DEPARTMENT_MARGIN:
@@ -366,6 +408,7 @@ class BattleWatcher:
                 # override -- the detector is new and a false negative
                 # must not leave them unable to say otherwise.
                 lured=(i in self._lured) or lure_indicator(frame, plate)))
+        self._cached_readings = readings
         return readings
 
     def set_level(self, index, level) -> None:
@@ -550,7 +593,11 @@ class BattleWatcher:
     def poll(self) -> List[Event]:
         """Grab one frame and return whatever changed because of it."""
         frame = self.capture.grab()
-        readings = self.read_frame(frame)
+        # Once per poll, for the read gate and for anyone displaying it.
+        from .gagpanel import find_panel
+
+        self.menu_visible = find_panel(frame) is not None
+        readings = self.read_frame(frame, menu_visible=self.menu_visible)
         if not self.in_battle(frame, bool(readings)):
             readings = []
             # Drop the search band too. It was set from whatever the
