@@ -76,3 +76,35 @@ class TestPanelBridge(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestNoUndefinedIdentifiers(unittest.TestCase):
+    """A handler that throws reaches Python with nothing to show for it.
+
+    `call` was defined inside App() while `CogRow` is a module-level
+    component, so every button in a cog row raised "call is not defined"
+    on click. The page rendered perfectly and screenshots looked right;
+    only clicking revealed it. tools/click_panel.py does that against a
+    browser -- this is the cheap static half.
+    """
+
+    def test_helpers_used_across_components_are_module_scope(self):
+        app = (SRC / "App.jsx").read_text(encoding="utf-8")
+        # `call` must not be declared inside the App component, or the
+        # other components in this file cannot see it.
+        body = app[app.index("export default function App("):]
+        self.assertNotIn("const call = ", body,
+                         "`call` is scoped to App() but CogRow uses it -- "
+                         "every button in a cog row will throw")
+
+    def test_every_component_that_calls_has_it_in_scope(self):
+        """Components in their own files must receive it as a prop."""
+        for path in sorted(SRC.glob("*.jsx")):
+            source = path.read_text(encoding="utf-8")
+            if "call(" not in source:
+                continue
+            declared = ("const call = " in source
+                        or "import" in source and path.name == "App.jsx")
+            self.assertTrue(declared or "onPick" in source,
+                            f"{path.name} uses call() without declaring it "
+                            f"or receiving a handler prop")

@@ -162,7 +162,10 @@ class Api:
         window = self._state.window
         if window is None:
             return
-        height = max(160, min(700, int(height)))
+        # 700 was the ceiling and an open cog picker needs more: four
+        # rows plus a 208px list runs past it, and the clipped part is
+        # exactly the part being clicked.
+        height = max(160, min(900, int(height)))
         if abs(getattr(window, "height", 0) - height) > 2:
             try:
                 window.resize(window.width, height)

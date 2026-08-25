@@ -42,6 +42,20 @@ const cogArt = (art, department) =>
 const OBJECTIVES = ['balanced', 'conserve', 'glass cannon', 'speedrun',
                     'survive']
 
+// MODULE SCOPE, deliberately. This lived inside App(), and `CogRow` is
+// its own component -- so every button in a cog row threw
+// "call is not defined" the moment it was clicked. The picker and the
+// lure marker both did nothing for that reason, and nothing reached
+// Python to be debugged, which is why fixing six real bugs behind it
+// changed nothing.
+//
+// Spread rather than a fixed argument: passing `undefined` explicitly
+// still sends pywebview a positional argument, and `ask_now()`,
+// `toggle_fight()` and `close()` take none.
+const call = (name, ...args) => {
+  if (window.pywebview?.api?.[name]) window.pywebview.api[name](...args)
+}
+
 function healthClass(h) {
   if (h > 0.6) return 'bg-success'
   if (h > 0.25) return 'bg-warning'
@@ -51,7 +65,7 @@ function healthClass(h) {
 function CogRow({ row }) {
   const art = cogArt(row.art, row.department)
   return (
-    <div className="flex items-center gap-2.5 py-[3px]">
+    <div className="flex items-start gap-2.5 py-[3px]">
       <div className="size-7 shrink-0 overflow-hidden rounded-full bg-base-300 ring-1 ring-white/5">
         {art ? (
           <img
@@ -163,33 +177,33 @@ export default function App() {
   }, [])
 
   // Report the content height so Python can size the window to it. The
-  // panel grows and shrinks with the number of cogs and the length of
-  // the evidence line, and a fixed height either clips or leaves a dead
-  // strip -- which is the bug the Tk version had.
+  // panel grows and shrinks with the number of cogs, the length of the
+  // evidence line, and whether a cog picker is open.
+  //
+  // A ResizeObserver, NOT an effect on [model]. Opening the picker
+  // changes the layout without changing the model, so a model-keyed
+  // effect never fired and the window stayed short -- leaving the open
+  // list past its bottom edge, drawn over the game and impossible to
+  // click. Watching the element itself catches every cause.
   //
   // MEASURE #panel, NOT #root. index.css gives html/body/#root
-  // `height: 100%` so the background fills the window, which also means
-  // #root.scrollHeight can never drop below the current viewport -- ask
-  // it and the window only ever grows. Two cogs left in a fight sat in a
-  // window sized for four, which is the same dead strip in a new place.
+  // `height: 100%`, so #root.scrollHeight can never fall below the
+  // current viewport and the window would only ever grow.
   useEffect(() => {
+    const panel = document.getElementById('panel')
+    if (!panel) return undefined
     const send = () => {
-      const h = document.getElementById('panel')?.scrollHeight
+      const h = panel.scrollHeight
       if (h && window.pywebview?.api?.set_height) {
         window.pywebview.api.set_height(Math.ceil(h))
       }
     }
-    const id = requestAnimationFrame(send)
-    return () => cancelAnimationFrame(id)
-  }, [model])
-
-  // Spread, not a fixed `arg`. Passing `undefined` explicitly still
-  // sends pywebview a positional argument, and `ask_now()` /
-  // `toggle_fight()` / `close()` take none -- which crashed the bridge
-  // with "takes 1 positional argument but 2 were given".
-  const call = (name, ...args) => {
-    if (window.pywebview?.api?.[name]) window.pywebview.api[name](...args)
-  }
+    send()
+    if (typeof ResizeObserver === 'undefined') return undefined
+    const ro = new ResizeObserver(send)
+    ro.observe(panel)
+    return () => ro.disconnect()
+  }, [])
 
   return (
     <div id="panel" className="flex flex-col gap-2 bg-base-100 p-4 text-base-content">

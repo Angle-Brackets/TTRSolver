@@ -50,7 +50,7 @@ export default function CogPicker({ row, onPick }) {
   )
 
   return (
-    <div ref={box} className="relative w-28 shrink-0">
+    <div ref={box} className="w-28 shrink-0">
       <button
         className={`w-full truncate rounded px-1 text-left text-[12px] hover:bg-base-300 ${
           row.identified ? 'opacity-80' : 'italic opacity-60'
@@ -63,8 +63,14 @@ export default function CogPicker({ row, onPick }) {
         {current ? current.display : `${row.name}?`}
       </button>
 
+      {/* IN FLOW, not absolute. An absolutely-positioned list is out of
+          flow, so it adds nothing to `#panel`'s scrollHeight -- which is
+          exactly what the panel measures to size its window. The window
+          stayed short, the list fell past its bottom edge, and clicks
+          there went to the game behind. Visible, and unclickable.
+          In flow, the panel grows and the list is inside the window. */}
       {open && (
-        <div className="absolute left-0 top-full z-50 mt-[2px] max-h-52 w-40 overflow-y-auto rounded-box border border-base-300 bg-base-200 shadow-xl">
+        <div className="mt-[2px] max-h-52 w-40 overflow-y-auto rounded-box border border-base-300 bg-base-200 shadow-xl">
           {likely.length > 0 && (
             <>
               <div className="px-2 pt-1 text-[9px] font-semibold uppercase tracking-wider opacity-40">
