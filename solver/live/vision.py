@@ -46,25 +46,6 @@ import numpy as np
 TEAL = (90, 141, 158)
 TOLERANCE = 34
 
-# The same colour described by channel ORDER rather than value, so a
-# scene the game has tinted still matches. TEAL itself has green leading
-# red by 51, blue leading red by 68, and blue within 17 of green.
-#
-# These are the LOOSEST values that keep every real-frame test passing,
-# and loose is the right side to err on: a sepia scene raises red, which
-# SHRINKS both leads, so tightening them defeats the purpose. Swept at
-# 55/40, 62/45 and 68/50 -- all three pass the fixtures, so the fixtures
-# do not constrain the choice and the tinted case decides it.
-#
-# Looser than 55/40 does not pass: at 40/28 the mask invented a third
-# plate on a two-plate frame and dropped a department margin to 0.28.
-TEAL_BLUE_LEAD = 55
-TEAL_GREEN_LEAD = 40
-TEAL_BG_SPREAD = 30
-# Keeps the clause off near-black and near-white, where the leads are
-# meaningless and every dark blue shadow would qualify.
-TEAL_MIN_LIGHT = 95
-TEAL_MAX_LIGHT = 190
 
 # Fractions of the frame rather than pixel counts. At 1080p these come
 # out near the values found by hand (120px, 40px, 1200px).
@@ -153,33 +134,29 @@ class Plate:
 def teal_mask(frame: np.ndarray) -> np.ndarray:
     """Boolean mask of pixels close to the portrait backdrop colour.
 
-    TWO TESTS, because an absolute one is not enough. The first is the
-    original box around a sampled TEAL, which is tight and precise on the
-    frames it was drawn from. The second describes teal by the
-    RELATIONSHIP between its channels -- blue leads red, green leads red,
-    blue and green stay near each other -- and that survives the game
-    tinting a whole scene.
+    A REFUTED WIDENING IS RECORDED HERE, because the reasoning was
+    plausible and the evidence was not.
 
-    Lawbot HQ is why. Its courtroom is lit sepia, every pixel shifts
-    toward red, and the slot fell outside the box on at least one channel
-    -- so a plate in plain view produced not one candidate, and the panel
-    reported "nothing on screen that looks like a battle" with the cog
-    right there. The relational test still finds it, because a tint moves
-    all three channels together and leaves their ordering intact.
+    Lawbot HQ lights its courtroom sepia, and a live grab there found no
+    plates. The theory was that a scene tint moves every channel and
+    breaks a +/-34 box around one sampled triple, so the mask gained a
+    second clause matching teal by channel ORDER -- blue over green over
+    red -- which a tint leaves intact.
 
-    The box stays as the first clause: it is stricter, it is what the
-    other thresholds in this file were calibrated against, and dropping
-    it would widen the mask everywhere for the sake of one zone.
+    The frame had no cogs in it. The owner was standing around and the
+    reader was correctly reporting nothing. Read twice on a real Lawbot
+    HQ battle afterwards, with the clause and with the box alone, both
+    found the same single plate at the same coordinates: the box was
+    always sufficient and the clause was carrying nothing.
+
+    So it is gone. A wider mask is not free -- at the loosest thresholds
+    tried it invented a third plate on a two-plate frame and dropped a
+    department margin to 0.28 -- and widening on no evidence is how that
+    cost gets paid for nothing. `tools/teal_ab.py` is the check, if a
+    zone ever does defeat the box.
     """
-    pixels = frame[:, :, :3].astype(np.int16)
-    boxed = np.all(np.abs(pixels - np.array(TEAL)) < TOLERANCE, axis=2)
-
-    red, green, blue = pixels[:, :, 0], pixels[:, :, 1], pixels[:, :, 2]
-    tinted = ((blue - red > TEAL_BLUE_LEAD)
-              & (green - red > TEAL_GREEN_LEAD)
-              & (np.abs(blue - green) < TEAL_BG_SPREAD)
-              & (green > TEAL_MIN_LIGHT) & (green < TEAL_MAX_LIGHT))
-    return boxed | tinted
+    delta = np.abs(frame[:, :, :3].astype(np.int16) - np.array(TEAL))
+    return np.all(delta < TOLERANCE, axis=2)
 
 
 def _runs(mask: np.ndarray) -> List[Tuple[int, int, int]]:
