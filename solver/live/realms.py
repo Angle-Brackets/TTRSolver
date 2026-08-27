@@ -87,6 +87,10 @@ BATTLE_CLASSES = ("DistributedBattle", "DistributedBattleBldg",
                   "DistributedCountryClubBattle", "DistributedBattleTutorial")
 TOON_CLASSES = ("DistributedToon", "DistributedTemporaryToon")
 
+# The battle state whose entries count rounds. Observed live alongside
+# 'WaitForInput'; one movie is one round.
+MOVIE_STATE = "PlayMovie"
+
 
 class RealmsError(RuntimeError):
     """Realms is not installed, is not running, or is missing a file."""
@@ -471,11 +475,20 @@ def parse_organic(values) -> Optional[frozenset]:
     every gag in it is organic thereafter. So any non-negative entry
     makes the track organic and the level itself is dropped.
 
-    IF REALMS GRANTS A PARTIAL BONUS -- organic only up to level N --
-    then that is a difference between the games and belongs in
-    `docs/realms.md` rather than being smuggled in here. A real toon
-    read [-1, -1, -1, -1, 6, -1, -1], organic Throw at 6, which is
-    consistent with both readings and settles nothing.
+    THE LEVEL IS 0-BASED AND 6 MEANS THE WHOLE TRACK, per the owner, so
+    a non-negative entry really does mean every gag in it -- the reading
+    this function already took. A real toon read
+    [-1, -1, -1, -1, 6, -1, -1]: Throw organic, all seven levels.
+
+    Whether it means the same THING in both games is a separate
+    question and the answer is no. Realms gives organic a flat +10% to
+    damage; TTR's bonus varies by track and also raises Lure accuracy,
+    which is why `Gag.organic_damage` is a per-gag column here rather
+    than a multiplier. So this correctly reads WHICH tracks are organic
+    and the solver will then price them by TTR's rules. That is the
+    right split -- reading a position is not reading a rule -- but it
+    does mean a damage number predicted here will not match what Realms
+    rolls. See `docs/realms.md`.
     """
     if not isinstance(values, (list, tuple)):
         return None
@@ -651,9 +664,12 @@ class RealmsListener(threading.Thread):
         self._stop = threading.Event()
         self._reply_channel = 0
         self._context = 0
-        # cog doId -> the level of the Lure gag aimed at it. See
-        # `_note_chosen_attacks`.
-        self.chosen_lures: Dict[int, int] = {}
+        # cog doId -> (Lure level, the round it was thrown in). See
+        # `_note_chosen_attacks` and `lure_age`.
+        self.chosen_lures: Dict[int, Tuple[int, int]] = {}
+        # battle doId -> how many movies it has played. A round is one
+        # movie, so this counts rounds. See `_note_state`.
+        self.battle_rounds: Dict[int, int] = {}
 
     # -- lifecycle ----------------------------------------------------
     def connect(self) -> None:
@@ -852,12 +868,49 @@ class RealmsListener(threading.Thread):
             if 0 <= index < len(members.suits):
                 # Levels are 0-based on the wire and 1-based everywhere
                 # in this project.
-                self.chosen_lures[members.suits[index]] = int(level) + 1
+                self.chosen_lures[members.suits[index]] = (
+                    int(level) + 1, self.battle_rounds.get(battle_do_id, 0))
+
+    def _note_state(self, battle_do_id: int, value) -> None:
+        """Count rounds by watching the battle's state machine.
+
+        A round is one movie: the toons choose, the movie plays, the
+        next round begins. `setState` walks that cycle, so counting
+        entries into the movie state counts rounds -- which is the only
+        way to know how much of a Lure is left, since NOTHING in the DC
+        carries lure duration. The whole 165KB file mentions "lure"
+        nowhere outside `setMembers`' untyped slots: it is AI-side state
+        and is never distributed.
+        """
+        name = value[0] if isinstance(value, (tuple, list)) and value else value
+        if isinstance(name, (bytes, bytearray)):
+            name = bytes(name).decode("latin-1", "replace")
+        if name == MOVIE_STATE:
+            self.battle_rounds[battle_do_id] = (
+                self.battle_rounds.get(battle_do_id, 0) + 1)
+
+    def lure_age(self, cog_do_id: int) -> Optional[Tuple[int, int]]:
+        """(Lure level, rounds since it was thrown), or None.
+
+        None means this reader did not see the Lure land, which is the
+        case whenever it attached mid-fight.
+        """
+        entry = self.chosen_lures.get(cog_do_id)
+        if entry is None:
+            return None
+        level, thrown_in = entry
+        battles = self.battles()
+        if len(battles) != 1:
+            return None
+        now = self.battle_rounds.get(battles[0].do_id, thrown_in)
+        return level, max(0, now - thrown_in)
 
     def _record(self, do_id: int, field, value) -> None:
         name = field.getName()
         if name == "setChosenToonAttacks":
             self._note_chosen_attacks(do_id, value)
+        elif name == "setState":
+            self._note_state(do_id, value)
         obj = self.store.set_field(do_id, field.getName(), value)
         if not obj.dclass:
             # SET_FIELD does not name the class. The field knows the one

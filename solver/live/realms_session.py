@@ -57,7 +57,8 @@ class RealmsBuild(NamedTuple):
 
 
 def cog_from_object(obj, lured: bool = False,
-                    lure_level: Optional[int] = None
+                    lure_level: Optional[int] = None,
+                    rounds_elapsed: Optional[int] = None
                     ) -> Tuple[Optional[CogState], List[str]]:
     """One suit object as a `CogState`, or why it cannot be."""
     problems: List[str] = []
@@ -113,12 +114,34 @@ def cog_from_object(obj, lured: bool = False,
         from ..state import Track
 
         gag = gags_mod.gag(Track.LURE, lure_level)
-        # Rounds remaining are not sent either -- `setMembers` says
-        # lured, not for how long. ONE round is the honest floor: it is
-        # what is certainly left, and it errs pessimistically, where
-        # assuming the full duration would have the solver plan a combo
-        # the cog wakes up in the middle of.
-        cog.status.apply_lure(gag.prop_accuracy(organic=False), 1,
+
+        # HOW MUCH LURE IS LEFT IS COUNTED, NOT READ. Nothing in the DC
+        # carries lure duration -- the whole file mentions "lure" nowhere
+        # outside `setMembers`' untyped slots, and cogs publish only DNA,
+        # level, HP, skelecog, revives and virtual. It is AI-side state
+        # and is never distributed.
+        #
+        # What CAN be established: which Lure landed (from
+        # `setChosenToonAttacks`) and how many rounds have gone by since
+        # (from counting the battle's movies). Duration comes from OUR
+        # table, so this is a TTR-consistent reading of a Realms
+        # position rather than a measurement of Realms -- if its lure
+        # durations differ, this is wrong in Realms and still right for
+        # the solver being fed it.
+        #
+        # The floor of 1 is not decoration. The cog appearing in
+        # `suits_lured` at all is direct evidence it has at least one
+        # round left, and that observation outranks the arithmetic --
+        # which is the safe direction anyway, since overestimating a
+        # lure plans a combo the cog wakes up in the middle of.
+        remaining = 1
+        if rounds_elapsed is not None:
+            try:
+                remaining = max(1, gag.rounds() - int(rounds_elapsed))
+            except (TypeError, ValueError):
+                remaining = 1
+
+        cog.status.apply_lure(gag.prop_accuracy(organic=False), remaining,
                               level=lure_level)
 
     return cog, []
@@ -192,9 +215,13 @@ def build_state(listener, player_do_id: Optional[int] = None,
         if obj is None:
             problems.append(f"cog {do_id}: not received yet")
             continue
+        age = None
+        if hasattr(listener, "lure_age"):
+            age = listener.lure_age(do_id)
         cog, why = cog_from_object(
             obj, lured=do_id in lured,
-            lure_level=getattr(listener, "chosen_lures", {}).get(do_id))
+            lure_level=None if age is None else age[0],
+            rounds_elapsed=None if age is None else age[1])
         problems.extend(why)
         if cog is not None:
             cogs.append(cog)

@@ -56,10 +56,14 @@ class FakeListener:
     def __init__(self, battles, objects, lures=None):
         self._battles = battles
         self.store = Store(objects)
+        # cog doId -> (lure level, rounds elapsed since it landed)
         self.chosen_lures = dict(lures or {})
 
     def battles(self):
         return list(self._battles)
+
+    def lure_age(self, cog_do_id):
+        return self.chosen_lures.get(cog_do_id)
 
 
 def battle(members):
@@ -167,7 +171,7 @@ class BuildStateTest(unittest.TestCase):
                         blind.problems)
 
         seen = realms_session.build_state(
-            FakeListener([battle(TWO_COG_MEMBERS)], objects, {11: 4}))
+            FakeListener([battle(TWO_COG_MEMBERS)], objects, {11: (4, 0)}))
         self.assertTrue(seen, seen.problems)
         lured = [c for c in seen.state.cogs if c.status.lured]
         self.assertEqual(len(lured), 1)
@@ -175,14 +179,40 @@ class BuildStateTest(unittest.TestCase):
                          "index '0' names the FIRST suit")
         self.assertEqual(lured[0].status.lure_level, 4)
 
-    def test_lure_rounds_are_the_pessimistic_floor(self):
-        """Duration is not sent. One round is what is certainly left;
-        assuming the full duration would plan a combo the cog wakes up
-        in the middle of."""
+    def test_lure_rounds_are_counted_down_from_the_gag(self):
+        """Duration is COUNTED, because nothing carries it.
+
+        The DC has no lure field at all -- cogs publish DNA, level, HP,
+        skelecog, revives and virtual, and the word appears nowhere else
+        in the file. So the remaining rounds come from the gag that
+        landed (known from `setChosenToonAttacks`) minus the rounds since
+        (counted from the battle's movies).
+        """
+        from solver.data import gags as gags_mod
+
+        full = gags_mod.gag(Track.LURE, 4).rounds()
+        for elapsed, want in ((0, full), (1, full - 1)):
+            listener = FakeListener(
+                [battle(TWO_COG_MEMBERS)],
+                [cog(11, "sdt" + NUL + "l", 2, 20, 20),
+                 cog(12, "spp" + NUL + "m", 1, 9, 12), toon()],
+                {11: (4, elapsed)})
+            state = realms_session.build_state(listener).state
+            lured = [c for c in state.cogs if c.status.lured][0]
+            self.assertEqual(lured.status.lure_rounds_remaining, want,
+                             f"{elapsed} rounds elapsed")
+
+    def test_a_lure_past_its_duration_still_has_one_round(self):
+        """The cog appearing in `suits_lured` is DIRECT evidence it has
+        at least one round left, and that observation outranks the
+        arithmetic -- which may disagree because the duration came from
+        our table and Realms is a different game. Flooring is the safe
+        direction anyway: overestimating a lure plans a combo the cog
+        wakes up in the middle of."""
         listener = FakeListener(
             [battle(TWO_COG_MEMBERS)],
             [cog(11, "sdt" + NUL + "l", 2, 20, 20),
-             cog(12, "spp" + NUL + "m", 1, 9, 12), toon()], {11: 4})
+             cog(12, "spp" + NUL + "m", 1, 9, 12), toon()], {11: (4, 99)})
         state = realms_session.build_state(listener).state
         lured = [c for c in state.cogs if c.status.lured][0]
         self.assertEqual(lured.status.lure_rounds_remaining, 1)
@@ -232,7 +262,7 @@ class BuildStateTest(unittest.TestCase):
         listener = FakeListener(
             [battle(TWO_COG_MEMBERS)],
             [cog(11, "sdt" + NUL + "l", 2, 20, 20),
-             cog(12, "spp" + NUL + "m", 1, 9, 12), toon()], {11: 4})
+             cog(12, "spp" + NUL + "m", 1, 9, 12), toon()], {11: (4, 0)})
         state = realms_session.build_state(listener).state
         value, action = expectimax.best_action_iterative(
             state, depth=1, objective=objectives.DEFAULT,
