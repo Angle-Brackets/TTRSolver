@@ -1,0 +1,14 @@
+# Reading a live battle from Toontown Realms' local Astron cluster.
+#
+# OPTIONAL, exactly like requirements-vision.txt. `solver/live/realms.py`
+# is the only module that imports this, `solver/live/__init__` must not
+# import `realms`, and `tests/test_realms.py` skips rather than fails
+# when it is absent. The solver, the Local API client and the rest of
+# the suite still run on the standard library alone.
+#
+# panda3d supplies the DC parser. The field numbering in a .dc file is
+# the contract between client and server, and reproducing it by hand got
+# it wrong: a hand-rolled parser put DistributedSuit.setPathPosition at
+# 492, and every field it decoded came out as something from an
+# unrelated class. This is the parser the game itself uses.
+panda3d>=1.10
