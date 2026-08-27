@@ -143,6 +143,30 @@ class ObjectStoreTest(unittest.TestCase):
         store.delete(7)
         self.assertIsNone(store.get(7))
 
+    def test_a_battle_learned_from_the_stream_is_found(self):
+        """REGRESSION. A SET_FIELD names no class, so an object learned
+        from the live stream is tagged with the class the FIELD was
+        declared on -- and both `setState` and `setMembers` are declared
+        on `DistributedBattleBase`, not on the concrete battle classes.
+
+        With the base missing from `BATTLE_CLASSES`, `battles()` matched
+        nothing and the lure watcher sat there finding no fight at all.
+        It went unnoticed because cogs were fine (the base IS in
+        `COG_CLASSES`) and because the CLI calls `refresh_all` first,
+        which resolves the real class through the ENTER path and papers
+        over it. The tool that did not call it saw nothing.
+        """
+        store = realms.ObjectStore()
+        store.set_field(9, "setMembers", None)
+        store.objects[9].dclass = "DistributedBattleBase"
+        self.assertEqual(len(store.of_class(*realms.BATTLE_CLASSES)), 1)
+
+    def test_the_base_classes_are_in_both_lists(self):
+        """Cogs and battles must behave the same way here. They did not,
+        which is the whole reason the bug above survived."""
+        self.assertIn("DistributedSuitBase", realms.COG_CLASSES)
+        self.assertIn("DistributedBattleBase", realms.BATTLE_CLASSES)
+
     def test_of_class_selects(self):
         store = realms.ObjectStore()
         store.enter(1, "DistributedSuit", 0, 1, {})

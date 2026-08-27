@@ -80,7 +80,18 @@ ENTER_MESSAGES = (OBJECT_ENTER_LOCATION_WITH_REQUIRED,
 COG_CLASSES = ("DistributedSuitBase", "DistributedSuit",
                "DistributedFactorySuit", "DistributedMintSuit",
                "DistributedStageSuit", "DistributedTutorialSuit")
-BATTLE_CLASSES = ("DistributedBattle", "DistributedBattleBldg",
+# `DistributedBattleBase` LEADS THIS LIST for the same reason
+# `DistributedSuitBase` leads COG_CLASSES, and leaving it out was a real
+# bug: a SET_FIELD names no class, so the object is tagged with the
+# class the FIELD was declared on. Both `setState` and `setMembers` are
+# declared on the base, so a battle learned from the live stream is a
+# `DistributedBattleBase` and matched nothing here. Cogs were unaffected
+# because the base was in their list, which is exactly why it went
+# unnoticed -- the tool that called `refresh_all` first got the real
+# class from the ENTER path and worked, and the one that did not saw no
+# battles at all.
+BATTLE_CLASSES = ("DistributedBattleBase",
+                  "DistributedBattle", "DistributedBattleBldg",
                   "DistributedLevelBattle", "DistributedBattleFactory",
                   "DistributedMintBattle", "DistributedStageBattle",
                   "DistributedBattleFinal", "DistributedCogdoBattleBldg",

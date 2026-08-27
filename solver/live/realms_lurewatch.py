@@ -72,15 +72,40 @@ def main(argv=None) -> int:             # pragma: no cover - needs a game
     print(f"  attached {realms_mod.MD_HOST}:{realms_mod.MD_PORT}")
     print("  go and Lure a cog; every round is reported\n")
 
+    # The stream carries CHANGES, so anything generated before attaching
+    # has never been described. Ask once up front, then keep asking: a
+    # battle starting later brings cogs that have been walking the
+    # street since before we connected.
+    time.sleep(3.0)
+    listener.refresh_all()
+    listener.refresh_battle_members()
+    next_refresh = time.time() + 5.0
+
     # cog doId -> (level, round it landed, rounds seen lured)
     watching: Dict[int, list] = {}
     last_round = -1
     last_lured = set()
     end = time.time() + args.seconds
 
+    heartbeat = 0.0
     while time.time() < end:
+        if time.time() >= next_refresh:
+            listener.refresh_all()
+            listener.refresh_battle_members()
+            next_refresh = time.time() + 5.0
+
         battles = listener.battles()
         if len(battles) != 1:
+            # SAY SOMETHING WHILE WAITING. A tool that prints nothing is
+            # indistinguishable from a broken one, which is exactly how
+            # the missing `DistributedBattleBase` presented: no output,
+            # no error, and no way to tell which of the two it was.
+            if time.time() >= heartbeat:
+                heartbeat = time.time() + 5.0
+                note = "  (walk into a cog)" if not battles else ""
+                print(f"  waiting: {len(battles)} battles, "
+                      f"{len(listener.store)} objects, "
+                      f"{listener.datagrams} datagrams{note}")
             time.sleep(0.4)
             continue
         battle = battles[0]
