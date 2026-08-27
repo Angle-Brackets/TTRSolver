@@ -53,9 +53,20 @@ every gag at max training, only these disagree about killing a level 12:
     organic TNT          198  kills a TTR 12, not a Realms 12
     organic Grand Piano  196  kills a TTR 12, not a Realms 12
 
-Plain TNT (180) fails to kill a 12 in *both* games, so the owner's
-observation is not a divergence — it is TTR behaviour too. Railroad
-(200) kills in both.
+**And the mechanism is named.** `cog_max_hp` records that before TTR
+3.0.0 (2021-12-03) a level 12 got a flat 10% boost to exactly **200**,
+and that the patch replaced it with the `+14` term, making it 196.
+Realms' 200 is not an arbitrary divergence — it is pre-3.0.0 Toontown,
+frozen. That is the cleanest possible illustration of why this source
+cannot feed the tables: it is not wrong, it is *old*, and the places it
+is old are precisely the places TTR chose to rebalance.
+
+TNT is the worked example, and the organic case is the one that counts:
+a maxed toon with organic Trap throws TNT for **198**, which kills a TTR
+12 (196) and fails on a Realms 12 (200). Non-organic TNT is 180 and
+kills neither, so whether the owner's observation is a divergence
+depends entirely on whether the Trap track is organic — and on the
+owner's own toon it is. Railroad (200) kills in both.
 
 That is the shape of the risk and why "the differences are small" is the
 wrong way to think about it. The magnitudes are small; the *decisions*
