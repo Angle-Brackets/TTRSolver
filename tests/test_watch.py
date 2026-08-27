@@ -415,3 +415,45 @@ class TestNamingFromThePanel(unittest.TestCase):
         frame = np.zeros((400, 600, 3), dtype=np.uint8)
         self.assertEqual([], w.read_frame(frame, menu_visible=True))
         self.assertEqual(0, w.reused_reads)
+
+    def test_a_candidate_inside_the_gag_menu_is_dropped(self):
+        """The menu holds plenty of teal -- cell backgrounds, the empty
+        Drop slot -- and once the slot floor came down to admit a real
+        plate at 1110 pixels, an 80x49 patch inside the TRAP row started
+        passing as a second cog."""
+        from solver.live.vision import Plate
+        from solver.live.watch import _outside_the_menu
+
+        class Frame:
+            shape = (1081, 1921, 3)
+
+        real = Plate(slot=(879, 119, 947, 168), filled=1200)
+        inside = Plate(slot=(1161, 353, 1241, 402), filled=1000)
+
+        import solver.live.watch as wm
+        located = (391, 857, {"a": 270, "b": 706}, 73)
+        original = wm.find_panel if hasattr(wm, "find_panel") else None
+        import solver.live.gagpanel as gp
+        saved = gp.find_panel
+        gp.find_panel = lambda frame: located
+        try:
+            kept = _outside_the_menu(Frame(), [real, inside])
+        finally:
+            gp.find_panel = saved
+        self.assertEqual([real], kept)
+
+    def test_nothing_is_dropped_when_the_menu_is_not_up(self):
+        from solver.live.vision import Plate
+        from solver.live.watch import _outside_the_menu
+        import solver.live.gagpanel as gp
+
+        class Frame:
+            shape = (1081, 1921, 3)
+
+        plates = [Plate(slot=(879, 119, 947, 168), filled=1200)]
+        saved = gp.find_panel
+        gp.find_panel = lambda frame: None
+        try:
+            self.assertEqual(plates, _outside_the_menu(Frame(), plates))
+        finally:
+            gp.find_panel = saved

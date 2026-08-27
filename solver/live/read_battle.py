@@ -276,8 +276,16 @@ def main(argv: Optional[List[str]] = None) -> int:
 
         print(f"any_plates  : {any_plates(frame)}"
               f"   (subsampled presence test the watcher gates on)")
-        print(f"locate_plates: {len(locate_plates(frame))} plate(s)"
+        from .watch import _outside_the_menu
+
+        located_plates = locate_plates(frame)
+        kept = _outside_the_menu(frame, located_plates)
+        dropped = len(located_plates) - len(kept)
+        print(f"locate_plates: {len(located_plates)} plate(s)"
               f"   (what the watcher actually calls)")
+        if dropped:
+            print(f"              {dropped} dropped for sitting inside the "
+                  f"gag menu -- never a cog plate")
         panel_box = find_panel(frame)
         print(f"gag menu    : {'found ' + str(panel_box) if panel_box is not None else 'NOT FOUND'}")
         print(f"              a battle needs plates AND the menu to start")

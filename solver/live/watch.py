@@ -229,6 +229,42 @@ def _roi(slots: Sequence[Tuple[int, int, int, int]], shape) -> Tuple[int, int]:
     return max(0, top - pad), min(shape[0], bottom + pad)
 
 
+def _outside_the_menu(frame, plates):
+    """Drop plate candidates that sit inside the gag menu.
+
+    A cog plate floats above its cog; the menu is drawn over the lower
+    middle of the screen and never contains one. The menu also holds
+    plenty of teal -- cell backgrounds, the empty Drop slot -- and after
+    the slot floor came down to admit a real plate at 1110 pixels, an
+    80x49 patch inside the TRAP row started passing as a second cog.
+    A false plate is worse than a missed one: the search then plans
+    against a cog nobody is fighting.
+
+    Costs nothing: `find_panel` has already run this poll for the read
+    gate, and its bounds are exactly what is needed.
+    """
+    if not plates:
+        return plates
+    from .gagpanel import find_panel
+
+    located = find_panel(frame)
+    if located is None:
+        return plates
+    left, width, bands, row_height = located
+    if not bands:
+        return plates
+    top = min(bands.values())
+    bottom = max(bands.values()) + row_height
+    kept = []
+    for plate in plates:
+        x0, y0, x1, y1 = plate.slot
+        cx, cy = (x0 + x1) // 2, (y0 + y1) // 2
+        inside = (left <= cx <= left + width) and (top <= cy <= bottom)
+        if not inside:
+            kept.append(plate)
+    return kept
+
+
 class BattleWatcher:
     """Polls the screen and reports what changed."""
 
@@ -328,6 +364,7 @@ class BattleWatcher:
                    menu_visible: Optional[bool] = None) -> List[CogReading]:
         readings = []
         plates = self._locate(frame)
+        plates = _outside_the_menu(frame, plates)
         self._forget_names(len(plates))
 
         # RE-READ WHEN THE MENU IS UP, or when the lineup changes.
