@@ -388,6 +388,105 @@ def cog_level(level_dist) -> Optional[int]:
 
 
 # ---------------------------------------------------------------------
+# The toon's pouch and training
+# ---------------------------------------------------------------------
+
+# Toontown's track order, which every one of these seven-long arrays is
+# in: setInventory's rows, setTrackAccess, setTrackBonusLevel.
+#
+# WRITTEN OUT RATHER THAN TAKEN FROM `Track`'s DECLARATION ORDER, which
+# happens to match today. Iterating the enum would couple the wire
+# format to the order members are declared in an unrelated file, and
+# reordering that enum -- an edit with no obvious connection to this
+# module -- would silently shift every gag count by one track. The wire
+# order is a property of the game, so it is stated here.
+DC_TRACK_ORDER = ("toon_up", "trap", "lure", "sound",
+                  "throw", "squirt", "drop")
+
+INVENTORY_LEVELS = 7
+
+
+def _track(name: str):
+    from ..state import Track
+
+    return Track(name)
+
+
+def parse_inventory(blob) -> Optional[Dict]:
+    """`setInventory` as {(Track, level): count}, or None.
+
+    The blob is a uint16 length then seven rows of seven bytes, one row
+    per track, one byte per level, holding the count carried. Verified
+    against a real toon: the Toon-Up row was all zeros and that toon's
+    `setTrackAccess[0]` was 0, which is an independent way of saying the
+    same thing.
+
+    Levels are 1-based here because the rest of this project counts them
+    that way -- `gag_counts[(Track.TRAP, 6)]` is TNT.
+    """
+    if isinstance(blob, str):
+        blob = blob.encode("latin-1", "replace")
+    if not isinstance(blob, (bytes, bytearray)):
+        return None
+    raw = bytes(blob)
+    if len(raw) >= 2:
+        (declared,) = struct.unpack_from("<H", raw, 0)
+        if declared == len(raw) - 2:
+            raw = raw[2:]               # strip the blob's length prefix
+    if len(raw) < len(DC_TRACK_ORDER) * INVENTORY_LEVELS:
+        return None
+
+    counts: Dict = {}
+    for index, name in enumerate(DC_TRACK_ORDER):
+        row = raw[index * INVENTORY_LEVELS:(index + 1) * INVENTORY_LEVELS]
+        for level, number in enumerate(row, start=1):
+            if number:
+                counts[(_track(name), level)] = int(number)
+    return counts
+
+
+def parse_track_access(values) -> Optional[frozenset]:
+    """`setTrackAccess` as the set of tracks the toon owns.
+
+    Seven flags in `DC_TRACK_ORDER`. A toon with [0, 1, 1, 1, 1, 1, 1]
+    has no Toon-Up, which is a real and awkward loadout rather than a
+    misread -- `docs/` has a whole thread about what a Toon-Up-less toon
+    can clear.
+    """
+    if not isinstance(values, (list, tuple)):
+        return None
+    if len(values) != len(DC_TRACK_ORDER):
+        return None
+    return frozenset(_track(name) for name, flag
+                     in zip(DC_TRACK_ORDER, values) if flag)
+
+
+def parse_organic(values) -> Optional[frozenset]:
+    """`setTrackBonusLevel` as the set of ORGANIC tracks.
+
+    Seven entries in `DC_TRACK_ORDER`, -1 for "not organic" and
+    otherwise the level the bonus reaches. This project treats organic
+    as a property of the whole track (see `ToonState.organic_tracks`),
+    which is how TTR works: a track is earned organic by ToonTask and
+    every gag in it is organic thereafter. So any non-negative entry
+    makes the track organic and the level itself is dropped.
+
+    IF REALMS GRANTS A PARTIAL BONUS -- organic only up to level N --
+    then that is a difference between the games and belongs in
+    `docs/realms.md` rather than being smuggled in here. A real toon
+    read [-1, -1, -1, -1, 6, -1, -1], organic Throw at 6, which is
+    consistent with both readings and settles nothing.
+    """
+    if not isinstance(values, (list, tuple)):
+        return None
+    if len(values) != len(DC_TRACK_ORDER):
+        return None
+    return frozenset(_track(name) for name, level
+                     in zip(DC_TRACK_ORDER, values)
+                     if isinstance(level, int) and level >= 0)
+
+
+# ---------------------------------------------------------------------
 # setMembers
 # ---------------------------------------------------------------------
 
@@ -552,6 +651,9 @@ class RealmsListener(threading.Thread):
         self._stop = threading.Event()
         self._reply_channel = 0
         self._context = 0
+        # cog doId -> the level of the Lure gag aimed at it. See
+        # `_note_chosen_attacks`.
+        self.chosen_lures: Dict[int, int] = {}
 
     # -- lifecycle ----------------------------------------------------
     def connect(self) -> None:
@@ -718,7 +820,44 @@ class RealmsListener(threading.Thread):
             do_id, parent, zone = struct.unpack_from("<III", body, 0)
             self.store.relocate(do_id, parent, zone)
 
+    def _note_chosen_attacks(self, battle_do_id: int, value) -> None:
+        """Remember which Lure gag was thrown at which cog.
+
+        `setMembers` says a cog IS lured and never which gag did it, and
+        the solver cannot use a lure without that: `lure_can_expire_early`
+        keys off the gag's level, so a cog marked lured with no level
+        raises the moment the search touches it.
+
+        `setChosenToonAttacks(toonIds, tracks, levels, targets, ...)` is
+        the only thing that says. Targets are indices into the battle's
+        suit roster, so the roster has to be read at the same time --
+        cogs die and the indices shift.
+
+        Only Lure is kept. Everything else the solver reads from state
+        rather than from intent, and intent is the weaker source: a
+        chosen attack is what a toon MEANT to do, and it may miss.
+        """
+        if not isinstance(value, (tuple, list)) or len(value) < 4:
+            return
+        battle = self.store.get(battle_do_id)
+        members = parse_members(battle.get("setMembers")) if battle else None
+        if members is None:
+            return
+        _toons, tracks, levels, targets = value[0], value[1], value[2], value[3]
+        lure_index = DC_TRACK_ORDER.index("lure")
+        for track, level, target in zip(tracks, levels, targets):
+            if int(track) != lure_index:
+                continue
+            index = int(target)
+            if 0 <= index < len(members.suits):
+                # Levels are 0-based on the wire and 1-based everywhere
+                # in this project.
+                self.chosen_lures[members.suits[index]] = int(level) + 1
+
     def _record(self, do_id: int, field, value) -> None:
+        name = field.getName()
+        if name == "setChosenToonAttacks":
+            self._note_chosen_attacks(do_id, value)
         obj = self.store.set_field(do_id, field.getName(), value)
         if not obj.dclass:
             # SET_FIELD does not name the class. The field knows the one
