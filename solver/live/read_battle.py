@@ -229,6 +229,49 @@ def status(catalogue: HeadCatalogue) -> None:
         print("still needed: " + ", ".join(display(c) for c in missing))
 
 
+def _write_png(frame, path: Path) -> None:
+    """Write an RGB array as a PNG, using zlib and struct only.
+
+    Deliberately not Pillow. `vision.py` is the one module allowed a
+    third-party import and numpy is all it gets; adding an imaging
+    library so that a diagnostic can save a file would put a new package
+    between the readers and every machine that runs them.
+
+    The byte constants are built with `bytes([...])` rather than written
+    as escapes. That is not style: this function was first written with
+    them and the escapes were collapsed in transit, so the signature
+    went out as UTF-8 encoded 0x89 and a stray NUL landed in the source.
+    Numbers cannot be mangled that way.
+    """
+    import struct
+    import zlib
+
+    import numpy as np
+
+    arr = np.asarray(frame)
+    if arr.ndim == 3 and arr.shape[2] == 4:
+        arr = arr[:, :, :3]
+    arr = np.ascontiguousarray(arr.astype("uint8"))
+    height, width = arr.shape[0], arr.shape[1]
+
+    # Every scanline carries a leading filter byte; 0 means "no filter".
+    filter_none = bytes([0])
+    rows = [filter_none + arr[y].tobytes() for y in range(height)]
+
+    def chunk(tag: bytes, payload: bytes) -> bytes:
+        return (struct.pack(">I", len(payload)) + tag + payload
+                + struct.pack(">I", zlib.crc32(tag + payload) & 0xFFFFFFFF))
+
+    signature = bytes([137, 80, 78, 71, 13, 10, 26, 10])
+    png = (signature
+           + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height,
+                                        8, 2, 0, 0, 0))
+           + chunk(b"IDAT", zlib.compress(b"".join(rows), 6))
+           + chunk(b"IEND", b""))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(png)
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("image", nargs="?", help="screenshot to read")
@@ -243,6 +286,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--status", action="store_true",
                         help="show how much of the library is filled in")
     parser.add_argument("--dir", help="head library directory")
+    parser.add_argument("--save", metavar="PATH",
+                        help="write the live grab to PATH as well as "
+                             "reading it. The frame is scoped to the game "
+                             "window, so it is what the readers actually "
+                             "see -- a full-screen screenshot taken by "
+                             "hand is a different image, and calibrating a "
+                             "threshold on the wrong one has gone wrong "
+                             "here before")
     args = parser.parse_args(argv)
 
     catalogue = HeadCatalogue(Path(args.dir) if args.dir else None)
@@ -266,6 +317,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             print("  no frame: is the game running?")
             return 1
         print(f"live grab   : {frame.shape[1]}x{frame.shape[0]}")
+        if args.save:
+            _write_png(frame, Path(args.save))
+            print(f"saved       : {args.save}")
         print(f"window rect : {rect if rect else 'not found -- full screen'}")
         if rect:
             left, top, right, bottom = rect
