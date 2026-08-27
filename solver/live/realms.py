@@ -36,7 +36,8 @@ import socket
 import struct
 import threading
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Sequence
+from typing import (Callable, Dict, List, NamedTuple, Optional,
+                    Sequence, Tuple)
 
 # Where Realms normally lands on Windows.
 DEFAULT_LOCATIONS = (
@@ -293,6 +294,89 @@ class ObjectStore:
 
 
 # ---------------------------------------------------------------------
+# setMembers
+# ---------------------------------------------------------------------
+
+class Members(NamedTuple):
+    """`DistributedBattleBase.setMembers`, unpacked.
+
+    The DC declares twelve untyped-looking slots --
+
+        setMembers(uint32[], string, string, string, string, string,
+                   uint32[], string, string, string, string, int16)
+
+    -- which is Toontown's long-standing shape: the suits and their
+    four state strings, then the toons and theirs, then a timestamp.
+    Observed live as
+
+        ([401005039], '', '', '0', '', '9', [100000001], '', '', '0',
+         '', -23220)
+
+    one cog and one toon, which is a solo street battle and reads
+    correctly as such.
+
+    `suits` and `toons` are the ones this project needs. `toons` in
+    particular answers directly what the panel currently asks the player
+    for: the party size, and so `BattleState.allies_standing`.
+
+    LURED AND TRAPPED ARE NOT DECODED, deliberately. `suits_lured` came
+    back empty and `suit_traps` as '9' against a single unlured,
+    untrapped cog, which is consistent with several encodings and proves
+    none of them -- one character per suit, or only the affected ones
+    listed, or a sentinel meaning "no trap". Guessing between them would
+    put a wrong lure state into a solver that treats lure as the pivot
+    of every Trap line. They are carried through as raw strings until a
+    frame with a genuinely lured cog says which.
+    """
+    suits: Tuple[int, ...]
+    suits_joining: str
+    suits_pending: str
+    suits_active: str
+    suits_lured: str
+    suit_traps: str
+    toons: Tuple[int, ...]
+    toons_joining: str
+    toons_pending: str
+    toons_active: str
+    toons_running: str
+    timestamp: int
+
+    @property
+    def toon_count(self) -> int:
+        return len(self.toons)
+
+    @property
+    def allies_standing(self) -> int:
+        """Teammates besides you, for `BattleState.allies_standing`.
+
+        Clamped at 3: four toons is the most a battle holds, and a
+        larger number would divide the danger by something impossible.
+        """
+        return max(0, min(3, len(self.toons) - 1))
+
+
+def parse_members(value) -> Optional[Members]:
+    """A `setMembers` value as a `Members`, or None if it is not one."""
+    if not isinstance(value, (tuple, list)) or len(value) != 12:
+        return None
+    try:
+        suits = tuple(int(x) for x in value[0])
+        toons = tuple(int(x) for x in value[6])
+    except (TypeError, ValueError):
+        return None
+
+    def text(raw) -> str:
+        if isinstance(raw, (bytes, bytearray)):
+            return bytes(raw).decode("latin-1", "replace")
+        return "" if raw is None else str(raw)
+
+    return Members(suits, text(value[1]), text(value[2]), text(value[3]),
+                   text(value[4]), text(value[5]), toons,
+                   text(value[7]), text(value[8]), text(value[9]),
+                   text(value[10]), int(value[11]))
+
+
+# ---------------------------------------------------------------------
 # The listener
 # ---------------------------------------------------------------------
 
@@ -379,6 +463,42 @@ class RealmsListener(threading.Thread):
                    + struct.pack("<H", OBJECT_GET_ALL)
                    + struct.pack("<II", self._context, do_id))
         self._sock.sendall(_datagram(payload))
+
+    def refresh_battle_members(self) -> int:
+        """Ask about every doId a battle names in `setMembers`.
+
+        THE MISSING LINK, and the reason a live capture showed a battle
+        with one suit in its roster and `cogs: 0` in the store. Cogs are
+        generated long before the fight -- they walk the street first --
+        so the listener has usually never seen a field update for them,
+        and `refresh_all` only asks about objects it already knows.
+
+        The battle itself is the thing that says which cogs matter, so
+        reading its roster and asking about those doIds directly is what
+        closes the loop.
+        """
+        asked = 0
+        for battle in self.battles():
+            members = parse_members(battle.get("setMembers"))
+            if members is None:
+                continue
+            for do_id in tuple(members.suits) + tuple(members.toons):
+                self.refresh(do_id)
+                asked += 1
+        return asked
+
+    def members(self) -> Optional[Members]:
+        """The roster of the battle in progress, if there is exactly one.
+
+        More than one battle is on the cluster whenever another toon is
+        fighting elsewhere in the district, so this deliberately refuses
+        to choose between them -- picking the wrong one would advise on
+        somebody else's fight.
+        """
+        battles = self.battles()
+        if len(battles) != 1:
+            return None
+        return parse_members(battles[0].get("setMembers"))
 
     def refresh_all(self, classes: Optional[Sequence[str]] = None) -> int:
         """Re-ask for every object seen so far, or just some classes."""
@@ -562,9 +682,15 @@ def _describe(listener: "RealmsListener") -> str:
     for battle in battles:
         lines.append(f"  #{battle.do_id} zone {battle.zone} "
                      f"state={battle.get('setState')!r}")
-        members = battle.get("setMembers")
-        if members:
-            lines.append(f"    members {members!r}"[:300])
+        members = parse_members(battle.get("setMembers"))
+        if members is not None:
+            lines.append(f"    toons {members.toon_count} "
+                         f"(allies {members.allies_standing}) "
+                         f"{list(members.toons)}")
+            lines.append(f"    suits {list(members.suits)} "
+                         f"active={members.suits_active!r} "
+                         f"lured={members.suits_lured!r} "
+                         f"traps={members.suit_traps!r}")
 
     cogs = listener.cogs()
     lines.append(f"cogs    : {len(cogs)}")
@@ -631,6 +757,7 @@ def main(argv=None) -> int:                          # pragma: no cover
         if current - seen:
             seen |= current
             listener.refresh_all()
+            listener.refresh_battle_members()
             time.sleep(1.0)
             print(_describe(listener))
             print()
