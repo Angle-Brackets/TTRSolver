@@ -726,11 +726,27 @@ def lure_indicator(frame: np.ndarray, plate: Plate) -> bool:
     x1, y1 = min(width, x1), min(height, y1)
     if x1 <= x0 or y1 <= y0:
         return False
+    return lure_pixels(frame, plate) >= LURE_MIN_PIXELS
+
+
+def lure_pixels(frame: np.ndarray, plate: Plate) -> int:
+    """How many pixels above the plate look like the lure tile.
+
+    Split out so a report can show the margin rather than a yes/no. A
+    false LURED is expensive -- it tells the solver that Throw and Squirt
+    hit for certain and that the cog will not swing -- so the count
+    matters when the verdict is in doubt.
+    """
+    x0, y0, x1, y1 = plate.region("lure")
+    height, width = frame.shape[:2]
+    x0, y0 = max(0, x0), max(0, y0)
+    x1, y1 = min(width, x1), min(height, y1)
+    if x1 <= x0 or y1 <= y0:
+        return 0
     patch = frame[y0:y1, x0:x1, :3].astype(np.int16)
     red = patch[:, :, 0]
     lead = red - np.maximum(patch[:, :, 1], patch[:, :, 2])
-    hits = (red > LURE_RED_MIN) & (lead > LURE_RED_DOMINANCE)
-    return int(hits.sum()) >= LURE_MIN_PIXELS
+    return int(((red > LURE_RED_MIN) & (lead > LURE_RED_DOMINANCE)).sum())
 
 
 def health_fraction(frame: np.ndarray, plate: Plate) -> float:

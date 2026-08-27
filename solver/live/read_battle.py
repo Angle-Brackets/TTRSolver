@@ -26,6 +26,7 @@ from .vision import (
     MIN_DEPARTMENT_MARGIN, find_plates, health_fraction, read_department,
     read_level,
     lure_indicator,
+    lure_pixels,
     MIN_LEVEL_MARGIN,
 )
 
@@ -64,6 +65,7 @@ def describe(frame, catalogue: HeadCatalogue) -> List[dict]:
         out.append({"plate": plate, "department": dept,
                     "department_margin": margin, "level": level,
                     "lured": lure_indicator(frame, plate),
+                    "lure_pixels": lure_pixels(frame, plate),
                     "level_score": score,
                     "level_margin": level_margin, "health": health_fraction(frame,
                                                                     plate),
@@ -98,6 +100,10 @@ def report(records: List[dict]) -> None:
         print(f"  cog {i + 1}: {dept:8s} level {str(level):>2}  "
               f"hp {r['health']:>4.0%}"
               f"{'  LURED' if r.get('lured') else ''}  {who}")
+        if r.get("lure_pixels") is not None:
+            from .vision import LURE_MIN_PIXELS
+            print(f"           lure tile: {r['lure_pixels']} red px "
+                  f"(needs {LURE_MIN_PIXELS})")
         if r["department"] is None:
             print(f"           department unreadable "
                   f"(margin {r['department_margin']:.2f} < "
