@@ -290,7 +290,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             import numpy as np
 
             from .gagpanel import (COLOUR_TOLERANCE, MIN_RUN_FRAC,
-                                   ROW_COLOURS, _longest_run)
+                                   ROW_COLOURS, _longest_run,
+                                   _qualifies)
 
             need = int(frame.shape[1] * MIN_RUN_FRAC)
             print(f"              each row needs an unbroken run of {need}px")
@@ -299,10 +300,23 @@ def main(argv: Optional[List[str]] = None) -> int:
                                     - np.array(colour)) < COLOUR_TOLERANCE,
                              axis=2)
                 rows = np.nonzero(hit.any(axis=1))[0]
-                best = max((_longest_run(hit[y]) for y in rows), default=0)
-                mark = "ok" if best >= need else "FAILS"
-                print(f"                {track.value:<8} longest run "
-                      f"{best:>5}px  {mark}")
+                best = span = lit = 0
+                for y in rows:
+                    run = _longest_run(hit[y])
+                    if run > best:
+                        best = run
+                        marks = np.flatnonzero(hit[y])
+                        span = int(marks[-1] - marks[0]) + 1
+                        lit = int(marks.size)
+                # `_qualifies` is what find_panel uses: an unbroken run,
+                # OR a span that is wide and mostly filled. Reporting the
+                # longest run alone said FAILS for a row the real test
+                # accepts, which is worse than saying nothing.
+                passed = any(_qualifies(hit[y], need) for y in rows)
+                cover = (lit / span) if span else 0.0
+                print(f"                {track.value:<8} run {best:>4}px  "
+                      f"span {span:>4}px  fills {cover:>4.0%}  "
+                      f"{'ok' if passed else 'FAILS'}")
 
         rejects = []
         plates = find_plates(frame, rejects=rejects)
