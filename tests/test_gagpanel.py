@@ -306,3 +306,29 @@ class TestOrganicRowBands(unittest.TestCase):
         row = np.zeros(1921, dtype=bool)
         row[400:600] = True
         self.assertFalse(_qualifies(row, self._need()))
+
+    def test_a_far_off_blob_of_the_same_colour_is_not_part_of_the_band(self):
+        """The Shticky Notes page is a pale yellow close enough to match
+        TRAP. Measuring first-lit to last-lit made the span the distance
+        to the notepad -- 1152px against the row's real 862 -- and the
+        fill fell to 62% against a 65% floor, so an organic TRAP row was
+        rejected because of something 290px away from it."""
+        import numpy as np
+        from solver.live.gagpanel import MIN_RUN_FRAC, _qualifies
+        need = int(1921 * MIN_RUN_FRAC)
+        row = np.zeros(1921, dtype=bool)
+        row[380:1242] = True                       # the band
+        for i in range(7):                         # organic badges
+            row[470 + i * 110:500 + i * 110] = False
+        row[1530:1750] = True                      # the notepad
+        self.assertTrue(_qualifies(row, need))
+
+    def test_two_short_groups_do_not_add_up_to_a_band(self):
+        """Merging must not let separate objects combine into one."""
+        import numpy as np
+        from solver.live.gagpanel import MIN_RUN_FRAC, _qualifies
+        need = int(1921 * MIN_RUN_FRAC)
+        row = np.zeros(1921, dtype=bool)
+        row[200:380] = True
+        row[900:1080] = True
+        self.assertFalse(_qualifies(row, need))

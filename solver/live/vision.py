@@ -51,7 +51,15 @@ TOLERANCE = 34
 # out near the values found by hand (120px, 40px, 1200px).
 MIN_FRAGMENT_FRAC = 0.000058     # of frame area
 MERGE_GAP_FRAC = 0.021           # of frame width
-MIN_SLOT_FRAC = 0.00058          # of frame area
+# Measured against a live rejection: a 65x45 slot held 1110 teal pixels
+# on a 1921x1081 frame and was refused for wanting 1204. The colour was
+# right -- the probe read rgb(87,139,155) against a TEAL of (90,141,158)
+# -- there was simply less backdrop showing, because that cog's head
+# covers more of its own slot than the one this was calibrated on.
+#
+# 0.00046 puts the floor under that reading with room, and stays well
+# above the largest rejected non-plate seen in the same frames (359).
+MIN_SLOT_FRAC = 0.00046          # of frame area
 
 # And a ceiling, of frame WIDTH. The aspect and minimum-size filters both
 # pass on large teal scenery: a grey-blue machine in the background of a

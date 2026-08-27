@@ -66,6 +66,11 @@ MIN_RUN_FRAC = 0.15
 # scenery blobs that happens to span the width does not.
 MIN_SPAN_COVERAGE = 0.65
 
+# The widest hole a badge punches in a row band. Beyond this the colour
+# belongs to something else -- the Shticky Notes page is close enough to
+# TRAP's yellow to match, ~290px away from the row.
+MAX_BADGE_GAP = 60
+
 # Cell grid, as fractions of the panel's width. Measured from a 1080p
 # frame: a 149px label area, then seven 91px cells on a 97.7px pitch.
 CELL_LEFT = 0.2065
@@ -242,8 +247,26 @@ def _qualifies(row: np.ndarray, need: int) -> bool:
     lit = np.flatnonzero(row)
     if lit.size == 0:
         return False
-    span = int(lit[-1] - lit[0]) + 1
-    return span >= need and lit.size >= span * MIN_SPAN_COVERAGE
+
+    # MERGED ACROSS SMALL GAPS ONLY. Measuring first-lit to last-lit made
+    # the span the distance to anything else on screen wearing the same
+    # colour: TRAP spanned 1152px because the Shticky Notes page is a
+    # pale yellow close enough to match, so the band and the notepad were
+    # treated as one thing with a hole between them, and the fill came
+    # out at 62% against a 65% floor.
+    #
+    # A badge interrupts a band by tens of pixels. Anything further apart
+    # is a different object, so the merge stops there and each group is
+    # judged on its own.
+    breaks = np.flatnonzero(np.diff(lit) > MAX_BADGE_GAP)
+    starts = np.concatenate(([0], breaks + 1))
+    ends = np.concatenate((breaks, [lit.size - 1]))
+    for first, last in zip(starts, ends):
+        span = int(lit[last] - lit[first]) + 1
+        filled = int(last - first) + 1
+        if span >= need and filled >= span * MIN_SPAN_COVERAGE:
+            return True
+    return False
 
 
 def _longest_run(row: np.ndarray) -> int:
