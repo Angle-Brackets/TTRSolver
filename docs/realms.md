@@ -88,3 +88,44 @@ For streets and buildings, 12 is the ceiling anyway.
     may be written into `solver/data/`, used to fit weights, or used to
     score a policy. The shipped policies were trained against our TTR
     tables and nothing here changes them.
+
+## The panel
+
+    python -m solver.live.realms_panel
+    python -m solver.live.realms_panel --objective survive --budget 8
+
+A **second panel**, not a mode of the first. `overlay.Worker` polls a
+screen capture, runs `find_plates`, reads a gag menu and hedges every
+number with a confidence; none of that applies when the server hands
+over typed fields. Threading a second world through it would put
+`if realms:` across the one module whose whole job is being careful
+about pixels, and the TTR panel could then break from an edit made for
+a game it does not read. `tests/test_realms_panel.py` greps
+`overlay.py`, `panel.py` and `session.py` for the word and fails if it
+ever appears.
+
+`Model`, `CogRow` and `model_json` ARE shared, and that is a different
+thing: they describe what a panel shows rather than how it reads, both
+panels showing the same thing is the point, and the built React app
+renders this one with no changes at all.
+
+What the player sees differently, all of it because the data is better:
+
+  * **cog names are never "?"** and the picker never appears -- identity
+    is `setDNAString`, so there is nothing to guess at
+  * **health is exact.** The TTR panel shows a fraction read off a green
+    bar; this shows 9/12 because the server said 9/12
+  * **LURED is read** from the battle roster, not marked by hand
+  * **party size is read** from `setMembers`, not asked for
+
+`name_cog` and `mark_lured` are deliberately **absent** from
+`RealmsApi` rather than stubbed. They exist on the TTR side so a player
+can supply what the readers could not see; here the server states both,
+and offering them would invite overriding correct data with a guess.
+`set_toon_count` exists but does nothing, because the shared page has a
+button for it and the click has to land somewhere.
+
+The search runs when the POSITION changes -- laff, each cog's health and
+lure, the pouch, the party size -- and deliberately not on the battle's
+state string, which cycles several times a round and would restart the
+search mid-think.
