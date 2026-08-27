@@ -294,6 +294,100 @@ class ObjectStore:
 
 
 # ---------------------------------------------------------------------
+# Suit DNA
+# ---------------------------------------------------------------------
+
+# The department letter. [CONFIRMED BY OBSERVATION] -- all four turned
+# up in one live capture and each agreed with the cog it was attached
+# to: 'sf\0\0c' a Flunky, 'scc\0s' a Cold Caller, 'spp\0m' a Penny
+# Pincher, 'sdt\0l' a Double Talker.
+DNA_DEPARTMENTS = {"c": "bossbot", "s": "sellbot",
+                   "m": "cashbot", "l": "lawbot"}
+
+# Cog code to our own key. [OPEN TOONTOWN SOURCE] -- this is a NAMING
+# map rather than game data, so it does not fall under the ban on
+# Realms numbers reaching `solver/data/`; nothing here is a stat.
+#
+# Five entries are [CONFIRMED BY OBSERVATION] from live captures: sc,
+# cc, f, pp, dt. Six more are confirmed from the game's OWN data pack,
+# which prints them into its log beside the localiser key -- 'mh' next
+# to #SuitMrHollywood, 'nd' to #SuitNameDropper, 'gh' to
+# #SuitGladHander, 'ms' to #SuitMoverShaker, 'm' to #SuitTheMingler,
+# 'cc' again to #SuitColdCaller. The rest follow the same scheme and an
+# unknown code returns None rather than a guess.
+DNA_COGS = {
+    # Bossbot
+    "f": "flunky", "p": "pencil_pusher", "ym": "yesman",
+    "mm": "micromanager", "ds": "downsizer", "hh": "head_hunter",
+    "cr": "corporate_raider", "tbc": "the_big_cheese",
+    # Sellbot
+    "cc": "cold_caller", "tm": "telemarketer", "nd": "name_dropper",
+    "gh": "glad_hander", "ms": "mover_and_shaker", "tf": "two_face",
+    "m": "the_mingler", "mh": "mr_hollywood",
+    # Cashbot
+    "sc": "short_change", "pp": "penny_pincher", "tw": "tightwad",
+    "bc": "bean_counter", "nc": "number_cruncher", "mb": "money_bags",
+    "ls": "loan_shark", "rb": "robber_baron",
+    # Lawbot
+    "bf": "bottom_feeder", "b": "bloodsucker", "dt": "double_talker",
+    "ac": "ambulance_chaser", "bs": "backstabber", "sd": "spin_doctor",
+    "le": "legal_eagle", "bw": "big_wig",
+}
+
+
+def parse_dna(raw) -> Optional[Tuple[str, str]]:
+    """A suit's `setDNAString` as (department, cog key), or None.
+
+    The blob is 's', then the cog's code padded with NULs to three
+    bytes, then the department letter -- b'sdt\\x00l' is a Lawbot Double
+    Talker, b'sf\\x00\\x00c' a Bossbot Flunky.
+
+    Returns None for anything it does not recognise. An unknown cog is
+    exactly the case the head catalogue refuses to guess at, and being
+    handed a typed field instead of a picture is no reason to start.
+    """
+    if isinstance(raw, str):
+        raw = raw.encode("latin-1", "replace")
+    if not isinstance(raw, (bytes, bytearray)) or len(raw) < 3:
+        return None
+    blob = bytes(raw)
+    if blob[:1] != b"s":
+        return None
+    department = DNA_DEPARTMENTS.get(chr(blob[-1]))
+    code = blob[1:-1].replace(b"\x00", b"").decode("latin-1", "replace")
+    cog = DNA_COGS.get(code)
+    if department is None or cog is None:
+        return None
+    return department, cog
+
+
+def cog_level(level_dist) -> Optional[int]:
+    """Absolute cog level from `setLevelDist`.
+
+    IT IS THE LEVEL MINUS ONE, not an offset into the cog's own range,
+    and the two are easy to confuse because they agree for every cog
+    whose range starts at 1. Four live reads settled it, cross-checked
+    against our own HP table rather than against Realms:
+
+        Flunky        dist 0, hp 6   -> level 1   (both readings agree)
+        Cold Caller   dist 0, hp 6   -> level 1   (both agree)
+        Penny Pincher dist 1, hp 12  -> level 2   (range starts at 2,
+                                                   so an offset would
+                                                   have been 0)
+        Double Talker dist 2, hp 20  -> level 3   (range starts at 3,
+                                                   offset would be 0)
+
+    The last two discriminate, and both say `level = dist + 1`.
+    """
+    if level_dist is None:
+        return None
+    try:
+        return int(level_dist) + 1
+    except (TypeError, ValueError):
+        return None
+
+
+# ---------------------------------------------------------------------
 # setMembers
 # ---------------------------------------------------------------------
 
@@ -319,14 +413,28 @@ class Members(NamedTuple):
     particular answers directly what the panel currently asks the player
     for: the party size, and so `BattleState.allies_standing`.
 
-    LURED AND TRAPPED ARE NOT DECODED, deliberately. `suits_lured` came
-    back empty and `suit_traps` as '9' against a single unlured,
-    untrapped cog, which is consistent with several encodings and proves
-    none of them -- one character per suit, or only the affected ones
-    listed, or a sentinel meaning "no trap". Guessing between them would
-    put a wrong lure state into a solver that treats lure as the pivot
-    of every Trap line. They are carried through as raw strings until a
-    frame with a genuinely lured cog says which.
+    THE STATE STRINGS ARE TWO DIFFERENT ENCODINGS, which is the trap
+    here and was settled by observation rather than assumed. A second
+    capture, two cogs with the first one lured:
+
+        active='01'   lured='0'   traps='99'
+
+    `traps` has one character per suit. `active` and `lured` do NOT:
+    they are the INDICES of the suits in that state. One lured cog out
+    of two gives '0', where a per-suit encoding would have given '10'
+    or similar. The earlier single-cog capture (`lured=''`, `traps='9'`)
+    agrees with both readings and so decides nothing; it is the two-cog
+    frame that discriminates.
+
+    Reading `lured` as one-char-per-suit would therefore mark the wrong
+    cog asleep, in a solver where lure is the pivot of every Trap line.
+
+    WHAT A TRAP LOOKS LIKE IS STILL UNOBSERVED. Every capture so far has
+    '9' in every trap slot, and `setMembers` is only re-broadcast when
+    membership changes -- a trap set mid-round does not resend it -- so
+    a trapped cog has not been seen. `trapped_indices` therefore reports
+    only "this slot is not 9", which is enough to know a trap is there
+    and not enough to know which gag it is.
     """
     suits: Tuple[int, ...]
     suits_joining: str
@@ -353,6 +461,37 @@ class Members(NamedTuple):
         larger number would divide the danger by something impossible.
         """
         return max(0, min(3, len(self.toons) - 1))
+
+    def _indices(self, text: str) -> Tuple[int, ...]:
+        """Suit indices named in a state string, dropping any that do
+        not address a suit actually in the roster."""
+        out = []
+        for char in text:
+            if char.isdigit():
+                index = int(char)
+                if 0 <= index < len(self.suits):
+                    out.append(index)
+        return tuple(out)
+
+    def lured_suits(self) -> Tuple[int, ...]:
+        """doIds of the cogs currently lured."""
+        return tuple(self.suits[i] for i in self._indices(self.suits_lured))
+
+    def active_suits(self) -> Tuple[int, ...]:
+        return tuple(self.suits[i] for i in self._indices(self.suits_active))
+
+    def trapped_suits(self) -> Tuple[int, ...]:
+        """doIds of cogs with SOMETHING on their trap slot.
+
+        One character per suit, and '9' in every capture so far, which
+        is this field's "no trap". A non-'9' character names the trap
+        gag, but no trapped cog has been observed, so what the character
+        maps to is not decoded -- only that it is not nothing. That is
+        the honest half: enough to know a cog is trapped, not enough to
+        say which gag is under it.
+        """
+        return tuple(do_id for do_id, char
+                     in zip(self.suits, self.suit_traps) if char != "9")
 
 
 def parse_members(value) -> Optional[Members]:

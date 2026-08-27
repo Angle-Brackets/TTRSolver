@@ -3,12 +3,16 @@
 Skips rather than fails without panda3d, the same arrangement
 tests/test_vision.py has with numpy -- `requirements-realms.txt` is an
 optional extra and the suite must still run on the standard library.
+Only `DCIndex` needs it, so the framing, store and decoder tests all
+run everywhere.
 
-The parts worth testing without a live cluster are the wire framing and
-the store. Framing is where this class of reader usually breaks: a TCP
-read will split a datagram across two recv() calls whenever it feels
-like it, and a length prefix that is half-arrived must be held rather
-than parsed.
+Framing is where this class of reader usually breaks: a TCP read will
+split a datagram across two recv() calls whenever it feels like it, and
+a half-arrived length prefix must be held rather than parsed.
+
+The decoder tests replay values the live reader actually produced
+against a running game, so they are regression tests for real captures
+rather than invented ones.
 
 stdlib unittest only -- pytest is not installed.
 """
@@ -28,6 +32,8 @@ try:
 except ImportError:
     HAVE_PANDA = False
 
+NUL = chr(0)
+
 
 def payload(msgtype: int, body: bytes = b"", channel: int = 0,
             sender: int = 0) -> bytes:
@@ -42,7 +48,7 @@ class _Bare(unittest.TestCase):
 
     `RealmsListener.__init__` builds a `DCIndex`, which needs an
     installation. The framing and store tests need neither, so they are
-    given an object with just the attributes they touch.
+    handed an object carrying just the attributes they touch.
     """
 
     def listener(self, index=None):
@@ -60,8 +66,8 @@ class FramingTest(_Bare):
 
     def test_a_split_datagram_is_held_not_parsed(self):
         """THE FAILURE THIS CLASS OF READER ALWAYS HAS. TCP gives no
-        message boundaries, so half a datagram arrives routinely. Parsing
-        it would decode a length prefix against absent bytes."""
+        message boundaries, so half a datagram arrives routinely, and
+        parsing one would read a length prefix against absent bytes."""
         whole = payload(realms.OBJECT_DELETE_RAM, struct.pack("<I", 42))
         one = self.listener()
         left = one.feed(whole[:5])
@@ -86,7 +92,7 @@ class FramingTest(_Bare):
     def test_a_malformed_datagram_does_not_stop_the_stream(self):
         """One bad message must not take down a reader watching a whole
         cluster. It is counted and skipped."""
-        bad = struct.pack("<H", 3) + b"\x01\x00\x00"
+        bad = struct.pack("<H", 3) + bytes([1, 0, 0])
         good = payload(realms.OBJECT_DELETE_RAM, struct.pack("<I", 7))
         one = self.listener()
         one.feed(bad + good)
@@ -99,9 +105,9 @@ class ControlMessageTest(unittest.TestCase):
 
     def test_control_messages_carry_no_sender(self):
         """Astron control messages address channel 1 and OMIT the sender
-        field every other message has. Including it shifts the message
-        type by eight bytes, and the server sees a subscription request
-        as something else entirely."""
+        field every other message carries. Including it shifts the
+        message type by eight bytes, and the server reads a subscription
+        request as something else entirely."""
         raw = realms._control(realms.CONTROL_ADD_CHANNEL,
                               struct.pack("<Q", 1234))
         (length,) = struct.unpack_from("<H", raw, 0)
@@ -147,6 +153,109 @@ class ObjectStoreTest(unittest.TestCase):
         self.assertEqual(len(store.of_class(*realms.TOON_CLASSES)), 1)
 
 
+@unittest.skipUnless(HAVE_MODULE, "solver.live.realms did not import")
+class MembersTest(unittest.TestCase):
+    """Two live captures, replayed. The values are the ones the reader
+    actually produced against a running game."""
+
+    SOLO = ([401005039], "", "", "0", "", "9",
+            [100000001], "", "", "0", "", -23220)
+    TWO_COGS = ([401005045, 401005050], "", "", "01", "0", "99",
+                [100000001], "", "", "0", "", 17404)
+
+    def test_party_size_comes_straight_out(self):
+        solo = realms.parse_members(self.SOLO)
+        self.assertEqual(solo.toon_count, 1)
+        self.assertEqual(solo.allies_standing, 0)
+
+    def test_lured_is_indices_not_one_char_per_suit(self):
+        """THE ONE THAT MATTERS, and why two captures were needed.
+
+        Two cogs with the first lured gives lured='0'. Read as one
+        character per suit that says "suit 0 is in state 0", which would
+        mark the WRONG cog asleep in a solver where lure is the pivot of
+        every Trap line. Read as a list of indices it says "suit 0",
+        which is what it is. The single-cog capture agrees with both
+        readings and so decides nothing.
+        """
+        members = realms.parse_members(self.TWO_COGS)
+        self.assertEqual(members.lured_suits(), (401005045,))
+        self.assertEqual(members.active_suits(), (401005045, 401005050))
+
+    def test_nothing_lured_reads_as_nothing(self):
+        self.assertEqual(realms.parse_members(self.SOLO).lured_suits(), ())
+
+    def test_traps_are_one_char_per_suit(self):
+        """'9' is this field's "no trap", in every slot of every capture
+        so far. Two cogs give two characters where lured gives one
+        index: the two fields genuinely differ."""
+        members = realms.parse_members(self.TWO_COGS)
+        self.assertEqual(len(members.suit_traps), len(members.suits))
+        self.assertEqual(members.trapped_suits(), ())
+
+    def test_an_index_outside_the_roster_is_dropped(self):
+        """Defensive. An index naming a suit not in the list would
+        otherwise raise, and a reader watching a whole cluster must not
+        die of one odd frame."""
+        odd = ([1, 2], "", "", "01", "7", "99", [10], "", "", "0", "", 0)
+        self.assertEqual(realms.parse_members(odd).lured_suits(), ())
+
+    def test_junk_is_refused(self):
+        for bad in (None, "", (1, 2, 3), ["x"] * 12):
+            self.assertIsNone(realms.parse_members(bad))
+
+
+@unittest.skipUnless(HAVE_MODULE, "solver.live.realms did not import")
+class DNATest(unittest.TestCase):
+
+    LIVE = {
+        "sdt" + NUL + "l": ("lawbot", "double_talker"),
+        "spp" + NUL + "m": ("cashbot", "penny_pincher"),
+        "sf" + NUL + NUL + "c": ("bossbot", "flunky"),
+        "scc" + NUL + "s": ("sellbot", "cold_caller"),
+        "ssc" + NUL + "m": ("cashbot", "short_change"),
+    }
+
+    def test_the_live_reads_decode(self):
+        for dna, want in self.LIVE.items():
+            self.assertEqual(realms.parse_dna(dna), want, repr(dna))
+
+    def test_every_code_names_a_cog_we_know(self):
+        """The map translates identifiers, it is not game data -- and it
+        is worthless if it points at keys `solver.data` does not have."""
+        from solver import data
+
+        for code, key in realms.DNA_COGS.items():
+            found = [d for d in realms.DNA_DEPARTMENTS.values()
+                     if key in data.COG_DEPARTMENTS[d]]
+            self.assertEqual(len(found), 1,
+                             f"{code} -> {key} found in {found}")
+
+    def test_all_four_departments_and_every_cog(self):
+        self.assertEqual(set(realms.DNA_DEPARTMENTS.values()),
+                         {"bossbot", "sellbot", "cashbot", "lawbot"})
+        self.assertEqual(len(realms.DNA_COGS), 32)
+
+    def test_an_unknown_code_is_refused_not_guessed(self):
+        """Same rule the head catalogue follows. Being handed a typed
+        field instead of a picture is no reason to start guessing."""
+        for bad in ("szz" + NUL + "l", "sdt" + NUL + "x", "",
+                    "xdt" + NUL + "l", None, 5):
+            self.assertIsNone(realms.parse_dna(bad), repr(bad))
+
+    def test_level_is_dist_plus_one(self):
+        """Cross-checked against our OWN HP table rather than Realms'.
+        A Penny Pincher at dist 1 had 12 hp and a Double Talker at dist
+        2 had 20, which are levels 2 and 3. Both cogs' ranges start
+        above level 1, so an offset-into-range reading would have given
+        0 for each -- which is what makes these two discriminating."""
+        from solver.data.cogs import COG_HP_BY_LEVEL
+
+        for dist, hp in ((0, 6), (1, 12), (2, 20)):
+            self.assertEqual(COG_HP_BY_LEVEL[realms.cog_level(dist)], hp)
+        self.assertIsNone(realms.cog_level(None))
+
+
 @unittest.skipUnless(HAVE_MODULE and HAVE_PANDA,
                      "needs panda3d (requirements-realms.txt)")
 class DCIndexTest(unittest.TestCase):
@@ -161,8 +270,8 @@ class DCIndexTest(unittest.TestCase):
             raise unittest.SkipTest(str(exc))
 
     def test_the_battle_fields_resolve(self):
-        """These are the fields the whole module exists to read. A DC
-        file that does not have them is not one we can use."""
+        """These are the fields the module exists to read. A DC file
+        without them is not one we can use."""
         for cls_name, field in (("DistributedSuitBase", "setHP"),
                                 ("DistributedSuitBase", "setMaxHP"),
                                 ("DistributedSuitBase", "setLevelDist"),
@@ -172,9 +281,8 @@ class DCIndexTest(unittest.TestCase):
                                 ("DistributedToon", "setHp")):
             fid = self.index.field_id(cls_name, field)
             self.assertIsNotNone(fid, f"{cls_name}.{field} missing")
-            self.assertEqual(self.index.name(fid),
-                             f"{cls_name}.{field}",
-                             "field id must round-trip to its own name")
+            self.assertEqual(self.index.name(fid), f"{cls_name}.{field}",
+                             "a field id must round-trip to its own name")
 
     def test_numbering_is_not_declaration_order(self):
         """Recorded because assuming it was cost real time: a
