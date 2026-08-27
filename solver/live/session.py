@@ -125,11 +125,20 @@ def cog_from_reading(reading) -> Tuple[Optional[CogState], List[str]]:
 
 def build_state(snapshot=None, panel=None, readings: Sequence = (),
                 round_num: int = 0,
-                ignore_checksum: bool = False) -> BuildResult:
+                ignore_checksum: bool = False,
+                allies: int = 0) -> BuildResult:
     """Assemble a BattleState from whatever the readers have produced.
 
     `snapshot` is a `ttr_local.Snapshot`, `panel` a `gagpanel.GagPanel`,
     `readings` the `watch.CogReading`s for the cogs on screen.
+
+    `allies` is how many OTHER toons are in the fight, 0-3. It is set by
+    the player rather than read: nothing on screen has been shown to
+    count toons reliably, and this module's rule is a state or the
+    reasons there isn't one, never a guess. Zero is therefore the
+    default and solo is what you get if nobody says otherwise -- which
+    is also the safe direction, because it is the one that assumes
+    every cog attack is coming at you.
 
     `ignore_checksum` builds a state from gag counts that do not match
     the menu's own total. It exists to exercise the rest of the pipeline
@@ -183,7 +192,9 @@ def build_state(snapshot=None, panel=None, readings: Sequence = (),
                      track_exp=track_exp, gag_counts=gag_counts,
                      organic_tracks=frozenset(snapshot.organic_tracks()))
     return BuildResult(BattleState(toon=toon, cogs=cogs,
-                                   round_num=round_num), [])
+                                   round_num=round_num,
+                                   allies_standing=max(0, min(3, int(allies)))),
+                       [])
 
 
 def describe(state: BattleState) -> str:

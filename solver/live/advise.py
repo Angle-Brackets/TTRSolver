@@ -105,21 +105,24 @@ class Thinker:
         self._lock = threading.Lock()
 
     def submit(self, frame, readings, snapshot, objective, depth,
-               budget=DEFAULT_BUDGET, ignore_checksum=False) -> None:
+               budget=DEFAULT_BUDGET, ignore_checksum=False,
+               allies=0) -> None:
         with self._lock:
             token = next(self._generation)
             self._current = token
         threading.Thread(target=self._run, daemon=True,
                          args=(token, frame, readings, snapshot, objective,
-                               depth, budget, ignore_checksum)).start()
+                               depth, budget, ignore_checksum,
+                               allies)).start()
 
     def _run(self, token, frame, readings, snapshot, objective, depth,
-             budget, ignore_checksum=False):
+             budget, ignore_checksum=False, allies=0):
         try:
             lines, state, action = advise(frame, readings, snapshot=snapshot,
                                   objective=objective, depth=depth,
                                   budget=budget,
-                                  ignore_checksum=ignore_checksum)
+                                  ignore_checksum=ignore_checksum,
+                                  allies=allies)
         except Exception as exc:            # noqa: BLE001 -- see below
             # A search that dies takes its thread with it and nothing
             # else notices: no advice appears, which looks exactly like
@@ -234,7 +237,7 @@ def _panel(frame):
 
 def advise(frame, readings, snapshot=None, objective=None,
            depth: int = DEFAULT_DEPTH, budget: float = DEFAULT_BUDGET,
-           ignore_checksum: bool = False):
+           ignore_checksum: bool = False, allies: int = 0):
     """(text, state) for what to do now, or (reasons, None)."""
     from ..search import expectimax
 
@@ -245,7 +248,7 @@ def advise(frame, readings, snapshot=None, objective=None,
         panel = _panel_with_training(frame, snapshot)
 
     result = build_state(snapshot=snapshot, panel=panel, readings=readings,
-                         ignore_checksum=ignore_checksum)
+                         ignore_checksum=ignore_checksum, allies=allies)
     if not result:
         return result.problems, None, None
 

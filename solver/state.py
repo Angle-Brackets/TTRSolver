@@ -353,6 +353,45 @@ class BattleState:
     # decides how the position was BUILT, not how it plays out.
     street: str = ""
 
+    # Teammates in this battle besides you: 0 solo, up to 3.
+    #
+    # PRESENT, NOT SIMULATED, AND THE DISTINCTION IS THE WHOLE DESIGN.
+    # They are a count rather than entries in `toons` for two reasons,
+    # both of which broke when tried the other way round.
+    #
+    # `is_terminal` is "every toon sad". Teammates in `toons` that the
+    # search cannot kill mean YOUR going sad no longer ends the battle,
+    # and the search happily evaluates positions from beyond your own
+    # death. That is the shape of bug that once scored a hopeless
+    # position at +47.6.
+    #
+    # Their laff would have to come from somewhere, and IT IS ON THE
+    # SCREEN -- the battle UI prints every toon's meter along the
+    # bottom ("80/95", "91/106", ...), not just yours, which is worth
+    # writing down because this file previously implied otherwise. What
+    # is genuinely missing is their GAGS: the box beside each meter is
+    # the gag they have chosen and it stays a "?" until the round
+    # resolves. A toon whose pouch is unknown cannot be searched as a
+    # toon, only counted -- so counted is what this is.
+    #
+    # And `search/features.py` pools over `toons`. Solo feature vectors
+    # are bit-identical today, which is what keeps the fitted weights
+    # valid; putting stand-in toons in the list would change the vector
+    # for every live party position and quietly invalidate them.
+    #
+    # So what this buys is exactly one thing, and it is the one thing a
+    # COUNT determines without knowing anything else about the people
+    # holding the gags: a single-target cog attack now has somewhere
+    # else to land. See `your_target_share`.
+    #
+    # What it deliberately does NOT buy, because a count cannot know it:
+    # teammate gags. No Trap set for someone else's Lure, no stacking a
+    # track for `calc_hp_bonus`, no counting their damage toward the
+    # fight. The advice still plans YOUR pouch alone and is correct to
+    # -- `solver/search/party_search.py` is the module that searches a
+    # party's joint plan, and it needs their loadouts to do it.
+    allies_standing: int = 0
+
     # Unlured passes still available. A pass is a real move -- conserving
     # a scarce gag, or in a party declining to hit a cog because
     # `mechanics.pick_cog_target` makes it prefer whoever damaged it
@@ -393,7 +432,8 @@ class BattleState:
                  round_num: int = 0, free_passes: int = 3,
                  cogs_remaining: int = 0,
                  holdout: Optional[List[CogState]] = None,
-                 kind: str = "street", street: str = ""):
+                 kind: str = "street", street: str = "",
+                 allies_standing: int = 0):
         if (toon is None) == (toons is None):
             raise ValueError("pass exactly one of `toon` or `toons`")
         self.toons = list(toons) if toons is not None else [toon]
@@ -404,6 +444,7 @@ class BattleState:
         self.holdout = list(holdout) if holdout else []
         self.kind = kind
         self.street = street
+        self.allies_standing = allies_standing
 
     @property
     def toon(self) -> ToonState:
@@ -465,6 +506,7 @@ class BattleState:
             holdout=[c.copy() for c in self.holdout],
             kind=self.kind,
             street=self.street,
+            allies_standing=self.allies_standing,
         )
 
     def active_cogs(self) -> List[CogState]:
@@ -488,6 +530,38 @@ class BattleState:
         return (bool(self.active_toons())
                 and len(self.active_cogs()) == 0
                 and not self.holdout)
+
+    def your_target_share(self) -> float:
+        """Probability a SINGLE-target cog attack picks you.
+
+        1/(1+allies): uniform among the toons standing. Group attacks
+        are not diluted at all -- they hit everyone -- so this is
+        applied per attack by name against `data.GROUP_ATTACKS`, never
+        to a cog's damage as a whole.
+
+        WHY UNIFORM, WHEN `mechanics.pick_cog_target` IS NOT. That
+        function sends `REVENGE_CHANCE` (75%) of attacks at whoever
+        damaged the cog, weighted by how much, and only the remaining
+        25% uniformly. Uniform is what that resolves to when everyone
+        is throwing gags at roughly equal rates, which is what a real
+        group is doing -- the damage weights are then roughly equal and
+        the revenge branch spreads like the uniform one.
+
+        IT IS OPTIMISTIC IN A SPECIFIC, KNOWABLE CASE, and this is the
+        limitation to hold in mind rather than a hidden one: if you are
+        the one dealing the damage -- you dropped a Railroad on a cog
+        your teammates have not touched -- revenge concentrates that
+        cog's attacks on you, and your real share is nearer 0.75 than
+        0.25. The model cannot see it, because it would need each
+        teammate's damage and nothing reports it.
+
+        The alternative was to assume the revenge branch always lands on
+        you, which is safe in that case and badly wrong in every other:
+        at four toons it gives a share of 0.81, so the dilution would be
+        almost nil and the count would not be worth reading.
+        """
+        allies = max(0, int(self.allies_standing))
+        return 1.0 / (1.0 + allies)
 
     def can_still_damage(self) -> bool:
         """Whether any sequence of remaining gags can hurt a cog.

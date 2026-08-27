@@ -557,8 +557,17 @@ def _resolve_cog_phase(state: BattleState) -> int:
 
         attack_name = mechanics.pick_cog_attack(cog)
         dmg, acc = mechanics.cog_attack_damage_and_accuracy(cog, attack_name)
-        if mechanics.roll_hit(acc):
-            total_dmg += dmg
+        if not mechanics.roll_hit(acc):
+            continue
+        # Teammates give a single-target attack somewhere else to land.
+        # A group attack hits everyone, so it is never diluted -- see
+        # `outcomes._damage_distribution_shared`, which this has to
+        # agree with or a sampled rollout stops being comparable with a
+        # searched line.
+        if state.allies_standing and not data.is_group_attack(attack_name):
+            if random.random() >= state.your_target_share():
+                continue
+        total_dmg += dmg
     return total_dmg
 
 

@@ -131,7 +131,8 @@ def _attack_outcomes(department: str, cog_type: str,
     return tuple(results)
 
 
-def cog_damage_distribution(cog: CogState) -> Dict[int, float]:
+def cog_damage_distribution(cog: CogState,
+                            allies_standing: int = 0) -> Dict[int, float]:
     """{damage: probability} for one cog's attack this round, assuming it
     attacks at all. Damage 0 covers every miss.
 
@@ -143,6 +144,9 @@ def cog_damage_distribution(cog: CogState) -> Dict[int, float]:
     the distribution depends only on the cog's department, type and level,
     and a three-cog depth-2 search asked for it 1.1 million times.
     """
+    if allies_standing:
+        return _damage_distribution_shared(cog.department, cog.cog_type,
+                                           cog.level, int(allies_standing))
     return _damage_distribution(cog.department, cog.cog_type, cog.level)
 
 
@@ -153,6 +157,42 @@ def _damage_distribution(department: str, cog_type: str,
     for prob, _name, dmg, _hit in _attack_outcomes(department, cog_type,
                                                     level):
         dist[dmg] = dist.get(dmg, 0.0) + prob
+    return dist
+
+
+@lru_cache(maxsize=None)
+def _damage_distribution_shared(department: str, cog_type: str, level: int,
+                                allies: int) -> Dict[int, float]:
+    """The same distribution, for damage landing on YOU with teammates
+    beside you.
+
+    SPLIT BY ATTACK, NOT APPLIED TO THE COG. This is why it cannot work
+    off `_damage_distribution`, which has already merged the attacks
+    into damage numbers and thrown the names away:
+
+      * a single-target attack picks one toon, so it reaches you with
+        probability `share` and otherwise deals you nothing;
+      * a GROUP attack hits every toon standing, so it reaches you
+        whatever the party size -- it is not diluted at all.
+
+    Scaling a cog's whole distribution by `share` would quietly halve
+    the Lawbot group attacks that are exactly what makes a crowded
+    battle dangerous. `data.GROUP_ATTACKS` is [CONFIRMED] from the
+    wiki's own two categories, and being group is a property of the
+    ATTACK rather than of the cog throwing it.
+
+    A miss is already damage 0 and is left alone: it does not matter
+    whose face it missed.
+    """
+    share = 1.0 / (1.0 + max(0, allies))
+    dist: Dict[int, float] = {}
+    for prob, name, dmg, _hit in _attack_outcomes(department, cog_type,
+                                                  level):
+        if dmg == 0 or data.is_group_attack(name):
+            dist[dmg] = dist.get(dmg, 0.0) + prob
+        else:
+            dist[dmg] = dist.get(dmg, 0.0) + prob * share
+            dist[0] = dist.get(0, 0.0) + prob * (1.0 - share)
     return dist
 
 
@@ -182,6 +222,7 @@ def clear_caches() -> None:
     _attack_outcomes.cache_clear()
     _damage_distribution.cache_clear()
     _worst_damage.cache_clear()
+    _damage_distribution_shared.cache_clear()
 
 
 def lure_end_probability(cog: CogState) -> float:
@@ -216,6 +257,7 @@ def cog_phase_outcomes(state: BattleState
     A lured cog contributes a mixture -- it stays asleep and deals nothing,
     or its lure ends (timeout or wake-up) and it attacks this same round.
     """
+    allies = int(getattr(state, "allies_standing", 0) or 0)
     combined: Dict[Tuple[int, frozenset, frozenset], float] = {
         (0, frozenset(), frozenset()): 1.0
     }
@@ -232,10 +274,12 @@ def cog_phase_outcomes(state: BattleState
                 branches.append((1.0 - p_end, 0, False, True))
             if p_end > 0:
                 branches += [(p_end * p, d, True, False)
-                             for d, p in cog_damage_distribution(cog).items()]
+                             for d, p in cog_damage_distribution(
+                                 cog, allies).items()]
         else:
             branches = [(p, d, False, False)
-                        for d, p in cog_damage_distribution(cog).items()]
+                        for d, p in cog_damage_distribution(
+                            cog, allies).items()]
 
         nxt: Dict[Tuple[int, frozenset, frozenset], float] = {}
         for (dmg_so_far, ended, held), p_so_far in combined.items():
@@ -467,6 +511,11 @@ def merge_key(state: BattleState) -> Tuple:
     and ORDER MATTERS -- toons are not interchangeable, they hold
     different pouches, so this must not be a frozenset.
     """
+    # `allies_standing` is deliberately NOT here, on this function's own
+    # stated rule. Every sibling being merged is an outcome of ONE action
+    # in ONE state, so the party size is identical across all of them --
+    # the same argument that keeps the gag counts out. It IS in
+    # `state_key`, where states genuinely differ.
     if len(state.toons) == 1:
         return (state.toon.laff, _cog_key(state))
     return (tuple(t.laff for t in state.toons), _cog_key(state))
@@ -524,6 +573,16 @@ def state_key(state: BattleState) -> Tuple:
             state.cogs_remaining,
             len(state.holdout),
             state.kind,
+            # Teammates change the cog phase -- a single-target attack
+            # has somewhere else to land -- so a position with three
+            # allies is a different node from the same one solo. It is
+            # constant within a single search, so this costs one tuple
+            # slot and never splits a node; it is here because `solve`
+            # takes a caller-supplied memo, and one reused across
+            # party sizes would serve a solo answer to a party question.
+            # `free_passes` is in this key for the same reason, and was
+            # left out when IT was added.
+            state.allies_standing,
         )
     return (
         tuple((t.laff,
@@ -536,4 +595,5 @@ def state_key(state: BattleState) -> Tuple:
         state.cogs_remaining,
         len(state.holdout),
         state.kind,
+        state.allies_standing,
     )

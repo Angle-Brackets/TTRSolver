@@ -110,6 +110,27 @@ class BuildStateTest(unittest.TestCase):
         self.assertEqual(result.state.toon.track_exp[Track.THROW], 7)
         self.assertEqual(result.state.toon.track_exp[Track.SQUIRT], 6)
 
+    def test_allies_default_to_none_and_are_carried_through(self):
+        """Solo is the default and the safe direction: it is the one
+        that assumes every cog attack is coming at you."""
+        solo = build_state(snapshot=snapshot(), panel=self.panel(),
+                           readings=[reading()])
+        self.assertEqual(solo.state.allies_standing, 0)
+
+        full = build_state(snapshot=snapshot(), panel=self.panel(),
+                           readings=[reading()], allies=3)
+        self.assertEqual(full.state.allies_standing, 3)
+        self.assertAlmostEqual(full.state.your_target_share(), 0.25)
+
+    def test_allies_are_clamped_to_a_legal_party(self):
+        """Four toons is the most a battle holds, so three allies is the
+        most there can be. A junk value must not reach the share, where
+        it would divide the danger by an arbitrary number."""
+        for given, want in ((9, 3), (4, 3), (-1, 0)):
+            result = build_state(snapshot=snapshot(), panel=self.panel(),
+                                 readings=[reading()], allies=given)
+            self.assertEqual(result.state.allies_standing, want)
+
     def test_gag_counts_come_from_the_panel(self):
         result = build_state(snapshot=snapshot(), panel=self.panel(),
                              readings=[reading()])

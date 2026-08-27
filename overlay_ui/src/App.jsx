@@ -8,7 +8,7 @@ const EMPTY = {
   in_battle: false, status: 'waiting', turn: 0,
   advice: '', track: null, gag_level: null, rows: [], problems: [],
   evidence: '', can_confirm: false, can_advise: false, thinking: false,
-  allow_level_7: true, objective: 'balanced', budget: 15,
+  allow_level_7: true, objective: 'balanced', budget: 15, toon_count: 1,
   lure_icon: '', map_icon: '',
   zone: '', neighborhood: '', district: '', invasion: '',
 }
@@ -233,7 +233,7 @@ export default function App() {
       {/* Live controls. Every value comes from the model, never from
           local state, so a control shows what the solver is actually
           doing rather than what the page last asked for. */}
-      <div className="flex items-center gap-1.5 text-[11px]">
+      <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
         <select
           className="select select-xs h-[22px] min-h-0 w-[7.5rem] bg-base-200 text-[11px]"
           value={model.objective}
@@ -254,6 +254,31 @@ export default function App() {
             onChange={(e) => call('set_budget', Number(e.target.value))}
           />
           <span className="w-7 font-mono tabular-nums">{Math.round(model.budget)}s</span>
+        </div>
+
+        {/* How many toons are in the fight, counting you. Four buttons
+            rather than a <select>: a native select popup is an OS-level
+            window that escapes this frameless always-on-top one, which
+            is the whole reason CogPicker exists. Four options do not
+            need a popup. */}
+        <div
+          className="flex items-center gap-1"
+          title="How many toons are in this fight, counting you. A single-target cog attack picks one toon, so a full group takes about a quarter of it each — group attacks still hit everyone."
+        >
+          <span className="opacity-50">toons</span>
+          <div className="join">
+            {[1, 2, 3, 4].map((n) => (
+              <button
+                key={n}
+                className={`btn btn-xs join-item h-[22px] min-h-0 w-[21px] px-0 text-[10px] font-semibold ${
+                  model.toon_count === n ? 'btn-primary' : 'btn-ghost opacity-40'
+                }`}
+                onClick={() => call('set_toon_count', n)}
+              >
+                {n}
+              </button>
+            ))}
+          </div>
         </div>
 
         <button

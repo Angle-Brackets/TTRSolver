@@ -114,6 +114,7 @@ def model_json(model: Model) -> str:
         "can_advise": model.can_advise,
         "thinking": model.thinking,
         "allow_level_7": model.allow_level_7,
+        "toon_count": model.toon_count,
         "lure_icon": LURE_ICON,
         "map_icon": MAP_ICON,
         "zone": model.zone,
@@ -195,6 +196,16 @@ class Api:
 
     def set_budget(self, seconds) -> None:
         self._worker.set_budget(seconds)
+
+    def set_toon_count(self, count) -> None:
+        """How many toons are in the fight, counting you.
+
+        Recomputes: the advice already on screen was worked out for a
+        different party size, and party size changes how much damage
+        every cog is expected to do to YOU.
+        """
+        self._worker.set_toon_count(count)
+        self._worker.ask_now()
 
     def set_height(self, height: int) -> None:
         """Size the window to the page, rather than guessing at it.

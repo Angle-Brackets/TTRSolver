@@ -173,6 +173,13 @@ class Model:
     # last asked for.
     objective: str = "balanced"
     budget: float = 15.0
+    # How many toons are in this fight, 1-4, INCLUDING you. Changes the
+    # cog phase: a single-target attack has three other places to land
+    # in a full group, so the same cog is far less dangerous to you --
+    # see `BattleState.allies_standing`. Group attacks are unaffected,
+    # which is why a Big Wig stays nearly as bad in a four-toon fight
+    # as it is solo.
+    toon_count: int = 1
     # Where the toon is, from the Local API. The solver does not use it
     # -- a street does not change a round -- but it tells the player at a
     # glance whether the panel is talking to the game at all, which the
@@ -295,6 +302,7 @@ class Worker(threading.Thread):
         # honouring it.
         from .. import state as state_mod
         self.allow_level_7 = state_mod.ALLOW_LEVEL_7
+        self.toon_count = 1
         self._forced: Optional[bool] = None
         self._lock = threading.Lock()
         self._stop = threading.Event()
@@ -381,7 +389,8 @@ class Worker(threading.Thread):
                     model.thinking = True
                     thinker.submit(frame, list(watcher.view.cogs), None,
                                    self.objective, self.depth, self.budget,
-                                   self.ignore_checksum)
+                                   self.ignore_checksum,
+                                   allies=max(0, self.toon_count - 1))
                 self._post()
                 time.sleep(max(0.0, POLL_INTERVAL - (time.time() - cycle)))
         finally:
@@ -509,6 +518,23 @@ class Worker(threading.Thread):
         self.model.allow_level_7 = bool(allow)
         self._post()
 
+    def set_toon_count(self, count) -> None:
+        """How many toons are in the fight, counting you.
+
+        Player-set. `find_toon_panels` can count the meters along the
+        bottom of the battle UI, but this stays authoritative when it
+        is called: a miscount is not cosmetic, it scales how dangerous
+        every cog looks, and the player can see the row better than the
+        reader can.
+        """
+        try:
+            value = int(count)
+        except (TypeError, ValueError):
+            return
+        with self._lock:
+            self.toon_count = max(1, min(4, value))
+        self._post()
+
     def _post(self) -> None:
         # A shallow copy per post: the UI must never read a Model that
         # the worker is halfway through updating.
@@ -517,6 +543,7 @@ class Worker(threading.Thread):
         self.model.allow_level_7 = self.allow_level_7
         self.model.objective = self.objective_name
         self.model.budget = self.budget
+        self.model.toon_count = self.toon_count
         try:
             self.outbox.put_nowait(copy(self.model))
         except queue.Full:                        # pragma: no cover
