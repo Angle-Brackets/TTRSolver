@@ -650,7 +650,15 @@ class BattleWatcher:
             self._pending_count += 1
         else:
             self._pending, self._pending_count = readings, 1
-        if self._pending_count < self.agree:
+        # AGREEMENT IS FOR DETECTION, NOT FOR AN ASSERTION. Two matching
+        # polls before believing the screen is right -- readings flicker
+        # through animations. But when the player has pressed "I'm in a
+        # fight" they have already told us; making them wait another poll
+        # for the readers to agree with each other is the delay they were
+        # trying to skip.
+        forced = self.force_battle() if self.force_battle else None
+        need = 1 if forced else self.agree
+        if self._pending_count < need:
             return []
 
         events = self._diff(self.view.cogs, readings)

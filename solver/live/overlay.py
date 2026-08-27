@@ -194,14 +194,21 @@ class Model:
     def can_confirm(self) -> bool:
         """May the player assert a battle right now?
 
-        Only with something on screen that could be one. Confirming with
-        no plates and no menu would ask for advice about a fight that is
-        not happening, and the state would be built from whatever the
-        readers last managed to see.
+        ALWAYS, once the game window is there. This used to require
+        plates or the menu already visible, which gated the override on
+        the very thing it exists to override: detection takes a poll or
+        two to settle, and during exactly that window the button was
+        greyed out.
+
+        Asserting a fight that is not happening is not dangerous. It sets
+        `forced`, and `build_state` still refuses without readings -- so
+        the panel says what it cannot see rather than inventing advice.
+        The old worry, that a forced battle would be answered from
+        whatever the readers last saw, is handled there rather than here.
         """
         if self.in_battle:
             return True             # always allowed to say it is over
-        return self.plates > 0 or self.menu_visible
+        return self.window_found
 
     @property
     def evidence(self) -> str:

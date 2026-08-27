@@ -17,10 +17,28 @@ from solver.live.overlay import ADVICE_LINGER, Model, TurnCounter
 
 class ConfirmButtonTest(unittest.TestCase):
 
-    def test_nothing_on_screen_means_nothing_to_confirm(self):
+    def test_it_is_offered_even_with_nothing_read_yet(self):
+        """Was the opposite, and the owner was right to object.
+
+        Detection needs two agreeing polls, so for a second or so after a
+        fight starts there is nothing on screen as far as the readers are
+        concerned -- and that is exactly when a player wants to say "I am
+        in a fight". Gating the override on detection made the button
+        unavailable in the only window where it was useful.
+
+        Asserting a fight that is not happening costs nothing:
+        `build_state` still refuses without readings, so the panel
+        reports what it cannot see instead of inventing advice.
+        """
         model = Model(window_found=True)
-        self.assertFalse(model.can_confirm)
+        self.assertTrue(model.can_confirm)
         self.assertIn("nothing on screen", model.evidence)
+
+    def test_it_is_withheld_without_the_game_window(self):
+        """No window is a different thing from nothing read: there is
+        nothing to assert a fight in."""
+        model = Model(window_found=False)
+        self.assertFalse(model.can_confirm)
 
     def test_plates_alone_are_enough_to_offer_it(self):
         """Plates without the menu is exactly the case automatic
