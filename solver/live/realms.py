@@ -674,9 +674,10 @@ class Members(NamedTuple):
         why every untrapped capture read '9' -- there are only seven
         trap levels, so 0-6 are the real values and 9 cannot collide.
 
-        Observed: a trapped Money Bags read '4', which is level 5,
-        Trapdoor -- and the toon's pouch held four Trapdoors. Untrapped
-        cogs have read '9' in every capture across many fights.
+        [CONFIRMED] live. A trapped Money Bags read '4'; the decode
+        says level 5, Trapdoor; the owner confirms a Trapdoor is what
+        they threw. Untrapped cogs have read '9' in every capture
+        across many fights.
 
         AND THE ROSTER DOES REFRESH. This module previously said the
         opposite: that `setMembers` is only re-broadcast on a membership
@@ -1107,6 +1108,14 @@ class RealmsListener(threading.Thread):
         from_roster = members.traps().get(cog_do_id)
         if from_roster is not None:
             return from_roster
+        # THE FALLBACK HAS NEVER FIRED and should not be relied on. A
+        # live capture counted two Trap attacks (`traps_seen == 2`) and
+        # stored none of them, so the target in `setChosenToonAttacks`
+        # is evidently not a roster slot for Trap the way it is for a
+        # single-target Lure. It is left in place because it costs
+        # nothing and the roster is authoritative anyway -- but it is
+        # unverified, and anything that starts depending on it needs to
+        # establish what that target actually is first.
         entry = self.chosen_traps.get(cog_do_id)
         return None if entry is None else entry[0]
 
