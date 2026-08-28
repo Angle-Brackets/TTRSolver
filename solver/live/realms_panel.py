@@ -199,7 +199,18 @@ class RealmsWorker(threading.Thread):
                 except Exception:       # pragma: no cover
                     pass
                 next_refresh = cycle + 5.0
-            self.tick()
+            try:
+                self.tick()
+            except Exception as exc:    # noqa: BLE001
+                # A worker that dies leaves the panel frozen on its last
+                # model, which from the outside is indistinguishable
+                # from a fight it cannot read -- no error, no output,
+                # just a window that never changes. Report it through
+                # the channel the panel already shows.
+                self.model.problems = [
+                    f"the reader failed: {exc.__class__.__name__}: {exc}"]
+                self.model.detected_battle = False
+                self._post()
             time.sleep(max(0.0, POLL_INTERVAL - (time.time() - cycle)))
 
     def tick(self) -> None:
@@ -345,6 +356,64 @@ class RealmsPanelState:
         self.window = None
 
 
+def _headless(listener, objective, depth, budget) -> int:  # pragma: no cover
+    """Run the worker with no window and narrate every poll."""
+    inbox: "queue.Queue" = queue.Queue(maxsize=64)
+    worker = RealmsWorker(inbox, objective, depth, budget, listener=listener)
+
+    print(f"  attached; polling every {POLL_INTERVAL}s. "
+          f"Ctrl-C to stop.")
+    print()
+    last = None
+    try:
+        while True:
+            cycle = time.time()
+            try:
+                listener.refresh_all()
+                listener.refresh_battle_members()
+            except Exception as exc:
+                print(f"  refresh failed: {exc}")
+            try:
+                worker.tick()
+            except Exception as exc:
+                import traceback
+                print(f"  TICK RAISED: {exc.__class__.__name__}: {exc}")
+                traceback.print_exc()
+                time.sleep(2.0)
+                continue
+
+            model = worker.model
+            line = (f"battles={len(listener.battles())} "
+                    f"cogs={len(listener.cogs())} "
+                    f"toons={len(listener.toons())} "
+                    f"objects={len(listener.store)} "
+                    f"datagrams={listener.datagrams} "
+                    f"undecoded={listener.undecoded}")
+            if line != last:
+                print(f"  {line}")
+                if listener._unknown:
+                    top = sorted(listener._unknown.items(),
+                                 key=lambda kv: -kv[1])[:6]
+                    print("    unknown message types: "
+                          + ", ".join(f"{t}x{n}" for t, n in top))
+                for problem in model.problems:
+                    print(f"    ! {problem}")
+                for row in model.rows:
+                    print(f"    {row.name} L{row.level} "
+                          f"{row.health:.0%}{' LURED' if row.lured else ''}")
+                if model.gag:
+                    print(f"    -> {model.gag}")
+                last = line
+            time.sleep(max(0.0, POLL_INTERVAL - (time.time() - cycle)))
+    except KeyboardInterrupt:
+        print()
+        print("  stopped")
+    finally:
+        worker.close()
+        listener.close()
+    return 0
+
+
 def main(argv: Optional[list] = None) -> int:   # pragma: no cover
     from ..search import objective as objectives
 
@@ -355,6 +424,12 @@ def main(argv: Optional[list] = None) -> int:   # pragma: no cover
     parser.add_argument("--budget", type=float, default=DEFAULT_BUDGET)
     parser.add_argument("--no-level-7", action="store_true")
     parser.add_argument("--dir", help="Realms install directory")
+    parser.add_argument("--headless", action="store_true",
+                        help="no window: print what the worker sees each "
+                             "poll. This is the only way to tell a panel "
+                             "that cannot read the fight from a panel "
+                             "whose reader thread has died -- both look "
+                             "like a window that never changes.")
     args = parser.parse_args(argv)
 
     index = DIST / "index.html"
@@ -382,6 +457,10 @@ def main(argv: Optional[list] = None) -> int:   # pragma: no cover
     if args.no_level_7:
         from .. import state as state_mod
         state_mod.ALLOW_LEVEL_7 = False
+
+    if args.headless:
+        return _headless(listener, objectives.PRESETS[args.objective],
+                         args.depth, args.budget)
 
     inbox: "queue.Queue" = queue.Queue(maxsize=4)
     worker = RealmsWorker(inbox, objectives.PRESETS[args.objective],
