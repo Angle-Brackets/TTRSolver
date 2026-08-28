@@ -440,9 +440,35 @@ The gate is on the BOARD, not on the policy's judgement, because the
 policy's judgement is the thing that was wrong. It says when a slip is
 cheap; it does not say to spend one.
 
-A LOOSER RULE MAY WELL BE BETTER and is not measured: `lured` requires
-EVERY live cog asleep, so it never fires on a board with one awake cog
-and three asleep, which is nearly as cheap. It spends 3 slips of 10.
+LOOSER RULES ARE MEASURED AND NONE OF THEM CLEARS THE BAR. `lured`
+wants EVERY live cog asleep, so it declines a board with one awake and
+three asleep, which is nearly as cheap. Against that, gating instead on
+`party_search.expected_incoming` -- what the round is actually expected
+to cost -- and on the count of awake cogs, 300 runs a cell:
+
+    arm                cleared   slips   vs lured
+    lured                56.3%     3.1
+    incoming <= 2        55.7%     3.1    +2/-4    p=0.69
+    incoming <= 6        56.0%     3.4   +13/-14   p=1.00
+    incoming <= 12       51.3%     3.8   +18/-33   p=0.049
+    at most 1 awake      59.7%     4.0   +36/-26   p=0.25
+
+`incoming <= 12` is the useful negative: too loose measurably HURTS,
+which is the same round-cost story from the other end.
+
+`at most 1 awake` is nominally the best arm and spends more of the
+slips, so it was taken to held-out seeds over 600 runs: 57.5% against
+54.8%, +73/-57, p=0.19. Consistent in direction across both sets and
+pooled at +109/-83, p=0.071 -- short of the bar this project holds
+elsewhere, so it is NOT shipped. It is the first thing to retry if the
+policy is ever retrained, since a policy that has actually seen slips
+may use a wider gate better than this one does.
+
+Beware when re-running that sweep: `_logits` now does the masking
+itself, so a wrapper measuring an alternative gate must set
+`FIRE_WHEN = "always"` first or it silently measures the incumbent
+five times. That is what the first run of it did -- five arms, +0/-0,
+identical slips spent.
 
 One hook point is enough. `propose` picks through `_choose(_logits())`
 and `climb` builds both its top-k and its track probes from the same
