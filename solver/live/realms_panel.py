@@ -538,6 +538,53 @@ class RealmsPanelState:
         self.window = None
 
 
+def _trace(listener) -> int:                 # pragma: no cover
+    """Log every field the fight receives, with timestamps.
+
+    HP arriving exactly one round late is not latency -- latency does
+    not quantise to rounds. It means the value we read is written at a
+    different moment than the hit, and the only way to find out which is
+    to watch what actually lands and when. Guessing produced two wrong
+    answers about this already.
+    """
+    from . import realms as realms_mod
+
+    started = time.time()
+    interesting = {"setHP", "setMaxHP", "damageSuit", "setState",
+                   "setMembers", "setChosenToonAttacks", "doExplode",
+                   "setSkeleRevives", "doRevive"}
+
+    def on_event(name, obj):
+        if name not in interesting:
+            return
+        value = obj.get(name)
+        if name == "setMembers":
+            members = realms_mod.parse_members(value)
+            if members is None:
+                return
+            value = (f"suits={list(members.suits)} "
+                     f"lured={members.suits_lured!r} "
+                     f"traps={members.suit_traps!r}")
+        text = str(value)
+        print(f"  {time.time()-started:7.2f}s  {obj.do_id:<11} "
+              f"{name:<22} {text[:90]}")
+
+    listener.on_event = on_event
+    print("  tracing. Hit a cog and watch whether setHP arrives with the")
+    print("  hit or only after the next round begins. Ctrl-C to stop.")
+    print()
+    try:
+        while True:
+            listener.refresh_battle_members()
+            time.sleep(0.4)
+    except KeyboardInterrupt:
+        print()
+        print("  stopped")
+    finally:
+        listener.close()
+    return 0
+
+
 def _headless(listener, objective, depth, budget) -> int:  # pragma: no cover
     """Run the worker with no window and narrate every poll."""
     inbox: "queue.Queue" = queue.Queue(maxsize=64)
@@ -639,6 +686,12 @@ def main(argv: Optional[list] = None) -> int:   # pragma: no cover
     parser.add_argument("--budget", type=float, default=DEFAULT_BUDGET)
     parser.add_argument("--no-level-7", action="store_true")
     parser.add_argument("--dir", help="Realms install directory")
+    parser.add_argument("--trace", action="store_true",
+                        help="log every field the cogs and the battle "
+                             "receive, with timestamps. For working out "
+                             "WHY a value is late rather than guessing: "
+                             "it shows whether the server re-sends setHP "
+                             "on a hit or only damageSuit.")
     parser.add_argument("--headless", action="store_true",
                         help="no window: print what the worker sees each "
                              "poll. This is the only way to tell a panel "
@@ -673,6 +726,8 @@ def main(argv: Optional[list] = None) -> int:   # pragma: no cover
         from .. import state as state_mod
         state_mod.ALLOW_LEVEL_7 = False
 
+    if args.trace:
+        return _trace(listener)
     if args.headless:
         return _headless(listener, objectives.PRESETS[args.objective],
                          args.depth, args.budget)
