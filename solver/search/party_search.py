@@ -249,9 +249,34 @@ QUICK_W = {
     # flat `kill` bonus makes correctly, even when the arithmetic looks
     # wasteful to a human watching it.
     #
-    # Left in place and at zero because the sweep is the useful
-    # artefact: the next person to notice a Cake landing on a 20hp cog
-    # can read this instead of building the term again.
+    # THE FIRST SWEEP WAS INVALID and the correction is the useful part.
+    # It ran 0-400, and the term's natural scale is ~0.06 against a
+    # `kill` bonus of 120 -- so no weight in that range could change a
+    # single decision, and "no effect" measured nothing at all.
+    #
+    # It also cannot work alone. `climb` offers each seat the policy's
+    # top `width`=3 proposals, and on the board that started this the
+    # policy's top three were all Birthday Cake. The scorer can only
+    # rank what it is given, so no weight reaches the cheaper gag; at
+    # 10000 the pick jumps straight to PASS, the only non-Cake option
+    # on the list. The pair had to be swept as a pair, which is the
+    # same trap `prevent` set: two things wrong at once, and reading
+    # either alone gives the wrong answer about the other.
+    #
+    # Swept properly, width 12 with waste 2000 reaches the cheap kill
+    # on the reported board. On the selection seeds it looked like a VP
+    # gain: 72/150 -> 85/150, p=0.092, while costing buildings
+    # 122 -> 114. ON 400 HELD-OUT SEEDS IT DID NOT CONFIRM -- VP
+    # 186/400 -> 195/400 at p=0.448, buildings 313 -> 302 at p=0.266.
+    #
+    # So the overkill is real, visible, and still not worth fixing:
+    # a dead cog stops attacking, and paying a scarcer gag to remove a
+    # threat a round sooner is a trade the flat `kill` bonus makes
+    # correctly. Charging for waste pushes the scorer onto gags that
+    # do not quite kill, and buildings then use MORE gags (14.1 ->
+    # 15.0), not fewer, because the cog survives to be hit again.
+    #
+    # Both stay as they are: `width` at 3, this at zero.
     #
     # It exists because `landed` is HP-capped, so overkill is neither
     # credited nor charged: killing a 72hp cog with a 165-damage Cake
