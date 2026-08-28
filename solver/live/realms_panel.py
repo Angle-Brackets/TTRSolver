@@ -554,8 +554,38 @@ def _trace(listener) -> int:                 # pragma: no cover
                    "setMembers", "setChosenToonAttacks", "doExplode",
                    "setSkeleRevives", "doRevive"}
 
+    def in_the_fight(do_id: int) -> bool:
+        """Only the battle and its own cogs. The street sends a
+        `setState` per wandering cog several times a second and it
+        buried the four lines that matter."""
+        for battle in listener.battles():
+            if do_id == battle.do_id:
+                return True
+            members = realms_mod.parse_members(battle.get("setMembers"))
+            if members and do_id in tuple(members.suits) + tuple(members.toons):
+                return True
+        return False
+
+    def snapshot() -> str:
+        """What `build_state` would report RIGHT NOW.
+
+        The arrival log alone cannot tell a listener bug from a model
+        bug: it shows the value landing and never what the panel holds
+        a moment later. Printing both on the same line does.
+        """
+        from . import realms_session
+
+        result = realms_session.build_state(listener)
+        if result.state is None:
+            return "build_state: " + ("; ".join(result.problems) or "no state")
+        return "build_state: " + ", ".join(
+            f"{c.cog_type} {c.hp}/{c.max_hp}"
+            + ("*lured" if c.status.lured else "")
+            + ("*trap" if c.status.trapped else "")
+            for c in result.state.cogs)
+
     def on_event(name, obj):
-        if name not in interesting:
+        if name not in interesting or not in_the_fight(obj.do_id):
             return
         value = obj.get(name)
         if name == "setMembers":
@@ -567,7 +597,9 @@ def _trace(listener) -> int:                 # pragma: no cover
                      f"traps={members.suit_traps!r}")
         text = str(value)
         print(f"  {time.time()-started:7.2f}s  {obj.do_id:<11} "
-              f"{name:<22} {text[:90]}")
+              f"{name:<22} {text[:70]}")
+        if name in ("setHP", "damageSuit", "setState"):
+            print(f"           {'':11}  -> {snapshot()[:110]}")
 
     listener.on_event = on_event
     print("  tracing. Hit a cog and watch whether setHP arrives with the")
