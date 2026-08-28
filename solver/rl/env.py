@@ -369,6 +369,7 @@ class BattleEnv:
     """One battle. `reset()` starts a new one, `step()` plays a round."""
 
     def __init__(self, objective=None, rng=None, max_rounds: int = 20,
+                 precision: float = 0.0,
                  shaping: float = 0.0, gamma: float = 0.99,
                  sampler=None, coordinated: bool = False,
                  survival_shaping: float = 0.0):
@@ -413,6 +414,10 @@ class BattleEnv:
         # only how fast the credit arrives. That guarantee is why this is
         # tried before `toon_lost_penalty`, which can.
         self.survival_shaping = survival_shaping
+        # Weight on damage thrown past a cog's remaining hit points. 0
+        # keeps the reward exactly what every shipped policy was trained
+        # against.
+        self.precision = float(precision)
         self.gamma = gamma
         self.sampler = sampler or default_position
         self.coordinated = coordinated
@@ -437,6 +442,34 @@ class BattleEnv:
             return
         order = self._standing()
         self.actor = order[0] if order else 0
+
+    def _sellbot_cog(self, rng, level):
+        """A SELLBOT of a given level, for the VP.
+
+        The VP is Sellbot HQ and every cog in it is a Sellbot. The VP
+        plan was being built with `_facility_cog`, which draws from the
+        street pools across all four departments, so the policy was
+        trained on VP rounds full of Lawbots and Cashbots -- a fight
+        that does not exist.
+
+        It matters beyond flavour: departments differ in their attacks,
+        so the incoming damage distribution the policy learned for a VP
+        was wrong, not merely mislabelled.
+
+        The eight Sellbots span levels 1-12 between them, exactly the
+        VP's own band, so nothing has to be substituted and this
+        refuses rather than guessing -- the same rule `_facility_cog`
+        and `_boss_cog` follow.
+        """
+        from .. import data
+
+        candidates = [spec.key for spec in data.all_cogs()
+                      if spec.department == "sellbot"
+                      and level in spec.levels]
+        if not candidates:
+            raise ValueError(f"no Sellbot at level {level}")
+        full = data.cog_max_hp(level)
+        return CogState(rng.choice(candidates), "sellbot", level, full, full)
 
     def _boss_cog(self, rng, level):
         """A cog of a given level, allowed to reach 13-15.
@@ -521,7 +554,7 @@ class BattleEnv:
                 # cogs_remaining, one pouch across both rounds -- is the
                 # ordinary facility machinery.
                 from .. import vp as vp_mod
-                self.plan = vp_mod.vp_plan(self.rng, self._facility_cog)
+                self.plan = vp_mod.vp_plan(self.rng, self._sellbot_cog)
                 first, holdout = self.plan.take_floor()
                 self.state.cogs = first
                 self.state.holdout = holdout
@@ -615,6 +648,33 @@ class BattleEnv:
             lost=nxt.is_terminal() and not nxt.is_win(),
             toons_lost=went_sad,
             cogs_remaining=before.cogs_remaining)
+
+        # PRECISION. `round_reward` charges for laff and for gags spent,
+        # and nothing at all for damage thrown past what a cog had left,
+        # so the policy has never been told that overkill is a thing --
+        # `waste` appeared nowhere in this file. It shows: on a board
+        # with four cogs asleep the policy's whole shortlist was
+        # Birthday Cake, and it will spend one on a 20hp Name Dropper as
+        # readily as on a 196hp Mr. Hollywood, because both pay the same.
+        #
+        # Charged here, in the REWARD, rather than in the ranker. A
+        # scorer weight only re-orders candidates the policy already
+        # proposes; teaching it in training changes what gets proposed,
+        # which is the half that was actually broken.
+        #
+        # `waste_penalty` scales by scarcity, so a gag that is the only
+        # thing that kills pays almost nothing and the same gag into a
+        # nearly-dead cog pays nearly in full.
+        if self.precision:
+            # The joint plan in coordinated mode, this seat's single
+            # action otherwise -- `_waste_fraction` takes a plan either
+            # way, one entry per toon.
+            plan = (list(self.pending) if self.coordinated
+                    else [None if action.is_pass else action])
+            try:
+                reward -= self.precision * ps._waste_fraction(before, plan)
+            except Exception:           # pragma: no cover - defensive
+                pass
 
         # POTENTIAL-BASED SHAPING on incoming damage.
         #

@@ -133,6 +133,23 @@ def main():
                          "blind to all three, and every shipped policy "
                          "since e835148 has passed 0.25 by hand anyway. "
                          "Pass 0.0 to train facilities only")
+    ap.add_argument("--precision", type=float, default=0.0,
+                    help="charge the REWARD for damage thrown past a "
+                         "cog's remaining hit points. `waste` appeared "
+                         "nowhere in env.py, so no shipped policy has "
+                         "ever been told overkill is a thing -- it will "
+                         "spend a Birthday Cake on a 20hp cog as "
+                         "readily as on a 196hp one. Scaled by scarcity, "
+                         "so a gag that is the only thing that kills "
+                         "pays almost nothing. 0 reproduces the reward "
+                         "every shipped policy was trained against")
+    ap.add_argument("--solo-fraction", type=float, default=0.25,
+                    help="share of boss and facility episodes cut down to "
+                         "ONE toon. Both samplers build parties -- the VP "
+                         "two, the CEO two, a facility two to four -- so "
+                         "the policy never saw a boss or a facility solo, "
+                         "which is exactly how the panel is used. The solo "
+                         "toon gets a maxed pouch and 100-137 laff")
     ap.add_argument("--ceo-share", type=float, default=0.5,
                     help="of the boss episodes, the share that are CEO "
                          "rather than VP")
@@ -187,6 +204,27 @@ def main():
         fire_fraction = args.fire_fraction
         fire_max = args.fire_max
 
+        solo_fraction = args.solo_fraction
+
+        def _make_solo(state, r):
+            """Cut a party position down to one maxed toon.
+
+            The boss and facility samplers all build parties, so a
+            policy trained on them has never seen either fought alone --
+            and alone is how the live panel is used. Keeps the toon that
+            is already there, so its tracks stay a genuine draw rather
+            than a fixed six.
+            """
+            from solver.state import Track
+
+            toon = state.toons[0]
+            toon.laff = toon.max_laff = r.randint(100, 137)
+            toon.gag_counts = {}
+            env_mod.restock(toon, r)
+            state.toons = [toon]
+            del Track
+            return state
+
         def sampler(r, _f=frac, _s=strange, _c=combo, _fa=fac, _b=boss):
             # A boss side is a two-floor facility with Version 2.0 cogs,
             # pink slips as standard and cogs above level 12 -- none of
@@ -199,14 +237,20 @@ def main():
                     # after this returns, so setting it here is what
                     # that episode gets.
                     ceo_mod.LEFTOVERS = r.randint(lo_left, hi_left)
-                    return ceo_mod.ceo_position(r)
-                return vp_mod.vp_position(r)
+                    state = ceo_mod.ceo_position(r)
+                else:
+                    state = vp_mod.vp_position(r)
+                if solo_fraction and r.random() < solo_fraction:
+                    state = _make_solo(state, r)
+                return state
 
             # A facility position becomes a multi-floor episode in
             # `BattleEnv.reset`, which is the only place a saved gag can
             # actually be spent later.
             if r.random() < _fa:
                 state = env_mod.facility_position(r)
+                if solo_fraction and r.random() < solo_fraction:
+                    state = _make_solo(state, r)
             else:
                 state = env_mod.mixed_position(r, _f, _s, _c)
                 state.cogs_remaining = 0
@@ -253,6 +297,7 @@ def main():
                               coordinated=args.coordinated,
                               shaping=args.shaping, gamma=args.gamma,
                               survival_shaping=args.survival_shaping,
+                              precision=args.precision,
                               objective=objective)
             for i in range(args.envs)]
     obs, masks = zip(*[e.reset() for e in envs])

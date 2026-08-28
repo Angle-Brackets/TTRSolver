@@ -67,7 +67,11 @@ MAXED_POUCH = 80
 # for fishing, gardening, racing and golf, none of which grants a point
 # of gag experience. Sweep it -- with the first toon loss deciding a
 # building, laff is the axis this model is most sensitive to.
-LAFF_RANGE = (MAXED_LAFF, MAXED_LAFF)
+# 100 to 137. Fixing it at 137 trained the policy on the ceiling only,
+# and the owner's toon is 100 -- a 37-point gap worth about sixteen
+# points of VP win rate, so the two are not the same fight. Sweeping the
+# range puts both in the data.
+LAFF_RANGE = (100, MAXED_LAFF)
 
 
 def maxed_toon(rng, tracks: Optional[Dict[Track, int]] = None,
