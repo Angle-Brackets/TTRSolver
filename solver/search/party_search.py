@@ -231,6 +231,22 @@ QUICK_W = {
     # buildings 66.0% -> 67.0% and VP unchanged. The largest confirmed
     # effect measured in this project.
     "prevent": 9.0,     # incoming damage removed, via `prevented`
+    # CHARGED, for damage thrown past what a cog had left. ZERO until
+    # swept, so this changes nothing yet -- the same way `kill_threat`
+    # and `risk` sit here at zero.
+    #
+    # It exists because `landed` is HP-capped, so overkill is neither
+    # credited nor charged: killing a 72hp cog with a 165-damage Cake
+    # and killing it with a 120-damage Storm Cloud score IDENTICALLY,
+    # and the tie breaks arbitrarily. `price` cannot separate them
+    # either, since it charges by gag level and carry limit rather than
+    # by damage discarded.
+    #
+    # Uses `plan_waste`, the same measure `objective.waste_penalty`
+    # already scales -- weight x wasted_fraction x scarcity -- so a gag
+    # that is the ONLY thing that kills pays almost nothing while the
+    # same gag into a nearly-dead cog pays nearly in full.
+    "waste": 0.0,
     "risk": 0.0,        # CHARGED, per standing toon a round could sink
     "price": 1.0,       # gags spent
 }
@@ -1013,6 +1029,8 @@ def _score_leaf(state: BattleState, plan, hits, record=None) -> float:
             + (QUICK_W["kill_threat"] * killed_threat(state, probe)
                if QUICK_W["kill_threat"] else 0.0)
             + QUICK_W["prevent"] * prevented(state, probe)
+            - (QUICK_W["waste"] * _waste_fraction(state, plan)
+               if QUICK_W["waste"] else 0.0)
             - (QUICK_W["risk"] * toons_at_risk(probe)
                if QUICK_W["risk"] else 0.0)
             - QUICK_W["price"] * price)
@@ -1357,6 +1375,22 @@ def plan_waste(state: BattleState, plan) -> Tuple[float, float]:
         price += 1.0 / limit
 
     return max(0.0, float(raw - useful)), price
+
+
+def _waste_fraction(state: BattleState, plan) -> float:
+    """`waste_penalty`'s shape without an objective's weight.
+
+    Split out so `_quick_score` can charge for overkill. That scorer
+    takes no objective -- it ranks the policy's proposals inside
+    `hybrid.climb`, which has none to give it -- so it cannot call
+    `waste_penalty`, and the weight lives in `QUICK_W` instead.
+    """
+    wasted, scarcity = plan_waste(state, plan)
+    if wasted <= 0.0 or scarcity <= 0.0:
+        return 0.0
+    total = wasted + sum(cog.hp for cog in state.cogs
+                         if not cog.status.is_dead)
+    return (wasted / total if total > 0 else 0.0) * scarcity
 
 
 def waste_penalty(objective, state: BattleState, plan) -> float:
