@@ -186,6 +186,8 @@ class RealmsWorker(threading.Thread):
         # policy's picks and there is no measurement to contradict them.
         self.engine = engine
         self.record_to = None
+        self.recorded = 0
+        self.record_error = None
         self.model = Model()
         # Owned here rather than on the Model the UI holds, for the same
         # reason `overlay.Worker` owns them: `_post` ships a fresh copy
@@ -350,8 +352,18 @@ class RealmsWorker(threading.Thread):
                              "allow_level_7": self.allow_level_7,
                              "budget": self.budget, "depth": self.depth},
                             handle)
-        except Exception:               # pragma: no cover - never fatal
-            pass
+            self.recorded += 1
+        except Exception as exc:        # noqa: BLE001
+            # SAY SO, ONCE. This used to be `pass`, and the directory the
+            # owner chose did not exist -- so every round failed silently
+            # and the recording they were relying on was never written.
+            # A diagnostic that fails without saying is worse than none,
+            # since it is trusted.
+            if not self.record_error:
+                self.record_error = f"{exc.__class__.__name__}: {exc}"
+                self.model.problems = list(self.model.problems) + [
+                    f"--record is not writing to {self.record_to}: "
+                    f"{self.record_error}"]
 
     def _search(self, state) -> None:
         with self._lock:
@@ -904,6 +916,20 @@ def main(argv: Optional[list] = None) -> int:   # pragma: no cover
     worker = RealmsWorker(inbox, objectives.PRESETS[args.objective],
                           args.depth, args.budget, listener=listener,
                           engine=args.engine)
+    if args.record:
+        # FAIL AT STARTUP, not silently on every round. Create the
+        # directory if it is missing and prove the file is writable now,
+        # while the player is still looking at the terminal.
+        record = Path(args.record)
+        try:
+            record.parent.mkdir(parents=True, exist_ok=True)
+            with open(record, "ab"):
+                pass
+            print(f"  recording positions to {record}")
+        except Exception as exc:
+            print(f"  cannot record to {record}: "
+                  f"{exc.__class__.__name__}: {exc}")
+            return 1
     worker.record_to = args.record
     worker.objective_name = args.objective
     state = RealmsPanelState()
