@@ -396,6 +396,10 @@ def _headless(listener, objective, depth, budget) -> int:  # pragma: no cover
                                  key=lambda kv: -kv[1])[:6]
                     print("    unknown message types: "
                           + ", ".join(f"{t}x{n}" for t, n in top))
+                for msgtype, seen in sorted(listener._entered.items()):
+                    names = sorted(listener._entered_classes.get(msgtype, ()))
+                    print(f"    msgtype {msgtype} delivered {seen} objects: "
+                          + ", ".join(names[:8]))
                 for problem in model.problems:
                     print(f"    ! {problem}")
                 for row in model.rows:

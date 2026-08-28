@@ -93,6 +93,11 @@ ENTER_MESSAGES = (OBJECT_ENTER_LOCATION_WITH_REQUIRED,
                   OBJECT_ENTER_OWNER_WITH_REQUIRED_OTHER)
 
 # The ..._OTHER forms carry a trailing block of non-required fields.
+# Seen once per object on a live cluster and not matching any number
+# this reader knows. Parsed as ENTER candidates, which is safe because
+# `_enter` refuses a dclass id that does not resolve.
+PROBE_ENTER = (2040, 2046, 2066, 2067)
+
 ENTER_WITH_OTHER = (OBJECT_ENTER_LOCATION_WITH_REQUIRED_OTHER,
                     OBJECT_ENTER_AI_WITH_REQUIRED_OTHER,
                     OBJECT_ENTER_OWNER_WITH_REQUIRED_OTHER)
@@ -724,6 +729,13 @@ class RealmsListener(threading.Thread):
         # A wrong constant then shows up as a number rather than as
         # silence, which is how six of them survived unnoticed.
         self._unknown: Dict[int, int] = {}
+        # msgtype -> how many objects it successfully delivered, and
+        # which classes. This is how an unrecognised number gets
+        # identified without dumping payloads: an ENTER parse that
+        # resolves to a real class is evidence, one that does not is
+        # counted as undecoded.
+        self._entered: Dict[int, int] = {}
+        self._entered_classes: Dict[int, set] = {}
 
     # -- lifecycle ----------------------------------------------------
     def connect(self) -> None:
@@ -886,17 +898,28 @@ class RealmsListener(threading.Thread):
         elif msgtype == OBJECT_SET_FIELDS:
             self._set_fields(body)
         elif msgtype in ENTER_MESSAGES:
-            self._enter(body, with_other=msgtype in ENTER_WITH_OTHER)
+            self._enter(body, with_other=msgtype in ENTER_WITH_OTHER,
+                        msgtype=msgtype)
         elif msgtype == OBJECT_GET_ALL_RESP:
             # context, then exactly an ENTER payload, then the non-required
             # fields as (count, [id, value]...).
-            self._enter(body[4:], with_other=True)
+            self._enter(body[4:], with_other=True, msgtype=msgtype)
         elif msgtype == OBJECT_DELETE_RAM:
             (do_id,) = struct.unpack_from("<I", body, 0)
             self.store.delete(do_id)
         elif msgtype == OBJECT_CHANGING_LOCATION:
             do_id, parent, zone = struct.unpack_from("<III", body, 0)
             self.store.relocate(do_id, parent, zone)
+        elif msgtype in PROBE_ENTER:
+            # UNDER INVESTIGATION, and self-validating. These arrive
+            # exactly once per object, which is the ENTER pattern, but
+            # the numbers are not ones this reader recognises. Parsing
+            # them as ENTER either yields a dclass id that resolves to a
+            # real class -- in which case that is what they are -- or it
+            # does not, and `_enter` declines and counts it. A wrong
+            # guess cannot enter the store.
+            self._unknown[msgtype] = self._unknown.get(msgtype, 0) + 1
+            self._enter(body, with_other=True, msgtype=msgtype)
         else:
             self._unknown[msgtype] = self._unknown.get(msgtype, 0) + 1
 
@@ -1010,7 +1033,8 @@ class RealmsListener(threading.Thread):
             offset += consumed
             self._record(do_id, field, value)
 
-    def _enter(self, body: bytes, with_other: bool = False) -> None:
+    def _enter(self, body: bytes, with_other: bool = False,
+               msgtype: int = 0) -> None:
         # doId, parentId, zoneId, dclassId, then the required fields
         # packed positionally with no ids at all.
         do_id, parent, zone, dclass_id = struct.unpack_from("<IIIH", body, 0)
@@ -1043,9 +1067,17 @@ class RealmsListener(threading.Thread):
                         break
                     fields[field.getName()] = value
                     offset += consumed
+        if self.index.dclass(dclass_id) is None:
+            # Not an ENTER after all, or one we mis-sliced. Committing
+            # it would put an object named "<60000>" in the store and
+            # make a wrong guess look like a discovery.
+            self.undecoded += 1
+            return
         obj = self.store.enter(do_id, self.index.class_name(dclass_id),
                                parent, zone, fields)
         self._notify("<enter>", obj)
+        self._entered[msgtype] = self._entered.get(msgtype, 0) + 1
+        self._entered_classes.setdefault(msgtype, set()).add(obj.dclass)
 
     def _notify(self, what: str, obj: LiveObject) -> None:
         if self.on_event is None:
