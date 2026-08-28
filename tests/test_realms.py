@@ -53,11 +53,22 @@ class _Bare(unittest.TestCase):
 
     def listener(self, index=None):
         obj = realms.RealmsListener.__new__(realms.RealmsListener)
+        # A real index when one is available: the crash this guards
+        # against happens INSIDE the DC lookup, so a None index would
+        # skip the very code under test.
+        if index is None:
+            try:
+                index = realms.DCIndex()
+            except Exception:
+                index = None
         obj.index = index
         obj.store = realms.ObjectStore()
         obj.on_event = None
         obj.datagrams = 0
         obj.undecoded = 0
+        obj._unknown = {}
+        obj.chosen_lures = {}
+        obj.battle_rounds = {}
         return obj
 
 
@@ -88,6 +99,34 @@ class FramingTest(_Bare):
         left = one.feed(a + b + c[:4])
         self.assertEqual(one.datagrams, 2)
         self.assertEqual(left, c[:4])
+
+    def test_a_bad_dclass_id_does_not_kill_the_thread(self):
+        """REGRESSION, and it was a hard crash rather than a bad read.
+
+        An ENTER message with an out-of-range dclass id reached
+        `DCIndex.required_fields`, which called panda3d's `getClass` --
+        and that fails a C++ ASSERTION rather than returning None, the
+        way `getFieldByIndex` politely does for a bad index. The two
+        live on the same object and behave differently.
+
+        `AssertionError` was not in the narrow tuple `feed` caught, so
+        it escaped, killed the listener thread, and left the panel
+        showing a fight that had quietly stopped updating.
+        """
+        body = struct.pack("<IIIH", 99, 401000000, 2337, 60000)
+        raw = payload(realms.OBJECT_ENTER_LOCATION_WITH_REQUIRED, body)
+        one = self.listener()
+        one.feed(raw)                   # must not raise
+        self.assertEqual(one.datagrams, 1)
+
+    def test_an_unrecognised_message_is_counted(self):
+        """Six of the message-type constants were invented and wrong.
+        They failed silently, because anything unmatched simply fell off
+        the end of the if-chain. Counting them means a number that is
+        still wrong shows up as a number."""
+        one = self.listener()
+        one.feed(payload(9999, b"\x00\x00\x00\x00"))
+        self.assertEqual(one._unknown.get(9999), 1)
 
     def test_a_malformed_datagram_does_not_stop_the_stream(self):
         """One bad message must not take down a reader watching a whole

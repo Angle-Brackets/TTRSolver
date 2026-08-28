@@ -59,22 +59,43 @@ CONTROL_ADD_CHANNEL = 9000
 CONTROL_ADD_RANGE = 9002
 CONTROL_SET_CON_NAME = 9004
 
-# State server messages worth keeping.
-OBJECT_DELETE_RAM = 2007
-OBJECT_GET_ALL = 2014
-OBJECT_GET_ALL_RESP = 2015
-OBJECT_SET_FIELD = 2020
-OBJECT_SET_FIELDS = 2021
-OBJECT_CHANGING_LOCATION = 2060
-OBJECT_ENTER_LOCATION_WITH_REQUIRED = 2066
-OBJECT_ENTER_LOCATION_WITH_REQUIRED_OTHER = 2067
-OBJECT_ENTER_AI_WITH_REQUIRED = 2064
-OBJECT_ENTER_AI_WITH_REQUIRED_OTHER = 2065
+# State server message types, from Astron's own numbering.
+#
+# SIX OF THESE WERE WRONG and it is worth saying which are evidenced.
+# Confirmed by observation: 2020 carried every one of 567 datagrams in
+# the first live capture and decoded as SET_FIELD, and 2014/2015 round
+# tripped a GET_ALL query into a full object. Those four match Astron's
+# documented numbering exactly, which is the reason for trusting it for
+# the rest rather than for the numbers previously here -- 2007, 2060 and
+# 2064-2067 were invented, and 2060 is really SET_OWNER, so an ownership
+# change was being applied as a relocation.
+#
+# `_unknown` counts anything unrecognised, so a number that is still
+# wrong shows up as a count instead of as silence.
+OBJECT_GET_ALL = 2014                   # [CONFIRMED] live
+OBJECT_GET_ALL_RESP = 2015              # [CONFIRMED] live
+OBJECT_SET_FIELD = 2020                 # [CONFIRMED] live
+OBJECT_SET_FIELDS = 2021                # [CONFIRMED] live
+OBJECT_DELETE_RAM = 2032
+OBJECT_CHANGING_LOCATION = 2041
+OBJECT_ENTER_LOCATION_WITH_REQUIRED = 2042
+OBJECT_ENTER_LOCATION_WITH_REQUIRED_OTHER = 2043
+OBJECT_ENTER_AI_WITH_REQUIRED = 2052
+OBJECT_ENTER_AI_WITH_REQUIRED_OTHER = 2053
+OBJECT_ENTER_OWNER_WITH_REQUIRED = 2062
+OBJECT_ENTER_OWNER_WITH_REQUIRED_OTHER = 2063
 
 ENTER_MESSAGES = (OBJECT_ENTER_LOCATION_WITH_REQUIRED,
                   OBJECT_ENTER_LOCATION_WITH_REQUIRED_OTHER,
                   OBJECT_ENTER_AI_WITH_REQUIRED,
-                  OBJECT_ENTER_AI_WITH_REQUIRED_OTHER)
+                  OBJECT_ENTER_AI_WITH_REQUIRED_OTHER,
+                  OBJECT_ENTER_OWNER_WITH_REQUIRED,
+                  OBJECT_ENTER_OWNER_WITH_REQUIRED_OTHER)
+
+# The ..._OTHER forms carry a trailing block of non-required fields.
+ENTER_WITH_OTHER = (OBJECT_ENTER_LOCATION_WITH_REQUIRED_OTHER,
+                    OBJECT_ENTER_AI_WITH_REQUIRED_OTHER,
+                    OBJECT_ENTER_OWNER_WITH_REQUIRED_OTHER)
 
 # The classes a battle is assembled from.
 COG_CLASSES = ("DistributedSuitBase", "DistributedSuit",
@@ -163,8 +184,26 @@ class DCIndex:
             return f"<unknown field {field_id}>"
         return f"{field.getClass().getName()}.{field.getName()}"
 
+    def dclass(self, dclass_id: int):
+        """A class by index, or None. GUARDED, because panda3d ASSERTS.
+
+        `getFieldByIndex` politely returns None for a bad index;
+        `getClass` fails a C++ assertion and takes the thread with it.
+        The two live on the same object and behave differently, which is
+        how an out-of-range id off the wire killed the reader thread
+        rather than being skipped as one bad datagram.
+
+        Bounds are checked here rather than at each call site so there
+        is one place to be right about it.
+        """
+        if not isinstance(dclass_id, int):
+            return None
+        if dclass_id < 0 or dclass_id >= self._dc.getNumClasses():
+            return None
+        return self._dc.getClass(dclass_id)
+
     def class_name(self, dclass_id: int) -> str:
-        dclass = self._dc.getClass(dclass_id)
+        dclass = self.dclass(dclass_id)
         return dclass.getName() if dclass is not None else f"<{dclass_id}>"
 
     def field_id(self, class_name: str, field_name: str) -> Optional[int]:
@@ -184,7 +223,7 @@ class DCIndex:
         skipped: they are aliases for several atomic fields and are
         never packed on the wire.
         """
-        dclass = self._dc.getClass(dclass_id)
+        dclass = self.dclass(dclass_id)
         if dclass is None:
             return []
         return [f for f in (dclass.getInheritedField(i)
@@ -681,6 +720,10 @@ class RealmsListener(threading.Thread):
         # battle doId -> how many movies it has played. A round is one
         # movie, so this counts rounds. See `_note_state`.
         self.battle_rounds: Dict[int, int] = {}
+        # msgtype -> count, for everything `handle` does not recognise.
+        # A wrong constant then shows up as a number rather than as
+        # silence, which is how six of them survived unnoticed.
+        self._unknown: Dict[int, int] = {}
 
     # -- lifecycle ----------------------------------------------------
     def connect(self) -> None:
@@ -820,7 +863,15 @@ class RealmsListener(threading.Thread):
             self.datagrams += 1
             try:
                 self.handle(payload)
-            except (struct.error, IndexError, ValueError):
+            except Exception:           # noqa: BLE001 -- see below
+                # DELIBERATELY BROAD. This is a socket, and one
+                # unparseable datagram must cost one datagram rather
+                # than the reader. The narrow tuple that used to be here
+                # (struct.error, IndexError, ValueError) did not cover
+                # panda3d's AssertionError, which comes out of C++ when
+                # an index is out of range -- it escaped, killed the
+                # listener thread, and left the panel showing a fight
+                # that had stopped updating.
                 self.undecoded += 1
         return buf
 
@@ -835,7 +886,7 @@ class RealmsListener(threading.Thread):
         elif msgtype == OBJECT_SET_FIELDS:
             self._set_fields(body)
         elif msgtype in ENTER_MESSAGES:
-            self._enter(body)
+            self._enter(body, with_other=msgtype in ENTER_WITH_OTHER)
         elif msgtype == OBJECT_GET_ALL_RESP:
             # context, then exactly an ENTER payload, then the non-required
             # fields as (count, [id, value]...).
@@ -846,6 +897,8 @@ class RealmsListener(threading.Thread):
         elif msgtype == OBJECT_CHANGING_LOCATION:
             do_id, parent, zone = struct.unpack_from("<III", body, 0)
             self.store.relocate(do_id, parent, zone)
+        else:
+            self._unknown[msgtype] = self._unknown.get(msgtype, 0) + 1
 
     def _note_chosen_attacks(self, battle_do_id: int, value) -> None:
         """Remember which Lure gag was thrown at which cog.
