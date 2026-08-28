@@ -249,12 +249,27 @@ class MembersTest(unittest.TestCase):
         self.assertEqual(realms.parse_members(self.SOLO).lured_suits(), ())
 
     def test_traps_are_one_char_per_suit(self):
-        """'9' is this field's "no trap", in every slot of every capture
-        so far. Two cogs give two characters where lured gives one
-        index: the two fields genuinely differ."""
+        """'9' is this field's "no trap". Two cogs give two characters
+        where lured gives one index: the two fields genuinely differ."""
         members = realms.parse_members(self.TWO_COGS)
         self.assertEqual(len(members.suit_traps), len(members.suits))
         self.assertEqual(members.trapped_suits(), ())
+        self.assertEqual(members.traps(), {})
+
+    def test_the_trap_character_is_a_zero_based_level(self):
+        """Observed live: a trapped Money Bags read '4', and the toon's
+        pouch held four Trapdoors -- level 5. There are only seven trap
+        levels, so 0-6 are the real values and the '9' sentinel cannot
+        collide with one."""
+        one = ([501], "", "", "0", "", "4", [1], "", "", "0", "", 0)
+        self.assertEqual(realms.parse_members(one).traps(), {501: 5})
+
+    def test_only_the_trapped_slot_is_read(self):
+        mixed = ([501, 502], "", "", "01", "", "95",
+                 [1], "", "", "0", "", 0)
+        members = realms.parse_members(mixed)
+        self.assertEqual(members.traps(), {502: 6})
+        self.assertEqual(members.trapped_suits(), (502,))
 
     def test_an_index_outside_the_roster_is_dropped(self):
         """Defensive. An index naming a suit not in the list would

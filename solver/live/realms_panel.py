@@ -418,9 +418,17 @@ def _headless(listener, objective, depth, budget) -> int:  # pragma: no cover
                     from solver.live.realms import parse_members
                     m = parse_members(b.get("setMembers"))
                     if m is not None:
+                        from solver.data import gags as _g
+                        from solver.state import Track as _T
+                        named = {}
+                        for _id, _lvl in m.traps().items():
+                            try:
+                                named[_id] = _g.gag(_T.TRAP, _lvl).display
+                            except Exception:
+                                named[_id] = f"level {_lvl}"
                         print(f"    roster: lured={m.suits_lured!r} "
-                              f"traps={m.suit_traps!r} "
-                              f"chosen_traps={listener.chosen_traps}")
+                              f"traps={m.suit_traps!r} -> {named} "
+                              f"| watched={listener.chosen_traps}")
                 for problem in model.problems:
                     print(f"    ! {problem}")
                 for row in model.rows:

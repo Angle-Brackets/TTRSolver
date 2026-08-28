@@ -663,17 +663,37 @@ class Members(NamedTuple):
         return tuple(self.suits[i] for i in self._indices(self.suits_active))
 
     def trapped_suits(self) -> Tuple[int, ...]:
-        """doIds of cogs with SOMETHING on their trap slot.
+        """doIds of cogs with a trap under them."""
+        return tuple(do_id for do_id, _level in self.traps().items())
 
-        One character per suit, and '9' in every capture so far, which
-        is this field's "no trap". A non-'9' character names the trap
-        gag, but no trapped cog has been observed, so what the character
-        maps to is not decoded -- only that it is not nothing. That is
-        the honest half: enough to know a cog is trapped, not enough to
-        say which gag is under it.
+    def traps(self) -> Dict[int, int]:
+        """{cog doId: trap gag level}, from the roster's own slots.
+
+        ONE CHARACTER PER SUIT, and it is the trap gag's 0-BASED LEVEL
+        rather than a flag. '9' is the sentinel for no trap, which is
+        why every untrapped capture read '9' -- there are only seven
+        trap levels, so 0-6 are the real values and 9 cannot collide.
+
+        Observed: a trapped Money Bags read '4', which is level 5,
+        Trapdoor -- and the toon's pouch held four Trapdoors. Untrapped
+        cogs have read '9' in every capture across many fights.
+
+        AND THE ROSTER DOES REFRESH. This module previously said the
+        opposite: that `setMembers` is only re-broadcast on a membership
+        change, so a trap laid mid-round would never appear. That was
+        wrong -- the slot updated with the cog still in the fight. The
+        watched-attacks path stays as a fallback for the case where a
+        stale roster and a fresh observation disagree, but the roster is
+        authoritative and is preferred.
         """
-        return tuple(do_id for do_id, char
-                     in zip(self.suits, self.suit_traps) if char != "9")
+        out: Dict[int, int] = {}
+        for do_id, char in zip(self.suits, self.suit_traps):
+            if not char.isdigit():
+                continue
+            index = int(char)
+            if 0 <= index <= 6:         # seven trap levels; 9 means none
+                out[do_id] = index + 1
+        return out
 
 
 def parse_members(value) -> Optional[Members]:
@@ -1081,12 +1101,12 @@ class RealmsListener(threading.Thread):
             # is nothing under this one now.
             self.chosen_traps.pop(cog_do_id, None)
             return None
-        if cog_do_id in members.trapped_suits():
-            # The server says trapped. It does not say with what -- the
-            # character maps to a trap gag and that mapping has never
-            # been observed -- so fall through to what we watched, and
-            # decline rather than invent if we did not see it.
-            pass
+        # THE ROSTER WINS. It is the server's own answer and it names
+        # the gag, where the watched-attacks path only knows what was
+        # aimed and not whether it stuck.
+        from_roster = members.traps().get(cog_do_id)
+        if from_roster is not None:
+            return from_roster
         entry = self.chosen_traps.get(cog_do_id)
         return None if entry is None else entry[0]
 
