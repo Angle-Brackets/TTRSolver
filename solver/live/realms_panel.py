@@ -397,7 +397,9 @@ def _headless(listener, objective, depth, budget) -> int:  # pragma: no cover
                     f"toons={len(listener.toons())} "
                     f"objects={len(listener.store)} "
                     f"datagrams={listener.datagrams} "
-                    f"undecoded={listener.undecoded}")
+                    f"undecoded={listener.undecoded} "
+                    f"attacks={listener.attacks_seen} "
+                    f"lures={listener.lures_seen}")
             if line != last:
                 print(f"  {line}")
                 if listener._unknown:

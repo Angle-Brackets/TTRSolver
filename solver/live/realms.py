@@ -751,6 +751,15 @@ class RealmsListener(threading.Thread):
         # counted as undecoded.
         self._entered: Dict[int, int] = {}
         self._entered_classes: Dict[int, set] = {}
+        # How many `setChosenToonAttacks` arrived, and how many named a
+        # Lure. Without these, "the Lure level is unknown" cannot be
+        # told apart from "the field never arrived" -- and they need
+        # opposite fixes.
+        self.attacks_seen = 0
+        self.lures_seen = 0
+        # battle doId -> (level, round) of the last Lure thrown in it,
+        # whatever it was aimed at. See `_note_chosen_attacks`.
+        self.last_lure: Dict[int, Tuple[int, int]] = {}
 
     # -- lifecycle ----------------------------------------------------
     def connect(self) -> None:
@@ -963,15 +972,27 @@ class RealmsListener(threading.Thread):
             return
         _toons, tracks, levels, targets = value[0], value[1], value[2], value[3]
         lure_index = DC_TRACK_ORDER.index("lure")
+        now = self.battle_rounds.get(battle_do_id, 0)
         for track, level, target in zip(tracks, levels, targets):
             if int(track) != lure_index:
                 continue
+            self.lures_seen += 1
+            # Levels are 0-based on the wire and 1-based everywhere in
+            # this project.
+            found = (int(level) + 1, now)
+
+            # A BATTLE-WIDE FALLBACK, because the per-target index is not
+            # always usable. A GROUP Lure hits every cog and has no one
+            # target, so its `target` is a sentinel rather than a slot,
+            # and keying only on the slot recorded nothing at all -- the
+            # reader then refused a cog it had watched be lured, saying
+            # the Lure was thrown before it attached, which was untrue
+            # and unfixable by waiting.
+            self.last_lure[battle_do_id] = found
+
             index = int(target)
             if 0 <= index < len(members.suits):
-                # Levels are 0-based on the wire and 1-based everywhere
-                # in this project.
-                self.chosen_lures[members.suits[index]] = (
-                    int(level) + 1, self.battle_rounds.get(battle_do_id, 0))
+                self.chosen_lures[members.suits[index]] = found
 
     def _note_state(self, battle_do_id: int, value) -> None:
         """Count rounds by watching the battle's state machine.
@@ -997,19 +1018,27 @@ class RealmsListener(threading.Thread):
         None means this reader did not see the Lure land, which is the
         case whenever it attached mid-fight.
         """
-        entry = self.chosen_lures.get(cog_do_id)
-        if entry is None:
-            return None
-        level, thrown_in = entry
         battles = self.battles()
         if len(battles) != 1:
             return None
+        entry = self.chosen_lures.get(cog_do_id)
+        if entry is None:
+            # Fall back to the last Lure thrown in THIS battle. Right
+            # for a group Lure, right for a solo fight, and the only
+            # case it can be wrong is two different Lure levels aimed at
+            # different cogs in one round -- which needs a party, and a
+            # party cannot be searched yet anyway.
+            entry = self.last_lure.get(battles[0].do_id)
+        if entry is None:
+            return None
+        level, thrown_in = entry
         now = self.battle_rounds.get(battles[0].do_id, thrown_in)
         return level, max(0, now - thrown_in)
 
     def _record(self, do_id: int, field, value) -> None:
         name = field.getName()
         if name == "setChosenToonAttacks":
+            self.attacks_seen += 1
             self._note_chosen_attacks(do_id, value)
         elif name == "setState":
             self._note_state(do_id, value)

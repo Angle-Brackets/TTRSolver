@@ -269,6 +269,59 @@ class MembersTest(unittest.TestCase):
 
 
 @unittest.skipUnless(HAVE_MODULE, "solver.live.realms did not import")
+class LureAgeTest(unittest.TestCase):
+    """Which Lure landed, and how long ago."""
+
+    def listener(self):
+        obj = realms.RealmsListener.__new__(realms.RealmsListener)
+        obj.store = realms.ObjectStore()
+        obj.chosen_lures = {}
+        obj.last_lure = {}
+        obj.battle_rounds = {}
+        obj.attacks_seen = 0
+        obj.lures_seen = 0
+        obj.store.enter(9, "DistributedBattle", 0, 1, {
+            "setMembers": ([11, 12], "", "", "01", "", "99",
+                           [100000001], "", "", "0", "", 1)})
+        return obj
+
+    def test_a_single_target_lure_is_keyed_on_the_cog(self):
+        one = self.listener()
+        # (toonIds, tracks, levels, targets, ...): Lure is track 2,
+        # level 3 on the wire is level 4 here, aimed at slot 1.
+        one._note_chosen_attacks(9, ([100000001], [2], [3], [1], [0]))
+        self.assertEqual(one.lure_age(12), (4, 0))
+
+    def test_a_group_lure_still_registers(self):
+        """THE ONE THAT BROKE IT LIVE. A group Lure hits every cog and
+        has no single target, so its `target` is a sentinel rather than
+        a slot. Keying only on the slot recorded nothing, and the reader
+        then refused a cog it had WATCHED be lured -- claiming the Lure
+        predated it, which was untrue and could not be fixed by
+        waiting."""
+        one = self.listener()
+        one._note_chosen_attacks(9, ([100000001], [2], [5], [255], [0]))
+        self.assertEqual(one.lure_age(11), (6, 0))
+        self.assertEqual(one.lure_age(12), (6, 0))
+
+    def test_rounds_elapsed_are_counted(self):
+        one = self.listener()
+        one._note_chosen_attacks(9, ([100000001], [2], [3], [1], [0]))
+        one.battle_rounds[9] = 2
+        self.assertEqual(one.lure_age(12), (4, 2))
+
+    def test_a_non_lure_attack_records_nothing(self):
+        one = self.listener()
+        one._note_chosen_attacks(9, ([100000001], [4], [3], [1], [0]))
+        self.assertEqual(one.lures_seen, 0)
+        self.assertIsNone(one.lure_age(12))
+
+    def test_an_unseen_lure_is_still_unknown(self):
+        """Attaching mid-fight must still refuse rather than invent."""
+        self.assertIsNone(self.listener().lure_age(12))
+
+
+@unittest.skipUnless(HAVE_MODULE, "solver.live.realms did not import")
 class DNATest(unittest.TestCase):
 
     LIVE = {
