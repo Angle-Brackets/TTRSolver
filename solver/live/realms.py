@@ -1013,8 +1013,30 @@ class RealmsListener(threading.Thread):
             self.last_lure[battle_do_id] = found
 
             index = int(target)
-            if 0 <= index < len(members.suits):
+            single = 0 <= index < len(members.suits)
+            if single:
                 self.chosen_lures[members.suits[index]] = found
+
+            # A LURE SPENDS A TRAP, so forget any we were holding for the
+            # cogs this Lure reaches. A group Lure reaches all of them.
+            #
+            # Clearing on the LURE rather than on the cog turning up
+            # lured is the whole point: a trapped cog dragged onto its
+            # trap takes the damage and is knocked awake, so it never
+            # appears in `suits_lured` at all. Waiting for it to would
+            # have held the trap forever and had the solver plan a
+            # second combo for damage already collected.
+            #
+            # DELIBERATELY CONSERVATIVE. A Lure that MISSES leaves the
+            # trap in place and this forgets it anyway, so the solver
+            # stops seeing a combo that is really still available. That
+            # is the safe direction: under-claiming a trap costs a
+            # better line, over-claiming one plans damage that will
+            # never arrive.
+            reached = ([members.suits[index]] if single
+                       else list(members.suits))
+            for do_id in reached:
+                self.chosen_traps.pop(do_id, None)
 
     def _note_state(self, battle_do_id: int, value) -> None:
         """Count rounds by watching the battle's state machine.
@@ -1054,6 +1076,9 @@ class RealmsListener(threading.Thread):
             return None
 
         if cog_do_id in members.lured_suits():
+            # Lured and still standing means the Lure found no trap
+            # here; a trapped cog springs it and wakes. Either way there
+            # is nothing under this one now.
             self.chosen_traps.pop(cog_do_id, None)
             return None
         if cog_do_id in members.trapped_suits():

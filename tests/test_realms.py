@@ -276,10 +276,12 @@ class LureAgeTest(unittest.TestCase):
         obj = realms.RealmsListener.__new__(realms.RealmsListener)
         obj.store = realms.ObjectStore()
         obj.chosen_lures = {}
+        obj.chosen_traps = {}
         obj.last_lure = {}
         obj.battle_rounds = {}
         obj.attacks_seen = 0
         obj.lures_seen = 0
+        obj.traps_seen = 0
         obj.store.enter(9, "DistributedBattle", 0, 1, {
             "setMembers": ([11, 12], "", "", "01", "", "99",
                            [100000001], "", "", "0", "", 1)})
@@ -303,6 +305,34 @@ class LureAgeTest(unittest.TestCase):
         one._note_chosen_attacks(9, ([100000001], [2], [5], [255], [0]))
         self.assertEqual(one.lure_age(11), (6, 0))
         self.assertEqual(one.lure_age(12), (6, 0))
+
+    def test_a_group_lure_spends_every_trap_it_reaches(self):
+        """THE CASE THE OWNER ASKED ABOUT. Group Lure, one cog trapped.
+
+        Our own simulator says what happens: the trapped cog is dragged
+        onto its trap, takes the damage and is knocked AWAKE, while the
+        others are lured. So the sprung cog never appears in
+        `suits_lured` -- and clearing the trap only when a cog turns up
+        lured would hold it forever and have the solver plan a second
+        combo for damage already collected.
+        """
+        one = self.listener()
+        one._note_chosen_attacks(9, ([100000001], [1], [5], [0], [0]))
+        self.assertEqual(one.trap_on(11), 6)
+
+        # A group Lure: the target is a sentinel, not a slot.
+        one._note_chosen_attacks(9, ([100000001], [2], [5], [255], [0]))
+        self.assertIsNone(one.trap_on(11), "the trap has been spent")
+
+    def test_a_single_lure_spends_only_that_cog_s_trap(self):
+        one = self.listener()
+        one._note_chosen_attacks(9, ([100000001], [1], [5], [0], [0]))
+        one._note_chosen_attacks(9, ([100000001], [1], [5], [1], [0]))
+        self.assertEqual((one.trap_on(11), one.trap_on(12)), (6, 6))
+
+        one._note_chosen_attacks(9, ([100000001], [2], [3], [1], [0]))
+        self.assertEqual(one.trap_on(11), 6, "the other trap survives")
+        self.assertIsNone(one.trap_on(12))
 
     def test_rounds_elapsed_are_counted(self):
         one = self.listener()
