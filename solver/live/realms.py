@@ -326,11 +326,33 @@ class ObjectStore:
             self.objects[do_id] = obj
         return obj
 
-    def enter(self, do_id, dclass, parent, zone, fields) -> LiveObject:
+    def enter(self, do_id, dclass, parent, zone, fields,
+              fill_only: bool = False) -> LiveObject:
+        """Record an object's arrival.
+
+        `fill_only` writes just the fields we do not already have, and
+        it is what a QUERY reply must use.
+
+        A `GET_ALL` answer describes the object as the state server saw
+        it when the query was processed, so it is already stale by the
+        time it lands -- and applying it wholesale REVERTED values the
+        live stream had since delivered. With the battle roster being
+        re-queried every poll, a cog's HP was overwritten with a
+        pre-hit snapshot about twice a second, which read as health
+        stuck a round behind the fight.
+
+        The stream is the authority and the query is the bootstrap: use
+        it to learn what was missed before attaching, never to correct
+        what is already known.
+        """
         with self._lock:
             obj = self._touch(do_id)
             obj.dclass, obj.parent, obj.zone = dclass, parent, zone
-            obj.fields.update(fields)
+            if fill_only:
+                for name, value in fields.items():
+                    obj.fields.setdefault(name, value)
+            else:
+                obj.fields.update(fields)
             return obj
 
     def set_field(self, do_id, name, value) -> LiveObject:
@@ -953,7 +975,10 @@ class RealmsListener(threading.Thread):
         elif msgtype == OBJECT_GET_ALL_RESP:
             # context, then exactly an ENTER payload, then the non-required
             # fields as (count, [id, value]...).
-            self._enter(body[4:], with_other=True, msgtype=msgtype)
+            # A QUERY REPLY, so it may only fill gaps. See
+            # `ObjectStore.enter`.
+            self._enter(body[4:], with_other=True, msgtype=msgtype,
+                        fill_only=True)
         elif msgtype == OBJECT_DELETE_RAM:
             (do_id,) = struct.unpack_from("<I", body, 0)
             self.store.delete(do_id)
@@ -1185,7 +1210,7 @@ class RealmsListener(threading.Thread):
             self._record(do_id, field, value)
 
     def _enter(self, body: bytes, with_other: bool = False,
-               msgtype: int = 0) -> None:
+               msgtype: int = 0, fill_only: bool = False) -> None:
         # doId, parentId, zoneId, dclassId, then the required fields
         # packed positionally with no ids at all.
         do_id, parent, zone, dclass_id = struct.unpack_from("<IIIH", body, 0)
@@ -1225,7 +1250,7 @@ class RealmsListener(threading.Thread):
             self.undecoded += 1
             return
         obj = self.store.enter(do_id, self.index.class_name(dclass_id),
-                               parent, zone, fields)
+                               parent, zone, fields, fill_only=fill_only)
         self._notify("<enter>", obj)
         self._entered[msgtype] = self._entered.get(msgtype, 0) + 1
         self._entered_classes.setdefault(msgtype, set()).add(obj.dclass)

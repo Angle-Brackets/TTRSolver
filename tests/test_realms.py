@@ -176,6 +176,46 @@ class ObjectStoreTest(unittest.TestCase):
         self.assertEqual(obj.get("setHP"), 42, "earlier fields must survive")
         self.assertEqual(obj.get("setMaxHP"), 90)
 
+    def test_a_query_reply_never_reverts_a_live_value(self):
+        """THE ONE-ROUND-STALE HEALTH BUG, and it was self-inflicted.
+
+        A `GET_ALL` answer describes the object as the state server saw
+        it when the query was PROCESSED, so it is already old when it
+        lands. Applied wholesale it overwrote values the stream had
+        since delivered -- and with the battle roster re-queried every
+        poll, a cog's HP was reverted to a pre-hit snapshot about twice
+        a second.
+
+        The trace settled where the fault was: `setHP` arrives in the
+        same millisecond as the attack choice, thirteen seconds before
+        the animation ends. The server was never late.
+        """
+        store = realms.ObjectStore()
+        store.enter(1, "DistributedSuit", 0, 1, {"setHP": 90})
+        store.set_field(1, "setHP", 72)
+        store.enter(1, "DistributedSuit", 0, 1, {"setHP": 90},
+                    fill_only=True)
+        self.assertEqual(store.get(1).get("setHP"), 72)
+
+    def test_a_query_reply_still_fills_what_is_missing(self):
+        """Which is the whole reason to query: an object generated
+        before we attached has never been described on the stream."""
+        store = realms.ObjectStore()
+        store.set_field(1, "setHP", 72)
+        store.enter(1, "DistributedSuit", 0, 1,
+                    {"setLevelDist": 7, "setHP": 90}, fill_only=True)
+        obj = store.get(1)
+        self.assertEqual(obj.get("setLevelDist"), 7)
+        self.assertEqual(obj.get("setHP"), 72, "must not revert")
+
+    def test_a_real_generate_does_overwrite(self):
+        """An ENTER is the object arriving, not a snapshot of one, so it
+        carries the current truth and replaces what we held."""
+        store = realms.ObjectStore()
+        store.set_field(1, "setHP", 72)
+        store.enter(1, "DistributedSuit", 0, 1, {"setHP": 90})
+        self.assertEqual(store.get(1).get("setHP"), 90)
+
     def test_delete_removes_it(self):
         store = realms.ObjectStore()
         store.enter(7, "DistributedSuit", 0, 1, {})
