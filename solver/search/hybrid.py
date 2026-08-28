@@ -194,6 +194,10 @@ def _logits(model, state: BattleState, seat: int, pending):
     out = x @ model["aw"] + model["ab"]
     mask = env_mod.legal_mask(state, seat)
     out = np.where(np.array(mask), out, -np.inf)
+    if not OFFER_FIRES:
+        for index in env_mod._FIRE_INDEX.values():
+            if index < len(out):
+                out[index] = -np.inf
     return out
 
 
@@ -398,6 +402,48 @@ def _judge(state: BattleState, plan, deep: bool) -> float:
 # one of the same track. Toggleable because the effect is still being
 # measured and the honest state of it is "unproven": see the A/B in
 # `_track_key`.
+OFFER_FIRES = False
+"""Whether the policy may propose a PINK SLIP.
+
+It may not, and this is a workaround for a defect in the policy rather
+than a claim that fires are bad. Solo VP, 8 cogs a round, 200 runs a
+cell on identical seeds, shipped policy:
+
+    slips    offered    masked      paired
+        0      49.5%     49.5%     +0/-0
+        5      22.0%     42.5%    +59/-18   p<0.0001
+       10       0.0%     51.5%    +103/-0   p<0.0001
+       20       0.0%     51.5%    +103/-0   p<0.0001
+
+Read the first row first: with no slips in the pouch the mask changes
+NOTHING, +0/-0 across 200 seeds, which is what says the rest of the
+column is about fires and not about a perturbed search. Then read the
+last: ten slips take the policy from winning half its VPs to winning
+none, and removing the option gives all of it back. 103 seeds flip loss
+to win and none flips the other way.
+
+The policy fires early and often -- with ten in hand a fire was 100% of
+its top-1 and top-3 -- spending a slip on one cog where a group Lure
+neutralises four for the same action. It then meets the back half of
+the VP with no slips and no round to spare.
+
+CHARGING FOR THEM IN TRAINING DOES NOT FIX IT; see `rl.env.fire_cost`,
+which removes the collapse and takes twenty points off the slip-free
+baseline with it. The likelier story is exposure: `--fire-fraction` is
+0.15, so a slip-carrying board is a thin slice of training and the
+policy is unfamiliar rather than mispriced. Until a policy is trained
+that handles them, not offering a slip beats offering one badly.
+
+WHAT THIS COSTS is real and should not be talked away: a human soloing
+a VP does use slips, so the advice here is weaker than good play, not
+equal to it. Set it True to get them back.
+
+One hook point is enough. `propose` picks through `_choose(_logits(...))`
+and `climb` builds both its top-k and its track probes off the same
+vector, gating on `np.isfinite`, so a -inf here is unreachable from
+every candidate source in this module.
+"""
+
 GROUP_PROBES = True
 
 # MEASURED NEUTRAL, kept as a correctness rule rather than a win. Paired
