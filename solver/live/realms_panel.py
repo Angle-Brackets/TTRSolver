@@ -421,10 +421,25 @@ class RealmsWorker(threading.Thread):
         self.model.allow_level_7 = self.allow_level_7
         self.model.objective = self.objective_name
         self.model.budget = self.budget
-        try:
-            self.outbox.put_nowait(copy(self.model))
-        except queue.Full:              # pragma: no cover
-            pass
+        # LATEST WINS. This was a FIFO that dropped the NEWEST model when
+        # it filled, so under load the panel rendered a queue of stale
+        # ones and never caught up -- cog health visibly a round behind
+        # the fight.
+        #
+        # A stale battle state is not merely late, it is wrong: the
+        # advice beside it was computed for a cog that has since taken
+        # damage or died. There is no value in an old model once a newer
+        # one exists, so the old one is thrown away rather than the new.
+        fresh = copy(self.model)
+        while True:
+            try:
+                self.outbox.put_nowait(fresh)
+                return
+            except queue.Full:
+                try:
+                    self.outbox.get_nowait()
+                except queue.Empty:     # pragma: no cover - raced
+                    pass
 
 
 class RealmsApi:
@@ -697,6 +712,15 @@ def main(argv: Optional[list] = None) -> int:   # pragma: no cover
                 state.model = inbox.get(timeout=0.25)
             except queue.Empty:
                 pass
+            # Skip to the newest. `evaluate_js` is a round trip into
+            # WebView2 and slower than the worker's poll, so models pile
+            # up behind it; rendering each in turn shows the player a
+            # replay rather than the fight.
+            while True:
+                try:
+                    state.model = inbox.get_nowait()
+                except queue.Empty:
+                    break
             try:
                 window.evaluate_js(
                     "window.pushModel && window.pushModel("

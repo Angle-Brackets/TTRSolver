@@ -70,6 +70,12 @@ class FakeListener:
         entry = getattr(self, "chosen_traps", {}).get(cog_do_id)
         return None if entry is None else entry[0]
 
+    def toons(self):
+        """Only OUR toon holds an inventory -- `setInventory` is
+        `ownrecv`, which is how `player_toon_id` tells us apart."""
+        return [o for o in self.store.objs.values()
+                if o.get("setInventory") is not None]
+
 
 def battle(members):
     return Obj(9, {"setMembers": members})
@@ -273,15 +279,40 @@ class BuildStateTest(unittest.TestCase):
         state = realms_session.build_state(organic_trap).state
         self.assertTrue(state.cogs[0].status.trap_organic)
 
-    def test_it_refuses_when_two_battles_are_running(self):
-        """Another toon fighting elsewhere in the district is ordinary,
-        and guessing which is yours would advise somebody else's fight."""
-        listener = FakeListener([battle(SOLO_MEMBERS), battle(SOLO_MEMBERS)],
-                                [cog(11, "sdt" + NUL + "l", 2, 20, 20),
-                                 toon()])
+    def test_it_finds_our_battle_among_several(self):
+        """THE VP SPLITS FOUR TOONS TWO AND TWO, so a boss fight has two
+        battle objects, and refusing whenever there is more than one --
+        which this used to do -- silences the panel for the whole fight
+        it is most wanted in. Streets hit it too, any time somebody else
+        in the district is fighting.
+
+        `setInventory` is `ownrecv`, so the toon whose pouch we hold is
+        the one being played. That identifies our battle with no
+        configuration and no guessing at names.
+        """
+        theirs = ([21], "", "", "0", "", "9", [999], "", "", "0", "", 1)
+        ours = ([11], "", "", "0", "", "9", [100000001], "", "", "0", "", 1)
+        listener = FakeListener(
+            [Obj(8, {"setMembers": theirs}), Obj(9, {"setMembers": ours})],
+            [cog(21, "spp" + NUL + "m", 1, 12, 12),
+             cog(11, "sdt" + NUL + "l", 2, 20, 20), toon()])
+        result = realms_session.build_state(listener)
+        self.assertTrue(result, result.problems)
+        self.assertEqual(result.state.cogs[0].cog_type, "double_talker",
+                         "picked the other party's fight")
+
+    def test_it_refuses_when_it_cannot_tell_which_is_ours(self):
+        """Declining beats advising on somebody else's fight."""
+        a = ([21], "", "", "0", "", "9", [999], "", "", "0", "", 1)
+        b = ([11], "", "", "0", "", "9", [998], "", "", "0", "", 1)
+        listener = FakeListener(
+            [Obj(8, {"setMembers": a}), Obj(9, {"setMembers": b})],
+            [cog(21, "spp" + NUL + "m", 1, 12, 12),
+             cog(11, "sdt" + NUL + "l", 2, 20, 20), toon()])
         result = realms_session.build_state(listener)
         self.assertFalse(result)
-        self.assertTrue(any("2 battles" in p for p in result.problems))
+        self.assertTrue(any("rosters" in line or "battles" in line
+                            for line in result.problems), result.problems)
 
     def test_it_refuses_a_cog_it_cannot_name(self):
         listener = FakeListener([battle(SOLO_MEMBERS)],

@@ -199,6 +199,53 @@ def toon_from_object(obj) -> Tuple[Optional[ToonState], List[str]]:
     return toon, []
 
 
+def player_toon_id(listener) -> Optional[int]:
+    """Which toon is OURS, by the one field only we receive.
+
+    `setInventory` is declared `ownrecv`: the pouch goes to the owning
+    client and to nobody else. So among the toons on the cluster, the
+    one whose inventory we hold is the one we are playing -- no
+    configuration, no guessing at names.
+
+    Returns None if that is ambiguous, which is the honest answer:
+    advising the wrong toon's pouch is worse than declining.
+    """
+    holders = [t.do_id for t in listener.toons()
+               if t.get("setInventory") is not None]
+    return holders[0] if len(holders) == 1 else None
+
+
+def pick_battle(listener, battles, player_do_id: Optional[int] = None):
+    """(battle, reasons). Which of several battles is the player's.
+
+    THE VP SPLITS FOUR TOONS TWO AND TWO, so a boss fight has TWO battle
+    objects on the cluster and refusing whenever there is more than one
+    -- which is what this used to do -- means the panel is silent for
+    the entire fight it is most wanted in. Ordinary streets hit the same
+    thing whenever another toon is fighting anywhere in the district.
+
+    The roster settles it: our battle is the one whose `setMembers`
+    lists our toon. Only if that cannot be established does it decline,
+    because advising on somebody else's fight is worse than saying
+    nothing.
+    """
+    if len(battles) == 1:
+        return battles[0], []
+
+    if player_do_id is None:
+        player_do_id = player_toon_id(listener)
+    if player_do_id is None:
+        return None, [f"{len(battles)} battles running and no way to tell "
+                      f"which is yours (no toon here holds an inventory)"]
+
+    for battle in battles:
+        members = realms_mod.parse_members(battle.get("setMembers"))
+        if members is not None and player_do_id in members.toons:
+            return battle, []
+    return None, [f"{len(battles)} battles running and toon {player_do_id} "
+                  f"is in none of their rosters yet"]
+
+
 def build_state(listener, player_do_id: Optional[int] = None,
                 round_num: int = 0) -> RealmsBuild:
     """A `BattleState` from what the listener currently holds.
@@ -213,13 +260,10 @@ def build_state(listener, player_do_id: Optional[int] = None,
     battles = listener.battles()
     if not battles:
         return RealmsBuild(None, ["no battle on the cluster"])
-    if len(battles) > 1:
-        # Another toon fighting elsewhere in the district is ordinary.
-        return RealmsBuild(None, [
-            f"{len(battles)} battles running and no way to tell which is "
-            f"yours -- pass player_do_id"])
 
-    battle = battles[0]
+    battle, why = pick_battle(listener, battles, player_do_id)
+    if battle is None:
+        return RealmsBuild(None, why)
     members = realms_mod.parse_members(battle.get("setMembers"))
     if members is None:
         return RealmsBuild(None, ["the battle has no roster yet"])
@@ -264,7 +308,11 @@ def build_state(listener, player_do_id: Optional[int] = None,
             cogs.append(cog)
 
     if player_do_id is None:
-        player_do_id = members.toons[0]
+        # OURS if we can tell, and only then the first seat. In a party
+        # `toons[0]` is whoever joined first, and planning their pouch
+        # while showing it as yours is the quietest possible way to give
+        # wrong advice.
+        player_do_id = player_toon_id(listener) or members.toons[0]
     elif player_do_id not in members.toons:
         problems.append(f"toon {player_do_id} is not in this battle")
 

@@ -36,6 +36,13 @@ class FakeListener:
     def lure_age(self, cog_do_id):
         return self.chosen_lures.get(cog_do_id)
 
+    def toons(self):
+        return [o for o in self.store.objs.values()
+                if o.get("setInventory") is not None]
+
+    def trap_on(self, cog_do_id):
+        return None
+
 
 def worker(listener):
     from solver.search import objective as objectives
