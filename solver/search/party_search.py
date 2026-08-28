@@ -196,6 +196,26 @@ HEAL_VALUE = 2.0
 QUICK_W = {
     "heal": 2.0,        # laff restored, capped at headroom
     "armed": 1.0,       # trap laid this round, via `armed_credit`
+    # PER COG KILLED, REGARDLESS OF WHICH, AND NOTHING CHARGES FOR
+    # OVERKILL. Those two facts together are a known defect rather than
+    # a simplification, and they are the explanation for a run of picks
+    # the owner reported as absurd: a Storm Cloud at a lured level 1, a
+    # Birthday Cake at a 20hp Name Dropper with a 196hp Mr. Hollywood
+    # asleep beside it, Cakes into level 7s.
+    #
+    # Killing the smallest cog on the field scores exactly what killing
+    # the largest does, so an organic Cake doing 165 into 20 hp is a
+    # free 120 points. `objective.waste_weight` exists for precisely
+    # this and is 20.0 in `balanced` -- but `_quick_score` takes no
+    # objective, so the scorer that ranks the policy's proposals cannot
+    # read it, and `hybrid.climb` cannot avoid overkill in principle.
+    #
+    # Not fixed here because a weight added by hand is how this table
+    # got its worst entry: `prevent` sat at 2.0 for a long time because
+    # it had been fitted against a term that was itself wrong. A waste
+    # term needs sweeping and confirming on held-out seeds, and until
+    # then the honest advice is `--engine search` with `balanced`, the
+    # one preset that prices waste.
     "kill": 120.0,      # per cog killed, regardless of which
     "kill_threat": 0.0, # per point of threat the kills removed
     # 9.0, and the journey there is the point. It sat at 2.0, fitted
