@@ -25,7 +25,7 @@ scarcer and is priced that way. That comes from data (`Gag.max_carry`)
 rather than from a guess about levels.
 """
 from dataclasses import dataclass
-from typing import Dict
+from typing import Dict, Optional
 
 from .. import data
 from ..data import gags as gags_mod
@@ -333,6 +333,61 @@ GLASS_CANNON = Objective(
 PRESETS: Dict[str, Objective] = {
     o.name: o for o in (BALANCED, SPEEDRUN, CONSERVE, SURVIVE, GLASS_CANNON)
 }
+
+
+def from_axes(caution: float = 0.3, thrift: float = 0.4,
+              name: Optional[str] = None) -> Objective:
+    """A playstyle from two knobs, each 0 to 1.
+
+    The five presets are already points on a plane and the axes are
+    visible in their numbers, so this interpolates rather than inventing
+    anything:
+
+        CAUTION  what a point of laff is worth. `laff_weight` runs
+                 0.25 in glass cannon to 3.0 in survive, and it is the
+                 ONLY field any preset uses to express risk.
+
+        THRIFT   how dearly gags are held. Four fields move together --
+                 `gag_cost`, `scarcity_cost`, `waste_weight` and
+                 `rare_gag_premium` -- because no preset moves one
+                 without the others.
+
+    Roughly where the presets land:
+
+        glass cannon   caution 0.00  thrift 0.0
+        speedrun       caution 0.27  thrift 0.1   (also turn_cost 2)
+        balanced       caution 0.27  thrift 0.4
+        conserve       caution 0.27  thrift 1.0
+        survive        caution 1.00  thrift 0.1
+
+    The interpolation is linear between the extremes each field
+    actually takes, so no value here is invented -- every endpoint is a
+    number some preset already uses. What IS a choice is that the four
+    thrift fields move together; nothing measured says they must, only
+    that no preset separates them.
+
+    UNMEASURED AS A CONTINUUM. The corners are the shipped presets and
+    have been evaluated; the space between them has not. Treat an
+    interior point as a preference, not as a tuned configuration.
+    """
+    caution = max(0.0, min(1.0, float(caution)))
+    thrift = max(0.0, min(1.0, float(thrift)))
+
+    def lerp(low: float, high: float, t: float) -> float:
+        return low + (high - low) * t
+
+    return Objective(
+        name=name or f"caution {caution:.2f} / thrift {thrift:.2f}",
+        description=(f"Two-axis playstyle: caution {caution:.2f}, "
+                     f"thrift {thrift:.2f}."),
+        # Caution: the glass cannon floor to the survive ceiling.
+        laff_weight=lerp(0.25, 3.0, caution),
+        # Thrift: each field from the loosest preset to the tightest.
+        gag_cost=lerp(0.0, 0.10, thrift),
+        scarcity_cost=lerp(0.0, 12.0, thrift),
+        waste_weight=lerp(0.0, 20.0, thrift),
+        rare_gag_premium=lerp(0.0, 6.0, thrift),
+    )
 
 DEFAULT = BALANCED
 
