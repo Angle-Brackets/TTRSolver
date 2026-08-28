@@ -58,12 +58,17 @@ class FakeListener:
         self.store = Store(objects)
         # cog doId -> (lure level, rounds elapsed since it landed)
         self.chosen_lures = dict(lures or {})
+        self.chosen_traps = {}
 
     def battles(self):
         return list(self._battles)
 
     def lure_age(self, cog_do_id):
         return self.chosen_lures.get(cog_do_id)
+
+    def trap_on(self, cog_do_id):
+        entry = getattr(self, "chosen_traps", {}).get(cog_do_id)
+        return None if entry is None else entry[0]
 
 
 def battle(members):
@@ -216,6 +221,57 @@ class BuildStateTest(unittest.TestCase):
         state = realms_session.build_state(listener).state
         lured = [c for c in state.cogs if c.status.lured][0]
         self.assertEqual(lured.status.lure_rounds_remaining, 1)
+
+    def test_a_watched_trap_reaches_the_cog(self):
+        """Traps come from the chosen attacks, not from `setMembers`.
+
+        `setMembers` carries the slots and is authoritative, but it is
+        only re-broadcast when membership changes -- so a trap laid
+        mid-round never resends it and the roster still reads '99' with
+        a cog visibly standing on a TNT. That is exactly what was seen
+        live: a trapped Number Cruncher the reader knew nothing about.
+        """
+        listener = FakeListener(
+            [battle(SOLO_MEMBERS)],
+            [cog(11, "sdt" + NUL + "l", 2, 20, 20), toon()])
+        listener.chosen_traps = {11: (6, 0)}
+        state = realms_session.build_state(listener).state
+        status = state.cogs[0].status
+        self.assertTrue(status.trapped)
+        self.assertEqual(status.trap_level, 6)
+        self.assertEqual(status.trap_track, Track.TRAP)
+
+    def test_a_lured_cog_is_never_also_trapped(self):
+        """A Lure SPRINGS a trap, so the two cannot coexist. Believing
+        in one that has already gone off would have the solver plan for
+        damage it has already collected."""
+        listener = FakeListener(
+            [battle(TWO_COG_MEMBERS)],
+            [cog(11, "sdt" + NUL + "l", 2, 20, 20),
+             cog(12, "spp" + NUL + "m", 1, 9, 12), toon()], {11: (4, 0)})
+        listener.chosen_traps = {11: (6, 0)}
+        state = realms_session.build_state(listener).state
+        lured = [c for c in state.cogs if c.status.lured][0]
+        self.assertTrue(lured.status.lured)
+        self.assertFalse(lured.status.trapped)
+
+    def test_trap_organic_follows_the_thrower_not_the_cog(self):
+        """Organic is a property of the toon who laid it. This toon's
+        organic track is Throw, so a Trap it lays is not organic."""
+        listener = FakeListener(
+            [battle(SOLO_MEMBERS)],
+            [cog(11, "sdt" + NUL + "l", 2, 20, 20), toon()])
+        listener.chosen_traps = {11: (6, 0)}
+        state = realms_session.build_state(listener).state
+        self.assertFalse(state.cogs[0].status.trap_organic)
+
+        organic_trap = FakeListener(
+            [battle(SOLO_MEMBERS)],
+            [cog(11, "sdt" + NUL + "l", 2, 20, 20),
+             toon(setTrackBonusLevel=[-1, 6, -1, -1, -1, -1, -1])])
+        organic_trap.chosen_traps = {11: (6, 0)}
+        state = realms_session.build_state(organic_trap).state
+        self.assertTrue(state.cogs[0].status.trap_organic)
 
     def test_it_refuses_when_two_battles_are_running(self):
         """Another toon fighting elsewhere in the district is ordinary,

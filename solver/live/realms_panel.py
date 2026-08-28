@@ -399,7 +399,8 @@ def _headless(listener, objective, depth, budget) -> int:  # pragma: no cover
                     f"datagrams={listener.datagrams} "
                     f"undecoded={listener.undecoded} "
                     f"attacks={listener.attacks_seen} "
-                    f"lures={listener.lures_seen}")
+                    f"lures={listener.lures_seen} "
+                    f"traps={listener.traps_seen}")
             if line != last:
                 print(f"  {line}")
                 if listener._unknown:
@@ -411,6 +412,15 @@ def _headless(listener, objective, depth, budget) -> int:  # pragma: no cover
                     names = sorted(listener._entered_classes.get(msgtype, ()))
                     print(f"    msgtype {msgtype} delivered {seen} objects: "
                           + ", ".join(names[:8]))
+                # The raw roster strings, so it is visible whether
+                # `setMembers` ever refreshes its trap slots at all.
+                for b in listener.battles():
+                    from solver.live.realms import parse_members
+                    m = parse_members(b.get("setMembers"))
+                    if m is not None:
+                        print(f"    roster: lured={m.suits_lured!r} "
+                              f"traps={m.suit_traps!r} "
+                              f"chosen_traps={listener.chosen_traps}")
                 for problem in model.problems:
                     print(f"    ! {problem}")
                 for row in model.rows:

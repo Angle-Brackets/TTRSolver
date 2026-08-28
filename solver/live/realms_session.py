@@ -58,7 +58,9 @@ class RealmsBuild(NamedTuple):
 
 def cog_from_object(obj, lured: bool = False,
                     lure_level: Optional[int] = None,
-                    rounds_elapsed: Optional[int] = None
+                    rounds_elapsed: Optional[int] = None,
+                    trap_level: Optional[int] = None,
+                    trap_organic: bool = False
                     ) -> Tuple[Optional[CogState], List[str]]:
     """One suit object as a `CogState`, or why it cannot be."""
     problems: List[str] = []
@@ -90,6 +92,24 @@ def cog_from_object(obj, lured: bool = False,
             cog.status.revives = int(revives)
         except (AttributeError, TypeError, ValueError):
             pass
+
+    if trap_level is not None and not lured:
+        # A TRAP IS WATCHED, NOT READ. `setMembers` carries the slots and
+        # is only re-broadcast on a membership change, so one laid
+        # mid-round never resends and the roster still reads '99' under
+        # a cog visibly standing on a TNT. The chosen attacks say what
+        # was thrown and at whom.
+        #
+        # Not applied to a lured cog: a Lure springs the trap, so the
+        # two states cannot coexist, and believing in a trap that has
+        # already gone off would have the solver plan for damage it has
+        # collected.
+        from ..state import Track
+
+        cog.status.trapped = True
+        cog.status.trap_track = Track.TRAP
+        cog.status.trap_level = trap_level
+        cog.status.trap_organic = bool(trap_organic)
 
     if lured:
         if lure_level is None:
@@ -209,6 +229,19 @@ def build_state(listener, player_do_id: Optional[int] = None,
         return RealmsBuild(None, ["the battle has no toons in it"])
 
     lured = set(members.lured_suits())
+
+    # Trap damage depends on whether the TOON's Trap track is organic,
+    # which is a property of the thrower rather than of the cog, so it
+    # has to be read before the cogs are built.
+    trap_is_organic = False
+    player_obj = listener.store.get(
+        player_do_id if player_do_id is not None else members.toons[0])
+    if player_obj is not None:
+        from ..state import Track
+
+        organic = realms_mod.parse_organic(
+            player_obj.get("setTrackBonusLevel"))
+        trap_is_organic = bool(organic and Track.TRAP in organic)
     cogs: List[CogState] = []
     for do_id in members.suits:
         obj = listener.store.get(do_id)
@@ -218,10 +251,14 @@ def build_state(listener, player_do_id: Optional[int] = None,
         age = None
         if hasattr(listener, "lure_age"):
             age = listener.lure_age(do_id)
+        trap = None
+        if hasattr(listener, "trap_on"):
+            trap = listener.trap_on(do_id)
         cog, why = cog_from_object(
             obj, lured=do_id in lured,
             lure_level=None if age is None else age[0],
-            rounds_elapsed=None if age is None else age[1])
+            rounds_elapsed=None if age is None else age[1],
+            trap_level=trap, trap_organic=trap_is_organic)
         problems.extend(why)
         if cog is not None:
             cogs.append(cog)

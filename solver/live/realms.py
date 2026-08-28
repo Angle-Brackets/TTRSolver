@@ -757,6 +757,11 @@ class RealmsListener(threading.Thread):
         # opposite fixes.
         self.attacks_seen = 0
         self.lures_seen = 0
+        self.traps_seen = 0
+        # cog doId -> (trap level, round it was set). Recorded from the
+        # chosen attacks, because `setMembers` will not say. See
+        # `_note_chosen_attacks`.
+        self.chosen_traps: Dict[int, Tuple[int, int]] = {}
         # battle doId -> (level, round) of the last Lure thrown in it,
         # whatever it was aimed at. See `_note_chosen_attacks`.
         self.last_lure: Dict[int, Tuple[int, int]] = {}
@@ -972,8 +977,25 @@ class RealmsListener(threading.Thread):
             return
         _toons, tracks, levels, targets = value[0], value[1], value[2], value[3]
         lure_index = DC_TRACK_ORDER.index("lure")
+        trap_index = DC_TRACK_ORDER.index("trap")
         now = self.battle_rounds.get(battle_do_id, 0)
         for track, level, target in zip(tracks, levels, targets):
+            if int(track) == trap_index:
+                # TRAPS COME FROM HERE BECAUSE `setMembers` WILL NOT SAY.
+                # Its `suit_traps` slots are authoritative but it is only
+                # re-broadcast when membership changes, so a trap laid
+                # mid-round never resends it and the roster still reads
+                # '99' with a cog visibly standing on a TNT.
+                #
+                # A trap is always aimed at ONE cog -- there is no group
+                # Trap -- so unlike Lure the target index is always a
+                # real slot and no battle-wide fallback is needed.
+                self.traps_seen += 1
+                index = int(target)
+                if 0 <= index < len(members.suits):
+                    self.chosen_traps[members.suits[index]] = (
+                        int(level) + 1, now)
+                continue
             if int(track) != lure_index:
                 continue
             self.lures_seen += 1
@@ -1011,6 +1033,37 @@ class RealmsListener(threading.Thread):
         if name == MOVIE_STATE:
             self.battle_rounds[battle_do_id] = (
                 self.battle_rounds.get(battle_do_id, 0) + 1)
+
+    def trap_on(self, cog_do_id: int) -> Optional[int]:
+        """The level of the Trap under a cog, or None.
+
+        Prefers `setMembers`, which is authoritative when it is fresh: a
+        slot that is not '9' means the server says there is a trap
+        there, and if that ever disagrees with what we watched being
+        thrown then the server wins.
+
+        Otherwise the observed choice. Cleared when the cog is lured,
+        because that is what springs a trap -- keeping it would have the
+        solver plan a combo whose damage has already been collected.
+        """
+        battles = self.battles()
+        if len(battles) != 1:
+            return None
+        members = parse_members(battles[0].get("setMembers"))
+        if members is None:
+            return None
+
+        if cog_do_id in members.lured_suits():
+            self.chosen_traps.pop(cog_do_id, None)
+            return None
+        if cog_do_id in members.trapped_suits():
+            # The server says trapped. It does not say with what -- the
+            # character maps to a trap gag and that mapping has never
+            # been observed -- so fall through to what we watched, and
+            # decline rather than invent if we did not see it.
+            pass
+        entry = self.chosen_traps.get(cog_do_id)
+        return None if entry is None else entry[0]
 
     def lure_age(self, cog_do_id: int) -> Optional[Tuple[int, int]]:
         """(Lure level, rounds since it was thrown), or None.
