@@ -684,6 +684,27 @@ class BattleEnv:
         # here teaches WHEN a guaranteed kill is worth more than the
         # round, which is the thing `--fire-fraction` was reaching for
         # and overshot.
+        #
+        # MEASURED, AND IT DOES NOT WORK. Two runs at 8 and 25, same
+        # seed and mix as the shipped policy, solo VP at 8 cogs a round:
+        #
+        #     slips              0      5     10
+        #     shipped        49.5%  22.0%   0.0%
+        #     fire_cost 8    31.5%   1.5%   0.0%
+        #     fire_cost 25   28.0%  15.5%   3.5%
+        #
+        # It removes the collapse -- fires fall from 100% of the
+        # shortlist to 0% and 31% -- and takes about twenty points off
+        # the base rate with it, measured with NO slips in hand, so the
+        # damage is to general play rather than to slip discipline.
+        # Worse, it does not fix the presenting problem either: fc25
+        # still slides 28.0 -> 15.5 -> 3.5 as slips are added.
+        #
+        # The likelier story is that slip-carrying boards are simply
+        # UNDER-TRAINED -- `--fire-fraction` is 0.15, so a board with
+        # ten of them is a thin slice of the distribution and the policy
+        # is unfamiliar rather than wrongly incentivised. Pricing cannot
+        # fix unfamiliarity; exposure might. Left here at 0.0.
         if self.fire_cost:
             spent = ps._fires_spent(before, nxt)
             if spent:
