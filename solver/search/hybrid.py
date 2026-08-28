@@ -194,7 +194,7 @@ def _logits(model, state: BattleState, seat: int, pending):
     out = x @ model["aw"] + model["ab"]
     mask = env_mod.legal_mask(state, seat)
     out = np.where(np.array(mask), out, -np.inf)
-    if not OFFER_FIRES:
+    if not _fires_allowed(state):
         for index in env_mod._FIRE_INDEX.values():
             if index < len(out):
                 out[index] = -np.inf
@@ -402,47 +402,66 @@ def _judge(state: BattleState, plan, deep: bool) -> float:
 # one of the same track. Toggleable because the effect is still being
 # measured and the honest state of it is "unproven": see the A/B in
 # `_track_key`.
-OFFER_FIRES = False
-"""Whether the policy may propose a PINK SLIP.
+FIRE_WHEN = "lured"
+"""When the policy may propose a PINK SLIP: never, lured, or always.
 
-It may not, and this is a workaround for a defect in the policy rather
-than a claim that fires are bad. Solo VP, 8 cogs a round, 200 runs a
-cell on identical seeds, shipped policy:
+A slip costs no gag, so it reads as free and the policy treated it as
+free -- with ten in hand a fire was 100% of its top-1 and top-3. It is
+not free: it costs a ROUND, and a round with the cogs awake costs about
+fifteen laff. That is what makes it expensive here specifically, since
+solo VP losses are 100% "went sad" with a median 73 gags still in the
+pouch. Laff is the binding constraint and rounds are the currency.
 
-    slips    offered    masked      paired
-        0      49.5%     49.5%     +0/-0
-        5      22.0%     42.5%    +59/-18   p<0.0001
-       10       0.0%     51.5%    +103/-0   p<0.0001
-       20       0.0%     51.5%    +103/-0   p<0.0001
+WHICH IS ALSO WHY WITHHOLDING THE SLIP ENTIRELY WAS THE WRONG FIX. A
+LURED BOARD DOES NOT SWING, so those rounds are already free -- lure
+first, then fire, and the removal costs nothing at all. Solo VP, 8 cogs
+a round, ten slips, against the same seeds:
 
-Read the first row first: with no slips in the pouch the mask changes
-NOTHING, +0/-0 across 200 seeds, which is what says the rest of the
-column is about fires and not about a perturbed search. Then read the
-last: ten slips take the policy from winning half its VPs to winning
-none, and removing the option gives all of it back. 103 seeds flip loss
-to win and none flips the other way.
+    arm       selection (200)      held out (500)   slips spent
+    never          51.5%               47.4%            0.0
+    lured          54.5%               54.0%            3.0
+    always          0.0%                0.0%            6.6
 
-The policy fires early and often -- with ten in hand a fire was 100% of
-its top-1 and top-3 -- spending a slip on one cog where a group Lure
-neutralises four for the same action. It then meets the back half of
-the VP with no slips and no round to spare.
+    lured vs never   +35/-29 p=0.53    +87/-54 p=0.0068
 
-CHARGING FOR THEM IN TRAINING DOES NOT FIX IT; see `rl.env.fire_cost`,
-which removes the collapse and takes twenty points off the slip-free
-baseline with it. The likelier story is exposure: `--fire-fraction` is
-0.15, so a slip-carrying board is a thin slice of training and the
-policy is unfamiliar rather than mispriced. Until a policy is trained
-that handles them, not offering a slip beats offering one badly.
+Pooled that is +122/-83. `lured` is the only arm that both beats
+withholding and actually spends the slips, which matters because a real
+solo VP does use them -- `never` bought back the win rate by giving up
+a tool the player has.
 
-WHAT THIS COSTS is real and should not be talked away: a human soloing
-a VP does use slips, so the advice here is weaker than good play, not
-equal to it. Set it True to get them back.
+`always` is the measurement that started this: ten slips took the
+policy from winning half its VPs to winning NONE, and 237 held-out
+seeds flip loss-to-win when the option is withdrawn, none the other
+way. With an empty pocket the gate changes nothing at all (+0/-0 over
+200 seeds), which is what says the column is about fires rather than
+about a perturbed search.
 
-One hook point is enough. `propose` picks through `_choose(_logits(...))`
-and `climb` builds both its top-k and its track probes off the same
-vector, gating on `np.isfinite`, so a -inf here is unreachable from
-every candidate source in this module.
+The gate is on the BOARD, not on the policy's judgement, because the
+policy's judgement is the thing that was wrong. It says when a slip is
+cheap; it does not say to spend one.
+
+A LOOSER RULE MAY WELL BE BETTER and is not measured: `lured` requires
+EVERY live cog asleep, so it never fires on a board with one awake cog
+and three asleep, which is nearly as cheap. It spends 3 slips of 10.
+
+One hook point is enough. `propose` picks through `_choose(_logits())`
+and `climb` builds both its top-k and its track probes from the same
+vector, gating on `np.isfinite`, so a -inf there is unreachable from
+every candidate source in this module. Confirmed rather than assumed:
+under `never` the runs spend 0.0 slips holding ten.
 """
+
+
+def _fires_allowed(state) -> bool:
+    """Is a pink slip on the menu for this board?"""
+    if FIRE_WHEN == "always":
+        return True
+    if FIRE_WHEN == "never":
+        return False
+    live = [c for c in state.cogs if not c.status.is_dead]
+    # A lured cog skips its attack, so a round spent here is free.
+    return bool(live) and all(c.status.lured for c in live)
+
 
 GROUP_PROBES = True
 

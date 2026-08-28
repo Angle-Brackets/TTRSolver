@@ -229,3 +229,62 @@ class FireInTheExactSearchTest(unittest.TestCase):
             self.assertGreaterEqual(
                 more, fewer - 1e-6,
                 f"a spare slip lowered the exact value: {values}")
+
+
+class FireWhenTest(unittest.TestCase):
+    """The board gate: a slip is cheap only when nothing is swinging.
+
+    Measured rather than reasoned. Solo VP, 8 cogs a round, ten slips,
+    held out over 500 runs: never 47.4%, lured 54.0% (+87/-54,
+    p=0.0068), always 0.0%. See `hybrid.FIRE_WHEN`.
+    """
+
+    def _board(self, lured, dead=False):
+        from solver import data
+        hp = data.cog_max_hp(2)
+        cogs = []
+        for _ in range(2):
+            c = CogState(cog_type="cold_caller", department="sellbot",
+                         level=2, hp=hp, max_hp=hp)
+            c.status.lured = lured
+            cogs.append(c)
+        if dead:
+            cogs[0].status.is_dead = True
+            cogs[0].status.lured = False
+        toon = ToonState(laff=50, max_laff=100, fires=2,
+                         gag_counts={(Track.THROW, 1): 2},
+                         track_exp={Track.THROW: 2})
+        return BattleState(cogs=cogs, toons=[toon])
+
+    def test_not_offered_while_a_cog_is_awake(self):
+        from solver.search import hybrid
+        self.assertFalse(hybrid._fires_allowed(self._board(lured=False)))
+
+    def test_offered_once_the_board_is_asleep(self):
+        from solver.search import hybrid
+        self.assertTrue(hybrid._fires_allowed(self._board(lured=True)))
+
+    def test_a_dead_cog_does_not_keep_the_board_awake(self):
+        """`lured` is False on a corpse, so a naive all() over
+        `state.cogs` would never open the gate once anything died."""
+        from solver.search import hybrid
+        self.assertTrue(
+            hybrid._fires_allowed(self._board(lured=True, dead=True)))
+
+    def test_an_empty_board_does_not_open_the_gate(self):
+        from solver.search import hybrid
+        state = self._board(lured=True)
+        for cog in state.cogs:
+            cog.status.is_dead = True
+        self.assertFalse(hybrid._fires_allowed(state))
+
+    def test_the_modes_do_what_they_say(self):
+        from solver.search import hybrid
+        original = hybrid.FIRE_WHEN
+        try:
+            hybrid.FIRE_WHEN = "never"
+            self.assertFalse(hybrid._fires_allowed(self._board(lured=True)))
+            hybrid.FIRE_WHEN = "always"
+            self.assertTrue(hybrid._fires_allowed(self._board(lured=False)))
+        finally:
+            hybrid.FIRE_WHEN = original
