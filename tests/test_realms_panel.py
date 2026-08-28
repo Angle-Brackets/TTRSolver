@@ -168,13 +168,22 @@ class TickTest(unittest.TestCase):
 @unittest.skipUnless(HAVE_MODULE, "realms panel unavailable")
 class ApiTest(unittest.TestCase):
 
-    def test_it_does_not_offer_to_override_what_the_server_states(self):
+    def test_it_does_not_override_what_the_server_states(self):
         """`name_cog` and `mark_lured` exist on the TTR panel so a player
         can supply what the readers could not see. Here the server says
-        both, so offering them would invite overriding correct data with
-        a guess. They must be ABSENT, not stubbed."""
-        self.assertFalse(hasattr(realms_panel.RealmsApi, "name_cog"))
-        self.assertFalse(hasattr(realms_panel.RealmsApi, "mark_lured"))
+        both, so they must not CHANGE anything.
+
+        They were originally absent on that reasoning, which was right
+        about what they should do and wrong about whether they should
+        exist: the page is shared, so a click reaches whatever the Api
+        has and a missing method fails silently at click time. Inert,
+        not absent.
+        """
+        api = realms_panel.RealmsApi.__new__(realms_panel.RealmsApi)
+        for name in ("name_cog", "mark_lured"):
+            method = getattr(realms_panel.RealmsApi, name, None)
+            self.assertIsNotNone(method, f"the page can call {name}")
+            self.assertIsNone(method(api, 0, True))
 
     def test_set_toon_count_exists_but_is_inert(self):
         """The page is shared, so the click has to land somewhere -- but
@@ -182,6 +191,41 @@ class ApiTest(unittest.TestCase):
         self.assertTrue(hasattr(realms_panel.RealmsApi, "set_toon_count"))
         api = realms_panel.RealmsApi.__new__(realms_panel.RealmsApi)
         self.assertIsNone(realms_panel.RealmsApi.set_toon_count(api, 3))
+
+
+@unittest.skipUnless(HAVE_MODULE, "realms panel unavailable")
+class BridgeTest(unittest.TestCase):
+    """Every method App.jsx calls must exist on RealmsApi.
+
+    The page and this Api were written apart, and two of its buttons --
+    "I'm in a fight" and "Work it out" -- called methods that were
+    simply absent. A missing method fails at click time with nothing in
+    the console the player will ever see.
+    """
+
+    def test_every_call_in_the_page_exists(self):
+        import re
+        from pathlib import Path
+
+        source = Path("overlay_ui/src/App.jsx").read_text(encoding="utf-8")
+        called = set(re.findall(r"call\('(\w+)'", source))
+        called |= set(re.findall(r"api\.(\w+)\(", source))
+        called.discard("pull")          # dev-server fallback only
+        missing = [name for name in sorted(called)
+                   if not hasattr(realms_panel.RealmsApi, name)]
+        self.assertEqual(missing, [], f"App.jsx calls {missing}")
+
+    def test_the_page_is_pushed_to_not_polled(self):
+        """`App.jsx` installs `window.pushModel` and waits. A pump that
+        only stores the model leaves the page on its own defaults --
+        which is exactly how this presented: "waiting for a battle" and
+        a 15s budget, 15 being App.jsx's fallback rather than this
+        module's 12."""
+        import inspect
+
+        source = inspect.getsource(realms_panel.main)
+        self.assertIn("pushModel", source)
+        self.assertIn("evaluate_js", source)
 
 
 @unittest.skipUnless(HAVE_MODULE, "realms panel unavailable")

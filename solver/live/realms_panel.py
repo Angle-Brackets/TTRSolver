@@ -302,11 +302,14 @@ class RealmsWorker(threading.Thread):
 class RealmsApi:
     """What the page may call. A strict subset of the TTR panel's.
 
-    `name_cog` and `mark_lured` are deliberately ABSENT rather than
-    stubbed. Both exist on the TTR side to let the player supply what
-    the readers could not see, and here the server says both outright --
-    offering them would invite a player to override correct data with a
-    guess.
+    `name_cog` and `mark_lured` are INERT rather than absent, and that
+    is a correction. They were left off entirely on the reasoning that
+    the server states both and a player should not be able to overrule
+    it with a guess -- which is right about what they should DO and
+    wrong about whether they should exist. The page is shared, so a
+    click reaches whatever the Api has, and a missing method fails at
+    click time with nothing the player will ever see. They exist and do
+    nothing.
     """
 
     def __init__(self, state: "RealmsPanelState", worker: RealmsWorker):
@@ -325,6 +328,16 @@ class RealmsApi:
     def set_level_7(self, allow) -> None:
         self._worker.set_level_7(allow)
 
+    def name_cog(self, *_args) -> None:
+        """Inert. Identity comes from `setDNAString`, so there is
+        nothing to name -- and `rows_from_state` leaves `choices` empty,
+        so the picker never appears in the first place."""
+        return None
+
+    def mark_lured(self, *_args) -> None:
+        """Inert. Lure state comes from the battle roster."""
+        return None
+
     def set_toon_count(self, count) -> None:
         """Accepted and ignored, with the reason said out loud.
 
@@ -335,6 +348,32 @@ class RealmsApi:
         shared, so the method has to exist or the click raises.
         """
         return None
+
+    def ask_now(self) -> None:
+        """Recompute now. The page's "Work it out" button."""
+        self._worker.ask_now()
+
+    def toggle_fight(self, *_args) -> None:
+        """The page's "I'm in a fight" button.
+
+        It RECOMPUTES rather than overriding detection, which is the
+        opposite of what it does on the TTR panel. There it sets
+        `forced`, because the screen readers genuinely miss fights and
+        the player can see one the pixels cannot. Here the cluster
+        states whether a battle exists, so asserting one would replace a
+        fact with an opinion -- and if the reader cannot build a state,
+        forcing changes nothing anyway: `build_state` still refuses and
+        the panel still shows the reasons.
+
+        What is useful about the button is the impatience behind it, so
+        it does that part: refresh and re-search immediately.
+        """
+        try:
+            self._worker.listener.refresh_all()
+            self._worker.listener.refresh_battle_members()
+        except Exception:               # pragma: no cover
+            pass
+        self._worker.ask_now()
 
     def set_height(self, height: int) -> None:
         window = self._state.window
@@ -514,11 +553,28 @@ def main(argv: Optional[list] = None) -> int:   # pragma: no cover
     worker.start()
 
     def pump() -> None:
+        """PUSH the model into the page. Do not merely store it.
+
+        The page does not poll -- `App.jsx` installs `window.pushModel`
+        and waits to be called, and `Api.pull` exists only for
+        `npm run dev` where there is no Python. Updating `state.model`
+        and stopping there left the page rendering its OWN defaults
+        forever, which is why the panel showed "waiting for a battle"
+        and a 15s budget while the reader could see the fight perfectly:
+        15 is App.jsx's fallback, not this module's 12, and that
+        mismatch is what gave it away.
+        """
         while not state.closing:
             try:
-                state.model = inbox.get(timeout=0.2)
+                state.model = inbox.get(timeout=0.25)
             except queue.Empty:
-                continue
+                pass
+            try:
+                window.evaluate_js(
+                    "window.pushModel && window.pushModel("
+                    + model_json(state.model) + ")")
+            except Exception:           # window gone
+                break
         worker.close()
         listener.close()
         try:
