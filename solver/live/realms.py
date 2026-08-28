@@ -805,6 +805,9 @@ class RealmsListener(threading.Thread):
         # chosen attacks, because `setMembers` will not say. See
         # `_note_chosen_attacks`.
         self.chosen_traps: Dict[int, Tuple[int, int]] = {}
+        # battle doId -> the last movie applied, so the doubled
+        # datagrams cannot deal their damage twice.
+        self._last_movie: Dict[int, str] = {}
         # battle doId -> (level, round) of the last Lure thrown in it,
         # whatever it was aimed at. See `_note_chosen_attacks`.
         self.last_lure: Dict[int, Tuple[int, int]] = {}
@@ -1084,6 +1087,82 @@ class RealmsListener(threading.Thread):
             for do_id in reached:
                 self.chosen_traps.pop(do_id, None)
 
+    def apply_movie(self, battle_do_id: int, value) -> int:
+        """Subtract a round's damage from the cogs, from `setMovie`.
+
+        WHY THIS IS NEEDED AT ALL. The server writes a cog's `setHP` at
+        COMMIT time and the value it writes is the HP going INTO that
+        round -- the damage a round deals only reaches the state server
+        at the NEXT commit. Confirmed against a live fight: HP 90 at one
+        commit, 61 at the next, with the owner confirming every gag in
+        between had hit.
+
+        That leaves the panel a round stale over exactly the window
+        where it is used: `WaitForInput`, while the player chooses. No
+        amount of re-querying fixes it, because the state server does
+        not have the number yet either.
+
+        `setMovie` does. It is `required broadcast ram` and carries the
+        round's resolution -- `ToonAttack.hp` is damage per target -- and
+        it arrives WITH the commit, before the animation plays. Applying
+        it moves the reader from a round behind to slightly ahead.
+
+        Safe to apply because `setHP` is ABSOLUTE: when the real value
+        turns up next commit it overwrites this rather than compounding
+        with it. This is a forward correction that the server later
+        confirms.
+        """
+        if not isinstance(value, (list, tuple)) or len(value) < 5:
+            return 0
+        made, _toons, suits, toon_attacks, _suit_attacks = value[:5]
+        if not made:
+            return 0
+
+        # EVERY DATAGRAM ARRIVES TWICE -- a full-range subscription
+        # matches both an object's own channel and its location channel
+        # -- so without this the damage would be applied twice and every
+        # cog would die at half health.
+        fingerprint = repr(value)
+        if self._last_movie.get(battle_do_id) == fingerprint:
+            return 0
+        self._last_movie[battle_do_id] = fingerprint
+
+        active = [int(x) for x in (suits or ())]
+        applied = 0
+        for attack in toon_attacks or ():
+            if len(attack) < 5:
+                continue
+            _i, track, _level, target, hp = attack[:5]
+            if int(track) < 0:
+                continue
+            damage = [int(x) for x in (hp or ())]
+            if not any(damage):
+                continue
+
+            if len(damage) == 1 and int(target) in active:
+                hits = [(int(target), damage[0])]
+            elif len(damage) == len(active):
+                # A group gag: one entry per active suit, in order.
+                hits = list(zip(active, damage))
+            else:
+                # Some other shape. Rather than guess at it, leave the
+                # HP to the server's own next write.
+                continue
+
+            for do_id, amount in hits:
+                if amount <= 0:
+                    continue
+                obj = self.store.get(do_id)
+                if obj is None:
+                    continue
+                current = obj.get("setHP")
+                if current is None:
+                    continue
+                self.store.set_field(do_id, "setHP",
+                                     max(0, int(current) - amount))
+                applied += 1
+        return applied
+
     def _note_state(self, battle_do_id: int, value) -> None:
         """Count rounds by watching the battle's state machine.
 
@@ -1174,6 +1253,8 @@ class RealmsListener(threading.Thread):
             self._note_chosen_attacks(do_id, value)
         elif name == "setState":
             self._note_state(do_id, value)
+        elif name == "setMovie":
+            self.apply_movie(do_id, value)
         obj = self.store.set_field(do_id, field.getName(), value)
         if not obj.dclass:
             # SET_FIELD does not name the class. The field knows the one

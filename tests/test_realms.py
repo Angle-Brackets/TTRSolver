@@ -407,6 +407,87 @@ class LureAgeTest(unittest.TestCase):
 
 
 @unittest.skipUnless(HAVE_MODULE, "solver.live.realms did not import")
+class MovieDamageTest(unittest.TestCase):
+    """Applying a round's damage from `setMovie`.
+
+    THE ACTUAL CAUSE of health reading a round behind, after three
+    wrong answers. The server writes `setHP` at COMMIT time and the
+    value is the HP going INTO that round -- a round's damage only
+    reaches the state server at the NEXT commit. Confirmed live: 90 at
+    one commit, 61 at the next, with every gag in between having hit.
+
+    So the panel was stale over exactly the window it is used in, and
+    no amount of re-querying could fix it: the state server did not
+    have the number either. `setMovie` does, and it arrives with the
+    commit.
+    """
+
+    def listener(self):
+        obj = realms.RealmsListener.__new__(realms.RealmsListener)
+        obj.store = realms.ObjectStore()
+        obj._last_movie = {}
+        obj.store.enter(11, "DistributedSuit", 0, 1,
+                        {"setHP": 90, "setMaxHP": 90})
+        obj.store.enter(12, "DistributedSuit", 0, 1,
+                        {"setHP": 42, "setMaxHP": 42})
+        return obj
+
+    def movie(self, attacks, suits=(11, 12)):
+        return (1, [100], list(suits), attacks, [])
+
+    def test_single_target_damage_lands(self):
+        one = self.listener()
+        one.apply_movie(9, self.movie([(0, 4, 3, 11, [29], 0, 0, [0], 0, 0)]))
+        self.assertEqual(one.store.get(11).get("setHP"), 61)
+        self.assertEqual(one.store.get(12).get("setHP"), 42, "untouched")
+
+    def test_the_same_movie_is_not_applied_twice(self):
+        """EVERY DATAGRAM ARRIVES TWICE -- a full-range subscription
+        matches an object's own channel AND its location channel -- so
+        without a guard every cog would die at half health."""
+        one = self.listener()
+        movie = self.movie([(0, 4, 3, 11, [29], 0, 0, [0], 0, 0)])
+        one.apply_movie(9, movie)
+        one.apply_movie(9, movie)
+        self.assertEqual(one.store.get(11).get("setHP"), 61)
+
+    def test_a_group_gag_hits_every_active_suit(self):
+        one = self.listener()
+        one.apply_movie(9, self.movie(
+            [(0, 3, 5, -1, [20, 20], 0, 0, [0], 0, 0)]))
+        self.assertEqual(one.store.get(11).get("setHP"), 70)
+        self.assertEqual(one.store.get(12).get("setHP"), 22)
+
+    def test_a_miss_changes_nothing(self):
+        one = self.listener()
+        one.apply_movie(9, self.movie([(0, 4, 3, 11, [0], 0, 0, [0], 0, 0)]))
+        self.assertEqual(one.store.get(11).get("setHP"), 90)
+
+    def test_an_unrecognised_shape_is_left_to_the_server(self):
+        """Three damage numbers against two suits is not something this
+        knows how to place. Guessing would put damage on the wrong cog;
+        the server's own next write is correct anyway, just late."""
+        one = self.listener()
+        one.apply_movie(9, self.movie(
+            [(0, 3, 5, -1, [10, 10, 10], 0, 0, [0], 0, 0)]))
+        self.assertEqual(one.store.get(11).get("setHP"), 90)
+
+    def test_health_never_goes_below_zero(self):
+        one = self.listener()
+        one.apply_movie(9, self.movie([(0, 4, 6, 11, [500], 0, 0, [0], 0, 0)]))
+        self.assertEqual(one.store.get(11).get("setHP"), 0)
+
+    def test_a_later_setHP_overrides_rather_than_compounds(self):
+        """`setHP` is ABSOLUTE, which is what makes applying the movie
+        safe: the server's real value replaces our forward correction
+        instead of stacking with it."""
+        one = self.listener()
+        one.apply_movie(9, self.movie([(0, 4, 3, 11, [29], 0, 0, [0], 0, 0)]))
+        one.store.set_field(11, "setHP", 61)
+        self.assertEqual(one.store.get(11).get("setHP"), 61)
+
+
+@unittest.skipUnless(HAVE_MODULE, "solver.live.realms did not import")
 class DNATest(unittest.TestCase):
 
     LIVE = {
