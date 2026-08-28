@@ -363,13 +363,22 @@ def _headless(listener, objective, depth, budget) -> int:  # pragma: no cover
 
     print(f"  attached; polling every {POLL_INTERVAL}s. "
           f"Ctrl-C to stop.")
+    next_full = 0.0
     print()
     last = None
     try:
         while True:
             cycle = time.time()
+            # THROTTLED. This used to refresh every poll, which with 133
+            # objects at 2.5 polls a second put a few hundred queries a
+            # second through the message director -- 6,000 GET_ALL
+            # replies in one fight, most of them re-describing a
+            # butterfly that had not changed. The battle roster is
+            # cheap and worth doing often; everything else is not.
             try:
-                listener.refresh_all()
+                if cycle >= next_full:
+                    listener.refresh_all()
+                    next_full = cycle + 10.0
                 listener.refresh_battle_members()
             except Exception as exc:
                 print(f"  refresh failed: {exc}")

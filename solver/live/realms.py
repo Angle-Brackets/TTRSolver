@@ -78,9 +78,14 @@ OBJECT_SET_FIELD = 2020                 # [CONFIRMED] live
 OBJECT_SET_FIELDS = 2021                # [CONFIRMED] live
 OBJECT_DELETE_RAM = 2032
 OBJECT_CHANGING_LOCATION = 2041
-OBJECT_ENTER_LOCATION_WITH_REQUIRED = 2042
-OBJECT_ENTER_LOCATION_WITH_REQUIRED_OTHER = 2043
-OBJECT_ENTER_AI_WITH_REQUIRED = 2052
+# [CONFIRMED] live. In one fight 2042 delivered DistributedBattle and
+# DistributedSuit, 2043 delivered DistributedToon, and 2052 delivered
+# DistributedBattle -- 34 objects between them, every dclass id
+# resolving to a real class. These three are what a battle and the
+# player's own toon arrive on, and nothing else announces them.
+OBJECT_ENTER_LOCATION_WITH_REQUIRED = 2042      # [CONFIRMED] live
+OBJECT_ENTER_LOCATION_WITH_REQUIRED_OTHER = 2043    # [CONFIRMED] live
+OBJECT_ENTER_AI_WITH_REQUIRED = 2052            # [CONFIRMED] live
 OBJECT_ENTER_AI_WITH_REQUIRED_OTHER = 2053
 OBJECT_ENTER_OWNER_WITH_REQUIRED = 2062
 OBJECT_ENTER_OWNER_WITH_REQUIRED_OTHER = 2063
@@ -92,11 +97,21 @@ ENTER_MESSAGES = (OBJECT_ENTER_LOCATION_WITH_REQUIRED,
                   OBJECT_ENTER_OWNER_WITH_REQUIRED,
                   OBJECT_ENTER_OWNER_WITH_REQUIRED_OTHER)
 
+# 2040 AND 2046 ARE NOT ENTER MESSAGES. They arrive once per object,
+# which is why they were suspected, and parsing them that way delivered
+# ZERO objects across a whole fight while 2042/2043/2052 delivered 34.
+# `_enter` refused every one because the dclass id did not resolve --
+# the guess was wrong and the validation is what said so, rather than a
+# store full of objects named "<60000>".
+#
+# Left unparsed deliberately. They are almost certainly SET_LOCATION
+# (2040, a command TO the state server rather than a broadcast, so it
+# carries no object) and a GET_LOCATION reply (2044 and 2046 turn up
+# together). Neither describes an object, so neither is wanted; they
+# are counted in `_unknown` and ignored.
+PROBE_ENTER = ()
+
 # The ..._OTHER forms carry a trailing block of non-required fields.
-# Seen once per object on a live cluster and not matching any number
-# this reader knows. Parsed as ENTER candidates, which is safe because
-# `_enter` refuses a dclass id that does not resolve.
-PROBE_ENTER = (2040, 2046, 2066, 2067)
 
 ENTER_WITH_OTHER = (OBJECT_ENTER_LOCATION_WITH_REQUIRED_OTHER,
                     OBJECT_ENTER_AI_WITH_REQUIRED_OTHER,
