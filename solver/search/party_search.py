@@ -231,9 +231,27 @@ QUICK_W = {
     # buildings 66.0% -> 67.0% and VP unchanged. The largest confirmed
     # effect measured in this project.
     "prevent": 9.0,     # incoming damage removed, via `prevented`
-    # CHARGED, for damage thrown past what a cog had left. ZERO until
-    # swept, so this changes nothing yet -- the same way `kill_threat`
-    # and `risk` sit here at zero.
+    # CHARGED, for damage thrown past what a cog had left. SWEPT, AND
+    # IT STAYS AT ZERO -- 0/20/60/150/400 over three regimes, common
+    # random numbers throughout:
+    #
+    #   buildings d7   123/150 at zero, 120 at best, monotonically
+    #                  WORSE with weight, p = 0.27-0.51
+    #   buildings d9   0/150 everywhere; nothing solo clears one, so
+    #                  the cell cannot discriminate and says nothing
+    #   VP, 7 a round  47/120 at zero, 50 at 400, kills and rounds
+    #                  identical to two decimals -- noise
+    #
+    # So overkill is real, visible, and costs nothing measurable. The
+    # reason is worth keeping: a dead cog stops attacking, and with 80
+    # gags in a pouch the binding constraint is LAFF, not gags. Paying
+    # a scarcer gag to remove a threat one round sooner is a trade the
+    # flat `kill` bonus makes correctly, even when the arithmetic looks
+    # wasteful to a human watching it.
+    #
+    # Left in place and at zero because the sweep is the useful
+    # artefact: the next person to notice a Cake landing on a 20hp cog
+    # can read this instead of building the term again.
     #
     # It exists because `landed` is HP-capped, so overkill is neither
     # credited nor charged: killing a 72hp cog with a 165-damage Cake
