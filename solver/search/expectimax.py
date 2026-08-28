@@ -141,6 +141,15 @@ def _vmin(state: BattleState) -> float:
 EXACT, LOWER, UPPER = 0, 1, 2
 
 
+class MissingData(Exception):
+    """Every action at a node was unevaluable because of a [TODO] cell.
+
+    Distinct from "no good move": the search could not look at all. The
+    caller should say which cell, and fall back to something that can
+    answer, rather than present an empty result as advice.
+    """
+
+
 class SearchTimeout(Exception):
     """Raised inside `evaluate` when a deadline passes.
 
@@ -348,12 +357,14 @@ def evaluate(state: BattleState, depth: int, objective=None,
     if probe_only:
         actions = actions[:1]
 
+    unevaluable = []
     for action in actions:
         try:
             branches = outcomes_mod.action_outcomes(state, action, objective)
-        except NotImplementedError:
+        except NotImplementedError as exc:
             # Gag or cog data still marked TODO -- skip this action rather
             # than let a data gap take down the whole search.
+            unevaluable.append(str(exc))
             continue
 
         branches, _dropped = trim(branches, epsilon)
@@ -372,6 +383,23 @@ def evaluate(state: BattleState, depth: int, objective=None,
                 break                      # this node is already refuted
 
     if best_action is None:
+        if unevaluable and len(unevaluable) == len(actions):
+            # EVERY action was unevaluable, which is a different thing
+            # from a position with nothing worth doing, and it used to be
+            # indistinguishable from one.
+            #
+            # Skipping per action assumes the gap is in that action's own
+            # gag. A gap in a COG's table is not: every action's outcome
+            # runs the same cog phase, so one TODO cell silently disables
+            # the entire search and it returns a heuristic and no move.
+            # Found on a VP board, where The Big Cheese at level 12 has a
+            # TODO accuracy -- the panel had been quietly falling back to
+            # the policy for every boss fight with one on the field.
+            #
+            # Raising is right because the caller can say so. Filling the
+            # cell in would be worse than useless: it is TODO precisely
+            # because nobody has confirmed it.
+            raise MissingData(sorted(set(unevaluable))[0])
         result = (heuristic_value(state), None)
         memo[key] = (result[0], None, EXACT)
         return result

@@ -63,6 +63,10 @@ DEFAULT_DEPTH = 4
 DEFAULT_BUDGET = 4.0
 DEFAULT_EPSILON = 0.03
 
+# Sentinel from `search_in_child`: the search could not run because the
+# board holds a cog with an unconfirmed data cell.
+MISSING_DATA = chr(0) + "missing-data"
+
 
 def _position_key(state) -> tuple:
     """What counts as a changed fight, for deciding to search again.
@@ -121,9 +125,17 @@ def search_in_child(state, objective_name: str, depth: int,
 
     state_mod.ALLOW_LEVEL_7 = bool(allow_level_7)
     objective = objectives.PRESETS.get(objective_name, objectives.DEFAULT)
-    _value, action = expectimax.best_action_iterative(
-        state, depth=depth, objective=objective, epsilon=DEFAULT_EPSILON,
-        time_budget=budget, exact_plies=1)
+    try:
+        _value, action = expectimax.best_action_iterative(
+            state, depth=depth, objective=objective,
+            epsilon=DEFAULT_EPSILON, time_budget=budget, exact_plies=1)
+    except expectimax.MissingData as exc:
+        # A [TODO] cell in a cog's table makes EVERY action unevaluable,
+        # because they all run the same cog phase. The policy is
+        # unaffected, so the caller keeps its answer -- but it has to be
+        # told, or the panel silently downgrades to the policy on every
+        # board holding that cog and looks like it is merely slow.
+        return MISSING_DATA, str(exc), None
     if action is None:
         return "no legal move -- nothing left to throw", None, None
     return (_render(action, state),
@@ -369,6 +381,19 @@ class RealmsWorker(threading.Thread):
             # on time by itself; this only stops a wedged process
             # holding the panel on "thinking" for ever.
             text, track, level = future.result(timeout=budget + 20.0)
+            if text == MISSING_DATA:
+                # Keep the policy's move -- it is a real answer and the
+                # only one available here -- and say what stopped the
+                # search rather than letting it look like a slow one.
+                with self._lock:
+                    if token != self._current:
+                        return
+                self.model.problems = [
+                    f"search unavailable, using the policy: {track}"]
+                self.model.thinking = False
+                self.model.engine = "rl"
+                self._post()
+                return
         except Exception as exc:        # noqa: BLE001
             # A search that dies takes its thread with it and nothing
             # else notices: no advice appears, which looks exactly like
