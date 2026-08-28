@@ -153,3 +153,79 @@ class SlipsAreFinite(unittest.TestCase):
         finally:
             ps.FIRE_PRICE = original
         self.assertEqual(free, priced)
+
+
+class FireInTheExactSearchTest(unittest.TestCase):
+    """The exact path, which nothing above reaches.
+
+    Every test in this file so far goes through `apply_toon_action` or
+    `party_search`, both of which branch on `action.fire` early. The
+    EXACT search does not: `outcomes.action_outcomes` asks for the hit
+    probability before it looks at what the action is.
+
+    That left `toon_action_accuracy` as the only guard, and it tested
+    `is_pass`, which is False for a fire by definition even though a
+    fire has `track=None` exactly as a pass does. So the call fell
+    through to `calc_toon_accuracy(None, 0, ...)` and raised
+
+        KeyError: no gag at no track (a pass) level 0
+
+    and since `legal_actions` offers one fire per live cog before it
+    offers any gag, EXACT SEARCH RAISED ON EVERY POSITION WHERE THE
+    TOON HELD A SLIP -- on the first branch it expanded.
+    """
+
+    def _tiny(self, fires):
+        """Small enough for `solve` to run to the end, with a slip."""
+        from solver import data
+        hp = data.cog_max_hp(2)
+        toon = ToonState(laff=30, max_laff=100, fires=fires,
+                         gag_counts={(Track.THROW, 1): 2},
+                         track_exp={Track.THROW: 2})
+        cog = CogState(cog_type="cold_caller", department="sellbot",
+                       level=2, hp=hp, max_hp=hp)
+        return BattleState(cogs=[cog], toons=[toon])
+
+    def test_a_fire_has_an_accuracy_and_it_is_certain(self):
+        fire = Action(track=None, level=0, target_index=0, fire=True)
+        self.assertEqual(
+            simulator.toon_action_accuracy(self._tiny(1), fire), 100)
+
+    def test_the_pass_guard_does_not_cover_a_fire(self):
+        """Why the guard needs its own arm rather than riding on the
+        pass. If this ever becomes True the comment above is stale."""
+        fire = Action(track=None, level=0, target_index=0, fire=True)
+        self.assertFalse(fire.is_pass)
+        self.assertIsNone(fire.track)
+
+    def test_action_outcomes_accepts_a_fire(self):
+        from solver import outcomes
+        fire = Action(track=None, level=0, target_index=0, fire=True)
+        branches = outcomes.action_outcomes(self._tiny(1), fire)
+        self.assertTrue(branches)
+        self.assertAlmostEqual(sum(p for p, _s, _r in branches), 1.0)
+        # It cannot miss, so the cog is gone down every branch.
+        for _p, nxt, _r in branches:
+            self.assertTrue(nxt.cogs[0].status.is_dead)
+            self.assertEqual(nxt.toons[0].fires, 0)
+
+    def test_exact_solve_runs_with_slips_in_the_pouch(self):
+        from solver.search import expectimax
+        value, action = expectimax.solve(self._tiny(1))
+        self.assertIsNotNone(action)
+        self.assertIsInstance(value, float)
+
+    def test_value_never_falls_as_slips_rise(self):
+        """The invariant that would have caught this on its own.
+
+        Nothing forces a toon to spend a slip, so every line playable
+        with none is still playable with two: the exact value must be
+        non-decreasing in the slip count. It cannot be checked at all
+        while the call raises, which is how the crash stayed hidden.
+        """
+        from solver.search import expectimax
+        values = [expectimax.solve(self._tiny(f))[0] for f in (0, 1, 2)]
+        for fewer, more in zip(values, values[1:]):
+            self.assertGreaterEqual(
+                more, fewer - 1e-6,
+                f"a spare slip lowered the exact value: {values}")

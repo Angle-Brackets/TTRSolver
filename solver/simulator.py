@@ -301,7 +301,19 @@ def toon_action_accuracy(state: BattleState, action: Action,
     invisible on a maxed team, which is every boss position modelled so
     far, and wrong for any mixed party.
     """
-    if action.is_pass:
+    if action.is_pass or action.fire:
+        # A PINK SLIP CANNOT MISS, and it needs its own arm here rather
+        # than riding on the pass guard: a fire has `track=None` too,
+        # but `is_pass` is False for it by definition, so it fell
+        # through to `calc_toon_accuracy(None, 0, ...)` and raised
+        # `KeyError: no gag at no track (a pass) level 0`.
+        #
+        # That was not a cosmetic gap. `outcomes.action_outcomes` asks
+        # for this before it looks at what the action is, so EXACT
+        # SEARCH RAISED on any position where the toon held a slip --
+        # `legal_actions` offers one fire per live cog, so the very
+        # first branch it expanded was a fire. Anyone carrying slips
+        # into the panel's search engine hit it.
         return 100
     toon = state.toons[actor]
     return mechanics.calc_toon_accuracy(
