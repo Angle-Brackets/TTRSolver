@@ -50,7 +50,17 @@ POLL_INTERVAL = 0.4
 # search is started when the POSITION changes, which is what these
 # summarise.
 DEFAULT_DEPTH = 4
-DEFAULT_BUDGET = 12.0
+# WAS 12s, AND IT BOUGHT NOTHING. Depth 4 never completes -- CLAUDE.md
+# measures depth 3 at "many minutes" -- so iterative deepening always
+# runs to the deadline, however long that is. Measured on the owner's
+# real 70-gag loadout, the recommended move stops changing by 2s in
+# every position tried: one cog, two cogs and four.
+#
+# It is not free time either. The search is CPU-bound Python in the
+# same process as the UI, so a long one starves the poll loop and the
+# window both -- which showed up as a panel that dragged when moved and
+# cog health that appeared to stop updating.
+DEFAULT_BUDGET = 4.0
 DEFAULT_EPSILON = 0.03
 
 
@@ -257,8 +267,42 @@ class RealmsWorker(threading.Thread):
                          args=(token, state, objective, depth,
                                budget)).start()
 
+    def _first_answer(self, state):
+        """The trained policy's move, in milliseconds.
+
+        `hybrid.climb` is what every offline evaluation in this project
+        actually runs -- the CEO sweeps, the building runs, the ship
+        gate -- and it is a thousand times faster than the search the
+        panel was using: 1-224ms against 9-12s on the same positions.
+
+        It is used here to answer IMMEDIATELY rather than to replace the
+        search, because which of the two plays better is genuinely not
+        established. They agreed on one of three test positions and
+        differed on the other two, and nothing here has measured which
+        was right. So the fast answer goes up first and the search
+        replaces it if it disagrees.
+        """
+        try:
+            import random
+
+            from ..search import hybrid
+
+            plan = hybrid.climb(state, random.Random(0), budget=8)
+        except Exception:               # pragma: no cover - optional path
+            return None
+        return plan[0] if plan else None
+
     def _run_search(self, token, state, objective, depth, budget) -> None:
         from ..search import expectimax
+
+        # Something on screen straight away. A blank panel for twelve
+        # seconds is the complaint that started this.
+        quick = self._first_answer(state)
+        if quick is not None:
+            with self._lock:
+                fresh = token == self._current
+            if fresh:
+                self._show(quick, state, thinking=True)
 
         try:
             _value, action = expectimax.best_action_iterative(
@@ -285,6 +329,17 @@ class RealmsWorker(threading.Thread):
         self.model.track = track
         self.model.gag_level = level
         self.model.thinking = False
+        self._post()
+
+    def _show(self, action, state, thinking: bool = False) -> None:
+        """Put a move on the panel without ending the search."""
+        self.model.gag = _render(action, state)
+        self.model.gag_at = time.time()
+        self.model.track = (None if action is None or action.is_pass
+                            else action.track.value)
+        self.model.gag_level = (None if action is None or action.is_pass
+                                else action.level)
+        self.model.thinking = thinking
         self._post()
 
     def _post(self) -> None:
