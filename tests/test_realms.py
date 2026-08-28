@@ -197,6 +197,32 @@ class ObjectStoreTest(unittest.TestCase):
                     fill_only=True)
         self.assertEqual(store.get(1).get("setHP"), 72)
 
+    def test_a_query_refreshes_what_the_stream_never_sends(self):
+        """THE OTHER HALF, and the fill-only rule got it wrong.
+
+        `setInventory` is declared `ownrecv`: the pouch goes to the
+        owning client and not to a listener, so a QUERY is the only way
+        it is ever seen. Filling it once and never again froze the pouch
+        at whatever the toon held when the reader attached, and the
+        solver went on planning with gags that had been thrown -- a
+        worse error than the stale HP the rule was added to prevent.
+
+        The rule is therefore about PROVENANCE, not about age: a query
+        may refresh anything the stream does not maintain, and must
+        never touch anything it does.
+        """
+        store = realms.ObjectStore()
+        store.set_field(1, "setHP", 90)
+        store.enter(1, "DistributedToon", 0, 1,
+                    {"setInventory": b"first", "setHP": 90}, fill_only=True)
+        store.set_field(1, "setHP", 61)
+        store.enter(1, "DistributedToon", 0, 1,
+                    {"setInventory": b"second", "setHP": 90}, fill_only=True)
+        obj = store.get(1)
+        self.assertEqual(obj.get("setHP"), 61, "stream owns this")
+        self.assertEqual(obj.get("setInventory"), b"second",
+                         "the query is the only source of this")
+
     def test_a_query_reply_still_fills_what_is_missing(self):
         """Which is the whole reason to query: an object generated
         before we attached has never been described on the stream."""

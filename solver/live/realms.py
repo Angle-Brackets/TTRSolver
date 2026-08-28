@@ -287,7 +287,7 @@ class DCIndex:
 # ---------------------------------------------------------------------
 
 class LiveObject:
-    __slots__ = ("do_id", "dclass", "parent", "zone", "fields")
+    __slots__ = ("do_id", "dclass", "parent", "zone", "fields", "streamed")
 
     def __init__(self, do_id: int, dclass: str = "",
                  parent: int = 0, zone: int = 0):
@@ -296,6 +296,9 @@ class LiveObject:
         self.parent = parent
         self.zone = zone
         self.fields: Dict[str, object] = {}
+        # Fields the STREAM has delivered at least once. A query reply
+        # may refresh anything not in here and must never touch what is.
+        self.streamed: set = set()
 
     def get(self, name: str, default=None):
         return self.fields.get(name, default)
@@ -349,16 +352,32 @@ class ObjectStore:
             obj = self._touch(do_id)
             obj.dclass, obj.parent, obj.zone = dclass, parent, zone
             if fill_only:
+                # REFRESH WHAT THE STREAM DOES NOT MAINTAIN, and only
+                # that. `setdefault` was too blunt: it froze fields the
+                # stream never sends.
+                #
+                # `setInventory` is declared `ownrecv`, so the pouch goes
+                # to the owning client and not to a listener -- a query
+                # is the ONLY way it is ever seen. Filling it once and
+                # never again left the solver planning with the gags the
+                # toon started the session holding, which is a far worse
+                # error than the stale HP the fill-only rule was added
+                # to prevent.
                 for name, value in fields.items():
-                    obj.fields.setdefault(name, value)
+                    if name not in obj.streamed:
+                        obj.fields[name] = value
             else:
                 obj.fields.update(fields)
+                obj.streamed.update(fields)
             return obj
 
-    def set_field(self, do_id, name, value) -> LiveObject:
+    def set_field(self, do_id, name, value,
+                  streamed: bool = True) -> LiveObject:
         with self._lock:
             obj = self._touch(do_id)
             obj.fields[name] = value
+            if streamed:
+                obj.streamed.add(name)
             return obj
 
     def relocate(self, do_id, parent, zone) -> None:
