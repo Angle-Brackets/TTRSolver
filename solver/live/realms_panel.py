@@ -302,7 +302,8 @@ class RealmsWorker(threading.Thread):
             with self._lock:
                 fresh = token == self._current
             if fresh:
-                self._show(quick, state, thinking=True)
+                self._show(quick, state, thinking=True,
+                           note="   · policy, ignores objective")
 
         try:
             _value, action = expectimax.best_action_iterative(
@@ -331,9 +332,24 @@ class RealmsWorker(threading.Thread):
         self.model.thinking = False
         self._post()
 
-    def _show(self, action, state, thinking: bool = False) -> None:
-        """Put a move on the panel without ending the search."""
-        self.model.gag = _render(action, state)
+    def _show(self, action, state, thinking: bool = False,
+              note: str = "") -> None:
+        """Put a move on the panel without ending the search.
+
+        `note` labels WHICH engine produced it, and that is not
+        decoration. The objective control steers the search and does
+        NOT steer the policy: `hybrid.climb` takes no objective, and the
+        scorer it ranks proposals with, `party_search._quick_score`,
+        reads fixed global weights rather than an objective. So a
+        provisional answer is the same move whether the player has
+        chosen "survive" or "glass cannon", and only the search that
+        replaces it honours the setting.
+
+        Showing an objective-blind answer under an objective dropdown
+        without saying so would be the panel quietly lying about what it
+        is doing.
+        """
+        self.model.gag = _render(action, state) + note
         self.model.gag_at = time.time()
         self.model.track = (None if action is None or action.is_pass
                             else action.track.value)
