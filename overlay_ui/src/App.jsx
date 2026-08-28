@@ -9,6 +9,7 @@ const EMPTY = {
   advice: '', track: null, gag_level: null, rows: [], problems: [],
   evidence: '', can_confirm: false, can_advise: false, thinking: false,
   allow_level_7: true, objective: 'balanced', budget: 15, toon_count: 1,
+  engine: '',
   lure_icon: '', map_icon: '',
   zone: '', neighborhood: '', district: '', invasion: '',
 }
@@ -225,6 +226,23 @@ export default function App() {
         >
           {model.status.toUpperCase()}
         </span>
+        {/* Which engine produced the advice. "RL" is the trained
+            policy answering in milliseconds and IGNORING the objective;
+            "SEARCH" is expectimax, which honours it. A badge rather
+            than words in the advice line, so the recommendation itself
+            stays short. */}
+        {model.engine && (
+          <span
+            className={`badge badge-xs h-[16px] px-1.5 text-[9px] font-semibold tracking-wide ${
+              model.engine === 'rl' ? 'badge-ghost opacity-60' : 'badge-primary'
+            }`}
+            title={model.engine === 'rl'
+              ? 'Trained policy — instant, but ignores the objective setting'
+              : 'Expectimax search — honours the objective setting'}
+          >
+            {model.engine === 'rl' ? 'RL' : 'SEARCH'}
+          </span>
+        )}
         <span className="ml-auto text-[11px] opacity-35">
           {model.turn ? `turn ~${model.turn}` : ''}
         </span>

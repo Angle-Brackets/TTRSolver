@@ -98,6 +98,39 @@ def _render(action, state) -> str:
         return f"{action.track.value} {action.level}"
 
 
+def search_in_child(state, objective_name: str, depth: int,
+                    budget: float, allow_level_7: bool):
+    """Run the search in a SEPARATE PROCESS and return a plain result.
+
+    WHY A PROCESS AND NOT A THREAD. The search is CPU-bound pure Python,
+    so a thread holds the GIL for most of its slice and starves both the
+    poll loop and the window. The panel dragged when moved and cog
+    health appeared to stall; cutting the search from twelve seconds to
+    four only made that less obvious rather than fixing it. A process
+    has its own interpreter and cannot interfere at all.
+
+    Returns `(text, track, level)` rather than an `Action`, so nothing
+    crosses the process boundary but a string and two scalars, and the
+    child renders the wording itself so it stays identical either way.
+
+    Top-level rather than a closure because Windows spawns rather than
+    forks, and a closure cannot be pickled into a fresh interpreter.
+    """
+    from .. import state as state_mod
+    from ..search import expectimax, objective as objectives
+
+    state_mod.ALLOW_LEVEL_7 = bool(allow_level_7)
+    objective = objectives.PRESETS.get(objective_name, objectives.DEFAULT)
+    _value, action = expectimax.best_action_iterative(
+        state, depth=depth, objective=objective, epsilon=DEFAULT_EPSILON,
+        time_budget=budget, exact_plies=1)
+    if action is None:
+        return "no legal move -- nothing left to throw", None, None
+    return (_render(action, state),
+            None if action.is_pass else action.track.value,
+            None if action.is_pass else action.level)
+
+
 def rows_from_state(state) -> List[CogRow]:
     """`CogRow`s from a searched state.
 
@@ -146,6 +179,7 @@ class RealmsWorker(threading.Thread):
         self._current = -1
         self._last_key: tuple = ()
         self._asked = threading.Event()
+        self._executor = None
 
     # -- controls -----------------------------------------------------
     def set_objective(self, name: str) -> None:
@@ -182,6 +216,9 @@ class RealmsWorker(threading.Thread):
 
     def close(self) -> None:
         self._stop.set()
+        if self._executor is not None:
+            self._executor.shutdown(wait=False, cancel_futures=True)
+            self._executor = None
 
     # -- the loop ------------------------------------------------------
     def run(self) -> None:              # pragma: no cover - needs a cluster
@@ -197,18 +234,27 @@ class RealmsWorker(threading.Thread):
                 return
             self.listener.start()
 
-        next_refresh = 0.0
+        next_full = 0.0
         while not self._stop.is_set():
             cycle = time.time()
-            if cycle >= next_refresh:
-                # The stream carries changes only, so anything generated
-                # before we attached has never been described.
-                try:
+            # THE FIGHT IS REFRESHED EVERY POLL, THE WORLD IS NOT.
+            # Both used to share a five-second timer, so a cog's HP was
+            # up to five seconds stale -- the server does not re-send
+            # `setHP` on every hit, it sends `damageSuit` for the
+            # animation, so the value in the store is only as fresh as
+            # the last query. Advice computed against a cog that died
+            # four seconds ago is worse than late advice.
+            #
+            # The asymmetry is what makes this cheap: the roster is two
+            # to five objects, the full sweep was 137, and it was the
+            # full sweep that needed throttling in the first place.
+            try:
+                self.listener.refresh_battle_members()
+                if cycle >= next_full:
                     self.listener.refresh_all()
-                    self.listener.refresh_battle_members()
-                except Exception:       # pragma: no cover
-                    pass
-                next_refresh = cycle + 5.0
+                    next_full = cycle + 10.0
+            except Exception:           # pragma: no cover
+                pass
             try:
                 self.tick()
             except Exception as exc:    # noqa: BLE001
@@ -292,9 +338,19 @@ class RealmsWorker(threading.Thread):
             return None
         return plan[0] if plan else None
 
-    def _run_search(self, token, state, objective, depth, budget) -> None:
-        from ..search import expectimax
+    def _pool(self):
+        """One worker process, made on first use and kept.
 
+        Windows spawns rather than forks, so a fresh interpreter costs
+        about half a second. Paid once rather than per search.
+        """
+        if self._executor is None:
+            from concurrent.futures import ProcessPoolExecutor
+
+            self._executor = ProcessPoolExecutor(max_workers=1)
+        return self._executor
+
+    def _run_search(self, token, state, objective, depth, budget) -> None:
         # Something on screen straight away. A blank panel for twelve
         # seconds is the complaint that started this.
         quick = self._first_answer(state)
@@ -302,19 +358,17 @@ class RealmsWorker(threading.Thread):
             with self._lock:
                 fresh = token == self._current
             if fresh:
-                self._show(quick, state, thinking=True,
-                           note="   · policy, ignores objective")
+                self._show(quick, state, thinking=True, engine="rl")
 
         try:
-            _value, action = expectimax.best_action_iterative(
-                state, depth=depth, objective=objective,
-                epsilon=DEFAULT_EPSILON, time_budget=budget, exact_plies=1)
-            text = (_render(action, state) if action is not None
-                    else "no legal move -- nothing left to throw")
-            track = None if action is None or action.is_pass \
-                else action.track.value
-            level = None if action is None or action.is_pass \
-                else action.level
+            future = self._pool().submit(
+                search_in_child, state,
+                getattr(objective, "name", self.objective_name),
+                depth, budget, self.allow_level_7)
+            # A margin past the child's own deadline. It should return
+            # on time by itself; this only stops a wedged process
+            # holding the panel on "thinking" for ever.
+            text, track, level = future.result(timeout=budget + 20.0)
         except Exception as exc:        # noqa: BLE001
             # A search that dies takes its thread with it and nothing
             # else notices: no advice appears, which looks exactly like
@@ -330,26 +384,29 @@ class RealmsWorker(threading.Thread):
         self.model.track = track
         self.model.gag_level = level
         self.model.thinking = False
+        self.model.engine = "search"
         self._post()
 
     def _show(self, action, state, thinking: bool = False,
-              note: str = "") -> None:
+              engine: str = "") -> None:
         """Put a move on the panel without ending the search.
 
-        `note` labels WHICH engine produced it, and that is not
-        decoration. The objective control steers the search and does
-        NOT steer the policy: `hybrid.climb` takes no objective, and the
-        scorer it ranks proposals with, `party_search._quick_score`,
-        reads fixed global weights rather than an objective. So a
-        provisional answer is the same move whether the player has
-        chosen "survive" or "glass cannon", and only the search that
-        replaces it honours the setting.
+        `engine` says WHICH one produced it, shown as a badge rather
+        than folded into the sentence -- the advice is what gets read at
+        a glance, and provenance is a property of it rather than part of
+        it.
 
-        Showing an objective-blind answer under an objective dropdown
-        without saying so would be the panel quietly lying about what it
-        is doing.
+        It is not decoration. The objective control steers the search
+        and does NOT steer the policy: `hybrid.climb` takes no objective
+        and `party_search._quick_score` reads fixed global weights, so
+        an "rl" answer is the same move whether the player picked
+        "survive" or "glass cannon". Only the "search" that replaces it
+        honours the setting, and a panel showing an objective-blind move
+        under an objective dropdown without saying so is lying about
+        what it is doing.
         """
-        self.model.gag = _render(action, state) + note
+        self.model.gag = _render(action, state)
+        self.model.engine = engine
         self.model.gag_at = time.time()
         self.model.track = (None if action is None or action.is_pass
                             else action.track.value)

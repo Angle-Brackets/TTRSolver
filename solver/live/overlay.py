@@ -180,6 +180,11 @@ class Model:
     # which is why a Big Wig stays nearly as bad in a four-toon fight
     # as it is solo.
     toon_count: int = 1
+    # Which engine produced the advice on screen: "rl", "search", or ""
+    # for neither. Shown as a badge rather than folded into the advice
+    # text, because the advice is the thing being read at a glance and
+    # provenance is a property OF it rather than part of it.
+    engine: str = ""
     # Where the toon is, from the Local API. The solver does not use it
     # -- a street does not change a round -- but it tells the player at a
     # glance whether the panel is talking to the game at all, which the

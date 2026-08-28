@@ -115,6 +115,7 @@ def model_json(model: Model) -> str:
         "thinking": model.thinking,
         "allow_level_7": model.allow_level_7,
         "toon_count": model.toon_count,
+        "engine": model.engine,
         "lure_icon": LURE_ICON,
         "map_icon": MAP_ICON,
         "zone": model.zone,
