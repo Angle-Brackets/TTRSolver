@@ -515,7 +515,7 @@ def _track_key(entry):
 
 
 def climb(state: BattleState, rng=random, budget: int = 16,
-          width: int = 3, probe_tracks: bool = True,
+          width: int = 3, probe_tracks: Optional[bool] = None,
           deep: bool = False, rollout: int = 0,
           fixed: Optional[Mapping[int, Optional[Action]]] = None,
           pairs: bool = True, pair_width: int = 7
@@ -592,8 +592,32 @@ def climb(state: BattleState, rng=random, budget: int = 16,
     distribution, where there is nothing good to stay near.
 
     `probe_tracks` offers each seat the best action of every track it
-    holds, not just the policy's top `width`. It is ON, and the story of
-    how it got there is the most useful thing in this file.
+    holds, not just the policy's top `width`. It is ON IN A PARTY AND
+    OFF SOLO, and the story of how it got there is the most useful thing
+    in this file.
+
+    THE SPLIT IS MEASURED. On v7_precision, 250 runs a cell, same seeds,
+    OFF minus ON:
+
+        building solo    +0.4%
+        building party   -1.2%
+        VP solo          +9.2%
+        VP party         -1.2%
+        CEO party       -17.6%
+
+    Solo is the only place turning it off wins, and the CEO is where it
+    earns its keep -- 20.0% with it against 2.4% without. Flipping it
+    globally, which the solo VP number alone argued for, would have cost
+    the CEO almost everything.
+
+    The reason fits the regulariser argument below. In a party the joint
+    plan space is far larger and a per-seat top-k is far more likely to
+    miss the move that only works in combination -- `sound/6->all` sat
+    22nd and 16th for two seats on the board in that note. Solo there is
+    no combination to miss, so the extra reach only gives an approximate
+    scorer more room to act on its errors.
+
+    `None` means decide from the party size. Pass a bool to override.
 
     IT WAS REFUTED TWICE. The reason was always the same: more reach for
     an approximate scorer is more scope to act on its errors. On 180
@@ -670,6 +694,11 @@ def climb(state: BattleState, rng=random, budget: int = 16,
     Boss analysis wants budget 36 or better. `advise.DEFAULT_BUDGET` is
     15 and is not measured here.
     """
+    if probe_tracks is None:
+        # Party only. See the measurements above: solo is the one place
+        # it costs, and the CEO is where it pays 20.0% against 2.4%.
+        probe_tracks = len(state.active_toons()) > 1
+
     import numpy as np
 
     from ..rl import env as env_mod
