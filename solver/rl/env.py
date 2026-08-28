@@ -369,7 +369,7 @@ class BattleEnv:
     """One battle. `reset()` starts a new one, `step()` plays a round."""
 
     def __init__(self, objective=None, rng=None, max_rounds: int = 20,
-                 precision: float = 0.0,
+                 precision: float = 0.0, fire_cost: float = 0.0,
                  shaping: float = 0.0, gamma: float = 0.99,
                  sampler=None, coordinated: bool = False,
                  survival_shaping: float = 0.0):
@@ -418,6 +418,9 @@ class BattleEnv:
         # keeps the reward exactly what every shipped policy was trained
         # against.
         self.precision = float(precision)
+        # Charged per pink slip spent. 0 keeps the reward every shipped
+        # policy was trained against.
+        self.fire_cost = float(fire_cost)
         self.gamma = gamma
         self.sampler = sampler or default_position
         self.coordinated = coordinated
@@ -665,6 +668,27 @@ class BattleEnv:
         # `waste_penalty` scales by scarcity, so a gag that is the only
         # thing that kills pays almost nothing and the same gag into a
         # nearly-dead cog pays nearly in full.
+        # A PINK SLIP COSTS THE ROUND'S ACTION, and the reward has never
+        # said so. `round_reward` charges laff and gags; fires are
+        # priced only in `_quick_score`, via FIRE_PRICE, which the
+        # policy never sees. So the fire logits learn that a slip is an
+        # unmissable kill and nothing teaches restraint.
+        #
+        # It shows badly: a solo VP with ten slips falls from 49.5% to
+        # 0.0%, dying three rounds sooner, with the policy's whole top
+        # FOUR being fires -- so no scorer weight can reach a gag,
+        # because none is on the shortlist.
+        #
+        # The cost is real and simple. Firing removes ONE cog while a
+        # group Lure neutralises four, for the same action. Charging it
+        # here teaches WHEN a guaranteed kill is worth more than the
+        # round, which is the thing `--fire-fraction` was reaching for
+        # and overshot.
+        if self.fire_cost:
+            spent = ps._fires_spent(before, nxt)
+            if spent:
+                reward -= self.fire_cost * float(spent)
+
         if self.precision:
             # The joint plan in coordinated mode, this seat's single
             # action otherwise -- `_waste_fraction` takes a plan either

@@ -133,6 +133,15 @@ def main():
                          "blind to all three, and every shipped policy "
                          "since e835148 has passed 0.25 by hand anyway. "
                          "Pass 0.0 to train facilities only")
+    ap.add_argument("--fire-cost", type=float, default=0.0,
+                    help="charge the REWARD per pink slip spent. A slip "
+                         "is an unmissable kill and the reward has never "
+                         "priced one, so the fire logits learn it is free "
+                         "-- a solo VP with ten slips drops from 49.5% "
+                         "to 0.0%, with the policy's entire top four "
+                         "being fires. The real cost is the round's "
+                         "action: a fire removes one cog where a group "
+                         "Lure neutralises four")
     ap.add_argument("--precision", type=float, default=0.0,
                     help="charge the REWARD for damage thrown past a "
                          "cog's remaining hit points. `waste` appeared "
@@ -298,6 +307,7 @@ def main():
                               shaping=args.shaping, gamma=args.gamma,
                               survival_shaping=args.survival_shaping,
                               precision=args.precision,
+                              fire_cost=args.fire_cost,
                               objective=objective)
             for i in range(args.envs)]
     obs, masks = zip(*[e.reset() for e in envs])
