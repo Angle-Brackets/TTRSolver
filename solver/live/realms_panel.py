@@ -185,6 +185,7 @@ class RealmsWorker(threading.Thread):
         # panel, not the policy. The owner reports preferring the
         # policy's picks and there is no measurement to contradict them.
         self.engine = engine
+        self.record_to = None
         self.model = Model()
         # Owned here rather than on the Model the UI holds, for the same
         # reason `overlay.Worker` owns them: `_post` ships a fresh copy
@@ -323,6 +324,35 @@ class RealmsWorker(threading.Thread):
             self._search(state)
         self._post()
 
+    def _record_position(self, state, advice: str) -> None:
+        """Append the EXACT position searched, so it can be replayed.
+
+        Reconstructing a board from a screenshot has now failed twice on
+        picks the owner reported: a Storm Cloud at a lured level 1 and a
+        pass with four lured cogs and a full pouch. Both rebuilt boards
+        gave sensible moves, which means the panel was searching
+        something other than what was reconstructed -- and no amount of
+        rebuilding by hand will find that.
+
+        Pickle rather than a summary: a summary records what I thought
+        to write down, which is exactly the assumption that keeps being
+        wrong.
+        """
+        if not self.record_to:
+            return
+        import pickle
+
+        try:
+            with open(self.record_to, "ab") as handle:
+                pickle.dump({"state": state, "advice": advice,
+                             "objective": self.objective_name,
+                             "engine": self.engine,
+                             "allow_level_7": self.allow_level_7,
+                             "budget": self.budget, "depth": self.depth},
+                            handle)
+        except Exception:               # pragma: no cover - never fatal
+            pass
+
     def _search(self, state) -> None:
         with self._lock:
             token = next(self._generation)
@@ -382,6 +412,7 @@ class RealmsWorker(threading.Thread):
                     self._show(quick, state,
                                thinking=self.engine == "both", engine="rl")
             if self.engine == "rl":
+                self._record_position(state, _render(quick, state))
                 return              # the policy's answer stands
 
         try:
@@ -422,6 +453,7 @@ class RealmsWorker(threading.Thread):
         self.model.gag_level = level
         self.model.thinking = False
         self.model.engine = "search"
+        self._record_position(state, text)
         self._post()
 
     def _show(self, action, state, thinking: bool = False,
@@ -815,6 +847,13 @@ def main(argv: Optional[list] = None) -> int:   # pragma: no cover
                              "is genuinely unmeasured -- everything "
                              "offline here evaluates the policy, so the "
                              "search is the untested one.")
+    parser.add_argument("--record", metavar="PATH",
+                        help="append every searched position and the "
+                             "advice given to PATH, so a bad pick can be "
+                             "replayed exactly. Rebuilding a board from a "
+                             "screenshot has twice produced a position "
+                             "the solver handles correctly, which proves "
+                             "only that the reconstruction was wrong.")
     parser.add_argument("--trace", action="store_true",
                         help="log every field the cogs and the battle "
                              "receive, with timestamps. For working out "
@@ -865,6 +904,7 @@ def main(argv: Optional[list] = None) -> int:   # pragma: no cover
     worker = RealmsWorker(inbox, objectives.PRESETS[args.objective],
                           args.depth, args.budget, listener=listener,
                           engine=args.engine)
+    worker.record_to = args.record
     worker.objective_name = args.objective
     state = RealmsPanelState()
     state.model.objective = args.objective
