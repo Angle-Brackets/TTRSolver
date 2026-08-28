@@ -129,3 +129,70 @@ The search runs when the POSITION changes -- laff, each cog's health and
 lure, the pouch, the party size -- and deliberately not on the battle's
 state string, which cycles several times a round and would restart the
 search mid-think.
+
+## The wire protocol, as established
+
+Every line here was settled by observation against a running cluster,
+because reasoning about Astron's numbering got it wrong twice.
+
+**Message types.** `[CONFIRMED]` means it delivered something that
+decoded to a real class or field on a live capture:
+
+| | | |
+|---|---|---|
+| 2014 / 2015 | `GET_ALL` / `_RESP` | [CONFIRMED] |
+| 2020 / 2021 | `SET_FIELD` / `SET_FIELDS` | [CONFIRMED] |
+| 2042 / 2043 | `ENTER_LOCATION_WITH_REQUIRED[_OTHER]` | [CONFIRMED] |
+| 2052 | `ENTER_AI_WITH_REQUIRED` | [CONFIRMED] |
+| 2040, 2046 | **not** enter messages — see below | disproven |
+
+**A SET_FIELD does not name a class.** The object gets tagged with the
+class the FIELD was declared on, which is a BASE of the real one. That
+is why cogs appeared and battles and toons did not: street cogs spam
+`setPathPosition`, so they were tagged `DistributedSuitBase` and
+matched; a battle's `setState` fires only at phase changes and a
+toon's position updates are declared on `DistributedSmoothNode`, so
+both objects existed only in the ENTER messages that were being
+dropped. **The ENTER path is not an optimisation, it is the only
+reliable source of an object's class.**
+
+**2040 and 2046 arrive exactly once per object** and are still not
+enter messages. That ratio is why they were suspected; parsing them
+that way delivered ZERO objects across a whole fight, every dclass id
+refusing to resolve. They are almost certainly `SET_LOCATION` and a
+`GET_LOCATION` reply. What made the wrong guess safe was making
+`_enter` decline an unresolvable class in the same change — without it
+the store would have filled with objects named `<60000>` and a bad
+guess would have looked like a discovery.
+
+**panda3d's DC accessors disagree with each other.**
+`getFieldByIndex` returns None for a bad index; `getClass` fails a C++
+assertion. The second killed the reader thread from one malformed
+datagram. Bounds are checked in `DCIndex.dclass`, and `feed` catches
+broadly — one bad datagram must cost one datagram.
+
+**A group Lure has no target.** `setChosenToonAttacks` names its target
+as an index into the suit roster, and a group Lure's is a sentinel
+rather than a slot, so keying only on the slot recorded nothing — and
+the reader then refused a cog it had watched being lured, blaming a
+Lure thrown "before it attached". The last Lure in a battle is
+remembered battle-wide as a fallback.
+
+**Ask sparingly.** `refresh_all` over 137 objects at every poll put
+several hundred `GET_ALL` queries a second through the message
+director and 6,000 replies through one fight, most of them
+re-describing a butterfly that had not moved. The battle roster is
+cheap and worth refreshing often; the full sweep is not.
+
+## Verified end to end
+
+A live street fight, read with nothing on screen:
+
+    Mover & Shaker L9 110/110 LURED
+    -> Birthday Cake on cog 1
+
+Which cross-checks three ways against tables Realms never touched: our
+`COG_HP_BY_LEVEL[9]` is 110 and the server said 110; the toon's organic
+Throw makes Birthday Cake 110 damage; and the cog being lured forces
+accuracy and adds knockback. An exact kill, chosen for reasons that can
+be checked by hand.
