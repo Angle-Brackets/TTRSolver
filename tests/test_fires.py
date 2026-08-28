@@ -239,60 +239,79 @@ class FireInTheExactSearchTest(unittest.TestCase):
                 f"a spare slip lowered the exact value: {values}")
 
 
-class FireWhenTest(unittest.TestCase):
-    """The board gate: a slip is cheap only when nothing is swinging.
+class DegenerateMenuTest(unittest.TestCase):
+    """A menu of one kind of move is what let slips run away with the VP.
 
-    Measured rather than reasoned. Solo VP, 8 cogs a round, ten slips,
-    held out over 500 runs: never 47.4%, lured 54.0% (+87/-54,
-    p=0.0068), always 0.0%. See `hybrid.FIRE_WHEN`.
+    A fire keys as (None, False), so ten of them collapse to a single
+    `_track_key` and fill the top-k, leaving the judge nothing to
+    compare against. `hybrid.PROBE_WHEN_DEGENERATE` notices that and
+    widens the menu for that seat.
+
+    Held out over 500 solo VPs at 8 cogs a round: with ten slips 68.6%
+    against 54.0% (+138/-65, p<0.0001), and with none 47.4% against
+    47.2% -- all of the gain, none of the cost. See `hybrid`.
     """
 
-    def _board(self, lured, dead=False):
-        from solver import data
-        hp = data.cog_max_hp(2)
-        cogs = []
-        for _ in range(2):
-            c = CogState(cog_type="cold_caller", department="sellbot",
-                         level=2, hp=hp, max_hp=hp)
-            c.status.lured = lured
-            cogs.append(c)
-        if dead:
-            cogs[0].status.is_dead = True
-            cogs[0].status.lured = False
-        toon = ToonState(laff=50, max_laff=100, fires=2,
-                         gag_counts={(Track.THROW, 1): 2},
-                         track_exp={Track.THROW: 2})
-        return BattleState(cogs=cogs, toons=[toon])
+    def _values(self, n, finite):
+        vals = [float("-inf")] * n
+        for i in finite:
+            vals[i] = 1.0
+        return vals
 
-    def test_not_offered_while_a_cog_is_awake(self):
-        from solver.search import hybrid
-        self.assertFalse(hybrid._fires_allowed(self._board(lured=False)))
+    def _fire_indices(self):
+        from solver.rl import env as env_mod
+        return list(env_mod._FIRE_INDEX.values())
 
-    def test_offered_once_the_board_is_asleep(self):
+    def test_all_fires_is_degenerate(self):
+        from solver.rl import env as env_mod
         from solver.search import hybrid
-        self.assertTrue(hybrid._fires_allowed(self._board(lured=True)))
+        order = self._fire_indices()[:3]
+        vals = self._values(len(env_mod.ACTIONS), order)
+        self.assertTrue(hybrid._menu_is_degenerate(order, vals))
 
-    def test_a_dead_cog_does_not_keep_the_board_awake(self):
-        """`lured` is False on a corpse, so a naive all() over
-        `state.cogs` would never open the gate once anything died."""
+    def test_a_mixed_menu_is_not(self):
+        from solver.rl import env as env_mod
         from solver.search import hybrid
-        self.assertTrue(
-            hybrid._fires_allowed(self._board(lured=True, dead=True)))
+        fire = self._fire_indices()[0]
+        gag = next(i for i, a in enumerate(env_mod.ACTIONS)
+                   if a is not None and not a.fire)
+        order = [fire, gag]
+        vals = self._values(len(env_mod.ACTIONS), order)
+        self.assertFalse(hybrid._menu_is_degenerate(order, vals))
 
-    def test_an_empty_board_does_not_open_the_gate(self):
+    def test_two_gags_of_one_track_and_reach_are_degenerate(self):
+        """Not a rule about fires. Any single `_track_key` counts --
+        this is the shape the Drop-argmax collapse had too."""
+        from solver.rl import env as env_mod
         from solver.search import hybrid
-        state = self._board(lured=True)
-        for cog in state.cogs:
-            cog.status.is_dead = True
-        self.assertFalse(hybrid._fires_allowed(state))
+        by_key = {}
+        for i, a in enumerate(env_mod.ACTIONS):
+            if a is None or a.fire:
+                continue
+            by_key.setdefault(hybrid._track_key(a), []).append(i)
+        order = next(v for v in by_key.values() if len(v) >= 2)[:2]
+        vals = self._values(len(env_mod.ACTIONS), order)
+        self.assertTrue(hybrid._menu_is_degenerate(order, vals))
 
-    def test_the_modes_do_what_they_say(self):
+    def test_masked_entries_are_ignored(self):
+        """An -inf entry is not on the menu, so it must not count as a
+        second kind of move and suppress the probe."""
+        from solver.rl import env as env_mod
         from solver.search import hybrid
-        original = hybrid.FIRE_WHEN
+        fires = self._fire_indices()[:2]
+        gag = next(i for i, a in enumerate(env_mod.ACTIONS)
+                   if a is not None and not a.fire)
+        vals = self._values(len(env_mod.ACTIONS), fires)   # gag is -inf
+        self.assertTrue(hybrid._menu_is_degenerate(fires + [gag], vals))
+
+    def test_the_flag_turns_it_off(self):
+        from solver.rl import env as env_mod
+        from solver.search import hybrid
+        order = self._fire_indices()[:3]
+        vals = self._values(len(env_mod.ACTIONS), order)
+        original = hybrid.PROBE_WHEN_DEGENERATE
         try:
-            hybrid.FIRE_WHEN = "never"
-            self.assertFalse(hybrid._fires_allowed(self._board(lured=True)))
-            hybrid.FIRE_WHEN = "always"
-            self.assertTrue(hybrid._fires_allowed(self._board(lured=False)))
+            hybrid.PROBE_WHEN_DEGENERATE = False
+            self.assertFalse(hybrid._menu_is_degenerate(order, vals))
         finally:
-            hybrid.FIRE_WHEN = original
+            hybrid.PROBE_WHEN_DEGENERATE = original

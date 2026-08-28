@@ -194,10 +194,6 @@ def _logits(model, state: BattleState, seat: int, pending):
     out = x @ model["aw"] + model["ab"]
     mask = env_mod.legal_mask(state, seat)
     out = np.where(np.array(mask), out, -np.inf)
-    if not _fires_allowed(state):
-        for index in env_mod._FIRE_INDEX.values():
-            if index < len(out):
-                out[index] = -np.inf
     return out
 
 
@@ -402,93 +398,6 @@ def _judge(state: BattleState, plan, deep: bool) -> float:
 # one of the same track. Toggleable because the effect is still being
 # measured and the honest state of it is "unproven": see the A/B in
 # `_track_key`.
-FIRE_WHEN = "lured"
-"""When the policy may propose a PINK SLIP: never, lured, or always.
-
-A slip costs no gag, so it reads as free and the policy treated it as
-free -- with ten in hand a fire was 100% of its top-1 and top-3. It is
-not free: it costs a ROUND, and a round with the cogs awake costs about
-fifteen laff. That is what makes it expensive here specifically, since
-solo VP losses are 100% "went sad" with a median 73 gags still in the
-pouch. Laff is the binding constraint and rounds are the currency.
-
-WHICH IS ALSO WHY WITHHOLDING THE SLIP ENTIRELY WAS THE WRONG FIX. A
-LURED BOARD DOES NOT SWING, so those rounds are already free -- lure
-first, then fire, and the removal costs nothing at all. Solo VP, 8 cogs
-a round, ten slips, against the same seeds:
-
-    arm       selection (200)      held out (500)   slips spent
-    never          51.5%               47.4%            0.0
-    lured          54.5%               54.0%            3.0
-    always          0.0%                0.0%            6.6
-
-    lured vs never   +35/-29 p=0.53    +87/-54 p=0.0068
-
-Pooled that is +122/-83. `lured` is the only arm that both beats
-withholding and actually spends the slips, which matters because a real
-solo VP does use them -- `never` bought back the win rate by giving up
-a tool the player has.
-
-`always` is the measurement that started this: ten slips took the
-policy from winning half its VPs to winning NONE, and 237 held-out
-seeds flip loss-to-win when the option is withdrawn, none the other
-way. With an empty pocket the gate changes nothing at all (+0/-0 over
-200 seeds), which is what says the column is about fires rather than
-about a perturbed search.
-
-The gate is on the BOARD, not on the policy's judgement, because the
-policy's judgement is the thing that was wrong. It says when a slip is
-cheap; it does not say to spend one.
-
-LOOSER RULES ARE MEASURED AND NONE OF THEM CLEARS THE BAR. `lured`
-wants EVERY live cog asleep, so it declines a board with one awake and
-three asleep, which is nearly as cheap. Against that, gating instead on
-`party_search.expected_incoming` -- what the round is actually expected
-to cost -- and on the count of awake cogs, 300 runs a cell:
-
-    arm                cleared   slips   vs lured
-    lured                56.3%     3.1
-    incoming <= 2        55.7%     3.1    +2/-4    p=0.69
-    incoming <= 6        56.0%     3.4   +13/-14   p=1.00
-    incoming <= 12       51.3%     3.8   +18/-33   p=0.049
-    at most 1 awake      59.7%     4.0   +36/-26   p=0.25
-
-`incoming <= 12` is the useful negative: too loose measurably HURTS,
-which is the same round-cost story from the other end.
-
-`at most 1 awake` is nominally the best arm and spends more of the
-slips, so it was taken to held-out seeds over 600 runs: 57.5% against
-54.8%, +73/-57, p=0.19. Consistent in direction across both sets and
-pooled at +109/-83, p=0.071 -- short of the bar this project holds
-elsewhere, so it is NOT shipped. It is the first thing to retry if the
-policy is ever retrained, since a policy that has actually seen slips
-may use a wider gate better than this one does.
-
-Beware when re-running that sweep: `_logits` now does the masking
-itself, so a wrapper measuring an alternative gate must set
-`FIRE_WHEN = "always"` first or it silently measures the incumbent
-five times. That is what the first run of it did -- five arms, +0/-0,
-identical slips spent.
-
-One hook point is enough. `propose` picks through `_choose(_logits())`
-and `climb` builds both its top-k and its track probes from the same
-vector, gating on `np.isfinite`, so a -inf there is unreachable from
-every candidate source in this module. Confirmed rather than assumed:
-under `never` the runs spend 0.0 slips holding ten.
-"""
-
-
-def _fires_allowed(state) -> bool:
-    """Is a pink slip on the menu for this board?"""
-    if FIRE_WHEN == "always":
-        return True
-    if FIRE_WHEN == "never":
-        return False
-    live = [c for c in state.cogs if not c.status.is_dead]
-    # A lured cog skips its attack, so a round spent here is free.
-    return bool(live) and all(c.status.lured for c in live)
-
-
 GROUP_PROBES = True
 
 # MEASURED NEUTRAL, kept as a correctness rule rather than a win. Paired
@@ -603,6 +512,86 @@ def _track_key(entry):
     except (KeyError, ValueError, NotImplementedError):
         group = entry.target_index is None
     return (entry.track, group)
+
+
+PROBE_WHEN_DEGENERATE = True
+"""Probe the tracks when the whole top-k is ONE kind of move.
+
+`probe_tracks` is decided per CALL and defaults to party-only, because
+in solo the extra reach mostly gives an approximate scorer more room to
+act on its errors. This is decided per SEAT and asks a narrower
+question: did the policy just hand the judge a menu with no choice on
+it?
+
+When every entry in the top-k shares a `_track_key`, the judge is
+choosing between orderings of one move and cannot see an alternative,
+however badly the one on offer scores.
+
+TEN PINK SLIPS DO EXACTLY THAT. A fire keys as (None, False), so all
+of them collapse to one entry and the top-3 is three fires. The policy
+then fires every round, and since a slip costs no gag but does cost a
+ROUND -- about fifteen laff with the cogs awake -- it met the back half
+of the VP with no laff left. Solo VP at 8 cogs a round went from 49.5%
+with an empty slip pocket to 0.0% with ten in it.
+
+Solo VP, 8 cogs a round, 300 runs a cell on selection seeds and 500 on
+held out:
+
+    slips   probes off   probes always   degenerate-only
+       10       56.3%          66.0%         66.7% / 68.6%
+        0       47.0%          37.3%         47.3% / 47.4%
+
+Neither FIXED setting wins both rows. Probing always costs ten points
+with an empty pocket (p=0.006, reproducing the +9.2% for probes-off
+already recorded on `climb`); probing never costs ten with slips in it.
+The rows disagree because the menu only collapses in one of them, which
+is the thing this flag tests for. Held out it is +138/-65 (p<0.0001)
+with slips and +2/-1 without -- all of the gain, none of the cost.
+
+WHAT THIS REPLACES, and why it is better than what it replaces. The
+first fix was a hand-written rule that withheld slips unless every live
+cog was lured, on the reasoning that a lured board does not swing so
+the round is free. It worked -- 54.0% held out against 47.4% for
+withholding them entirely -- and it was still wrong, in two ways this
+one is not.
+
+It was a rule about pink slips, so it could only ever fix pink slips;
+the Drop-argmax collapse is the same failure and it would have missed
+it. And it was aimed at the ranking when the fault was in the REACH:
+with the alternatives on the menu the policy fires MORE, not less --
+5.2 slips a run against 3.0 -- and wins ten points more often. The
+lure rule was suppressing a good move to prevent a bad one, because
+nothing had put the two side by side. Turning it back on on top of
+degenerate probing measured 57.3% against 66.0%: it costs nine points
+once the judge can see.
+
+The order the project keeps -- model, then weights, then reach -- says
+to suspect the proposal before the ranking. This is the reach, and it
+is the third time on this function that a menu the judge never saw was
+mistaken for a judgement it got wrong.
+"""
+
+
+def _menu_is_degenerate(order, values) -> bool:
+    """Is every candidate in the top-k the same kind of move?"""
+    import numpy as np
+
+    from ..rl import env as env_mod
+
+    if not PROBE_WHEN_DEGENERATE:
+        return False
+    keys = set()
+    for index in order:
+        index = int(index)
+        if not np.isfinite(values[index]):
+            continue
+        entry = env_mod.ACTIONS[index]
+        if entry is None:
+            continue                  # the pass; ACTIONS has gaps
+        keys.add(_track_key(entry))
+        if len(keys) > 1:
+            return False
+    return len(keys) == 1
 
 
 def climb(state: BattleState, rng=random, budget: int = 16,
@@ -823,7 +812,7 @@ def climb(state: BattleState, rng=random, budget: int = 16,
             pending[seat] = None
             values = _logits(model, state, seat, pending)
             order = list(np.argsort(values)[::-1][:width])
-            if probe_tracks:
+            if probe_tracks or _menu_is_degenerate(order, values):
                 # The best of every track this toon can actually play,
                 # in the policy's own within-track order.
                 seen_tracks = set()
