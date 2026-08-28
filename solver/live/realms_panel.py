@@ -169,7 +169,7 @@ class RealmsWorker(threading.Thread):
     """Reads the cluster, searches when the position moves, posts a Model."""
 
     def __init__(self, outbox: "queue.Queue", objective, depth: int,
-                 budget: float, listener=None):
+                 budget: float, listener=None, engine: str = "both"):
         super().__init__(daemon=True)
         self.outbox = outbox
         self.objective = objective
@@ -177,6 +177,14 @@ class RealmsWorker(threading.Thread):
         self.depth = depth
         self.budget = budget
         self.listener = listener
+        # "rl", "search" or "both". WHICH IS BETTER IS NOT ESTABLISHED,
+        # which is the honest reason this is a choice rather than a
+        # decision made here. Everything offline in this project -- the
+        # CEO sweeps, the building runs, the ship gate -- evaluates
+        # `hybrid.climb`, so the search is the UNTESTED path in the
+        # panel, not the policy. The owner reports preferring the
+        # policy's picks and there is no measurement to contradict them.
+        self.engine = engine
         self.model = Model()
         # Owned here rather than on the Model the UI holds, for the same
         # reason `overlay.Worker` owns them: `_post` ships a fresh copy
@@ -365,12 +373,16 @@ class RealmsWorker(threading.Thread):
     def _run_search(self, token, state, objective, depth, budget) -> None:
         # Something on screen straight away. A blank panel for twelve
         # seconds is the complaint that started this.
-        quick = self._first_answer(state)
-        if quick is not None:
-            with self._lock:
-                fresh = token == self._current
-            if fresh:
-                self._show(quick, state, thinking=True, engine="rl")
+        if self.engine != "search":
+            quick = self._first_answer(state)
+            if quick is not None:
+                with self._lock:
+                    fresh = token == self._current
+                if fresh:
+                    self._show(quick, state,
+                               thinking=self.engine == "both", engine="rl")
+            if self.engine == "rl":
+                return              # the policy's answer stands
 
         try:
             future = self._pool().submit(
@@ -793,6 +805,16 @@ def main(argv: Optional[list] = None) -> int:   # pragma: no cover
     parser.add_argument("--budget", type=float, default=DEFAULT_BUDGET)
     parser.add_argument("--no-level-7", action="store_true")
     parser.add_argument("--dir", help="Realms install directory")
+    parser.add_argument("--engine", default="both",
+                        choices=("both", "rl", "search"),
+                        help="'rl' is the trained policy alone, answering "
+                             "in milliseconds and ignoring the objective. "
+                             "'search' is expectimax alone, which honours "
+                             "it. 'both' shows the policy first and lets "
+                             "the search replace it. Which plays better "
+                             "is genuinely unmeasured -- everything "
+                             "offline here evaluates the policy, so the "
+                             "search is the untested one.")
     parser.add_argument("--trace", action="store_true",
                         help="log every field the cogs and the battle "
                              "receive, with timestamps. For working out "
@@ -841,7 +863,8 @@ def main(argv: Optional[list] = None) -> int:   # pragma: no cover
 
     inbox: "queue.Queue" = queue.Queue(maxsize=4)
     worker = RealmsWorker(inbox, objectives.PRESETS[args.objective],
-                          args.depth, args.budget, listener=listener)
+                          args.depth, args.budget, listener=listener,
+                          engine=args.engine)
     worker.objective_name = args.objective
     state = RealmsPanelState()
     state.model.objective = args.objective
