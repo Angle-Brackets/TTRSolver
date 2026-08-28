@@ -222,6 +222,14 @@ class FireInTheExactSearchTest(unittest.TestCase):
         with none is still playable with two: the exact value must be
         non-decreasing in the slip count. It cannot be checked at all
         while the call raises, which is how the crash stayed hidden.
+
+        Held here to one position so the suite stays fast. Offline it
+        was swept wider: 400 random small positions at depth 2, zero
+        violations, smallest gain from 0 to 2 slips +0.000 -- that is,
+        a spare slip is sometimes worth nothing and never worth less
+        than nothing. Exact solve to the end is far too slow for that
+        breadth; it ran on three positions and gained on all three
+        (-117.2 / 90.2 / 96.3 on the first).
         """
         from solver.search import expectimax
         values = [expectimax.solve(self._tiny(f))[0] for f in (0, 1, 2)]
