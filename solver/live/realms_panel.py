@@ -538,6 +538,45 @@ class RealmsPanelState:
         self.window = None
 
 
+def _summarise_movie(value) -> str:          # pragma: no cover
+    """`setMovie` in one readable line.
+
+    struct BattleMovie {
+        int8 movieHasBeenMade; uint32[] activeToons; uint32[] activeSuits;
+        ToonAttack[] toonAttacks; SuitAttack[] suitAttacks;
+    }
+    struct ToonAttack { index, track, level, target, hp[], accBonus,
+                        hpBonus, kbBonus[], suitDied, suitRevive }
+    """
+    if not isinstance(value, (list, tuple)) or len(value) < 5:
+        return str(value)
+    made, _toons, _suits, toon_attacks, suit_attacks = value[:5]
+    if not made:
+        return "not made yet"
+
+    parts = []
+    for attack in toon_attacks or ():
+        try:
+            _i, track, level, target, hp = attack[:5]
+            died = attack[8] if len(attack) > 8 else 0
+        except Exception:
+            parts.append(str(attack)[:40])
+            continue
+        if int(track) < 0:
+            continue
+        total = sum(int(x) for x in (hp or ()))
+        parts.append(f"toon track{track} lvl{int(level) + 1} -> {target} "
+                     f"dmg{list(hp or ())}={total}"
+                     + (" KILLED" if died else ""))
+    for attack in suit_attacks or ():
+        try:
+            _i, track, target, hp = attack[:4]
+        except Exception:
+            continue
+        parts.append(f"cog atk{track} -> {target} dmg{list(hp or ())}")
+    return "; ".join(parts) or "no attacks"
+
+
 def _trace(listener) -> int:                 # pragma: no cover
     """Log every field the fight receives, with timestamps.
 
@@ -552,7 +591,7 @@ def _trace(listener) -> int:                 # pragma: no cover
     started = time.time()
     interesting = {"setHP", "setMaxHP", "damageSuit", "setState",
                    "setMembers", "setChosenToonAttacks", "doExplode",
-                   "setSkeleRevives", "doRevive"}
+                   "setSkeleRevives", "doRevive", "setMovie"}
 
     def in_the_fight(do_id: int) -> bool:
         """Only the battle and its own cogs. The street sends a
@@ -595,6 +634,17 @@ def _trace(listener) -> int:                 # pragma: no cover
             value = (f"suits={list(members.suits)} "
                      f"lured={members.suits_lured!r} "
                      f"traps={members.suit_traps!r}")
+        if name == "setMovie":
+            # THE ROUND'S ACTUAL RESULT. `ToonAttack.hp` is the damage
+            # dealt per target and `suitDied` says whether it finished
+            # the cog, so this is what really happened -- as against
+            # `setChosenToonAttacks`, which is only what was AIMED.
+            #
+            # It is also the discriminator the last capture lacked: with
+            # only setHP to go on, "the server sends pre-round HP" and
+            # "the server resolves instantly and that attack missed"
+            # explain the same bytes.
+            value = _summarise_movie(value)
         text = str(value)
         print(f"  {time.time()-started:7.2f}s  {obj.do_id:<11} "
               f"{name:<22} {text[:70]}")
