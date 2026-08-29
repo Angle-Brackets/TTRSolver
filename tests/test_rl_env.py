@@ -526,3 +526,36 @@ class SlipEncodingTest(unittest.TestCase):
         toon.fire_capacity = 0
         with self.assertRaises(ValueError):
             env_mod._fire_feature(toon)
+
+    def test_the_loaded_model_carries_its_obs_version(self):
+        """`_load` rebuilds the model dict from selected keys, so a
+        field that is not copied is silently lost -- and `_logits` then
+        defaults to version 1 and reads a version 2 policy through the
+        wrong encoder. Invisible in testing, because the shipped policy
+        really is version 1."""
+        import json
+        import tempfile
+        from pathlib import Path
+        from solver.search import hybrid
+        from solver.rl import env as env_mod
+
+        shipped = (Path(__file__).resolve().parents[1]
+                   / "solver" / "rl" / "ppo_facility.json")
+        if not shipped.exists():
+            self.skipTest("no shipped policy in this checkout")
+        payload = json.loads(shipped.read_text(encoding="utf-8"))
+        payload["obs_version"] = env_mod.OBS_VERSION
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "versioned.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            saved = (hybrid._EXPORT, hybrid._MODEL, hybrid._TRIED)
+            try:
+                hybrid._EXPORT = path
+                hybrid._MODEL, hybrid._TRIED = None, False
+                model = hybrid._load()
+                self.assertIsNotNone(model, hybrid.unavailable_reason())
+                self.assertEqual(model.get("obs_version"),
+                                 env_mod.OBS_VERSION)
+            finally:
+                hybrid._EXPORT, hybrid._MODEL, hybrid._TRIED = saved

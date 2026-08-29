@@ -163,6 +163,14 @@ def _load():
         "trunk": layers,
         "aw": np.array(payload["actor"]["weight"]).T,
         "ab": np.array(payload["actor"]["bias"]),
+        # CARRIED, not dropped. `_logits` feeds this back to `encode` so
+        # a policy is read with the layout it was fitted to. Rebuilding
+        # the model dict from selected keys silently lost it, and every
+        # version 2 policy was then read through the version 1 encoder
+        # -- the exact silent misread the version exists to prevent, and
+        # invisible because the shipped policy IS version 1 and so was
+        # right by accident.
+        "obs_version": int(payload.get("obs_version", 1)),
     }
     return _MODEL
 
