@@ -548,6 +548,16 @@ The rows disagree because the menu only collapses in one of them, which
 is the thing this flag tests for. Held out it is +138/-65 (p<0.0001)
 with slips and +2/-1 without -- all of the gain, none of the cost.
 
+WHERE IT CANNOT REGRESS, and it is worth knowing why rather than
+measuring it: the condition is `probe_tracks or _menu_is_degenerate`,
+which short-circuits, so on any position where probes are already on --
+every party position, since `probe_tracks` defaults to party-only -- the
+new code is not even called and behaviour is bit-identical. Only solo
+can change. Solo buildings at difficulty 8 with no slips read 17.3%
+against 16.7%, +9/-7, p=0.80: neutral, on the surface where the
+Drop-argmax collapse lived and where a degenerate menu was therefore
+most plausible without slips in the pouch.
+
 WHAT THIS REPLACES, and why it is better than what it replaces. The
 first fix was a hand-written rule that withheld slips unless every live
 cog was lured, on the reasoning that a lured board does not swing so
