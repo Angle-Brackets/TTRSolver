@@ -254,3 +254,79 @@ class SeparationTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EngineToggleTest(unittest.TestCase):
+    """The badge swaps engines without paying for a search.
+
+    The search takes fifteen seconds on any board with two or more cogs
+    (measured; see `advise.DEFAULT_DEPTH`), so it runs in the background
+    whichever answer is on screen. Swapping then reads a value that is
+    already in the model. If it ever starts costing a search, this is
+    the test that should fail.
+    """
+
+    def _worker(self):
+        w = worker(FakeListener([], {}))
+        w.model.rl_gag = "Storm Cloud on all"
+        w.model.rl_track = "squirt"
+        w.model.rl_gag_level = 5
+        w.model.gag = w.model.rl_gag
+        w.model.engine = "rl"
+        return w
+
+    def test_swapping_to_a_finished_search_is_instant(self):
+        w = self._worker()
+        w.model.search_gag = "Presentation on all"
+        w.model.search_track = "lure"
+        w.model.search_gag_level = 7
+        w.model.search_ready = True
+        w.prefer_engine("search")
+        self.assertEqual(w.model.gag, "Presentation on all")
+        self.assertEqual(w.model.engine, "search")
+        self.assertEqual(w.model.track, "lure")
+        self.assertEqual(w.model.gag_level, 7)
+
+    def test_swapping_back_restores_the_policy_answer(self):
+        w = self._worker()
+        w.model.search_gag = "Presentation on all"
+        w.model.search_ready = True
+        w.prefer_engine("search")
+        w.prefer_engine("rl")
+        self.assertEqual(w.model.gag, "Storm Cloud on all")
+        self.assertEqual(w.model.engine, "rl")
+
+    def test_asking_early_keeps_the_move_on_screen(self):
+        """A blank panel mid-fight is worse than the other engine's
+        move with a badge saying which it is."""
+        w = self._worker()
+        w.model.search_ready = False
+        w.prefer_engine("search")
+        self.assertEqual(w.model.preferred_engine, "search")
+        self.assertEqual(w.model.gag, "Storm Cloud on all")
+        self.assertEqual(w.model.engine, "rl")
+
+    def test_the_preference_survives_so_the_answer_swaps_itself_in(self):
+        """Having asked early, the search must take over when it lands
+        rather than needing a second click."""
+        w = self._worker()
+        w.prefer_engine("search")               # nothing to show yet
+        w.model.search_gag = "Presentation on all"
+        w.model.search_ready = True
+        w.prefer_engine(w.model.preferred_engine)
+        self.assertEqual(w.model.gag, "Presentation on all")
+
+    def test_an_unknown_name_falls_back_to_the_policy(self):
+        w = self._worker()
+        w.prefer_engine("nonsense")
+        self.assertEqual(w.model.preferred_engine, "rl")
+
+    def test_the_serialiser_carries_what_the_badge_needs(self):
+        import json
+        w = self._worker()
+        w.model.search_gag = "Presentation on all"
+        w.model.search_ready = True
+        payload = json.loads(realms_panel.model_json(w.model))
+        for key in ("engine", "preferred_engine", "search_ready",
+                    "rl_gag", "search_gag"):
+            self.assertIn(key, payload)

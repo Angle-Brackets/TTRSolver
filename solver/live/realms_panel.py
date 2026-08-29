@@ -234,6 +234,43 @@ class RealmsWorker(threading.Thread):
         self._last_key = ()
         self.ask_now()
 
+    def prefer_engine(self, name) -> None:
+        """Swap which engine's answer is on screen. No recomputation.
+
+        Both answers are already in the model -- the search runs in the
+        background whichever one the player is reading -- so this is a
+        read, not a search. That is the whole point: the search costs
+        fifteen seconds on any board with two or more cogs, and a player
+        who wants a second opinion mid-fight cannot spend that.
+
+        Asking for the search before it has finished sets the
+        PREFERENCE and leaves the policy's move on screen, so the swap
+        happens by itself when the answer lands. It does not blank the
+        panel to wait, because a blank panel mid-fight is worse than a
+        move from the other engine with a badge saying so.
+        """
+        choice = "search" if str(name).lower() == "search" else "rl"
+        with self._lock:
+            self.model.preferred_engine = choice
+            if choice == "search":
+                if not self.model.search_ready:
+                    self._post()
+                    return          # it will swap in when it arrives
+                self.model.gag = self.model.search_gag
+                self.model.track = self.model.search_track or None
+                self.model.gag_level = self.model.search_gag_level or None
+                self.model.engine = "search"
+            else:
+                if not self.model.rl_gag:
+                    self._post()
+                    return
+                self.model.gag = self.model.rl_gag
+                self.model.track = self.model.rl_track or None
+                self.model.gag_level = self.model.rl_gag_level or None
+                self.model.engine = "rl"
+            self.model.gag_at = time.time()
+        self._post()
+
     def ask_now(self) -> None:
         self._asked.set()
 
@@ -415,12 +452,30 @@ class RealmsWorker(threading.Thread):
     def _run_search(self, token, state, objective, depth, budget) -> None:
         # Something on screen straight away. A blank panel for twelve
         # seconds is the complaint that started this.
+        # A NEW POSITION INVALIDATES THE STORED SEARCH ANSWER. Leaving
+        # it would let the badge toggle produce last round's move, which
+        # is worse than having nothing to toggle to.
+        self.model.search_gag = ""
+        self.model.search_track = ""
+        self.model.search_gag_level = 0
+        self.model.search_ready = False
+
         if self.engine != "search":
             quick = self._first_answer(state)
             if quick is not None:
                 with self._lock:
                     fresh = token == self._current
                 if fresh:
+                    self.model.rl_gag = _render(quick, state)
+                    self.model.rl_track = (
+                        "" if quick is None or quick.is_pass
+                        else quick.track.value)
+                    self.model.rl_gag_level = (
+                        0 if quick is None or quick.is_pass else quick.level)
+                    # Shown now whatever the preference: it is the only
+                    # answer that exists this early, and a blank panel
+                    # while the search runs is the complaint that
+                    # started all of this.
                     self._show(quick, state,
                                thinking=self.engine == "both", engine="rl")
             if self.engine == "rl":
@@ -459,12 +514,23 @@ class RealmsWorker(threading.Thread):
         with self._lock:
             if token != self._current:
                 return                  # the fight moved on
-        self.model.gag = text
-        self.model.gag_at = time.time()
-        self.model.track = track
-        self.model.gag_level = level
+
+        # STORED ALWAYS, DISPLAYED ON REQUEST. The search runs whichever
+        # engine the player is reading, precisely so that swapping to it
+        # costs nothing: the fifteen seconds are spent while they are
+        # looking at the policy's move, not after they ask.
+        self.model.search_gag = text
+        self.model.search_track = track or ""
+        self.model.search_gag_level = level or 0
+        self.model.search_ready = True
         self.model.thinking = False
-        self.model.engine = "search"
+
+        if self.model.preferred_engine == "search":
+            self.model.gag = text
+            self.model.gag_at = time.time()
+            self.model.track = track
+            self.model.gag_level = level
+            self.model.engine = "search"
         self._record_position(state, text)
         self._post()
 
@@ -542,6 +608,10 @@ class RealmsApi:
 
     def pull(self) -> str:
         return model_json(self._state.model)
+
+    def prefer_engine(self, name) -> None:
+        """Badge click: read the other engine's answer, already computed."""
+        self._worker.prefer_engine(name)
 
     def set_objective(self, name) -> None:
         self._worker.set_objective(str(name))

@@ -116,6 +116,10 @@ def model_json(model: Model) -> str:
         "allow_level_7": model.allow_level_7,
         "toon_count": model.toon_count,
         "engine": model.engine,
+        "preferred_engine": model.preferred_engine,
+        "search_ready": model.search_ready,
+        "rl_gag": model.rl_gag,
+        "search_gag": model.search_gag,
         "lure_icon": LURE_ICON,
         "map_icon": MAP_ICON,
         "zone": model.zone,
@@ -136,6 +140,22 @@ class Api:
 
     def pull(self) -> str:
         return model_json(self._state.model)
+
+    def prefer_engine(self, name) -> None:
+        """INERT here. This panel has one engine.
+
+        The other panel runs a policy and the search side by side and
+        lets the badge swap between them. This one only ever runs the
+        search, so there is nothing to swap to: `model.engine` is never
+        set, the badge does not render, and the click cannot happen.
+
+        It exists anyway, for the same reason `name_cog` and
+        `mark_lured` exist over there -- THE PAGE IS SHARED. A call site
+        in App.jsx reaches whatever Api is behind it, and a missing
+        method fails at click time with nothing the player will ever
+        see. `tests/test_panel_bridge` enforces that and is what caught
+        this one.
+        """
 
     def toggle_fight(self) -> None:
         """Confirm a fight, or end one and reset.

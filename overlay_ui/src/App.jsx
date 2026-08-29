@@ -10,6 +10,10 @@ const EMPTY = {
   evidence: '', can_confirm: false, can_advise: false, thinking: false,
   allow_level_7: true, objective: 'balanced', budget: 15, toon_count: 1,
   engine: '',
+  // The badge reads both: `engine` labels what is on screen,
+  // `preferred_engine` and `search_ready` decide whether to show the
+  // waiting ellipsis.
+  preferred_engine: 'rl', search_ready: false,
   lure_icon: '', map_icon: '',
   zone: '', neighborhood: '', district: '', invasion: '',
 }
@@ -226,22 +230,37 @@ export default function App() {
         >
           {model.status.toUpperCase()}
         </span>
-        {/* Which engine produced the advice. "RL" is the trained
-            policy answering in milliseconds and IGNORING the objective;
-            "SEARCH" is expectimax, which honours it. A badge rather
-            than words in the advice line, so the recommendation itself
-            stays short. */}
+        {/* Which engine produced the advice, and a control to swap.
+            "RL" is the trained policy answering in milliseconds and
+            IGNORING the objective; "SEARCH" is expectimax, which
+            honours it.
+
+            Clicking swaps. It costs nothing because the search runs in
+            the background whichever answer is on screen -- measured at
+            fifteen seconds on any board with two or more cogs, which is
+            not a bill anyone can pay mid-fight after deciding they want
+            a second opinion.
+
+            The badge shows what PRODUCED the text now displayed, which
+            is not always the preference: ask for the search before it
+            lands and the policy's move stays up, dimmed to "…", and the
+            swap happens by itself when the answer arrives. */}
         {model.engine && (
-          <span
-            className={`badge badge-xs h-[16px] px-1.5 text-[9px] font-semibold tracking-wide ${
+          <button
+            type="button"
+            onClick={() => call('prefer_engine',
+                                model.engine === 'rl' ? 'search' : 'rl')}
+            className={`badge badge-xs h-[16px] px-1.5 text-[9px] font-semibold tracking-wide cursor-pointer hover:opacity-100 ${
               model.engine === 'rl' ? 'badge-ghost opacity-60' : 'badge-primary'
             }`}
             title={model.engine === 'rl'
-              ? 'Trained policy — instant, but ignores the objective setting'
-              : 'Expectimax search — honours the objective setting'}
+              ? 'Trained policy — instant, but ignores the objective setting. Click for the expectimax answer.'
+              : 'Expectimax search — honours the objective setting. Click for the policy answer.'}
           >
             {model.engine === 'rl' ? 'RL' : 'SEARCH'}
-          </span>
+            {model.preferred_engine === 'search' && !model.search_ready
+              ? '…' : ''}
+          </button>
         )}
         <span className="ml-auto text-[11px] opacity-35">
           {model.turn ? `turn ~${model.turn}` : ''}

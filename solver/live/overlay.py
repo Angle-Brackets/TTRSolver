@@ -185,6 +185,27 @@ class Model:
     # text, because the advice is the thing being read at a glance and
     # provenance is a property OF it rather than part of it.
     engine: str = ""
+    # BOTH ENGINES' ANSWERS, KEPT SIDE BY SIDE, so the badge can be a
+    # toggle instead of a label. The search takes fifteen seconds on any
+    # board with two or more cogs (see `advise.DEFAULT_DEPTH`), so a
+    # player who swaps to it after the fact would otherwise pay that
+    # cost mid-fight. It runs in the background regardless of which
+    # answer is on screen; swapping then reads a value that is already
+    # here.
+    #
+    # `preferred_engine` is the player's choice and persists across
+    # rounds. `engine` stays what actually PRODUCED the text currently
+    # displayed, which is not always the preference -- the search may
+    # not have finished yet, and on the first round of a fight it never
+    # has.
+    rl_gag: str = ""
+    rl_track: str = ""
+    rl_gag_level: int = 0
+    search_gag: str = ""
+    search_track: str = ""
+    search_gag_level: int = 0
+    search_ready: bool = False
+    preferred_engine: str = "rl"
     # Where the toon is, from the Local API. The solver does not use it
     # -- a street does not change a round -- but it tells the player at a
     # glance whether the panel is talking to the game at all, which the
