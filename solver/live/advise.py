@@ -108,6 +108,41 @@ DEFAULT_BUDGET = 15.0
 # change a decision.
 DEFAULT_EPSILON = 0.03
 
+# RAISING IT BUYS DEPTH THAT DOES NOT CHANGE THE PLAY. Since the depth
+# cap does not bind above one cog (see above), pruning is the only knob
+# that can reach a deeper pass inside the budget -- so it was measured,
+# 14 boards a row at the panel's 15s, against a reference of epsilon
+# 0.03 given 60s:
+#
+#     cogs  epsilon        depth reached   agrees with ref
+#        3      ref                 3:14        --
+#             0.03                 2:14        13/14
+#             0.08          2:5 3:7 4:2        13/14
+#             0.15          2:3 3:9 4:2        11/14
+#        4      ref              2:7 3:7        --
+#             0.03                 2:14        14/14
+#             0.08             2:13 3:1        14/14
+#             0.15             2:11 3:3        12/14
+#
+# 0.08 is a real gain in depth at no cost in agreement: three-cog boards
+# go from every one stuck at depth 2 to seven reaching 3 and two
+# reaching 4. 0.15 goes deeper still and starts disagreeing, which is
+# the accuracy being spent.
+#
+# THEN THE GAMES SAID IT DOES NOT MATTER. 42 paired single battles,
+# three cogs, maxed toon, 15s a decision -- the regime where 0.08 buys
+# the ply -- came out 41 TIED, one better, none worse, +0.40 laff,
+# p=1.0. A four-cog run at 2s was 117 tied of 120, but that one proves
+# nothing: at 2s neither epsilon gets past the same shallow pass, so it
+# was the wrong regime to ask in.
+#
+# So 0.03 stays, on the grounds that nothing justifies moving it rather
+# than that 0.08 was refuted. The likely reason for all the ties is that
+# a maxed toon against three cogs is not a CLOSE position, and a deeper
+# search only changes an answer that was nearly balanced. If the panel
+# is ever pointed at close positions -- low laff, or a boss -- this is
+# worth asking again, in that regime rather than this one.
+
 # Collapse the cog phase into its mean where the objective allows it.
 # A ply costs actions x chance outcomes, and this attacks the second
 # factor: two cogs reach depth 4 instead of 3, three and four reach 3
