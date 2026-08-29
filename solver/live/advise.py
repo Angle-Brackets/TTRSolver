@@ -72,6 +72,35 @@ RECOMPUTE_ON = {"battle_started", "cog_joined", "cog_defeated", "damage"}
 DEFAULT_DEPTH = 4
 DEFAULT_BUDGET = 15.0
 
+# THE DEPTH ONLY BINDS ON ONE COG. `best_action_iterative` searches
+# 1..depth and keeps the deepest pass that FINISHED, so 4 is a cap
+# rather than a promise, and measuring what it actually reaches at this
+# budget gives 12 boards a row, solo maxed toon, epsilon 0.03:
+#
+#     cogs  median s   max s  timed out   depth reached
+#        1      5.85    9.43          0   4:12
+#        2     15.03   15.08         11   3:11  4:1
+#        3     15.09   15.20         12   2:10  3:2
+#        4     15.19   15.40         12   2:12
+#
+# From two cogs up the budget binds, not the depth, and on four the
+# search always stops at 2 having spent the whole fifteen seconds --
+# most of it failing to finish a pass it then throws away.
+#
+# That is the exact opposite of what the note above this hoped for. It
+# reasons that a ply deeper changes the move 40-42% of the time on three
+# and four cogs, so "the crowded fights are where any further depth
+# would earn its keep". Those are the boards that never get it.
+#
+# So RAISING `DEFAULT_DEPTH` does nothing above one cog, and lowering it
+# to 2 would save nothing either -- the search already stops there. The
+# only knob that can buy a ply inside a fixed budget is the pruning; see
+# `DEFAULT_EPSILON`.
+#
+# Worth knowing separately: the panel takes the full fifteen seconds on
+# any board with two or more cogs. If that is too slow in play, the
+# depth table says a smaller budget costs very little on four cogs.
+
 # Dropped probability mass per chance node. Checked against an exact
 # search on four positions: at 0.03 every one picks the same move while
 # running 1.5-1.8x faster, and at 0.08 the three-cog position changes its
