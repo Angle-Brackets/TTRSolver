@@ -559,3 +559,67 @@ class SlipEncodingTest(unittest.TestCase):
                                  env_mod.OBS_VERSION)
             finally:
                 hybrid._EXPORT, hybrid._MODEL, hybrid._TRIED = saved
+
+
+class GrantSlipsTest(unittest.TestCase):
+    """Slips are for bosses; standard play does not need them.
+
+    The owner states this, and the training distribution had it exactly
+    inverted: `--fire-fraction` reached street and building positions
+    only, because the boss branch of the sampler returned before it.
+    The VP -- the fight the slip collapse was measured on -- never held
+    a slip in training at all, and the CEO was the one exception,
+    issuing its own five a toon.
+    """
+
+    def _party(self, n=2):
+        from solver import data
+        from solver.state import BattleState, CogState, ToonState, Track
+        hp = data.cog_max_hp(2)
+        cog = CogState(department="sellbot", cog_type="cold_caller",
+                       level=2, hp=hp, max_hp=hp)
+        toons = [ToonState(100, 100, {Track.THROW: 7}, {}, frozenset())
+                 for _ in range(n)]
+        return BattleState(cogs=[cog], toons=toons)
+
+    def test_a_zero_fraction_grants_nothing(self):
+        import random
+        from solver.rl import env as env_mod
+        state = self._party()
+        env_mod.grant_slips(state, random.Random(0), 0.0, 10)
+        self.assertTrue(all(t.fires == 0 for t in state.toons))
+
+    def test_a_certain_fraction_always_grants(self):
+        import random
+        from solver.rl import env as env_mod
+        state = self._party()
+        env_mod.grant_slips(state, random.Random(0), 1.0, 10)
+        self.assertTrue(all(t.fires > 0 for t in state.toons))
+
+    def test_the_whole_party_gets_the_same_count(self):
+        import random
+        from solver.rl import env as env_mod
+        state = self._party(n=4)
+        env_mod.grant_slips(state, random.Random(3), 1.0, 20)
+        counts = {t.fires for t in state.toons}
+        self.assertEqual(len(counts), 1)
+
+    def test_the_count_never_exceeds_the_cap(self):
+        import random
+        from solver.rl import env as env_mod
+        for seed in range(50):
+            state = self._party()
+            env_mod.grant_slips(state, random.Random(seed), 1.0, 6)
+            for toon in state.toons:
+                self.assertTrue(1 <= toon.fires <= 6, toon.fires)
+
+    def test_the_fraction_is_honoured_roughly(self):
+        import random
+        from solver.rl import env as env_mod
+        rng = random.Random(7)
+        granted = 0
+        for _ in range(2000):
+            state = self._party(n=1)
+            env_mod.grant_slips(state, rng, 0.30, 10)
+            granted += state.toons[0].fires > 0
+        self.assertTrue(0.25 < granted / 2000 < 0.35, granted / 2000)

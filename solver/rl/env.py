@@ -1362,6 +1362,36 @@ def restock(toon, rng, capacity=None) -> None:
     toon.gag_counts = {k: v for k, v in counts.items() if v > 0}
 
 
+def grant_slips(state, rng, fraction: float, cap: int) -> None:
+    """Hand the party pink slips, in place, with probability `fraction`.
+
+    WHERE SLIPS BELONG IS A FACT ABOUT HOW THE GAME IS PLAYED, and the
+    owner states it: slips are for BOSSES. Standard play does not need
+    them, buildings included.
+
+    The training distribution had it exactly inverted. The boss branch
+    of the sampler returned early, so `--fire-fraction` reached only
+    street and facility positions -- and the VP, which is where the
+    slip collapse was measured, never held a slip in training at all.
+    The CEO was the sole exception, issuing its own five per toon.
+
+    That inversion is the best available explanation for a fire logit
+    that ignores the board. A street battle is one to four cogs, so
+    removing one really is most of the work, and "hold slips -> fire"
+    is a reasonable habit THERE. Carried to an eight-cog VP wave, where
+    a group Lure stops four cogs swinging for the same round, it is
+    the reflex that loses fifty points of win rate.
+
+    Not a rule of the game -- nothing stops a toon firing on a street.
+    A choice about what to TRAIN on, made to match typical play.
+    """
+    if not fraction or rng.random() >= fraction:
+        return
+    count = rng.randint(1, max(1, int(cap)))
+    for toon in state.toons:
+        toon.fires = count
+
+
 def facility_position(rng) -> BattleState:
     """A facility floor, built street first.
 

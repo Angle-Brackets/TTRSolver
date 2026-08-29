@@ -251,6 +251,13 @@ def main():
                     state = vp_mod.vp_position(r)
                 if solo_fraction and r.random() < solo_fraction:
                     state = _make_solo(state, r)
+                # SLIPS BELONG TO BOSSES. The CEO already issued its own
+                # five a toon, which is the real number and must not be
+                # overwritten; the VP got none at all, which is why the
+                # slip collapse was measured on the one fight the policy
+                # had never held a slip in. See `env.grant_slips`.
+                if state.kind == "vp":
+                    env_mod.grant_slips(state, r, fire_fraction, fire_max)
                 return state
 
             # A facility position becomes a multi-floor episode in
@@ -265,26 +272,17 @@ def main():
                 state.cogs_remaining = 0
                 state.kind = "street"
 
-            # PINK SLIPS IN A MINORITY OF POSITIONS. A slip is an
-            # unmissable instant kill, so handing them out everywhere
-            # would teach a policy to answer every board by firing and
-            # it would never learn to throw. Giving them to a fraction
-            # teaches the harder thing: when a guaranteed kill is worth
-            # more than the gag it replaces.
+            # NO SLIPS ON A STREET OR IN A BUILDING. They used to be
+            # handed out HERE and nowhere else, which inverted the game:
+            # the owner states that slips are for bosses and standard
+            # play does not need them, buildings included.
             #
-            # Without ANY, the four fire logits are never updated, and a
-            # party holding twenty slips plays as though it holds none --
-            # which is exactly what the first CEO run showed, a toon
-            # dying on 7 laff with five slips in hand.
-            # Boss sides have already returned above, and deliberately:
-            # the CEO issues its own five slips a toon, which is the real
-            # number, and overwriting that with a training default would
-            # teach the wrong budget on the one fight where the budget is
-            # known.
-            if fire_fraction and r.random() < fire_fraction:
-                count = r.randint(1, fire_max)
-                for toon in state.toons:
-                    toon.fires = count
+            # The reason it matters is not tidiness. A street battle is
+            # one to four cogs, so firing one is most of the work and
+            # "hold slips -> fire" is a fair habit there; it is the same
+            # habit that loses fifty points at an eight-cog VP wave. The
+            # policy learned slips in the one context where the lesson
+            # does not transfer. See `env.grant_slips`.
             return state
     objective = None
     if args.objective:
