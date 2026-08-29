@@ -100,6 +100,31 @@ DEFAULT_BUDGET = 15.0
 # Worth knowing separately: the panel takes the full fifteen seconds on
 # any board with two or more cogs. If that is too slow in play, the
 # depth table says a smaller budget costs very little on four cogs.
+#
+# WHICH RAISES WHETHER THE SEARCH IS WORTH RUNNING AT ALL HERE, since
+# `hybrid.climb` answers the same board in a millisecond. Measured, 80
+# single battles, four cogs, a WOUNDED toon (45-75 laff, because a maxed
+# toon wins every one of these under either engine and separates
+# nothing), paired on identical seeds:
+#
+#     engine        won   mean laff left   s/decision
+#     rl         98.8%             56.7         0.007
+#     search    100.0%             57.9        14.647
+#
+#     same outcome on 79 of 80; search only 1, RL only 0, p=1.0
+#
+# So they AGREE almost always, the search is a hair ahead inside noise,
+# and it charges 2088x the time for it. That is a price difference
+# rather than a quality one, and on a crowded board the price is fifteen
+# seconds of a live fight.
+#
+# It is NOT a general verdict, and two limits matter. This is single
+# battles: nothing here tests husbanding a pouch across floors, which is
+# where the two engines have the most room to differ. And the RL engine
+# has a failure mode the search cannot have -- its proposals can
+# collapse onto one kind of move, which is what pink slips did to it --
+# patched by `hybrid.PROBE_WHEN_DEGENERATE` but patched, not absent. The
+# search enumerates legal actions and so cannot fail that way.
 
 # Dropped probability mass per chance node. Checked against an exact
 # search on four positions: at 0.03 every one picks the same move while
