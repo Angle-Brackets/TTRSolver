@@ -755,17 +755,35 @@ class BattleEnv:
         #     fire_cost 25   28.0%  15.5%   3.5%
         #
         # It removes the collapse -- fires fall from 100% of the
-        # shortlist to 0% and 31% -- and takes about twenty points off
-        # the base rate with it, measured with NO slips in hand, so the
-        # damage is to general play rather than to slip discipline.
-        # Worse, it does not fix the presenting problem either: fc25
-        # still slides 28.0 -> 15.5 -> 3.5 as slips are added.
+        # shortlist to 0% and 31%.
         #
-        # The likelier story is that slip-carrying boards are simply
-        # UNDER-TRAINED -- `--fire-fraction` is 0.15, so a board with
-        # ten of them is a thin slice of the distribution and the policy
-        # is unfamiliar rather than wrongly incentivised. Pricing cannot
-        # fix unfamiliarity; exposure might. Left here at 0.0.
+        # THE "TWENTY POINTS OFF THE BASE RATE" CLAIM THAT USED TO BE
+        # HERE WAS WRONG, and it was wrong for a reason worth keeping.
+        # It read 31.5% and 28.0% against the shipped policy's 49.5% and
+        # concluded the term had done damage. It had not. Ten training
+        # runs later -- old code and new, three fire fractions, two
+        # dosages, fresh seeds -- solo VP at 8 cogs a round spans
+        # 21.0-38.0% with a mean of 30.2% and an sd of 5.0. The
+        # fire_cost runs sat squarely inside that. The SHIPPED policy is
+        # the outlier, 3.8 sd above the mean of the rest.
+        #
+        # It is an outlier by construction: v7_precision was selected
+        # for shipping BECAUSE it scored +16 on solo VP, so the baseline
+        # is a best-of-N on the exact metric being gated with. Every
+        # single new run then looks like a regression, and none of them
+        # is one.
+        #
+        # So fire_cost is UNJUDGED, not refuted. It stays at 0.0 because
+        # nothing has shown it helps, which is a different and much
+        # weaker statement than what stood here before.
+        #
+        # WHAT THIS MEANS FOR ANY FUTURE RETRAIN: one run cannot be
+        # compared with the shipped artifact. The comparison has to be
+        # between DISTRIBUTIONS -- several seeds a condition, judged on
+        # the spread -- or the winner's curse answers for you. Note the
+        # training's own `eval_return` did not show this at all: the
+        # v10 runs score 39-40 against shipped's 38.92, because eval
+        # runs the training mix while the gate is one solo slice.
         if self.fire_cost:
             spent = ps._fires_spent(before, nxt)
             if spent:
