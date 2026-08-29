@@ -817,8 +817,43 @@ def climb(state: BattleState, rng=random, budget: int = 16,
     three earlier refutations of "widen the menu" -- this one is neutral
     where it cannot help rather than costly everywhere.
 
-    Boss analysis wants budget 36 or better. `advise.DEFAULT_BUDGET` is
-    15 and is not measured here.
+    Boss analysis wants budget 36 or better. That is a PARTY result and
+    it does not carry to solo -- measured now, where it used to say the
+    panel's setting was unmeasured.
+
+    Solo VP, 8 cogs a round, ten slips, shipped policy on every arm,
+    paired on identical seeds:
+
+        budget    150 sel.    300 held out
+             3       0.0%
+             4      11.3%
+             6      71.3%           71.0%   +49/-41  p=0.46
+             8      63.3%           68.3%   (the panel's setting)
+            16      47.3%
+            24      47.3%           55.3%   +26/-65  p=0.0001
+            36      47.3%
+
+    RAISING IT HURTS, by thirteen points held out. The reason is the one
+    already written three times above: more reach for an approximate
+    scorer is more scope to act on its errors. In a party the joint plan
+    space is large enough that the extra reach finds moves worth having;
+    solo there is no combination to miss.
+
+    16, 24 and 36 are IDENTICAL on the selection set, which is the tell
+    for what the budget does here. Solo has one seat, so once the
+    single-seat menu is exhausted there is nothing left to spend on --
+    the pair loop below needs two seats. Budget 8 stops partway through
+    that menu, and stopping helps.
+
+    Below 6 it collapses instead -- 11.3% at 4, 0.0% at 3 -- because the
+    climb cannot afford even the first few candidates and returns close
+    to the policy's raw argmax, which is what `PROBE_WHEN_DEGENERATE`
+    exists to rescue.
+
+    6 looked like a free +8 on the selection set and came back +2.7 and
+    p=0.46 held out, so the panel's 8 stays. `advise.DEFAULT_BUDGET` is
+    a different quantity -- seconds for the expectimax path -- and is
+    still unmeasured.
     """
     if probe_tracks is None:
         # Party only. See the measurements above: solo is the one place
