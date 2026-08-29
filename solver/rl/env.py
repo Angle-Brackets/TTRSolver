@@ -160,9 +160,61 @@ def _trap_damage(cog) -> float:
         return 0.0
 
 
+OBS_VERSION = 2
+"""Bumped whenever `encode` changes what a slot MEANS.
+
+A policy is a pile of floats against a fixed layout, and `OBS_DIM` does
+not change when the SCALE of a slot changes -- so a stale policy loads
+without complaint and quietly misreads its input. Version 1 normalised
+slips as `min(fires, 10) / 10`; version 2 divides by the toon's
+`fire_capacity`. Ten slips therefore went from 1.0 to 0.05, and nothing
+about the shapes would have said so.
+
+`hybrid._load` refuses a policy whose version it does not recognise.
+"""
+
+
+def _fire_feature(toon, obs_version: int = None) -> float:
+    """Pink slips as a fraction of what a toon can carry.
+
+    [CONFIRMED] wiki, via `ToonState.fire_capacity`: the cap is 200.
+
+    THE LITERAL 10 THIS REPLACES WAS DOING TWO JOBS AND BOTH BADLY. It
+    was the scale, and it was also a saturation point -- `min(fires, 10)`
+    meant ten slips and twenty were the same input, which is exactly
+    what the slip curve showed when 10 and 20 came back identical to the
+    decimal. And training never went above five (`--fire-max` defaults
+    to 5), so the live range was 0.1 to 0.5 and every measurement taken
+    at ten slips was off the end of it.
+
+    Dividing by the real capacity costs signal magnitude -- a realistic
+    ten slips is 0.05 -- and buys back resolution across the whole range
+    a toon can actually hold. A linear input rescaled is something a
+    first layer can absorb; a saturated one has thrown the difference
+    away before the net sees it.
+    """
+    if obs_version is None:
+        obs_version = OBS_VERSION
+    fires = max(0, int(toon.fires))
+    if obs_version < 2:
+        # A version 1 policy was FITTED to this. Reproduce it exactly
+        # rather than refusing to load one -- the shipped policy is
+        # version 1, and it has to keep advising while its replacement
+        # trains.
+        return min(fires, 10) / 10.0
+    cap = max(1, int(getattr(toon, "fire_capacity", 200)))
+    return min(fires, cap) / cap
+
+
 def encode(state: BattleState, actor: int = 0,
-           pending=None) -> List[float]:
+           pending=None, obs_version: int = None) -> List[float]:
     """Fixed-width observation, from `actor`'s point of view.
+
+    `obs_version` reproduces an OLDER layout's meaning for a policy
+    fitted to it. `OBS_DIM` does not change when a slot's SCALE does, so
+    a stale policy loads and misreads its input in silence; passing the
+    version the policy was exported with is what stops that. Defaults to
+    current, which is what training wants.
 
     `pending` is the joint plan so far this round -- one entry per toon,
     None where they have not chosen. Coordinated play needs it; solo and
@@ -228,7 +280,7 @@ def encode(state: BattleState, actor: int = 0,
             out += [1.0,
                     toon.laff / max(1, toon.max_laff),
                     toon.max_laff / 137.0,
-                    min(toon.fires, 10) / 10.0]
+                    _fire_feature(toon, obs_version)]
             for track in TRACKS:
                 for level in range(1, 8):
                     held = toon.gag_counts.get((track, level), 0)

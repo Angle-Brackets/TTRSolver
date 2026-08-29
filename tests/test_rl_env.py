@@ -409,3 +409,93 @@ class MoveGeneratorAgreementTest(unittest.TestCase):
             state.free_passes = 0
             for actor in range(len(state.toons)):
                 self.assertTrue(any(env.legal_mask(state, actor)))
+
+
+class SlipEncodingTest(unittest.TestCase):
+    """Slips are normalised by what a toon can CARRY, not by a literal.
+
+    [CONFIRMED] wiki: the cap is 200, reduced from 255 on 31 May 2022.
+    `ToonState.fire_capacity` holds it and `_fire_feature` divides by it.
+
+    The literal 10 this replaced was doing two jobs and both badly. It
+    was the scale, and `min(fires, 10)` also made it a saturation point,
+    so ten slips and twenty were the same number going in -- which is
+    why the slip curve came back identical at 10 and 20 to the decimal.
+    Training never went above five either (`--fire-max` defaults to 5),
+    so the live range was 0.1 to 0.5 and every measurement taken at ten
+    slips was off the end of it.
+    """
+
+    def _toon(self, fires):
+        from solver.state import ToonState, Track
+        t = ToonState(100, 100, {Track.THROW: 7}, {}, frozenset())
+        t.fires = fires
+        return t
+
+    def test_the_capacity_is_the_divisor(self):
+        from solver.rl import env as env_mod
+        toon = self._toon(50)
+        self.assertAlmostEqual(env_mod._fire_feature(toon),
+                               50 / toon.fire_capacity)
+
+    def test_a_full_pocket_is_one(self):
+        from solver.rl import env as env_mod
+        toon = self._toon(0)
+        toon.fires = toon.fire_capacity
+        self.assertAlmostEqual(env_mod._fire_feature(toon), 1.0)
+
+    def test_ten_and_twenty_are_no_longer_the_same_input(self):
+        """The saturation that hid half the slip curve."""
+        from solver.rl import env as env_mod
+        self.assertNotAlmostEqual(env_mod._fire_feature(self._toon(10)),
+                                  env_mod._fire_feature(self._toon(20)))
+
+    def test_a_custom_capacity_is_honoured(self):
+        from solver.rl import env as env_mod
+        toon = self._toon(5)
+        toon.fire_capacity = 10
+        self.assertAlmostEqual(env_mod._fire_feature(toon), 0.5)
+
+    def test_over_capacity_still_clamps(self):
+        from solver.rl import env as env_mod
+        self.assertAlmostEqual(env_mod._fire_feature(self._toon(10_000)),
+                               1.0)
+
+    def test_version_one_is_reproduced_exactly(self):
+        """The shipped policy was FITTED to `min(fires, 10) / 10`. It has
+        to keep advising while its replacement trains, so the old
+        meaning stays reachable rather than the old policy being
+        refused."""
+        from solver.rl import env as env_mod
+        for fires, expected in ((0, 0.0), (5, 0.5), (10, 1.0), (20, 1.0)):
+            self.assertAlmostEqual(
+                env_mod._fire_feature(self._toon(fires), obs_version=1),
+                expected, msg=f"{fires} slips under version 1")
+
+    def test_encode_threads_the_version_through(self):
+        from solver.rl import env as env_mod
+        from solver.state import BattleState, CogState
+        from solver import data
+        hp = data.cog_max_hp(2)
+        cog = CogState(department="sellbot", cog_type="cold_caller",
+                       level=2, hp=hp, max_hp=hp)
+        state = BattleState(toon=self._toon(10), cogs=[cog])
+        old = env_mod.encode(state, 0, None, obs_version=1)
+        new = env_mod.encode(state, 0, None, obs_version=2)
+        self.assertEqual(len(old), len(new))
+        self.assertNotEqual(old, new,
+                            "ten slips must not encode the same under "
+                            "both versions, or the version is a no-op")
+
+    def test_the_shipped_policy_declares_no_version_and_means_one(self):
+        """`hybrid` reads `model.get("obs_version", 1)`. If an export
+        ever starts defaulting differently, the shipped weights get
+        misread in silence -- so pin the default here."""
+        import json
+        from pathlib import Path
+        shipped = (Path(__file__).resolve().parents[1]
+                   / "solver" / "rl" / "ppo_facility.json")
+        if not shipped.exists():
+            self.skipTest("no shipped policy in this checkout")
+        payload = json.loads(shipped.read_text(encoding="utf-8"))
+        self.assertEqual(payload.get("obs_version", 1), 1)

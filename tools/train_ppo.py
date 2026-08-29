@@ -622,6 +622,11 @@ def main():
                    for k, v in critic.state_dict().items()},
         "eval_return": evaluate()[0], "eval_baseline": base_ret,
         "coordinated": args.coordinated,
+        # What `encode` meant when these weights were fitted. A reader
+        # that ignores it loads a stale policy without complaint and
+        # misreads its input, because OBS_DIM does not move when a
+        # slot's scale does. See `env.OBS_VERSION`.
+        "obs_version": env_mod.OBS_VERSION,
     }
     Path(args.export).write_text(json.dumps(payload), encoding="utf-8")
     print(f"  exported to {args.export} "

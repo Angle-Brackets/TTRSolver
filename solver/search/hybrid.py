@@ -188,7 +188,12 @@ def _logits(model, state: BattleState, seat: int, pending):
 
     from ..rl import env as env_mod
 
-    x = np.array(env_mod.encode(state, seat, pending), dtype=float)
+    # A policy exported before the slip feature changed scale must be
+    # fed the layout it was fitted to. Absent key means version 1, the
+    # `min(fires, 10) / 10` encoding; see `env.OBS_VERSION`.
+    x = np.array(env_mod.encode(state, seat, pending,
+                                obs_version=model.get("obs_version", 1)),
+                 dtype=float)
     for weight, bias in model["trunk"]:
         x = np.tanh(x @ weight + bias)
     out = x @ model["aw"] + model["ab"]

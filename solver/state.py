@@ -90,6 +90,16 @@ class ToonState:
     # key -- that is the `free_passes` lesson.
     pouch_capacity: int = 80
 
+    # How many pink slips a toon can hold. [CONFIRMED] wiki: "Toons can
+    # hold up to 200 pink slips", reduced from 255 on 31 May 2022 by the
+    # rebalancing update of December 2021.
+    #
+    # Same reasoning as `pouch_capacity` above: NOT in `state_key`,
+    # because nothing hands a toon a slip mid-battle, so it cannot
+    # change any value the search computes. It is here so the encoder
+    # has a real number to normalise against instead of a literal.
+    fire_capacity: int = 200
+
     # Pink slips, "fires". [CONFIRMED] wiki: they fire a targeted cog out
     # of battle with a cannon and eliminate BOTH layers of a Version 2.0.
     # The owner confirms the rest from play: using one costs the toon's
@@ -491,6 +501,7 @@ class BattleState:
                 gag_counts=t.gag_counts,
                 organic_tracks=t.organic_tracks,
                 pouch_capacity=t.pouch_capacity,
+                fire_capacity=t.fire_capacity,
                 # Pink slips are SPENT, so they must be carried. Omitting
                 # this defaulted every clone to zero and the fires simply
                 # evaporated -- a CEO sweep reported "20 used every run"
