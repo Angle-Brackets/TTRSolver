@@ -548,6 +548,29 @@ The rows disagree because the menu only collapses in one of them, which
 is the thing this flag tests for. Held out it is +138/-65 (p<0.0001)
 with slips and +2/-1 without -- all of the gain, none of the cost.
 
+WHY THE NET RANKS FIRES THERE AT ALL, since a probe works around
+that rather than fixing it. On a live VP board -- L12 196hp, L11 156hp,
+L8 90hp, L3 20hp, all awake, 49.9 laff of incoming, ten slips -- the
+four fires take ranks 1 to 4 at logits 20.4 to 21.1 with the best gag
+at 14.8. A gap of 6.2 logits is about 500x in probability, so a 3-wide
+menu can contain nothing else. With the slips removed the same net
+ranks Geyser, Wedding Cake, Toontanic, Hypno-goggles -- sensibly.
+
+It is not evaluating the board, and two readings show it rather than
+suggest it. The spread across the four targets is 0.647 logits, and
+the ORDER is wrong: the 20 hp Cold Caller outranks both Hollywoods, so
+whatever it has learned, it is not "remove the biggest threat". And
+lure the whole board -- incoming 49.9 -> 0.0, which is precisely when
+a slip is free -- and every fire logit falls by 5.6 to 6.6. It rates
+firing WORST exactly where firing is cheapest, which is backwards.
+
+So the prior is close to a reflex on holding slips, and uninformed by
+the rest of the position. That is what `--fire-fraction 0.15` predicts:
+a slip-carrying board is a thin slice of training, and a slip-carrying
+board that is ALSO lured is thinner still. The probe forces a
+comparison the net never learned to make; only a retrain that shows it
+those positions can fix the ranking itself.
+
 WHERE IT CANNOT REGRESS, and it is worth knowing why rather than
 measuring it: the condition is `probe_tracks or _menu_is_degenerate`,
 which short-circuits, so on any position where probes are already on --
