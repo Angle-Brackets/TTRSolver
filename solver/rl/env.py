@@ -177,7 +177,11 @@ about the shapes would have said so.
 def _fire_feature(toon, obs_version: int = None) -> float:
     """Pink slips as a fraction of what a toon can carry.
 
-    [CONFIRMED] wiki, via `ToonState.fire_capacity`: the cap is 200.
+    Divided by `toon.fire_capacity` -- the toon's own, so a build with
+    a different cap encodes against its own ceiling rather than against
+    a number baked in here. The default is 200; [CONFIRMED] wiki, and it
+    lives on `ToonState` beside `pouch_capacity` where the rest of a
+    toon's limits are.
 
     THE LITERAL 10 THIS REPLACES WAS DOING TWO JOBS AND BOTH BADLY. It
     was the scale, and it was also a saturation point -- `min(fires, 10)`
@@ -202,7 +206,12 @@ def _fire_feature(toon, obs_version: int = None) -> float:
         # version 1, and it has to keep advising while its replacement
         # trains.
         return min(fires, 10) / 10.0
-    cap = max(1, int(getattr(toon, "fire_capacity", 200)))
+    # The toon's OWN capacity, not a constant. A fallback literal here
+    # would be the same magic number in a new hiding place, and would
+    # quietly paper over a ToonState built without the field.
+    cap = int(toon.fire_capacity)
+    if cap <= 0:
+        raise ValueError(f"fire_capacity must be positive, got {cap!r}")
     return min(fires, cap) / cap
 
 

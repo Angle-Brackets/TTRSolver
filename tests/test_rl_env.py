@@ -499,3 +499,30 @@ class SlipEncodingTest(unittest.TestCase):
             self.skipTest("no shipped policy in this checkout")
         payload = json.loads(shipped.read_text(encoding="utf-8"))
         self.assertEqual(payload.get("obs_version", 1), 1)
+
+    def test_no_capacity_literal_survives_in_the_encoder(self):
+        """A toon with an unusual cap must encode against ITS cap.
+
+        The first version of this used `getattr(toon, "fire_capacity",
+        200)`, which is the same magic number in a new hiding place and
+        would silently absorb a ToonState built without the field.
+        """
+        from solver.rl import env as env_mod
+        toon = self._toon(3)
+        toon.fire_capacity = 6
+        self.assertAlmostEqual(env_mod._fire_feature(toon), 0.5)
+
+    def test_a_missing_capacity_is_an_error_not_a_default(self):
+        from solver.rl import env as env_mod
+
+        class Bare:
+            fires = 4
+        with self.assertRaises(AttributeError):
+            env_mod._fire_feature(Bare())
+
+    def test_a_nonsense_capacity_raises(self):
+        from solver.rl import env as env_mod
+        toon = self._toon(3)
+        toon.fire_capacity = 0
+        with self.assertRaises(ValueError):
+            env_mod._fire_feature(toon)
