@@ -315,3 +315,50 @@ class DegenerateMenuTest(unittest.TestCase):
             self.assertFalse(hybrid._menu_is_degenerate(order, vals))
         finally:
             hybrid.PROBE_WHEN_DEGENERATE = original
+
+
+class FireFloorTest(unittest.TestCase):
+    """A slip costs something on every board, not only mid-facility.
+
+    `_quick_score` charged `FIRE_PRICE * cogs_remaining`, and nothing
+    sets `cogs_remaining` on a board the live panel builds -- it cannot
+    know what a VP or a building still holds. So a slip was free in
+    every live fight, and one got spent on a level 1 Cold Caller with
+    6 hp while the pouch held gags that would have killed it.
+    """
+
+    def _board(self, hp, fires=5):
+        from solver import data
+        from solver.state import BattleState, CogState, ToonState, Track
+        cog = CogState(cog_type="cold_caller", department="sellbot",
+                       level=1, hp=hp, max_hp=data.cog_max_hp(1))
+        toon = ToonState(laff=80, max_laff=100, fires=fires,
+                         gag_counts={(Track.THROW, 4): 3,
+                                     (Track.SQUIRT, 5): 3},
+                         track_exp={Track.THROW: 7, Track.SQUIRT: 7})
+        return BattleState(cogs=[cog], toons=[toon])
+
+    def test_a_slip_is_not_free_when_nothing_is_known_to_remain(self):
+        from solver.search import party_search as ps
+        from solver.state import Action
+        fire = Action(track=None, level=0, target_index=0, fire=True)
+        state = self._board(6)
+        self.assertEqual(state.cogs_remaining, 0,
+                         "the premise: a panel board knows of no more cogs")
+        original = ps.FIRE_FLOOR
+        try:
+            ps.FIRE_FLOOR = 0.0
+            free = ps._quick_score(state, [fire])
+            ps.FIRE_FLOOR = 50.0
+            priced = ps._quick_score(state, [fire])
+        finally:
+            ps.FIRE_FLOOR = original
+        self.assertLess(priced, free,
+                        "the floor must cost something at horizon 0")
+
+    def test_the_floor_is_on(self):
+        """Measured free on held-out seeds -- 86.4% against 85.6% on a
+        solo VP, and eight tenths of a slip cheaper. If this is ever
+        turned off, the panel starts firing 6hp cogs again."""
+        from solver.search import party_search as ps
+        self.assertGreater(ps.FIRE_FLOOR, 0.0)

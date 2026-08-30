@@ -1046,8 +1046,25 @@ FIRE_PRICE = 20.0
 # zero, making a slip free. That is how a pink slip got spent on a 6hp
 # level 1 Cold Caller in live play.
 #
-# Swept below. Zero is the old behaviour.
-FIRE_FLOOR = 0.0
+# Swept with `QUICK_W["waste"]`, because the two pull opposite ways:
+# waste charges gags for overkill and skips fires by design, so raising
+# it alone sends the same board back to firing. 150 runs a cell, then
+# 250 on held-out seeds:
+#
+#     floor  waste   vp+5slips   slips spent   vp+0   buildings
+#         0      0       85.6%          4.5   55.2%      23.6%
+#        20      0       86.4%          3.7   55.2%      23.6%
+#        60     30       81.2%          3.0   55.2%      24.0%
+#
+# 20 is free: +9/-7 (p=0.80) on the VP and eight tenths of a slip
+# cheaper, and it is enough to stop the pick that prompted this -- a
+# slip spent on a level 1 Cold Caller with 6 hp.
+#
+# Waste at 30 looked worth it on the selection set, +2.6 on buildings
+# for -2 on the VP. Held out the building gain vanished (23.6 -> 24.0)
+# and the VP cost grew to -4.4, +12/-23, p=0.09. So it stays at zero,
+# and GAG overkill remains unfixed -- see `QUICK_W["waste"]`.
+FIRE_FLOOR = 20.0
 
 
 # A branch this unlikely is not worth a probe. The pruned mass is
