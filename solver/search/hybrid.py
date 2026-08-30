@@ -483,6 +483,23 @@ job. The distinction the menu is missing is not track, it is size.
 One entry per live cog, so the cost is bounded by the board rather than
 the pouch, and only when something in the pouch actually kills it
 outright.
+
+MEASURED, paired on identical seeds, 250 runs a cell then 300 held out:
+
+    cell             off     on    held out      paired (held out)
+    vp + 5 slips   81.2%  82.0%   84.3 -> 84.7   +1/-0    p=1.00
+    vp + 0 slips   48.8%  54.4%   46.7 -> 53.7   +24/-3   p=0.0002
+    buildings      16.0%  21.6%   17.3 -> 24.3   +30/-9   p=0.0008
+
+Seven points on both no-slip cells, and it replicates. Note it does NOT
+save gags -- 11.2 against 11.4 a run, 17.4 against 17.8 -- so this is
+not conservation. It wins more rounds outright, because spending the
+smallest thing that kills leaves the bigger gag for the cog that needs
+it, and the run lasts long enough to throw more of them.
+
+It pays most where there is no slip to fall back on, which is the
+opposite of where it was found: the board that prompted it had five
+slips and the fix that mattered there was `FIRE_PRICE`'s floor.
 """
 
 
