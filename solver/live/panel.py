@@ -117,6 +117,7 @@ def model_json(model: Model) -> str:
         "toon_count": model.toon_count,
         "engine": model.engine,
         "preferred_engine": model.preferred_engine,
+        "max_fires": model.max_fires,
         "search_ready": model.search_ready,
         "rl_gag": model.rl_gag,
         "search_gag": model.search_gag,
@@ -155,6 +156,13 @@ class Api:
         method fails at click time with nothing the player will ever
         see. `tests/test_panel_bridge` enforces that and is what caught
         this one.
+        """
+
+    def set_max_fires(self, count) -> None:
+        """INERT here. Nothing on this side reads a pink slip count.
+
+        Present because THE PAGE IS SHARED, the same reason
+        `prefer_engine` is. See that method.
         """
 
     def toggle_fight(self) -> None:

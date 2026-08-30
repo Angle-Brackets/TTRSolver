@@ -14,6 +14,7 @@ const EMPTY = {
   // `preferred_engine` and `search_ready` decide whether to show the
   // waiting ellipsis.
   preferred_engine: 'rl', search_ready: false,
+  max_fires: 0,
   lure_icon: '', map_icon: '',
   zone: '', neighborhood: '', district: '', invasion: '',
 }
@@ -35,6 +36,19 @@ const COG_ART = import.meta.glob('./assets/cogs/*.png', {
 
 const gagArt = (track, level) =>
   (track && level) ? GAG_ART[`./assets/gags/gag-${track}-${level}.png`] : null
+
+// A pink slip is not a gag: no track, no level, so no `gag-*.png` to
+// index. Drawn here rather than pulled from the game's phase files,
+// which would tie the panel to one installation's artwork -- and the
+// two games this page serves do not share one.
+const PinkSlip = () => (
+  <svg viewBox="0 0 24 24" className="h-7 w-7" aria-hidden="true">
+    <rect x="4" y="3" width="16" height="18" rx="2"
+          fill="#f9a8d4" stroke="#be185d" strokeWidth="1.4" />
+    <path d="M7.5 8h9M7.5 11.5h9M7.5 15h5.5"
+          stroke="#9d174d" strokeWidth="1.3" strokeLinecap="round" />
+  </svg>
+)
 
 // Falls back to the department emblem, which is the honest picture when
 // a plate was read to a department but not to a single cog. Drawing a
@@ -127,7 +141,8 @@ function CogRow({ row, lureIcon }) {
 function Advice({ model }) {
   const showing = Boolean(model.advice) && model.in_battle
   const track = showing && model.track ? model.track : 'none'
-  const art = showing ? gagArt(model.track, model.gag_level) : null
+  const firing = showing && model.track === 'fire'
+  const art = showing && !firing ? gagArt(model.track, model.gag_level) : null
   return (
     <div
       className={`track-${track} relative flex items-center gap-3 overflow-hidden rounded-box bg-base-200 px-4 py-3`}
@@ -143,13 +158,18 @@ function Advice({ model }) {
           className="size-11 shrink-0 object-contain drop-shadow"
         />
       )}
+      {firing && (
+        <div className="flex size-11 shrink-0 items-center justify-center drop-shadow">
+          <PinkSlip />
+        </div>
+      )}
       <div className="min-w-0">
         {showing && model.track && (
           <div
             className="text-[10px] font-semibold tracking-[0.14em]"
             style={{ color: 'var(--accent)' }}
           >
-            {model.track.replace('_', '-').toUpperCase()}
+            {firing ? 'PINK SLIP' : model.track.replace('_', '-').toUpperCase()}
             {model.gag_level ? ` · ${model.gag_level}` : ''}
           </div>
         )}
@@ -371,6 +391,30 @@ export default function App() {
         >
           {model.thinking ? 'thinking…' : 'Work it out'}
         </button>
+        {/* HOW MANY PINK SLIPS THE SOLVER MAY PLAN WITH. Zero by
+            default, which is the only safe default: the count is read
+            live from the game, a slip is an unmissable kill, and a
+            player holding 200 of them would be told to fire everything
+            and win trivially. That answer is correct and useless.
+
+            It is a cap, not a count -- the game decrements its own
+            total when one is fired and the panel re-reads it every
+            cycle, so nothing here tracks spending or needs resetting
+            between a VP's waves or a building's floors. */}
+        <label
+          className="ml-1 flex items-center gap-1 text-[10px] opacity-60"
+          title="Most pink slips the solver may plan with. 0 = never advise a fire."
+        >
+          <span className="font-semibold uppercase tracking-wide">slips</span>
+          <input
+            type="number"
+            min="0"
+            max="99"
+            value={model.max_fires}
+            onChange={(e) => call('set_max_fires', Number(e.target.value))}
+            className="input input-xs h-[20px] w-[42px] px-1 text-[10px]"
+          />
+        </label>
         <button
           className="btn btn-sm btn-ghost btn-square ml-auto opacity-40"
           onClick={() => call('close')}

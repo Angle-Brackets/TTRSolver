@@ -85,6 +85,33 @@ def _position_key(state) -> tuple:
             state.allies_standing)
 
 
+def _track_of(action):
+    """The page's track slug for an action, or None.
+
+    "fire" is a SENTINEL, not a gag track. It exists so the advice line
+    can show a pink slip instead of falling back to the no-track styling
+    that a pass uses -- firing and passing are not the same thing and
+    should not look alike.
+
+    It also stops the crash this replaced. A fire has `track=None` and
+    `is_pass=False`, so `None if action.is_pass else action.track.value`
+    raised AttributeError on the first fire the panel was ever offered.
+    Nothing read the slip count until now, so nothing ever offered one.
+    """
+    if action is None or action.is_pass:
+        return None
+    if getattr(action, "fire", False):
+        return "fire"
+    return action.track.value
+
+
+def _level_of(action):
+    """A fire has no level; a gag has its own."""
+    if action is None or action.is_pass or getattr(action, "fire", False):
+        return None
+    return action.level
+
+
 def _render(action, state) -> str:
     """Advice as one line. Reuses the TTR panel's wording where it can.
 
@@ -138,9 +165,7 @@ def search_in_child(state, objective_name: str, depth: int,
         return MISSING_DATA, str(exc), None
     if action is None:
         return "no legal move -- nothing left to throw", None, None
-    return (_render(action, state),
-            None if action.is_pass else action.track.value,
-            None if action.is_pass else action.level)
+    return (_render(action, state), _track_of(action), _level_of(action))
 
 
 def rows_from_state(state) -> List[CogRow]:
@@ -185,6 +210,7 @@ class RealmsWorker(threading.Thread):
         # panel, not the policy. The owner reports preferring the
         # policy's picks and there is no measurement to contradict them.
         self.engine = engine
+        self.max_fires = 0
         self.record_to = None
         self.recorded = 0
         self.record_error = None
@@ -231,6 +257,30 @@ class RealmsWorker(threading.Thread):
         with self._lock:
             self.allow_level_7 = bool(allow)
         state_mod.ALLOW_LEVEL_7 = bool(allow)
+        self._last_key = ()
+        self.ask_now()
+
+    def set_max_fires(self, count) -> None:
+        """Cap the slips the solver may plan with. Zero advises none.
+
+        NOT a count of what is held -- `setPinkSlips` supplies that and
+        is always current, because the game decrements it when a slip is
+        fired and the panel re-reads it every cycle. So there is no
+        used-count to track and nothing to reset when a VP reaches its
+        second wave or a building its next floor, which is the trap this
+        control looks like it should fall into.
+
+        What it caps is how many the PLAYER is willing to spend, which
+        nothing on the wire can say. Recomputes: the advice on screen
+        was worked out under the old cap.
+        """
+        try:
+            value = int(count)
+        except (TypeError, ValueError):
+            return
+        with self._lock:
+            self.max_fires = max(0, min(99, value))
+            self.model.max_fires = self.max_fires
         self._last_key = ()
         self.ask_now()
 
@@ -334,7 +384,8 @@ class RealmsWorker(threading.Thread):
         listener and no cluster at all."""
         from . import realms_session
 
-        result = realms_session.build_state(self.listener)
+        result = realms_session.build_state(self.listener,
+                                            max_fires=self.max_fires)
         model = self.model
         model.window_found = True
         model.detected_battle = result.state is not None
@@ -467,11 +518,8 @@ class RealmsWorker(threading.Thread):
                     fresh = token == self._current
                 if fresh:
                     self.model.rl_gag = _render(quick, state)
-                    self.model.rl_track = (
-                        "" if quick is None or quick.is_pass
-                        else quick.track.value)
-                    self.model.rl_gag_level = (
-                        0 if quick is None or quick.is_pass else quick.level)
+                    self.model.rl_track = _track_of(quick) or ""
+                    self.model.rl_gag_level = _level_of(quick) or 0
                     # Shown now whatever the preference: it is the only
                     # answer that exists this early, and a blank panel
                     # while the search runs is the complaint that
@@ -555,10 +603,8 @@ class RealmsWorker(threading.Thread):
         self.model.gag = _render(action, state)
         self.model.engine = engine
         self.model.gag_at = time.time()
-        self.model.track = (None if action is None or action.is_pass
-                            else action.track.value)
-        self.model.gag_level = (None if action is None or action.is_pass
-                                else action.level)
+        self.model.track = _track_of(action)
+        self.model.gag_level = _level_of(action)
         self.model.thinking = thinking
         self._post()
 
@@ -566,6 +612,7 @@ class RealmsWorker(threading.Thread):
         from copy import copy
 
         self.model.allow_level_7 = self.allow_level_7
+        self.model.max_fires = self.max_fires
         self.model.objective = self.objective_name
         self.model.budget = self.budget
         # LATEST WINS. This was a FIFO that dropped the NEWEST model when
@@ -612,6 +659,10 @@ class RealmsApi:
     def prefer_engine(self, name) -> None:
         """Badge click: read the other engine's answer, already computed."""
         self._worker.prefer_engine(name)
+
+    def set_max_fires(self, count) -> None:
+        """The pink slip cap box. Zero means never advise a fire."""
+        self._worker.set_max_fires(count)
 
     def set_objective(self, name) -> None:
         self._worker.set_objective(str(name))

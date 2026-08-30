@@ -369,6 +369,17 @@ def track_of(action) -> Optional[str]:
 def _render(action, state) -> str:
     if action.is_pass:
         return "pass -- wait for the lure to lapse"
+    if getattr(action, "fire", False):
+        # A FIRE HAS NO TRACK AND NO LEVEL, and `is_pass` is False for
+        # it, so every renderer that guards only on `is_pass` reaches
+        # `action.track.value` and raises. That was unreachable while
+        # nothing read the slip count; it is reachable now.
+        if action.target_index is None:
+            return "pink slip"
+        cog = state.cogs[action.target_index]
+        entry = data.cog(cog.department, cog.cog_type)
+        return (f"pink slip on cog {action.target_index + 1} "
+                f"({entry.display}, {cog.hp}/{cog.max_hp} hp)")
     gag = data.gag(action.track, action.level)
     if action.target_index is None:
         return f"{gag.display} on all cogs"

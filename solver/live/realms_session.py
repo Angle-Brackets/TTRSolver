@@ -32,6 +32,7 @@ the TTR side is:
               player for
   laff        the toon object's `setHp` / `setMaxHp`
   pouch       `setInventory`
+  slips       `setPinkSlips`
   training    `setTrackAccess`, and organic from `setTrackBonusLevel`
 
 Realms balance must not leak into the solver's tables -- see
@@ -167,8 +168,16 @@ def cog_from_object(obj, lured: bool = False,
     return cog, []
 
 
-def toon_from_object(obj) -> Tuple[Optional[ToonState], List[str]]:
-    """The player's toon object as a `ToonState`, or why it cannot be."""
+def toon_from_object(obj, max_fires: int = 0
+                     ) -> Tuple[Optional[ToonState], List[str]]:
+    """The player's toon object as a `ToonState`, or why it cannot be.
+
+    `max_fires` caps the slips the solver may plan with, whatever the
+    toon holds. It defaults to ZERO -- no fire is ever advised unless
+    the player raises it -- because a slip is the one resource in the
+    fight that costs real money to replace, and that is their call to
+    make rather than the solver's.
+    """
     problems: List[str] = []
 
     laff, max_laff = obj.get("setHp"), obj.get("setMaxHp")
@@ -196,6 +205,26 @@ def toon_from_object(obj) -> Tuple[Optional[ToonState], List[str]]:
     toon = ToonState(laff=int(laff), max_laff=int(max_laff),
                      track_exp=track_exp, gag_counts=counts,
                      organic_tracks=organic or frozenset())
+
+    # PINK SLIPS. `setPinkSlips(uint8) required ownrecv db` on
+    # DistributedToon -- the same ownrecv shape as `setInventory`, so it
+    # only ever arrives by query, never on the broadcast stream, and
+    # `ObjectStore.seen` already refreshes it on every fill because the
+    # stream does not maintain it.
+    #
+    # Absent means ZERO rather than a refusal, and that asymmetry is
+    # deliberate. A missing pouch makes advice impossible and rightly
+    # blocks the state; a missing slip count only makes the advice more
+    # conservative, and the fallback is the behaviour the panel had
+    # before this was read at all. Blocking on it would turn a better
+    # reading into a new way to get no advice.
+    slips = obj.get("setPinkSlips")
+    if slips is not None and max_fires:
+        try:
+            toon.fires = min(max(0, int(slips)), int(max_fires))
+        except (TypeError, ValueError):
+            problems.append(f"toon {obj.do_id}: setPinkSlips is "
+                            f"{slips!r}, which is not a count")
     return toon, []
 
 
@@ -247,7 +276,7 @@ def pick_battle(listener, battles, player_do_id: Optional[int] = None):
 
 
 def build_state(listener, player_do_id: Optional[int] = None,
-                round_num: int = 0) -> RealmsBuild:
+                round_num: int = 0, max_fires: int = 0) -> RealmsBuild:
     """A `BattleState` from what the listener currently holds.
 
     `player_do_id` names which toon is being advised. With one toon in
@@ -321,7 +350,7 @@ def build_state(listener, player_do_id: Optional[int] = None,
         problems.append(f"toon {player_do_id}: not received yet")
         toon = None
     else:
-        toon, why = toon_from_object(player)
+        toon, why = toon_from_object(player, max_fires=max_fires)
         problems.extend(why)
 
     # Every reason at once, like `session.build_state`: being told one

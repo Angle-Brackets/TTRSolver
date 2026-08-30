@@ -59,6 +59,15 @@ def worker(listener):
     obj.listener = listener
     obj.model = Model()
     obj.allow_level_7 = True
+    # Mirror the real worker's settings. `engine` was missing and the
+    # search thread died on it every tick -- an AttributeError raised in
+    # a background thread, printed and otherwise ignored, which is how
+    # it survived. `max_fires` is the pink slip cap.
+    obj.engine = "both"
+    obj.max_fires = 0
+    obj.record_to = None
+    obj.record_error = None
+    obj.recorded = 0
     obj._lock = threading.Lock()
     obj._stop = threading.Event()
     obj._generation = count()
@@ -330,3 +339,73 @@ class EngineToggleTest(unittest.TestCase):
         for key in ("engine", "preferred_engine", "search_ready",
                     "rl_gag", "search_gag"):
             self.assertIn(key, payload)
+
+
+class PinkSlipTest(unittest.TestCase):
+    """Reading the slip count makes fires reachable for the first time.
+
+    `setPinkSlips(uint8) required ownrecv db` on DistributedToon, found
+    in the Realms DC file. Nothing read it before, so `toon.fires` was
+    always 0 and no engine ever proposed a fire -- which is why the
+    render paths could carry a crash for this long without anyone
+    meeting it.
+    """
+
+    def _action(self, **kw):
+        from solver.state import Action
+        return Action(**kw)
+
+    def test_a_fire_reports_its_own_track_sentinel(self):
+        fire = self._action(track=None, level=0, target_index=1, fire=True)
+        self.assertEqual(realms_panel._track_of(fire), "fire")
+        self.assertIsNone(realms_panel._level_of(fire))
+
+    def test_a_fire_does_not_look_like_a_pass(self):
+        """They render differently and must not collapse together."""
+        fire = self._action(track=None, level=0, target_index=1, fire=True)
+        a_pass = self._action(track=None)
+        self.assertNotEqual(realms_panel._track_of(fire),
+                            realms_panel._track_of(a_pass))
+
+    def test_the_old_crash_is_gone(self):
+        """`None if is_pass else action.track.value` raised on a fire:
+        `is_pass` is False for one and `track` is None."""
+        fire = self._action(track=None, level=0, target_index=0, fire=True)
+        self.assertFalse(fire.is_pass)
+        self.assertIsNone(fire.track)
+        realms_panel._track_of(fire)        # must not raise
+
+    def test_the_cap_is_what_limits_planning_not_the_count(self):
+        """The count is read from the game and can be 200. The cap is
+        the player saying how many they will spend."""
+        from solver.live import realms_session
+
+        class Obj:
+            do_id = 7
+            _f = {"setHp": 90, "setMaxHp": 137,
+                  "setPinkSlips": 200,
+                  "setTrackAccess": [1, 1, 1, 1, 1, 1, 1],
+                  "setTrackBonusLevel": [-1] * 7,
+                  "setInventory": None}
+
+            def get(self, name):
+                return self._f.get(name)
+
+        obj = Obj()
+        obj._f["setInventory"] = _inventory_blob()
+        for cap, expected in ((0, 0), (3, 3), (500, 200)):
+            toon, why = realms_session.toon_from_object(obj, max_fires=cap)
+            self.assertIsNotNone(toon, why)
+            self.assertEqual(toon.fires, expected,
+                             f"cap {cap} against 200 held")
+
+    def test_zero_is_the_default_so_no_fire_is_ever_advised(self):
+        from solver.live import realms_session
+        import inspect
+        sig = inspect.signature(realms_session.toon_from_object)
+        self.assertEqual(sig.parameters["max_fires"].default, 0)
+
+
+def _inventory_blob():
+    """A minimal `setInventory` the parser accepts: 7 tracks x 7 levels."""
+    return bytes([0] * 49)

@@ -206,6 +206,21 @@ class Model:
     search_gag_level: int = 0
     search_ready: bool = False
     preferred_engine: str = "rl"
+    # The most pink slips the solver may PLAN with, whatever the toon
+    # actually holds. Zero -- the default -- means never advise a fire.
+    #
+    # A cap rather than a count, because the count is read from the game
+    # (`setPinkSlips`) and is always right. What it cannot know is how
+    # many the player is WILLING to spend, and slips are the one
+    # resource here that costs real money to replace.
+    #
+    # It also needs no tracking across rounds or floors, which is the
+    # trap it looks like it should fall into. The game decrements
+    # `setPinkSlips` when one is fired and the panel re-reads it every
+    # cycle, so "how many are left" is always the live value. There is
+    # no used-count to maintain and nothing to reset when a VP moves to
+    # its second wave or a building to its next floor.
+    max_fires: int = 0
     # Where the toon is, from the Local API. The solver does not use it
     # -- a street does not change a round -- but it tells the player at a
     # glance whether the panel is talking to the game at all, which the
