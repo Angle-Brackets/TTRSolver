@@ -100,6 +100,13 @@ class ToonState:
     # has a real number to normalise against instead of a literal.
     fire_capacity: int = 200
 
+    # Rounds until this toon may use another unite. [CONFIRMED] wiki:
+    # three rounds inside a battle, shown as the Unite Cooldown status
+    # effect. Unlike `fires`, this one DOES belong in `state_key`: it
+    # changes what the toon may do next round, so two positions
+    # identical but for it are not the same position.
+    unite_cooldown: int = 0
+
     # Pink slips, "fires". [CONFIRMED] wiki: they fire a targeted cog out
     # of battle with a cannon and eliminate BOTH layers of a Version 2.0.
     # The owner confirms the rest from play: using one costs the toon's
@@ -502,6 +509,7 @@ class BattleState:
                 organic_tracks=t.organic_tracks,
                 pouch_capacity=t.pouch_capacity,
                 fire_capacity=t.fire_capacity,
+                unite_cooldown=t.unite_cooldown,
                 # Pink slips are SPENT, so they must be carried. Omitting
                 # this defaulted every clone to zero and the fires simply
                 # evaporated -- a CEO sweep reported "20 used every run"
