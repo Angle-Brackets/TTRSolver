@@ -107,8 +107,19 @@ PASS_INDEX = 0
 # actions -- four Lures on the same board. Coordination needs the
 # pending plan to be visible.
 PENDING_DIM = MAX_TOONS * (len(TRACKS) + 2)      # track one-hot, group, none
-OBS_DIM = (MAX_COGS * 11 + MAX_TOONS * (4 + 49) + 6
-           + MAX_TOONS + PENDING_DIM)
+def obs_dim_for(version: int) -> int:
+    """How wide the observation is at a given `OBS_VERSION`.
+
+    Version 3 added ABSOLUTE remaining laff to each toon block, so the
+    per-toon scalars went from four to five. Older policies are still
+    loadable and still read their own width -- see `encode`.
+    """
+    per_toon = 5 if version >= 3 else 4
+    return (MAX_COGS * 11 + MAX_TOONS * (per_toon + 49) + 6
+            + MAX_TOONS + PENDING_DIM)
+
+
+OBS_DIM = obs_dim_for(3)
 
 # Cog level and max hp were scaled by 12 and 200, which is the top of a
 # cog BUILDING and nowhere near the top of the game. A level 15 Big
@@ -149,8 +160,14 @@ def check_export(payload) -> Optional[str]:
     that no longer matches the feature list refuses to be used instead
     of quietly misreading it.
     """
-    if payload.get("obs_dim") != OBS_DIM:
-        return (f"observation is {OBS_DIM} wide, policy was trained on "
+    # AGAINST ITS OWN VERSION, not the current one. A version 1 policy
+    # is 302 wide and correct at 302; comparing it to today's width
+    # would refuse a policy that is perfectly usable through the
+    # version-aware `encode`.
+    want = obs_dim_for(int(payload.get("obs_version", 1)))
+    if payload.get("obs_dim") != want:
+        return (f"observation is {want} wide at version "
+                f"{payload.get('obs_version', 1)}, policy was trained on "
                 f"{payload.get('obs_dim')} -- retrain")
     if payload.get("n_actions") != len(ACTIONS):
         return (f"action table is {len(ACTIONS)}, policy was trained on "
@@ -176,7 +193,7 @@ def _trap_damage(cog) -> float:
         return 0.0
 
 
-OBS_VERSION = 2
+OBS_VERSION = 3
 """Bumped whenever `encode` changes what a slot MEANS.
 
 A policy is a pile of floats against a fixed layout, and `OBS_DIM` does
@@ -250,6 +267,8 @@ def encode(state: BattleState, actor: int = 0,
     `outcomes.state_key` keys on every toon in order for the same
     reason.
     """
+    if obs_version is None:
+        obs_version = OBS_VERSION
     out: List[float] = []
     for i in range(MAX_COGS):
         if i < len(state.cogs) and not state.cogs[i].status.is_dead:
@@ -304,8 +323,22 @@ def encode(state: BattleState, actor: int = 0,
             # the only thing that ever told it no.
             out += [1.0,
                     toon.laff / max(1, toon.max_laff),
-                    toon.max_laff / MAX_LAFF_SCALE,
-                    _fire_feature(toon, obs_version)]
+                    toon.max_laff / MAX_LAFF_SCALE]
+            if obs_version >= 3:
+                # ABSOLUTE LAFF LEFT, handed over rather than left to be
+                # inferred. The two features above are a RATIO and a
+                # CEILING, and what decides a fight is their product --
+                # 0.5 of 137 survives a Legal Eagle, 0.5 of 40 does not.
+                # A linear layer cannot multiply, which is the same
+                # reasoning that put `remaining` in the cog block for
+                # Version 2.0s, twenty lines up.
+                #
+                # It matters here more than anywhere: every solo VP loss
+                # measured ends with about seventy gags in the pouch and
+                # no laff. Laff is the binding constraint of the fight
+                # the policy could not see in absolute terms.
+                out.append(toon.laff / MAX_LAFF_SCALE)
+            out.append(_fire_feature(toon, obs_version))
             for track in TRACKS:
                 for level in range(1, 8):
                     held = toon.gag_counts.get((track, level), 0)
@@ -325,7 +358,10 @@ def encode(state: BattleState, actor: int = 0,
                         held = 0
                     out.append(min(held, 8) / 8.0)
         else:
-            out += [0.0] * (4 + 49)
+            # Must match the filled branch's width at the SAME version,
+            # or every feature after this slot shifts. Five scalars from
+            # version 3, four before it.
+            out += [0.0] * ((5 if obs_version >= 3 else 4) + 49)
 
     out += [min(state.round_num, 12) / 12.0,
             len(state.active_cogs()) / MAX_COGS,

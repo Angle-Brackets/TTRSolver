@@ -108,14 +108,34 @@ class HighLevelCogsStayInRange(unittest.TestCase):
 
 class AMismatchedPolicySaysWhy(unittest.TestCase):
     def test_check_export_names_the_width(self):
-        message = env_mod.check_export({"obs_dim": env_mod.OBS_DIM - 12,
-                                        "n_actions": len(env_mod.ACTIONS)})
+        message = env_mod.check_export(
+            {"obs_dim": env_mod.OBS_DIM - 12,
+             "obs_version": env_mod.OBS_VERSION,
+             "n_actions": len(env_mod.ACTIONS)})
         self.assertIsNotNone(message)
         self.assertIn(str(env_mod.OBS_DIM), message)
 
     def test_an_accepted_payload_returns_none(self):
         self.assertIsNone(env_mod.check_export(
-            {"obs_dim": env_mod.OBS_DIM, "n_actions": len(env_mod.ACTIONS)}))
+            {"obs_dim": env_mod.OBS_DIM,
+             "obs_version": env_mod.OBS_VERSION,
+             "n_actions": len(env_mod.ACTIONS)}))
+
+    def test_a_width_is_only_meaningful_with_its_version(self):
+        """An export declaring today's WIDTH at an old VERSION is
+        contradictory and must be refused. Widths moved when version 3
+        added absolute laff, so 306 is right at 3 and wrong at 1."""
+        why = env_mod.check_export(
+            {"obs_dim": env_mod.OBS_DIM, "obs_version": 1,
+             "n_actions": len(env_mod.ACTIONS)})
+        self.assertIsNotNone(why)
+
+    def test_an_older_policy_is_still_accepted_at_its_own_width(self):
+        """The whole point of versioning it: a version 1 export is 302
+        wide and correct, and `encode` still speaks version 1."""
+        self.assertIsNone(env_mod.check_export(
+            {"obs_dim": env_mod.obs_dim_for(1), "obs_version": 1,
+             "n_actions": len(env_mod.ACTIONS)}))
 
     def test_unavailable_reason_is_never_silent(self):
         """The reason used to be computed and discarded, so a policy

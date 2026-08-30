@@ -198,11 +198,13 @@ class ExportCompatibilityTest(unittest.TestCase):
 
     def test_a_matching_export_is_accepted(self):
         self.assertIsNone(env.check_export(
-            {"obs_dim": env.OBS_DIM, "n_actions": len(env.ACTIONS)}))
+            {"obs_dim": env.OBS_DIM, "obs_version": env.OBS_VERSION,
+             "n_actions": len(env.ACTIONS)}))
 
     def test_a_stale_observation_width_is_rejected(self):
         why = env.check_export(
-            {"obs_dim": env.OBS_DIM - 4, "n_actions": len(env.ACTIONS)})
+            {"obs_dim": env.OBS_DIM - 4, "obs_version": env.OBS_VERSION,
+             "n_actions": len(env.ACTIONS)})
         self.assertIsNotNone(why)
         self.assertIn("retrain", why)
 
@@ -544,7 +546,13 @@ class SlipEncodingTest(unittest.TestCase):
         if not shipped.exists():
             self.skipTest("no shipped policy in this checkout")
         payload = json.loads(shipped.read_text(encoding="utf-8"))
-        payload["obs_version"] = env_mod.OBS_VERSION
+        # Version 2, not the current one: versions 1 and 2 are the same
+        # WIDTH -- 2 only rescaled the slip feature -- so this stamps a
+        # version the shipped weights are actually valid at. Stamping 3
+        # would declare a 306-wide layout on a 302-wide policy, which
+        # `check_export` rightly refuses.
+        stamped = 2
+        payload["obs_version"] = stamped
 
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "versioned.json"
@@ -555,8 +563,7 @@ class SlipEncodingTest(unittest.TestCase):
                 hybrid._MODEL, hybrid._TRIED = None, False
                 model = hybrid._load()
                 self.assertIsNotNone(model, hybrid.unavailable_reason())
-                self.assertEqual(model.get("obs_version"),
-                                 env_mod.OBS_VERSION)
+                self.assertEqual(model.get("obs_version"), stamped)
             finally:
                 hybrid._EXPORT, hybrid._MODEL, hybrid._TRIED = saved
 
