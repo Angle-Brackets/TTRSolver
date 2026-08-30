@@ -384,12 +384,23 @@ export default function App() {
         >
           {model.in_battle ? 'Fight is over' : "I'm in a fight"}
         </button>
+        {/* RECONSIDER, not "Work it out". The old button re-ran a
+            search that had already run on an unchanged board, so it
+            returned the same answer -- a button whose only effect was
+            to make you wait.
+
+            This rejects what is on screen and asks for the next best.
+            It rejects by KIND, not by exact move, so turning down a
+            pink slip on one cog does not offer the same slip on the
+            next three. Rejections apply to this board only and clear
+            when it changes. */}
         <button
           className="btn btn-sm btn-primary text-[12px]"
-          disabled={!model.can_advise}
-          onClick={() => call('ask_now')}
+          disabled={!model.can_advise || !model.advice}
+          onClick={() => call('reconsider')}
+          title="Reject this suggestion and show the next best for this board"
         >
-          {model.thinking ? 'thinking…' : 'Work it out'}
+          {model.thinking ? 'thinking…' : 'Reconsider'}
         </button>
         {/* HOW MANY PINK SLIPS THE SOLVER MAY PLAN WITH. Zero by
             default, which is the only safe default: the count is read

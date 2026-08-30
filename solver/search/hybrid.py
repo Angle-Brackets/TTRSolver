@@ -191,7 +191,8 @@ def unavailable_reason() -> Optional[str]:
     return _REASON or "the policy could not be loaded"
 
 
-def _logits(model, state: BattleState, seat: int, pending):
+def _logits(model, state: BattleState, seat: int, pending,
+            reject=None):
     import numpy as np
 
     from ..rl import env as env_mod
@@ -207,6 +208,14 @@ def _logits(model, state: BattleState, seat: int, pending):
     out = x @ model["aw"] + model["ab"]
     mask = env_mod.legal_mask(state, seat)
     out = np.where(np.array(mask), out, -np.inf)
+    if reject:
+        # Masked here rather than filtered afterwards, so a rejected
+        # move is invisible to the hill-climb instead of being proposed
+        # and discarded -- otherwise `climb` spends its budget
+        # rediscovering the answer that was just turned down.
+        for index, entry in enumerate(env_mod.ACTIONS):
+            if index < len(out) and reject_key(entry) in reject:
+                out[index] = -np.inf
     return out
 
 
@@ -232,8 +241,8 @@ def _choose(values, rng, sample: bool) -> int:
 
 
 def propose(state: BattleState, rng, sample: bool = True,
-            fixed: Optional[Mapping[int, Optional[Action]]] = None
-            ) -> List[Optional[Action]]:
+            fixed: Optional[Mapping[int, Optional[Action]]] = None,
+            reject=None) -> List[Optional[Action]]:
     """One joint plan, every standing toon choosing in turn.
 
     Later toons see the earlier ones' picks through `pending`, which is
@@ -257,7 +266,8 @@ def propose(state: BattleState, rng, sample: bool = True,
     for seat, toon in enumerate(state.toons):
         if seat in fixed or toon.laff <= 0:
             continue
-        index = _choose(_logits(model, state, seat, pending), rng, sample)
+        index = _choose(_logits(model, state, seat, pending, reject),
+                        rng, sample)
         action = env_mod.action_at(index)
         pending[seat] = None if action.is_pass else action
     return pending
@@ -499,6 +509,27 @@ def _wastes_a_drop(state, plan) -> bool:
     return False
 
 
+def reject_key(entry) -> object:
+    """What "no, not that" rejects, for the panel's Reconsider control.
+
+    `_track_key` already collapses EVERY fire into one key, because a
+    fire has no track and no level, so rejecting one rejects all of
+    them. That is the behaviour wanted rather than a side effect: a
+    player who dismisses "pink slip on cog 2" means "do not spend a
+    slip", not "spend it on cog 3", and offering the same move against
+    a different target four times over is the obvious way to make a
+    Reconsider button useless.
+
+    The same reasoning gives "no, not Drop" in one click.
+
+    The pass has no entry in `ACTIONS` -- it is a None -- so it gets its
+    own constant rather than being unrejectable.
+    """
+    if entry is None:
+        return "pass"
+    return _track_key(entry)
+
+
 def _track_key(entry):
     """What counts as a distinct kind of move for probing purposes.
 
@@ -644,7 +675,7 @@ def climb(state: BattleState, rng=random, budget: int = 16,
           width: int = 3, probe_tracks: Optional[bool] = None,
           deep: bool = False, rollout: int = 0,
           fixed: Optional[Mapping[int, Optional[Action]]] = None,
-          pairs: bool = True, pair_width: int = 7
+          pairs: bool = True, pair_width: int = 7, reject=None
           ) -> Optional[Sequence[Optional[Action]]]:
     """Coordinate ascent on the joint plan, instead of independent draws.
 
@@ -876,7 +907,8 @@ def climb(state: BattleState, rng=random, budget: int = 16,
              if rollout else (lambda st, pl: _judge(st, pl, deep)))
 
     fixed = dict(fixed or {})
-    plan = list(propose(state, rng, sample=False, fixed=fixed))
+    plan = list(propose(state, rng, sample=False, fixed=fixed,
+                        reject=reject))
     try:
         best_score = judge(state, plan)
     except (NotImplementedError, ValueError, KeyError):
@@ -891,7 +923,7 @@ def climb(state: BattleState, rng=random, budget: int = 16,
                 continue
             pending = list(plan)
             pending[seat] = None
-            values = _logits(model, state, seat, pending)
+            values = _logits(model, state, seat, pending, reject)
             order = list(np.argsort(values)[::-1][:width])
             if probe_tracks or _menu_is_degenerate(order, values):
                 # The best of every track this toon can actually play,
@@ -969,7 +1001,7 @@ def climb(state: BattleState, rng=random, budget: int = 16,
             for seat in seats:
                 pending = list(plan)
                 pending[seat] = None
-                values = _logits(model, state, seat, pending)
+                values = _logits(model, state, seat, pending, reject)
                 best_of_track, seen_tracks = [], set()
                 for index in np.argsort(values)[::-1]:
                     index = int(index)

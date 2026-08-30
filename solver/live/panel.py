@@ -165,6 +165,13 @@ class Api:
         `prefer_engine` is. See that method.
         """
 
+    def reconsider(self) -> None:
+        """INERT here. Present because THE PAGE IS SHARED.
+
+        Same reason as `prefer_engine` and `set_max_fires`; see the
+        first of those.
+        """
+
     def toggle_fight(self) -> None:
         """Confirm a fight, or end one and reset.
 

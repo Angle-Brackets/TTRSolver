@@ -65,6 +65,7 @@ def worker(listener):
     # it survived. `max_fires` is the pink slip cap.
     obj.engine = "both"
     obj.max_fires = 0
+    obj._rejected = set()
     obj.record_to = None
     obj.record_error = None
     obj.recorded = 0
@@ -409,3 +410,85 @@ class PinkSlipTest(unittest.TestCase):
 def _inventory_blob():
     """A minimal `setInventory` the parser accepts: 7 tracks x 7 levels."""
     return bytes([0] * 49)
+
+
+class ReconsiderTest(unittest.TestCase):
+    """Rejecting a suggestion, by KIND rather than by exact move.
+
+    The button it replaces re-ran a search on an unchanged board and so
+    returned the same answer -- its only effect was the wait.
+    """
+
+    def _worker_with(self, track, level=None, gag="something"):
+        w = worker(FakeListener([], {}))
+        w.model.gag = gag
+        w.model.track = track
+        w.model.gag_level = level
+        return w
+
+    def test_rejecting_a_fire_rejects_every_fire(self):
+        """The point of the whole design. Otherwise the button offers
+        the same slip against each cog in turn."""
+        w = self._worker_with("fire", None, "pink slip on cog 2")
+        w.reconsider()
+        self.assertIn((None, False), w._rejected)
+
+        from solver.rl import env as env_mod
+        from solver.search import hybrid
+        keys = {hybrid.reject_key(a) for a in env_mod.ACTIONS
+                if a is not None and a.fire}
+        self.assertEqual(keys, {(None, False)},
+                         "every fire must share one reject key")
+
+    def test_rejecting_a_gag_rejects_that_track_and_reach(self):
+        w = self._worker_with("throw", 5, "Birthday Cake on cog 1")
+        w.reconsider()
+        self.assertTrue(w._rejected)
+
+    def test_rejecting_a_pass_is_possible(self):
+        w = self._worker_with(None, None, "pass -- wait for the lure")
+        w.reconsider()
+        self.assertIn("pass", w._rejected)
+
+    def test_nothing_on_screen_rejects_nothing(self):
+        w = self._worker_with("throw", 5, gag="")
+        w.reconsider()
+        self.assertFalse(w._rejected)
+
+    def test_it_asks_for_a_fresh_answer(self):
+        w = self._worker_with("throw", 5)
+        w.reconsider()
+        self.assertTrue(w._asked.is_set(),
+                        "rejecting must trigger a recompute")
+        self.assertEqual(w._last_key, ())
+
+    def test_the_climb_honours_a_rejection(self):
+        """End to end through the solver rather than the panel: the
+        rejected kind must not come back."""
+        import random
+        from solver import data
+        from solver.rl import env as env_mod
+        from solver.search import hybrid
+        from solver.state import BattleState, CogState, ToonState, Track
+
+        if not hybrid.available():
+            self.skipTest(hybrid.unavailable_reason())
+        tracks = [t for t in Track if t is not Track.TOON_UP]
+        toon = ToonState(80, 137, {t: 7 for t in tracks}, {}, frozenset())
+        env_mod.restock(toon, random.Random(1))
+        hp = data.cog_max_hp(8)
+        cogs = [CogState(department="sellbot", cog_type="glad_hander",
+                         level=8, hp=hp, max_hp=hp) for _ in range(3)]
+        state = BattleState(toon=toon, cogs=cogs)
+
+        plan = hybrid.climb(state, random.Random(0), budget=8)
+        first = plan[0] if plan else None
+        if first is None or first.is_pass:
+            self.skipTest("policy passed; nothing to reject")
+        key = hybrid.reject_key(first)
+        again = hybrid.climb(state, random.Random(0), budget=8,
+                             reject={key})
+        second = again[0] if again else None
+        if second is not None and not second.is_pass:
+            self.assertNotEqual(hybrid.reject_key(second), key,
+                                "the rejected kind came back")

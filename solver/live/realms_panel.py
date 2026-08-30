@@ -85,6 +85,23 @@ def _position_key(state) -> tuple:
             state.allies_standing)
 
 
+def _entry_for(track, level):
+    """Any `env.ACTIONS` entry with this track and level, for keying.
+
+    The model carries the DISPLAYED move as a slug and a level rather
+    than as an Action, so Reconsider has to find something with the same
+    `reject_key`. Any entry of that track and level does -- the key
+    ignores the target, which is the point.
+    """
+    from ..rl import env as env_mod
+
+    for entry in env_mod.ACTIONS:
+        if (entry is not None and not entry.fire
+                and entry.track == track and entry.level == level):
+            return entry
+    raise LookupError(f"no action for {track} {level}")
+
+
 def _track_of(action):
     """The page's track slug for an action, or None.
 
@@ -211,6 +228,10 @@ class RealmsWorker(threading.Thread):
         # policy's picks and there is no measurement to contradict them.
         self.engine = engine
         self.max_fires = 0
+        # Moves the player has turned down for the CURRENT position, as
+        # `hybrid.reject_key` values. Cleared when the board changes: a
+        # rejection is about this board, not about the move in general.
+        self._rejected: set = set()
         self.record_to = None
         self.recorded = 0
         self.record_error = None
@@ -257,6 +278,41 @@ class RealmsWorker(threading.Thread):
         with self._lock:
             self.allow_level_7 = bool(allow)
         state_mod.ALLOW_LEVEL_7 = bool(allow)
+        self._last_key = ()
+        self.ask_now()
+
+    def reconsider(self) -> None:
+        """Turn down what is on screen and ask for the next best.
+
+        Rejects by `hybrid.reject_key` rather than by the exact action,
+        and that is the whole design. Every fire shares one key, so
+        dismissing "pink slip on cog 2" dismisses spending a slip at all
+        -- rather than offering the same move against cog 3, then cog 1,
+        then cog 4, which is exactly how this control would become
+        useless. The same click gives "not Drop" or "not a pass".
+
+        Rejections last for THIS BOARD only and are dropped as soon as
+        anything changes, so they cannot quietly narrow the rest of the
+        fight.
+        """
+        from ..search import hybrid
+
+        with self._lock:
+            if not self.model.gag:
+                return              # nothing on screen to turn down
+            track = self.model.track
+            level = self.model.gag_level
+            if track == "fire":
+                key = (None, False)         # every slip, one key
+            elif not track:
+                key = "pass"
+            else:
+                from ..state import Track
+                try:
+                    key = hybrid.reject_key(_entry_for(Track(track), level))
+                except Exception:           # noqa: BLE001
+                    return
+            self._rejected.add(key)
         self._last_key = ()
         self.ask_now()
 
@@ -408,6 +464,15 @@ class RealmsWorker(threading.Thread):
 
         key = _position_key(state)
         if key != self._last_key or self._asked.is_set():
+            if key != self._last_key:
+                # A NEW BOARD FORGETS THE REJECTIONS. Keeping them would
+                # silently narrow every later round, and a player who
+                # dismissed one Lure three rounds ago would stop being
+                # offered Lure without knowing why. Deliberately not
+                # cleared when `_asked` fired instead -- that is
+                # Reconsider itself asking, and clearing there would
+                # undo the rejection it was just given.
+                self._rejected.clear()
             self._last_key = key
             self._asked.clear()
             model.thinking = True
@@ -483,7 +548,8 @@ class RealmsWorker(threading.Thread):
 
             from ..search import hybrid
 
-            plan = hybrid.climb(state, random.Random(0), budget=8)
+            plan = hybrid.climb(state, random.Random(0), budget=8,
+                                reject=frozenset(self._rejected))
         except Exception:               # pragma: no cover - optional path
             return None
         return plan[0] if plan else None
@@ -663,6 +729,10 @@ class RealmsApi:
     def set_max_fires(self, count) -> None:
         """The pink slip cap box. Zero means never advise a fire."""
         self._worker.set_max_fires(count)
+
+    def reconsider(self) -> None:
+        """Reject the move on screen and offer the next best."""
+        self._worker.reconsider()
 
     def set_objective(self, name) -> None:
         self._worker.set_objective(str(name))
