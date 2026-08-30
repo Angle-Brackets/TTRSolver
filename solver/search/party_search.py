@@ -1040,6 +1040,15 @@ def armed_credit(before: BattleState, after: BattleState) -> float:
 # sweep said +7.5 there and 200 sides said +3.5; trust the larger one.
 FIRE_PRICE = 20.0
 
+# Charged for a slip WHATEVER the horizon, because `cogs_remaining` is 0
+# on every board the panel builds -- it has no way to know what a VP or
+# a building still holds -- and `FIRE_PRICE * cogs_remaining` is then
+# zero, making a slip free. That is how a pink slip got spent on a 6hp
+# level 1 Cold Caller in live play.
+#
+# Swept below. Zero is the old behaviour.
+FIRE_FLOOR = 0.0
+
 
 # A branch this unlikely is not worth a probe. The pruned mass is
 # renormalised away, so this trades a little accuracy in the tail for
@@ -1103,9 +1112,23 @@ def _score_leaf(state: BattleState, plan, hits, record=None) -> float:
     price *= 1.0 + objective_mod.Objective().horizon_cost * float(
         state.cogs_remaining)
     # A slip spent now is one not held for the cogs still to come, so it
-    # costs what is still coming -- and nothing at all when nothing is.
+    # costs what is still coming -- plus a floor, because "nothing is
+    # coming" and "nobody told us what is coming" are different states
+    # and this term could not tell them apart.
+    #
+    # THE PANEL NEVER SETS `cogs_remaining`. Nothing in
+    # `realms_session.build_state` can know how many cogs a VP or a
+    # building still has, so it is 0 on every live board -- and a slip
+    # was therefore free in live play, always. The owner watched it
+    # spend one on a level 1 Cold Caller with 6 hp while holding a
+    # pouch full of gags that would have killed it.
+    #
+    # The floor is what a slip is worth against the cog it could have
+    # been saved for, rather than against the fight's remaining length,
+    # so it applies even in a genuine last battle. `FIRE_FLOOR` at zero
+    # restores the old behaviour exactly.
     price += (FIRE_PRICE * float(state.cogs_remaining)
-              * _fires_spent(state, probe))
+              + FIRE_FLOOR) * _fires_spent(state, probe)
     return (landed
             + QUICK_W["heal"] * restored
             + QUICK_W["armed"] * armed_credit(state, probe)

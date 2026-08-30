@@ -277,8 +277,9 @@ def rollout_judge(state: BattleState, plan, seed: int, depth: int = 3,
                   objective=None) -> float:
     """Play the plan, then let PPO play on, and total the real reward.
 
-    The horizon `_quick_score` does not have. It plays one all-hit round
-    and scores it with a hand-weighted sum whose weights turn out not to
+    The horizon `_quick_score` does not have. It scores ONE round --
+    expected over the accuracy rolls, not all-hit; this said all-hit
+    long after that changed -- with a hand-weighted sum whose weights turn out not to
     matter -- four random weight vectors finish 62.5-65.0% of the same
     buildings, and zeroing every term costs five points. So the terms
     matter and their sizes do not, which is what a flat proxy looks
@@ -367,9 +368,16 @@ def rollout_judge(state: BattleState, plan, seed: int, depth: int = 3,
 def _judge(state: BattleState, plan, deep: bool) -> float:
     """Rank a plan. One round, or two.
 
-    `_quick_score` plays a single all-hit round, which is why a trap
-    scores near zero and why climbing it harder stops paying: it cannot
-    see anything that arrives next round. `deep` plays the plan, then
+    `_quick_score` scores a single round, which is why a trap scores
+    near zero and why climbing it harder stops paying: it cannot see
+    anything that arrives next round.
+
+    NOT "all-hit", which this said for a long time after it stopped
+    being true. It takes the expectation over the accuracy rolls, and
+    that change is why the CEO went 69.5% -> 75.0%: an all-hit score
+    prefers the biggest number printed on a gag, which is reliably the
+    least likely one to land. The horizon is what is missing here, not
+    the dice. `deep` plays the plan, then
     lets `greedy_plan` answer for the round after, and counts that at
     LOOKAHEAD_DISCOUNT.
 
