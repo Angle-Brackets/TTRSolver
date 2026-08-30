@@ -70,6 +70,14 @@ def main():
     ap.add_argument("--rollout", type=int, default=128)
     ap.add_argument("--epochs", type=int, default=4)
     ap.add_argument("--minibatch", type=int, default=1024)
+    ap.add_argument("--obs-version", type=int, default=None,
+                    help="train against an OLDER observation layout, as "
+                         "a matched control. Defaults to the current "
+                         "version. Only useful for comparing a new "
+                         "feature against its own absence: comparing a "
+                         "new run to the shipped policy cannot settle "
+                         "anything, because that baseline was selected "
+                         "and sits 3.8 sd above a fresh run.")
     ap.add_argument("--hidden", type=int, default=256,
                     help="trunk width; 512 is the capacity test")
     ap.add_argument("--lr", type=float, default=3e-4)
@@ -176,6 +184,15 @@ def main():
                          "standard deviation instead, which preserves "
                          "relative magnitudes")
     args = ap.parse_args()
+
+    # BEFORE ANY ENVIRONMENT EXISTS. `encode` reads the module global at
+    # call time, so this has to be set before the first observation is
+    # produced -- set it just before `build` instead and the net comes
+    # out 302 wide while the envs are still emitting 306, which fails
+    # as `mat1 and mat2 shapes cannot be multiplied`.
+    if args.obs_version is not None:
+        env_mod.OBS_VERSION = int(args.obs_version)
+        env_mod.OBS_DIM = env_mod.obs_dim_for(env_mod.OBS_VERSION)
 
     import torch
     import torch.nn.functional as F
