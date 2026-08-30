@@ -37,17 +37,16 @@ const COG_ART = import.meta.glob('./assets/cogs/*.png', {
 const gagArt = (track, level) =>
   (track && level) ? GAG_ART[`./assets/gags/gag-${track}-${level}.png`] : null
 
-// A pink slip is not a gag: no track, no level, so no `gag-*.png` to
-// index. Drawn here rather than pulled from the game's phase files,
-// which would tie the panel to one installation's artwork -- and the
-// two games this page serves do not share one.
+// A pink slip is not a gag: no track, no level, so there is no
+// `gag-*.png` to index by. The game's own icon, supplied by the owner,
+// rather than the placeholder drawn here first -- it could not be found
+// in the phase files by name (`pink`, `fired`, `slip` and `fire` all
+// miss, and it is in neither sos_textures.bam nor inventory_icons.bam),
+// so a runtime extraction like the lure icon was not available.
+import pinkSlipArt from './assets/pink-slip.png'
+
 const PinkSlip = () => (
-  <svg viewBox="0 0 24 24" className="h-7 w-7" aria-hidden="true">
-    <rect x="4" y="3" width="16" height="18" rx="2"
-          fill="#f9a8d4" stroke="#be185d" strokeWidth="1.4" />
-    <path d="M7.5 8h9M7.5 11.5h9M7.5 15h5.5"
-          stroke="#9d174d" strokeWidth="1.3" strokeLinecap="round" />
-  </svg>
+  <img src={pinkSlipArt} alt="" className="size-11 object-contain" />
 )
 
 // Falls back to the department emblem, which is the honest picture when
