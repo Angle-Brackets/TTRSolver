@@ -54,6 +54,39 @@ the Chief Financial Officer -- a whole boss run for a handful -- so the
 scarcity that matters is measured in CFO runs, not in rounds. A search
 that cannot see that will spend them freely and be wrong every time,
 exactly as it did with pink slips while `cogs_remaining` was 0.
+
+MEASURED, AND THEY DO NOT HELP -- FOR A REASON THAT IS NOT ABOUT THEM.
+Wired into `hybrid.climb` as a planning-phase transformation and run on
+a solo VP, 100-120 runs a cell:
+
+    cogs a round   no unites   unites@200   unites@0   used@0
+               8       79.2%        78.3%          -      0.3
+              12       25.8%        17.5%          -      0.3
+              16        0.0%         0.0%       0.0%      0.6
+              20        0.0%         0.0%       0.0%      0.7
+
+Free unites are used 0.6 times in a seventeen-round fight that allows
+five or six, and the VP stays at zero. The price is not what stops
+them.
+
+THE SCORER CANNOT SEE LAFF. On a fixed board and a fixed plan,
+`_quick_score` returns 329.40 with the toon on 30 laff and 329.40 after
+restoring 80. Exactly zero difference. `QUICK_W["heal"]` credits laff
+restored BY A GAG during the round, computed from the round's own
+healing; laff a toon simply HAS is not a term anywhere. So a unite
+applied before scoring is invisible, and no price makes an invisible
+benefit worth buying.
+
+That is the same hole three other findings have circled:
+`QUICK_W["risk"]` is 0.0 and re-sweeping it changed nothing because it
+is constant across candidates; `prevent` prices twenty incoming damage
+identically at 100 laff and at 20; and every VP loss ends with seventy
+gags in the pouch. The scorer optimises damage dealt and damage
+prevented within one round, and has no notion of surviving.
+
+So unites are not the missing piece the 0.0% needed -- the missing
+piece is a scorer that values being alive. Until it has one, this
+module is correct mechanics that nothing will choose to use.
 """
 from __future__ import annotations
 
@@ -81,12 +114,24 @@ UNITE_COSTS_THE_ROUND: Optional[bool] = False
 # What a unite costs the SEARCH, in the same units as
 # `party_search.FIRE_PRICE` (20.0) and `FIRE_FLOOR` (20.0).
 #
-# [OWNER] "weigh them more than Fires" -- they are an absolute last
-# resort. Set well above a slip and NOT swept: the right value depends
-# on how dearly the player holds them, which is a preference rather
-# than a fact about the game, exactly like `objective.waste_weight`.
-# The number to check it against is behavioural: a solo VP should reach
-# for a unite when it is dying and never otherwise.
+# [OWNER] "weigh them more than Fires" -- an absolute last resort,
+# because "unites are extremely OP compared to Fires... otherwise it
+# trivializes a lot of stuff".
+#
+# DO NOT SWEEP THIS FOR WIN RATE. That sweep has a known answer and it
+# is the wrong one: a unite costs no gag and no round, restores up to
+# 80 laff or 30 gags, and returns every three rounds, so cheaper unites
+# will always clear more VPs. The search would find that and be right
+# about the number while being wrong about the game -- it would be
+# spending a resource the player farms whole CFO runs for, to win a
+# fight they wanted to win on gags.
+#
+# This is a PREFERENCE, in the same category as
+# `objective.waste_weight`: "a CHOSEN number... not a [TODO] standing
+# in for a fact, it is a preference about how to play." The test it has
+# to pass is behavioural, not statistical -- a solo VP should reach for
+# a unite when it is dying and never otherwise -- and that is what
+# `tests/test_unites.py` checks the shape of.
 UNITE_PRICE = 200.0
 
 
@@ -186,6 +231,78 @@ def tick_cooldown(toon) -> None:
 def available(toon) -> bool:
     """Is a unite usable by this toon this round?"""
     return getattr(toon, "unite_cooldown", 0) <= 0
+
+
+def candidates(toon):
+    """Unite options worth evaluating for this toon, best-value first.
+
+    A ROUND IS TWO DECISIONS -- unite, then throw -- and the unite is
+    modelled as a transformation of the state the gag is chosen from,
+    never as an entry in the action table. Putting it in the table
+    would multiply 246 actions by every unite on offer; wrapping the
+    choice instead costs one extra evaluation per candidate.
+
+    Pruned hard, because a unite priced at `UNITE_PRICE` will lose
+    almost every comparison and evaluating hopeless ones is wasted
+    search:
+
+      * nothing at all while the cooldown runs,
+      * a Toon-Up only if it heals within 5 of its face value, so an 80
+        is never offered to a toon down 12,
+      * a Gag-Up only for a track with real room in it.
+
+    Returns (kind, argument) pairs. `kind` is "toon_up" or "gag_up";
+    the argument is the laff value, or the Track (None = all tracks).
+    """
+    from .data import gags as gags_mod
+
+    if not available(toon):
+        return []
+    out = []
+
+    headroom = int(toon.max_laff) - int(toon.laff)
+    for value in TOON_UP_VALUES:
+        if headroom >= value - 5:
+            out.append(("toon_up", value))
+    # Largest first: they are mutually exclusive this round, and a
+    # bigger heal that is NOT wasted always beats a smaller one.
+    out.sort(key=lambda kv: -kv[1] if kv[0] == "toon_up" else 0)
+
+    owned = [t for t, xp in toon.track_exp.items() if xp > 0]
+    for track in owned:
+        room = 0
+        for level in range(1, gags_mod.POUCH_EXEMPT_LEVEL):
+            if toon.track_exp.get(track, 0) < level:
+                continue
+            try:
+                cap = gags_mod.gag(track, level).max_carry
+            except (KeyError, ValueError, NotImplementedError):
+                continue
+            room += max(0, cap - toon.gag_counts.get((track, level), 0))
+        if room >= GAG_UP_SINGLE_TRACK_MAX:
+            out.append(("gag_up", track))
+    if len(owned) > 1:
+        out.append(("gag_up", None))
+    return out
+
+
+def apply(toon, choice) -> int:
+    """Apply a `candidates` pair to `toon` in place. Returns what it gave."""
+    kind, arg = choice
+    if kind == "toon_up":
+        return apply_toon_up(toon, arg)
+    if kind == "gag_up":
+        return apply_gag_up(toon, arg)
+    raise ValueError(f"unknown unite {kind!r}")
+
+
+def describe(choice) -> str:
+    """One phrase for the panel."""
+    kind, arg = choice
+    if kind == "toon_up":
+        return f"{arg} Toon-Up unite"
+    return ("Gag-Up unite (all tracks)" if arg is None
+            else f"Gag-Up unite ({arg.value})")
 
 
 def gag_up_capacity(track_count: int) -> Dict[str, int]:

@@ -465,6 +465,41 @@ NO_DROP_INTO_OWN_LURE = True
 # right. Legality was never the constraint.
 ALWAYS_PROBE_PASS = True
 
+LAST_UNITE = None
+"""The unite `climb` chose on its last call, or None.
+
+A module global rather than a second return value, because `climb`'s
+return shape is what every evaluation harness and the live panel
+unpack, and widening it to a tuple would touch all of them for a field
+almost always None. The panel reads this to name the unite it is
+advising; nothing else should depend on it.
+"""
+
+OFFER_UNITES = False
+"""Whether `climb` may open a round by using a unite.
+
+A ROUND IS TWO DECISIONS when a unite is available -- use one, then
+throw -- because a unite costs no action and applies immediately in the
+planning phase. [OWNER, from play; see solver/unites.py.]
+
+Modelled as a state TRANSFORMATION wrapped around the ordinary choice,
+never as an entry in the action table. The table has 246 actions and
+there are up to thirteen unite options; multiplying them is unusable,
+while wrapping costs one extra evaluation per candidate and only when
+one is off cooldown and not obviously wasted.
+
+Each candidate is scored on the transformed state and charged
+`unites.UNITE_PRICE`, which is ten times a pink slip. That price is a
+PREFERENCE, not a tunable -- see the note on it -- so this flag is
+about whether the option exists at all, not about how eagerly it is
+taken.
+
+OFF by default until measured. The question it exists to answer: a solo
+VP at 16 and 20 cogs a round reads 0.0% for every policy, weight and
+observation version tried, while the owner beats that fight. Unites are
+the difference nobody has modelled.
+"""
+
 PROBE_CHEAPEST_KILL = True
 """Offer the SMALLEST gag that kills each cog, alongside the policy's.
 
@@ -777,7 +812,8 @@ def climb(state: BattleState, rng=random, budget: int = 16,
           width: int = 3, probe_tracks: Optional[bool] = None,
           deep: bool = False, rollout: int = 0,
           fixed: Optional[Mapping[int, Optional[Action]]] = None,
-          pairs: bool = True, pair_width: int = 7, reject=None
+          pairs: bool = True, pair_width: int = 7, reject=None,
+          allow_unites: bool = True
           ) -> Optional[Sequence[Optional[Action]]]:
     """Coordinate ascent on the joint plan, instead of independent draws.
 
@@ -1009,6 +1045,52 @@ def climb(state: BattleState, rng=random, budget: int = 16,
              if rollout else (lambda st, pl: _judge(st, pl, deep)))
 
     fixed = dict(fixed or {})
+
+    # UNITE FIRST, THEN THROW. Evaluated by transforming the state and
+    # re-planning on it, so the gag is chosen against the laff and gags
+    # the unite just restored -- which is what the game does in the
+    # planning phase. The unite is charged for separately, so a plan
+    # that uses one has to beat the plan that does not BY MORE than the
+    # price, not merely beat it.
+    if OFFER_UNITES and allow_unites and not fixed and state.toons:
+        from .. import unites as unites_mod
+
+        def _value_of(st):
+            inner = climb(st, rng, budget=budget, width=width,
+                          probe_tracks=probe_tracks, deep=deep,
+                          rollout=rollout, pairs=pairs,
+                          pair_width=pair_width, reject=reject,
+                          allow_unites=False)
+            if inner is None:
+                return None, float("-inf")
+            try:
+                return inner, _judge(st, inner, deep)
+            except (NotImplementedError, ValueError, KeyError):
+                return inner, float("-inf")
+
+        base_plan, base_value = _value_of(state)
+        best_value, best_choice, best_plan = base_value, None, base_plan
+        for choice in unites_mod.candidates(state.toons[0]):
+            probe = state.clone()
+            try:
+                unites_mod.apply(probe.toons[0], choice)
+            except Exception:               # noqa: BLE001 - unpriced gag
+                continue
+            plan_u, value_u = _value_of(probe)
+            # Charged, so a unite has to beat doing nothing BY MORE
+            # than its price rather than merely beat it.
+            value_u -= unites_mod.UNITE_PRICE
+            if value_u > best_value:
+                best_value, best_choice, best_plan = value_u, choice, plan_u
+
+        global LAST_UNITE
+        LAST_UNITE = best_choice
+        if best_choice is not None:
+            # In place, because the caller's state is what the round is
+            # played from and the effect lands before the gag.
+            unites_mod.apply(state.toons[0], best_choice)
+        return best_plan
+
     plan = list(propose(state, rng, sample=False, fixed=fixed,
                         reject=reject))
     try:
