@@ -17,16 +17,27 @@ stat table, and the project owner confirms they are identical.
 WHAT IS NOT PUBLISHED, AND SO IS A PARAMETER
 --------------------------------------------
 How many cogs each round contains. The wiki gives the level bands and
-nothing else. These were [ASSUMED] at 12 apiece; the owner has since
-reported twenty across a solo VP, ten a round, and that is what they
-now hold. Still parameters -- `vp_plan` takes them as arguments -- but
-no longer guesses.
+nothing else. These were [ASSUMED] at 12 apiece; the owner reports
+twenty A ROUND for a solo, and that is what they now hold. Still
+parameters -- `vp_plan` takes them as arguments -- but no longer
+guesses.
 
-WHERE A SOLO VP IS LOST, measured at that size: the skelecog round, not
-the cog round. It reaches round two 97% of the time and loses there
-47% of the time holding five slips. Arriving at the skelecogs with laff
-left is the whole problem, which is why the fights that fail do so with
-about seventy gags still in the pouch.
+AT THAT SIZE THE MODEL SCORES ZERO AND THE OWNER WINS, which is the
+most useful thing this module currently records. Measured across
+sizes, 150 solo runs a cell with five slips:
+
+    cogs a round   cleared   died round 1   gags left
+               8     81.3%           2.0%        76.8
+              10     50.7%           2.7%        80.2
+              20      0.0%          68.0%        71.0
+
+Every VP figure quoted anywhere in this project before that table was
+taken at 8, which is under half the real fight.
+
+The losses are not close and they are not about gags: seventy left in
+the pouch, no laff. Unites and SOS cards restore laff and neither is
+modelled. That is the gap, and it is a modelling one rather than a
+weight to tune.
 
 A ROUND IS A FLOOR, and the waves are the holdout. That mapping is why
 this fits the existing machinery with no new mechanics: four cogs on the
@@ -57,19 +68,24 @@ from . import facility
 from .data import gags as gags_mod
 from .state import BattleState, CogState, ToonState, Track
 
-# [OWNER, from play] -- twenty cogs across a SOLO VP, ten in each round.
-# The wiki publishes neither count, so this was [ASSUMED] at 12 apiece
-# until the owner reported the real number from a fight they had just
-# won. Their observation beats the guess and beats anything derivable.
+# [OWNER, from play] -- TWENTY A ROUND for a solo VP, so forty cogs
+# across the fight. The wiki publishes neither count, so these were
+# [ASSUMED] at 12 apiece until the owner reported the real number.
 #
-# TWENTY IS THE WHOLE FIGHT, not each round, and getting that wrong is
-# worth recording because it inverted a conclusion. Set as 20 AND 20 --
-# forty cogs -- a solo VP measured 0.0% cleared and died in the first
-# round half the time, which said the fight was impossible while the
-# owner was beating it. At 10 and 10 it reads 50.7% with five slips: a
-# coin flip they won, which is what actually happened.
-COG_ROUND = 10
-SKELECOG_ROUND = 10
+# THE MODEL CANNOT WIN THIS FIGHT AND THE OWNER CAN. At 20 and 20 a
+# solo VP measures 0.0% cleared over 150 runs, dying in the first round
+# half the time; the owner beats it following the panel's own advice.
+# That gap is not a tuning error, it is something missing from the
+# model, and the losses say which: they end with about SEVENTY GAGS
+# still in the pouch and no laff. The pouch never binds. Laff does.
+#
+# The owner uses Unites and SOS cards, and this project models neither
+# -- see the standing assumption above. Both restore laff. Until they
+# are modelled, a solo VP at its real size is a fight the solver
+# believes is lost from the first round, and its advice there is being
+# computed for a position it has already written off.
+COG_ROUND = 20
+SKELECOG_ROUND = 20
 
 # [CONFIRMED] wiki: the two rounds' level bands.
 COG_LEVELS = (1, 12)
