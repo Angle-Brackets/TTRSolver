@@ -118,6 +118,22 @@ OBS_DIM = (MAX_COGS * 11 + MAX_TOONS * (4 + 49) + 6
 LEVEL_SCALE = 20.0
 MAX_HP_SCALE = 476.0
 
+# A toon's laff CEILING, as a fraction of the game's. Named because it
+# was a bare 137.0 in `encode`, the same shape of magic number as the
+# `min(fires, 10) / 10` that hid the slip saturation.
+#
+# NOT replaceable by `toon.max_laff`, which is the other feature beside
+# it. `laff / max_laff` already asks "how hurt is this toon", using
+# their own ceiling. This one asks "how big is that ceiling" -- a 40
+# laff toon and a maxed one are different players facing the same cog
+# -- and dividing max_laff by itself would be 1.0 for everyone and
+# carry nothing.
+#
+# Changing the NUMBER changes what the slot means and needs
+# OBS_VERSION bumped with it; 137 is the value every shipped policy was
+# fitted against.
+MAX_LAFF_SCALE = 137.0
+
 
 def check_export(payload) -> Optional[str]:
     """Why a saved policy cannot be used here, or None if it can.
@@ -288,7 +304,7 @@ def encode(state: BattleState, actor: int = 0,
             # the only thing that ever told it no.
             out += [1.0,
                     toon.laff / max(1, toon.max_laff),
-                    toon.max_laff / 137.0,
+                    toon.max_laff / MAX_LAFF_SCALE,
                     _fire_feature(toon, obs_version)]
             for track in TRACKS:
                 for level in range(1, 8):

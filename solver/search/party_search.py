@@ -784,6 +784,19 @@ def expected_incoming(state: BattleState) -> float:
 WAKE_COSTS_PREVENTED = True
 
 
+PER_COG_REACH = True
+"""Stagger the lure horizon per sleeper instead of one number for all.
+
+`reach` gives every sleeper `asleep / standing` rounds of credit. You
+do not reach them all at once: the first is woken next round and the
+last after all of them. Ordered by remaining health, since that is the
+order they get worked through -- finish the cheap ones, leave the
+Mr. Hollywood asleep.
+
+Measured below alongside `LURE_IS_SPENT_ON_SLEEPERS`.
+"""
+
+
 LURE_IS_SPENT_ON_SLEEPERS = True
 """Whether a lure's value is capped by when you would wake the cog.
 
@@ -875,6 +888,25 @@ def prevented(before: BattleState, after: BattleState) -> float:
     asleep = sum(1 for c in after.active_cogs() if c.status.lured)
     # How many rounds before the party gets round to any given sleeper.
     reach = max(1.0, asleep / float(standing))
+    # PER-COG HORIZON. `reach` is one number for every sleeper, but you
+    # do not reach them all at the same time: the first is woken next
+    # round, the last after `asleep / standing` rounds. Staggering it
+    # credits a four-cog lure for 1 + 2 + 3 + 4 rounds of quiet rather
+    # than 4 + 4 + 4 + 4, which is both less generous in total and
+    # better shaped -- the cog you are about to kill was never going to
+    # stay asleep, and the one at the back was.
+    #
+    # Ordered by remaining health, because that is the order a player
+    # works through them: finish the cheap ones, leave the Mr.
+    # Hollywood asleep. `PER_COG_REACH` turns it off.
+    order = {}
+    if PER_COG_REACH:
+        sleepers = sorted(
+            (c for c in after.active_cogs() if c.status.lured),
+            key=lambda c: c.hp + (c.max_hp if c.status.suited else 0))
+        for rank, cog in enumerate(sleepers, start=1):
+            order[id(cog)] = max(1.0, rank / float(standing))
+
     if not LURE_IS_SPENT_ON_SLEEPERS:
         # LEAVING THEM ASLEEP IS THE STRATEGY, not a failure to get
         # round to them. The owner: lure the field with a Presentation,
@@ -932,7 +964,8 @@ def prevented(before: BattleState, after: BattleState) -> float:
                 left = min(float(old.status.lure_rounds_remaining), reach)
                 total += threat * max(0.0, 1.0 - left / reach)
         elif new.status.lured and not old.status.lured:
-            rounds = min(float(new.status.lure_rounds_remaining), reach)
+            horizon = order.get(id(new), reach)
+            rounds = min(float(new.status.lure_rounds_remaining), horizon)
             total += threat * max(0.0, rounds)
         elif WAKE_COSTS_PREVENTED and old.status.lured                 and not new.status.lured:
             # WOKEN, and this used to be free. The three cases above
@@ -974,6 +1007,38 @@ def killed_threat(before: BattleState, after: BattleState) -> float:
 
 def toons_at_risk(state: BattleState) -> float:
     """Standing toons a round of incoming damage could knock out.
+
+    RE-SWEPT AFTER THE FIX BELOW, and the weight stays 0.0 -- but for a
+    different reason than the one that zeroed it first, and the new
+    reason is worth having. Solo VP, 200 runs a cell:
+
+        risk weight    12 a round    20 a round
+                  0         29.0%          0.0%
+                  5         29.0%          0.0%
+                 15         29.0%          0.0%
+                 40         29.0%          0.0%
+
+    Not one game changed at any weight, +0/-0 on identical seeds.
+
+    The function is NOT dead this time: it reads non-zero in 61 of 168
+    sampled VP positions, and it discriminates cleanly between plans.
+    On a toon at 35 laff facing 53 incoming from four awake cogs,
+    Presentation and Hypno-goggles leave risk at 0.000 while Foghorn,
+    Birthday Cake and a pink slip all leave it at 1.000.
+
+    It arrives too late to matter. Risk is zero for every candidate
+    while laff is healthy, so the term is a constant that cannot move
+    an argmax; it only separates plans once the toon is already low,
+    and by then a solo VP is lost whatever it picks. A term that is
+    flat in the winnable region and decisive in the lost one changes
+    nothing about the outcome.
+
+    That points at prevention rather than risk: `QUICK_W["prevent"]`
+    values removing incoming damage the SAME at 100 laff and at 20,
+    when the second is worth far more. Scaling prevention by how close
+    to death the toon is would act early, where the game is still
+    winnable, and is the thing to try next.
+    """
 
     Nothing in any scorer charged for losing a toon. A sad toon takes
     their whole pouch out of the run -- in a building that is every
