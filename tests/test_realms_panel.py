@@ -492,3 +492,63 @@ class ReconsiderTest(unittest.TestCase):
         if second is not None and not second.is_pass:
             self.assertNotEqual(hybrid.reject_key(second), key,
                                 "the rejected kind came back")
+
+
+class CheapestKillProbeTest(unittest.TestCase):
+    """The smallest LEGAL gag that kills a cog, offered to the judge.
+
+    The scorer already prefers a cheap kill; it was never shown one.
+    And the probe that was meant to show it was a no-op for its first
+    version, because it ignored legality: the cheapest killer of a 6hp
+    cog is a single-target SOUND, Sound is group-only, so the one
+    candidate offered was always illegal and the caller dropped it.
+    """
+
+    def _board(self, hp):
+        from solver import data
+        from solver.rl import env as env_mod
+        from solver.state import BattleState, CogState, ToonState, Track
+        tracks = [t for t in Track if t is not Track.TOON_UP]
+        toon = ToonState(80, 137, {t: 7 for t in tracks},
+                         {(Track.SQUIRT, 4): 4, (Track.DROP, 6): 3,
+                          (Track.SOUND, 4): 5},
+                         frozenset(), pouch_capacity=80)
+        cog = CogState(department="sellbot", cog_type="cold_caller",
+                       level=1, hp=hp, max_hp=data.cog_max_hp(1))
+        del env_mod
+        return BattleState(toon=toon, cogs=[cog])
+
+    def test_it_offers_something_legal(self):
+        from solver.rl import env as env_mod
+        from solver.search import hybrid
+        state = self._board(6)
+        legal = env_mod.legal_mask(state, 0)
+        found = hybrid._cheapest_kills(state, 0)
+        self.assertTrue(found, "nothing offered for a 6hp cog")
+        for index in found:
+            self.assertTrue(legal[index],
+                            f"offered an illegal action at {index}")
+
+    def test_it_prefers_the_smaller_gag(self):
+        from solver.rl import env as env_mod
+        from solver.search import hybrid
+        state = self._board(6)
+        found = hybrid._cheapest_kills(state, 0)
+        entries = [env_mod.ACTIONS[i] for i in found]
+        self.assertTrue(all(e.level <= 4 for e in entries),
+                        f"offered {[(e.track.value, e.level) for e in entries]}"
+                        f" for a 6hp cog")
+
+    def test_nothing_is_offered_when_nothing_kills(self):
+        from solver.search import hybrid
+        state = self._board(400)          # more hp than anything held
+        self.assertEqual(hybrid._cheapest_kills(state, 0), [])
+
+    def test_the_flag_turns_it_off(self):
+        from solver.search import hybrid
+        original = hybrid.PROBE_CHEAPEST_KILL
+        try:
+            hybrid.PROBE_CHEAPEST_KILL = False
+            self.assertEqual(hybrid._cheapest_kills(self._board(6), 0), [])
+        finally:
+            hybrid.PROBE_CHEAPEST_KILL = original

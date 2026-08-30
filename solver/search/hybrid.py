@@ -486,7 +486,7 @@ outright.
 """
 
 
-def _cheapest_kills(state, seat: int):
+def _cheapest_kills(state, seat: int, legal=None):
     """Indices of the smallest single-target gag that kills each cog.
 
     Cheapest by DAMAGE, not by level: a level 4 Throw can out-damage a
@@ -504,6 +504,8 @@ def _cheapest_kills(state, seat: int):
 
     if not PROBE_CHEAPEST_KILL or seat >= len(state.toons):
         return []
+    if legal is None:
+        legal = env_mod.legal_mask(state, seat)
     toon = state.toons[seat]
     out = []
     for index, cog in enumerate(state.cogs):
@@ -514,6 +516,15 @@ def _cheapest_kills(state, seat: int):
             if (entry is None or entry.fire or entry.target_index != index
                     or entry.track in (Track.LURE, Track.TRAP,
                                        Track.TOON_UP)):
+                continue
+            # LEGALITY, and leaving it out made this whole probe a
+            # no-op. The cheapest killer of a 6hp cog is a single-target
+            # SOUND, and Sound is group-only -- so the one candidate
+            # offered was always illegal, the caller's isfinite check
+            # dropped it, and the menu was never widened at all. Checked
+            # here so the search falls through to the next cheapest
+            # LEGAL gag instead of offering nothing.
+            if action_index < len(legal) and not legal[action_index]:
                 continue
             if toon.gag_counts.get((entry.track, entry.level), 0) <= 0:
                 continue
@@ -998,6 +1009,7 @@ def climb(state: BattleState, rng=random, budget: int = 16,
             pending = list(plan)
             pending[seat] = None
             values = _logits(model, state, seat, pending, reject)
+            mask_for_seat = np.isfinite(values)
             order = list(np.argsort(values)[::-1][:width])
             if probe_tracks or _menu_is_degenerate(order, values):
                 # The best of every track this toon can actually play,
@@ -1034,7 +1046,7 @@ def climb(state: BattleState, rng=random, budget: int = 16,
             # OUTSIDE the track probes, because this is wanted whether
             # or not they are on: solo runs with them off, and solo is
             # where the overkill was reported.
-            for index in _cheapest_kills(state, seat):
+            for index in _cheapest_kills(state, seat, mask_for_seat):
                 if index not in order and np.isfinite(values[index]):
                     order.append(index)
             for index in order:

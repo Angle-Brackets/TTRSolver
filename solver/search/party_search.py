@@ -1093,8 +1093,13 @@ def _roll_groups(plan) -> Dict[int, tuple]:
     return groups
 
 
-def _score_leaf(state: BattleState, plan, hits, record=None) -> float:
-    """Score one fixed outcome of the round -- who hit and who missed."""
+def _score_leaf(state: BattleState, plan, hits, record=None,
+                objective=None) -> float:
+    """Score one fixed outcome of the round -- who hit and who missed.
+
+    `objective`, when given, adds `waste_penalty` on top of the fixed
+    `QUICK_W` terms. See `_quick_score`.
+    """
     from .. import data
 
     probe = state.clone()
@@ -1155,6 +1160,8 @@ def _score_leaf(state: BattleState, plan, hits, record=None) -> float:
             + QUICK_W["prevent"] * prevented(state, probe)
             - (QUICK_W["waste"] * _waste_fraction(state, plan)
                if QUICK_W["waste"] else 0.0)
+            - (waste_penalty(objective, state, plan)
+               if objective is not None else 0.0)
             - (QUICK_W["risk"] * toons_at_risk(probe)
                if QUICK_W["risk"] else 0.0)
             - QUICK_W["price"] * price)
@@ -1241,8 +1248,22 @@ def _expected_over_rolls(state: BattleState, plan, leaf) -> float:
     return total / mass
 
 
-def _quick_score(state: BattleState, plan) -> float:
+def _quick_score(state: BattleState, plan, objective=None) -> float:
     """Expected value of the round over every way the dice can fall.
+
+    `objective` is OPTIONAL and off by default, which is not laziness --
+    the setting only half-applies. It steers this ranker but not the
+    policy that proposes to it, so with it on, `survive` and `glass
+    cannon` still shortlist the same moves and merely order them
+    differently. That was reason enough to leave it out while the menu
+    came only from the policy; `PROBE_CHEAPEST_KILL` now puts the cheap
+    option there regardless, so the ranker can act on it.
+
+    What it buys that `QUICK_W["waste"]` cannot: `waste_penalty` scales
+    by SCARCITY as well as by wasted fraction, so burning one of three
+    Grand Pianos into a 6hp cog costs far more than spilling a Seltzer
+    there. A flat fraction cannot say that, and a flat fraction is what
+    was swept and failed -- twice.
 
     This used to play ONE ALL-HIT round, and that assumption is what lost
     the CEO. In a cog building it is nearly true -- accuracy runs 70-95%
@@ -1262,7 +1283,8 @@ def _quick_score(state: BattleState, plan) -> float:
     """
     return _expected_over_rolls(
         state, plan,
-        lambda hits, record: _score_leaf(state, plan, hits, record))
+        lambda hits, record: _score_leaf(state, plan, hits, record,
+                                         objective))
 
 
 def _playable(state: BattleState, plan) -> bool:
