@@ -21,11 +21,26 @@ import random
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from . import data
+from . import facility
 from . import mechanics
 from . import state as state_mod
+from .search import objective as objective_mod
 from .state import (
     ATTACK_ORDER, BattleState, CogState, Action, Track,
 )
+
+# `facility` and `search.objective` USED TO BE FUNCTION-LOCAL IMPORTS
+# inside `step`, and neither had to be. Both depend only on `data` and
+# `state`, so nothing here is a cycle: checked by importing each of the
+# 60 modules under solver/ in its own fresh interpreter, and by
+# importing `search.objective`, `facility`, `outcomes`, `search.hybrid`
+# and `search.party_search` FIRST and then this module.
+#
+# Python re-runs `_handle_fromlist` on every execution of a
+# function-local `from . import x`, and `step` is called once per
+# sampled round -- 11,670 import calls in a 6,000-step solo rollout,
+# two per round. See `party.py` for the two that genuinely are cycles
+# and have to stay local.
 
 
 def is_group_action(track: Track, level: int) -> bool:
@@ -600,8 +615,6 @@ def step(state: BattleState, action: Action, gag_cost_lambda=None,
     builds an objective with that gag cost and nothing else, which is
     what it always meant.
     """
-    from .search import objective as objective_mod
-
     if objective is None:
         if gag_cost_lambda is None:
             objective = objective_mod.DEFAULT
@@ -629,7 +642,6 @@ def step(state: BattleState, action: Action, gag_cost_lambda=None,
 
     # Same reinforcement rule as the party path; see the note in
     # `apply_party_round`.
-    from . import facility
     facility.reinforce(next_state)
 
     # One implementation of what a round is worth, shared with
@@ -690,6 +702,62 @@ def _spend_gag(toon, track, level) -> None:
     toon.gag_counts = counts
 
 
+def _check_pouches(state: BattleState,
+                   actions: Sequence[Optional[Action]]) -> None:
+    """Refuse a party plan that spends a gag somebody does not hold,
+    BEFORE any of the round is applied.
+
+    Every non-pass, non-fire action in a party round spends exactly one
+    gag -- `_apply_track_group` calls `_spend_gag` once per resolved
+    action on all four of its arms -- so the plan can be priced against
+    the pouches without simulating anything.
+
+    WHY IT IS CHECKED HERE AND NOT LEFT TO `_spend_gag`. The spend
+    happens track by track, in ATTACK_ORDER, as each group resolves. An
+    unplayable plan therefore raised from three frames down AFTER the
+    earlier tracks had already mutated `state`, and said only
+    `KeyError: (<Track.TOON_UP: 'toon_up'>, 1)` -- no toon, no hint that
+    the PLAN was the thing at fault. Checking first makes the refusal
+    atomic (a caller that passes a live state gets it back untouched,
+    which `tests/test_pass.py` already asserts for the single-toon case)
+    and makes the message name the seat.
+
+    THE CALLER IS ALWAYS THE ONE AT FAULT. `legal_actions` only offers a
+    gag with a positive count and `rl.env.legal_mask` is derived from
+    it, so a plan that respects the mask cannot reach this: 20,000 legal
+    coordinated `BattleEnv` steps raise nothing. The crash this was
+    written for came from a driver that ignored the mask and fed action
+    index 1 to every seat -- `Action(TOON_UP, 1, target_index=None)`,
+    a GROUP Toon-Up level 1, which is not a group gag and which
+    `legal_actions` never emits for anybody.
+
+    KeyError, not a new exception type, for the reason `_spend_gag`
+    gives: every caller that scores a speculative plan already catches
+    it, and this is the same fact those catches are for.
+
+    Counted per toon BY IDENTITY, so two seats holding the same
+    `ToonState` object are charged one gag each rather than both reading
+    the same pre-round count.
+    """
+    wanted: Dict[Tuple[int, Track, int], int] = {}
+    for index, action in enumerate(actions):
+        if action is None or action.is_pass or action.fire:
+            continue
+        # Indexes `state.toons` exactly as the resolution below does, so
+        # an over-long `actions` raises the same IndexError it always
+        # did, only sooner.
+        toon = state.toons[index]
+        key = (id(toon), action.track, action.level)
+        wanted[key] = wanted.get(key, 0) + 1
+        held = toon.gag_counts.get((action.track, action.level), 0)
+        if held < wanted[key]:
+            raise KeyError(
+                f"toon {index} was told to throw {action.track} level "
+                f"{action.level} and holds {held} of them -- the plan "
+                f"cannot be played"
+            )
+
+
 def apply_party_round(state: BattleState,
                       actions: Sequence[Optional[Action]],
                       hits: Optional[Sequence[bool]] = None,
@@ -730,6 +798,11 @@ def apply_party_round(state: BattleState,
     resolve in ATTACK_ORDER, so one track is prepared exactly once.
     """
     healed = [0 for _ in state.toons]
+
+    # The whole plan is priced against the pouches before a single gag
+    # lands -- see `_check_pouches` for why this is not left to the
+    # per-track spends further down.
+    _check_pouches(state, actions)
 
     # PINK SLIPS RESOLVE FIRST, before any gag. A fired cog is removed
     # from the battle by cannon, so it is gone before the round's gags

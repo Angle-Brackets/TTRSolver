@@ -23,6 +23,16 @@ cost rises with gag level, it uses each gag's own carry limit: you can hold
 thirty Cupcakes and exactly one Wedding Cake, so the Cake is thirty times
 scarcer and is priced that way. That comes from data (`Gag.max_carry`)
 rather than from a guess about levels.
+
+THIS IS ONE OF THREE WEIGHT SYSTEMS
+-----------------------------------
+`party_search.QUICK_W` and `party_search.GREEDY_W` price several of the
+same concepts -- laff, gags spent, overkill, kills -- on their own
+scales, because the two fast scorers take no objective and cannot read
+these fields. `docs/scoring.md` is the inventory: every term, which
+system defines it, who reads it, and where two of them disagree. A term
+added here that the fast scorers cannot see is only half-wired, which
+is exactly what happened to `waste_weight`.
 """
 from dataclasses import dataclass
 from typing import Dict, Optional
@@ -60,6 +70,15 @@ class Objective:
     # against those labels, so changing what `step_reward` returns
     # silently invalidates the fitted evaluator. Keeping the term on the
     # party path leaves the solo numbers bit-identical.
+    #
+    # AND IT REACHES LESS THAN THAT. `party_search.waste_penalty` is the
+    # only reader, and its only shipped callers are
+    # `party_search.evaluate` and `tools/gen_party_data.py` -- the exact
+    # search. `_quick_score` accepts an objective and no caller passes
+    # one, so the scorer that ranks the RL policy's proposals inside
+    # `hybrid.climb` cannot see this field at all, and overkill on that
+    # path is charged only by `QUICK_W["waste"]`, which is 0.0.
+    # docs/scoring.md, "where two systems disagree".
     waste_weight: float = 0.0
 
     # Extra charge for a gag that does not count against the pouch --
@@ -165,6 +184,13 @@ class Objective:
     # Horizon 0 is unchanged under every k tested, which is the check
     # that matters most: the street battle the solver has always
     # modelled is undisturbed.
+    #
+    # NOT READ BY THE FAST SCORERS EITHER, and worse than not read:
+    # `party_search._score_leaf` builds a default `Objective()` purely to
+    # take this number, so the party shortlist scales gag prices by 0.15
+    # whichever objective the caller asked for. A `speedrun` or
+    # `glass cannon` search still ranks its candidate plans on
+    # `balanced`'s horizon. docs/scoring.md.
     horizon_cost: float = 0.15
     # Flat charge per round. The only term that makes the solver prefer
     # finishing sooner for its own sake; without it, a line that stalls

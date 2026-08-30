@@ -5,30 +5,19 @@ on the underlying numbers.
 
 SOLO-TOON SIMPLIFICATIONS (read before extending to multi-toon parties):
 
-1. PrevHits ("stun") bonus is mostly a same-ROUND bonus between different
-   toons' (or a multi-target attack's) sequential hits. A solo toon takes
-   one action per round, so that half has nothing to inherit from and
-   stays 0 until there are other toons.
+1. PrevHits ("stun") has two halves. The same-round half is 0 for a solo
+   toon (one action per round, nothing to inherit from) EXCEPT for Trap:
+   Trap's PrevHits bonus for Lure persists across rounds, so a solo toon
+   that traps then lures gets +10 -- see calc_prev_hits_bonus. luredRatio,
+   the other half, is not a same-round effect and DOES apply solo -- see
+   calc_lured_ratio_bonus.
+2. Trap+Lure combo damage is a separate, persistent cross-round trigger
+   from the PrevHits bonus above -- modeled in
+   simulator._resolve_toon_action's LURE branch.
+3. pick_cog_target() is a stub returning the lone toon; the
+   proportional-damage weighting for parties is implemented below it.
 
-   TRAP IS THE EXCEPTION, and this said otherwise for a long time. The
-   wiki is explicit that Lure's PrevHits from Trap "remain across
-   multiple rounds, as long as Trap is present", so a solo toon that
-   traps and then lures collects +10 -- see calc_prev_hits_bonus. That
-   is the commonest solo line there is and it was being rolled ten
-   points short of what the game gives it.
-
-   The OTHER half of the `bonus` term, luredRatio, is not a same-round
-   effect and does apply to a solo toon -- see calc_lured_ratio_bonus().
-
-2. Trap+Lure combo damage (the classic burst combo) is NOT the same thing
-   as the PrevHits bonus above. It's a persistent, cross-round trigger:
-   trap sits on a cog until a Lure knocks that cog onto it. That part IS
-   modeled here (see simulator._resolve_toon_action's LURE branch).
-
-3. Cog target selection is trivial for a single toon (there's only one
-   toon to target), so pick_cog_target() below is a stub that always
-   returns the lone toon. The proportional-damage weighting algorithm
-   from the source doc is noted in a comment for when you add toons.
+Full discovery history: docs/mechanics-notes.md#solo-toon-simplifications-module-docstring
 """
 import math
 import random
@@ -61,13 +50,10 @@ def calc_track_exp(toon: ToonState, track: Track) -> int:
 
 
 def cog_rank(cog: CogState) -> int:
-    """The cog's rank (a.k.a. tier) on its department's corporate ladder,
-    1-8. [CONFIRMED] TTR wiki: rank is position on the ladder, and the
-    lowest level a cog can appear at equals that position -- Flunky is
-    tier 1 and starts at level 1, Pencil Pusher tier 2 at level 2, and so
-    on for all 32 cogs. So the first entry of its "levels" list is its
-    rank, with no extra table needed.
-    """
+    """Rank (tier) on the department's corporate ladder, 1-8. [CONFIRMED]
+    TTR wiki: rank equals the lowest level the cog can appear at (Flunky
+    tier 1 starts at level 1, Pencil Pusher tier 2 at level 2, ...), so
+    the first entry of "levels" is the rank -- no extra table needed."""
     return data.cog(cog.department, cog.cog_type).rank
 
 
@@ -75,11 +61,10 @@ def calc_tgt_def(track: Track, target_cogs) -> int:
     """For group attacks, uses the strongest (highest-level) cog's defense,
     since every active cog is in the target list. [CONFIRMED]
 
-    tgtDef depends on the cog's RANK as well as its level: the wiki's table
-    marks levels 4 and 5 with a second value used by rank-1 cogs. This
-    previously always took the rank-1 branch, which understated the defense
-    of every non-rank-1 cog at those two levels by 3 and 5 points -- a
-    level-4 Micromanager was scored -12 instead of -15.
+    tgtDef depends on the cog's RANK as well as its level, not just level --
+    a bug once had this always taking the rank-1 branch, understating
+    non-rank-1 defense by 3-5 points at levels 4-5. See
+    docs/mechanics-notes.md#calc_tgt_def--the-rank-1-branch-bug.
     """
     if not target_cogs:
         return 0
@@ -98,52 +83,33 @@ PREV_HIT_MAX = 75
 
 
 def calc_same_round_prev_hits(prior_hits: int) -> int:
-    """The stun bonus from attacks that already landed this round.
-
-    Zero for a solo toon, who acts once and has nothing to inherit from;
-    this is the half of PrevHits that only a party can earn.
+    """The stun bonus from attacks that already landed this round. Zero
+    for a solo toon (one action per round, nothing to inherit) -- the
+    half of PrevHits only a party can earn.
 
     `prior_hits` counts hits on this attack's target(s) earlier in the
-    same round that satisfy the wiki's conditions, which the caller
-    checks because they depend on tracks and targets rather than on a
-    number: the previous attack must have hit, must have been a
-    *different* track, and either attack must affect the group or both
-    must share a target. Trap is excluded from the count.
+    same round meeting the wiki's conditions -- caller-checked, since
+    they depend on tracks/targets rather than a number: previous attack
+    hit, was a *different* track, and either attack is group or both
+    share a target. Trap is excluded from the count.
     """
     return min(PREV_HIT_MAX, max(0, prior_hits) * PREV_HIT_STEP)
 
 
 def calc_prev_hits_bonus(track: Track, level: int = 0, all_cogs=None) -> int:
-    """PrevHits half of the `bonus` term.
+    """PrevHits half of the `bonus` term. Not always zero for a solo toon:
 
-    THE SOLO CASE IS NOT ALWAYS ZERO, WHICH THIS SAID FOR A LONG TIME.
-    The same-round part is: a solo toon acts once per round, so there is
-    no previous attack this round to inherit a bonus from, and that half
-    stays 0 until there are other toons.
-
-    But Trap's contribution is explicitly cross-round. [CONFIRMED] TTR
-    wiki (Accuracy#PrevHits):
-
-      1. "The first Trap gag that is placed grants +10 to PrevHits, but
-         only for Lure."
-      2. "Further Trap gag placements grant an additional +5 to a group
-         Lure gag."
-      3. "The PrevHits for Lure remain across multiple rounds, as long as
-         Trap is present."
-
-    Point 3 is the one that makes this a solo rule. A toon who traps in
-    one round and lures in the next is the commonest solo line there is
-    -- it is the line `simulator.legal_actions` offers the pass action
-    for -- and it was being rolled at 10 points less accuracy than the
-    game gives it.
-
+    [CONFIRMED] TTR wiki (Accuracy#PrevHits): first Trap placement grants
+    +10 PrevHits to Lure only; each further Trap placement grants +5 more
+    to a GROUP Lure; and this persists across rounds as long as Trap is
+    present -- so a solo toon that traps then lures next round gets it.
     Rule 4, "+50 PrevHits when Trap is activated by Lure", is left at 0:
-    it is a bonus to attacks landing *after* the trap goes off in the
-    same round, and a solo toon has none.
+    it applies to attacks landing after the trap fires in the same round,
+    which a solo toon never has.
 
     `all_cogs` is every cog in the battle; without it there is no trap
-    state to read and this returns 0, matching the old behaviour for
-    callers that pass nothing.
+    state to read and this returns 0. See
+    docs/mechanics-notes.md#calc_prev_hits_bonus--the-solo-case-is-not-always-zero.
     """
     if track != Track.LURE or not all_cogs:
         return 0
@@ -161,11 +127,11 @@ def calc_prev_hits_bonus(track: Track, level: int = 0, all_cogs=None) -> int:
 
 def gets_lured_ratio(track: Track, level: int) -> bool:
     """Which gags receive the luredRatio bonus. [CONFIRMED] TTR wiki
-    (Accuracy#luredRatio): "given to all Sound gags, and level 7 Throw or
-    Squirt gags when there is a mixed set of lured and un-lured Cogs".
+    (Accuracy#luredRatio): all Sound gags, and level 7 Throw or Squirt
+    when there is a mixed set of lured and un-lured Cogs.
 
-    Narrower than the strategy guide's rule, which was "everything except
-    Lure, Toon-Up and Drop" -- that wrongly handed the bonus to ordinary
+    Narrower than the strategy guide's rule ("everything except Lure,
+    Toon-Up and Drop"), which wrongly handed the bonus to ordinary
     single-target Throw/Squirt and to Trap.
     """
     if track == Track.SOUND:
@@ -180,15 +146,13 @@ def calc_lured_ratio_bonus(track: Track, level: int, all_cogs) -> int:
 
     Unlike PrevHits this is NOT a same-round, multi-toon effect -- it is
     read off the battle's current lure state, so a solo toon gets it too.
+    `all_cogs` is every cog in the battle, not just this attack's targets
+    (the denominator is the whole battle); dead cogs are excluded from
+    both halves.
 
-    `all_cogs` is every cog in the battle, not just this attack's targets:
-    the ratio's denominator is the whole battle. Dead cogs are excluded
-    from both halves (they have left the battle).
-
-    Rounding: the source expresses this as a percentage and adds it to
-    atkAcc; it does not say how a non-integral ratio (e.g. 1 of 3 cogs
-    lured -> 33.33) is rounded. We truncate. Only ever a 1-point
-    difference, and only for cog counts that don't divide 100.
+    Truncated, not rounded -- the source doesn't say how a non-integral
+    ratio should round, and truncation is only ever a 1-point difference.
+    See docs/mechanics-notes.md#gets_lured_ratio--calc_lured_ratio_bonus.
     """
     if not gets_lured_ratio(track, level):
         return 0
@@ -204,28 +168,21 @@ def calc_lured_ratio_bonus(track: Track, level: int, all_cogs) -> int:
 def calc_bonus(track: Track, level: int, all_cogs=None) -> int:
     """The full `bonus` term of atkAcc = propAcc + trackExp + tgtDef + bonus.
 
-    `all_cogs` is every cog in the battle. It defaults to None, meaning
-    "lure state not supplied", which drops the luredRatio half and leaves
-    the old always-0 behaviour for callers that don't pass battle state.
-    Deliberately NOT defaulted to the attack's targets: for a single-target
-    attack that would compute the ratio over one cog and read 100.
-    """
+    `all_cogs` defaults to None ("lure state not supplied"), dropping the
+    luredRatio half. Deliberately NOT defaulted to the attack's own
+    targets: for a single-target attack that would compute the ratio over
+    one cog and read 100."""
     return (calc_prev_hits_bonus(track, level, all_cogs)
             + calc_lured_ratio_bonus(track, level, all_cogs))
 
 
 def lure_hit_override(track: Track, target_cogs):
     """Accuracy forced by the targets' lure state, or None for "roll it".
-    [CONFIRMED] TTR wiki (Lure):
-
-      - Throw and Squirt get "a 50% damage bonus on guaranteed hits"
-        against lured cogs -> 100.
-      - "Drop gags always miss on lured Cogs" -> 0.
-
-    Only applies when EVERY target is lured. The wiki's own trivia is
-    explicit that a mixed set of lured and un-lured cogs is not guaranteed
-    to hit, so a group gag over a partly-lured battle rolls normally.
-    """
+    [CONFIRMED] TTR wiki (Lure): Throw/Squirt get "a 50% damage bonus on
+    guaranteed hits" against lured cogs -> 100; "Drop gags always miss on
+    lured Cogs" -> 0. Only when EVERY target is lured -- the wiki is
+    explicit that a mixed lured/un-lured set is not guaranteed, so a
+    group gag over a partly-lured battle rolls normally."""
     if not target_cogs or not all(c.status.lured for c in target_cogs):
         return None
     if track in (Track.THROW, Track.SQUIRT):
@@ -242,15 +199,10 @@ def forced_accuracy(track: Track, target_cogs):
     Squirt are guaranteed against fully lured cogs, and Drop always
     misses them. Because they are stated rather than computed, nothing
     may adjust them afterwards -- not the same-round stun bonus, not the
-    95 cap.
-
-    This exists as one function because the party round had its own copy
-    of the decision and got it wrong in all three directions: it added
-    stun to the forced number and then capped the sum, which gave an
-    always-hit Trap a 5% miss, gave a guaranteed Throw a 5% miss, and
-    gave a Drop that "always misses on lured Cogs" a 25% chance to land
-    whenever anything else hit earlier in the round. Solo play was
-    right the whole time, which is what made it hard to see.
+    95 cap. This exists as one function because the party round once had
+    its own copy of the decision and got it wrong in all three directions
+    (adding stun then capping gave an always-hit Trap a 5% miss, etc) --
+    see docs/mechanics-notes.md#forced_accuracy--the-party-rounds-three-way-bug.
     """
     if track == Track.TRAP:
         return 100  # [CONFIRMED] trap is always-hit
@@ -280,27 +232,22 @@ def calc_toon_accuracy(track: Track, level: int, toon: ToonState,
     # always misses -- and that case has already returned 0 above.
     acc = max(acc, data.ACCURACY_FLOOR)
 
-    # The 95 cap became a SOFT cap in 4.3.3: stun/Lure/Trap bonuses and
-    # Toons Hit "can slightly push the final accuracy value higher". The
-    # wiki never quantifies "slightly" or gives a replacement ceiling, so
-    # there is nothing to model -- this stays a hard cap, which is the
-    # pre-4.3.3 rule and the closest defensible approximation. See
-    # data.ACCURACY_CAP_IS_SOFT; revisit if a number ever surfaces.
+    # The 95 cap became a SOFT cap in 4.3.3 (stun/Lure/Trap/Toons Hit can
+    # push it higher), but the wiki never quantifies "slightly" or gives a
+    # replacement ceiling, so this stays a hard cap -- the closest
+    # defensible approximation. See data.ACCURACY_CAP_IS_SOFT and
+    # docs/mechanics-notes.md#calc_toon_accuracy--the-95-cap-and-the-433-soft-cap.
     return min(acc, data.ACCURACY_CAP)
 
 
 def accuracy_roll(rng=random) -> int:
-    """One accuracy die, 0-99.
+    """One accuracy die, 0-99. Separate from `roll_hit` because a roll is
+    sometimes SHARED: gags of the same track aimed at the same cog
+    resolve on one roll, and a group gag rolls once for every target, so
+    the caller needs the number, not just the verdict.
 
-    Separate from `roll_hit` because a roll is sometimes SHARED. Gags of
-    the same track aimed at the same cog resolve on one roll, and a
-    group gag rolls once for every target -- so the caller needs the
-    number, not just the verdict. `roll_hit` stays for the solo path,
-    where one gag means one roll either way.
-
-    `rng` defaults to the global module so every existing caller is
-    unchanged. Pass one to make a search reproducible -- see the note on
-    `party_search.evaluate`.
+    `rng` defaults to the global module so callers are unaffected; pass
+    one for a reproducible search -- see `party_search.evaluate`.
     """
     return rng.randint(0, 99)
 
@@ -318,13 +265,10 @@ def roll_hit(accuracy_pct: int, rng=random) -> bool:
 # from earned experience against per-gag minE/maxE thresholds that are
 # not transcribed, so it is a single global stand-in.
 #
-# It is a knob so a search can be run against a PESSIMISTIC assumption
-# and the answers compared. That comparison is the only way to ask "how
-# much does this recommendation depend on everyone actually being
-# maxed", which is the question behind a player's preference for a wide
-# damage margin -- see the note on `objective.risk_aversion`. Nothing
-# about outcome variance can answer it, because at a fixed fraction the
-# damage is deterministic.
+# A knob: run the search at a pessimistic fraction and compare answers to
+# ask "how much does this recommendation depend on everyone being maxed"
+# -- see objective.risk_aversion. See
+# docs/mechanics-notes.md#damage_trained_fraction.
 DAMAGE_TRAINED_FRACTION = 1.0
 
 
@@ -332,12 +276,9 @@ def calc_toon_damage(track: Track, level: int,
                       trained_fraction: float = None,
                       organic: bool = False) -> int:
     """Damage dealt by a gag. The real game ties this deterministically to
-    the toon's earned experience in the track (see gag_damage_from_exp
-    below) -- but we don't have the minE/maxE thresholds transcribed yet.
-    As an interim approximation, trained_fraction (0=min dmg, 1=max dmg)
-    linearly interpolates the gag's range. Default 1.0 assumes a fully
-    maxed track, which is the common "solved" build anyway.
-    """
+    earned experience (see gag_damage_from_exp) via minE/maxE thresholds
+    not yet transcribed; as an interim approximation, trained_fraction
+    (0=min dmg, 1=max dmg) linearly interpolates the gag's range."""
     if trained_fraction is None:
         trained_fraction = DAMAGE_TRAINED_FRACTION
     return data.gag(track, level).damage_at(trained_fraction, organic)
@@ -360,23 +301,15 @@ KB_BONUS_TRACKS = (Track.THROW, Track.SQUIRT)   # [CONFIRMED]
 
 
 def calc_kb_bonus(track: Track, target_lured: bool, total_damage: int) -> float:
-    """Lure knockback bonus damage. [CONFIRMED]:
+    """Lure knockback bonus damage. [CONFIRMED] kbBonus = totalDmgs * 0.50,
+    applying whenever a lured target is hit with Throw or Squirt.
+    `total_damage` is that track's damage to the target this round --
+    just the one gag's for a solo toon. Returned unrounded; caller lands
+    it on an integer HP pool.
 
-        "kbBonus should have applied in any case in which a lured target
-         was attacked with Throw or Squirt."
-        kbBonus = totalDmgs * 0.50
-
-    `totalDmgs` is the damage that track dealt to that lured target this
-    round -- for a solo toon that is just the one gag's damage.
-
-    Returned unrounded (the source keeps damage as a float and applies
-    gag damage, then hpBonus, then kbBonus as separate instances); the
-    caller decides how to land it on an integer HP pool.
-
-    NOT modeled: the long-standing kbBonus mis-indexing bug the guide
-    documents (bonus applied to the cog at the target's index in a
-    differently-ordered list). It needs >1 cog and a specific ordering
-    mismatch, is a bug rather than a mechanic, and TTR may have fixed it.
+    NOT modeled: the guide's kbBonus mis-indexing bug (needs >1 cog and a
+    list-ordering mismatch; a TTO-lineage bug, not a mechanic). See
+    docs/mechanics-notes.md#calc_kb_bonus--the-mis-indexing-bug-not-modeled.
     """
     if not target_lured or track not in KB_BONUS_TRACKS:
         return 0.0
@@ -389,36 +322,19 @@ def calc_hp_bonus(total_damage: int, gags_on_target: int = 1) -> int:
 
     [CONFIRMED] TTR wiki (Gags): "When two or more of the same gag type
     (excluding Lure, Trap, and Toon-Up) are used on a Cog simultaneously,
-    a 20% damage bonus applies." The exclusion list is the wiki's; this
-    function is only ever called for damage tracks, and callers must not
-    call it for Lure or Trap.
+    a 20% damage bonus applies." Callers must not call this for Lure or
+    Trap. `gags_on_target` defaults to 1 (solo case), which yields 0.
 
-    This is the whole reason coordinating a party is worth anything, and
-    it returned 0 unconditionally until multi-toon work began. A search
-    over the old rules could not see any value in two toons hitting the
-    same cog, so it would have rated four toons stacking Throw exactly
-    level with four toons hitting four different cogs.
+    PER COG, NOT PER ROUND -- do not copy Toontown Online's bug of
+    applying the bonus to every cog a group gag touched just because two
+    same-track gags landed somewhere in the round; [CONFIRMED] wrong for
+    TTR by the owner from play. `simulator._apply_track_group` keys its
+    contributions by cog index for this reason.
 
-    `gags_on_target` defaults to 1, which is the solo case and yields 0,
-    so nothing about solo play changes.
-
-    PER COG, NOT PER ROUND, and this is where Toontown Online had a bug
-    that must not be copied back in. The bonus counts the gags of one
-    track landing on THAT cog. A group Geyser plus a single Storm Cloud
-    at one cog gives that cog 105 + 80 = 185 and the 20% on top; the
-    three cogs the Geyser alone reached take a flat 105 with no bonus.
-    Applying the multiplier to every cog a group gag touched, because
-    two same-track gags were used somewhere in the round, is the TTO
-    behaviour and is [CONFIRMED] wrong for TTR by the owner from play.
-    `simulator._apply_track_group` keys its contributions by cog index
-    for this reason, and a test asserts two cogs do not combo.
-
-    ROUNDING IS NOT WIKI-CONFIRMED. The wiki says "a 20% damage bonus"
-    and does not say how it rounds; `ceil` comes from the QED1224 source
-    doc, which describes Toontown Online. It is kept because a bonus has
-    to resolve to a whole number of hit points somehow, and ceil is the
-    only reading with a source behind it -- but it is the first thing to
-    check if party damage ever reads a point low.
+    Rounds with `ceil`, which is NOT wiki-confirmed -- it's the QED1224
+    (Toontown Online) source's convention, kept for lack of a better one.
+    First thing to check if party damage ever reads a point low. See
+    docs/mechanics-notes.md#calc_hp_bonus--per-cog-not-per-round.
     """
     if gags_on_target < 2:
         return 0
@@ -464,46 +380,22 @@ REVENGE_CHANCE = 75
 def pick_cog_target(cog: CogState, toons, rng=random) -> int:
     """Which toon a cog's single-target attack hits.
 
-    With one toon there is no choice. With more:
+    With one toon there is no choice. With more: `REVENGE_CHANCE` per
+    cent of the time, if anyone has damaged this cog, pick among those
+    who have, weighted by their share of the damage; otherwise uniformly
+    among the toons still standing.
 
-      * `REVENGE_CHANCE` per cent of the time, if anyone has damaged
-        this cog, pick among those who have, weighted by their share of
-        the damage.
-      * Otherwise, uniformly among the toons still standing.
-
-    PROVENANCE, WHICH IS WEAKER THAN [CONFIRMED]. The wiki gives only a
-    direction -- "It is more likely that a Cog's single attack may
-    target a Toon whose gags dealt the most damage to them, though this
-    may not always be the case" -- and no numbers. The 75/25 split and
-    the proportional weighting come from Open Toontown's
-    `BattleCalculatorAI.__calcSuitTarget`, which is Toontown *Online*
-    code, the same lineage this project distrusts the QED1224 guide for.
-    It is a much better lead than a prose description, because it is the
-    algorithm rather than someone's account of it, and the wiki
-    corroborates its shape exactly. It is still not TTR.
-
-    TWO ODDITIES IN THAT SOURCE, DELIBERATELY NOT COPIED. What is
-    implemented is what the code evidently means.
-
-    `__rememberToonAttack` writes `self.SuitAttackers[suitId] = [toonId,
-    damage]` when a later hit is at least as large as an earlier one,
-    replacing the per-cog dictionary with a two-element list -- which
-    then breaks the `.keys()` calls in the selector. That one looks
-    simply wrong.
-
-    The weights are `damage / totalDamage * 100`, and the file is
-    Python 2 (it calls `has_key`). If those values are integers that is
-    integer division, every term with two or more attackers floors to
-    zero, and selection falls through to uniform random -- but the
-    operand types were inferred from the arithmetic rather than traced,
-    so treat that as a reading and not a finding.
-
-    Either way this implements the intent, on the judgement that TTR has
-    most likely fixed anything of the sort in the twenty years since,
-    and that reproducing another implementation's accidents would be
-    modelling the accident rather than the game. The discrepancy is
-    recorded so that a future disagreement with observed play has
-    somewhere obvious to start.
+    [OPEN TOONTOWN SOURCE], WEAKER THAN [CONFIRMED]. The wiki gives only
+    a direction ("more likely to target whoever dealt the most damage,
+    though this may not always be the case") with no numbers; the 75/25
+    split and proportional weighting come from Open Toontown's
+    `BattleCalculatorAI.__calcSuitTarget` (Toontown *Online* code). Two
+    oddities in that source are deliberately NOT copied -- a dict-vs-list
+    clobber and a probable integer-division bug that would floor
+    multi-attacker weights to zero -- on the judgement that what's
+    implemented here is what the code evidently means, not its accidents.
+    Full reasoning and what to check if play disagrees:
+    docs/mechanics-notes.md#pick_cog_target.
     """
     if len(toons) <= 1:
         return 0
@@ -530,11 +422,9 @@ def pick_cog_target(cog: CogState, toons, rng=random) -> int:
 
 def cog_attack_damage_and_accuracy(cog: CogState, attack_name: str, rng=random) -> Tuple[int, int]:
     """Damage and accuracy for one of this cog's attacks at its level.
-
     Raises NotImplementedError naming the cell if either is a documented
-    gap -- without that a None reaches the arithmetic and surfaces as a
-    bare TypeError, which reads like a simulator bug rather than a data one.
-    """
+    gap, rather than letting a None reach the arithmetic as a bare
+    TypeError that reads like a simulator bug."""
     spec = data.cog(cog.department, cog.cog_type)
     entry = spec.damage_at(attack_name, cog.level)
     dmg = entry if isinstance(entry, int) else rng.randint(*entry)
@@ -552,23 +442,14 @@ def lure_accuracy_before_bonus(track: Track, level: int, toon: ToonState,
 
         propAcc + trackExp + tgtDef        (NO bonus term)
 
-    [CONFIRMED]. The guide shows atkAccResult being written *before*
-    accuracy bonuses are added -- "Because of this, wakeupChance cannot be
-    offset with accuracy bonuses, and is only affected by propAcc,
-    trackExp, and tgtDef."
+    [CONFIRMED]: snapshotted before accuracy bonuses are added, so
+    "wakeupChance cannot be offset with accuracy bonuses". THE 95 CAP IS
+    DELIBERATELY NOT APPLIED HERE -- moot anyway since
+    wakeupChance = 100 - 2*acc is already <= 0 at acc >= 50. See
+    docs/mechanics-notes.md#lure_accuracy_before_bonus--why-the-95-cap-is-not-applied-here.
 
-    THE 95 CAP IS DELIBERATELY NOT APPLIED HERE. Reading: the guide only
-    ever states the cap in the hit/miss section ("It's important to note,
-    however, that atkAcc is capped at 95"), describing the value compared
-    against randChoice -- i.e. the post-bonus accuracy. atkAccResult is
-    snapshotted earlier, and nothing in the guide caps it. It is also moot
-    for the only consumer: wakeupChance = 100 - 2*acc is already <= 0 at
-    acc >= 50, so any pre-bonus accuracy that could reach the cap can
-    never wake a cog either way. Capping or not capping changes no
-    outcome; we don't cap because the source doesn't say to.
-
-    Worked example from the guide (Lureless toon, propAcc 70, level-12
-    cog): 70 + 0 + (-55) = 15  ->  wakeupChance 70.
+    Worked example (Lureless toon, propAcc 70, level-12 cog):
+    70 + 0 + (-55) = 15 -> wakeupChance 70.
     """
     return (calc_prop_acc(track, level, lure_tree_planted)
             + calc_track_exp(toon, track)
@@ -596,11 +477,9 @@ LURE_ROUNDS_BY_LEVEL = {g.level: g.lure_rounds for g in data.gags_in(Track.LURE)
 
 def lure_duration_rounds(level: int) -> int:
     """Rounds a Lure of this level holds for -- cog phases the cog skips.
-    [CONFIRMED] TTR wiki: 2/2/3/3/4/4/8 by level.
-
-    This duration is set once, when the lure lands on an un-lured cog, and
-    is never extended: re-luring neither stacks (3.0.0 removed that) nor
-    refreshes. See CogStatus.apply_lure.
+    [CONFIRMED] TTR wiki: 2/2/3/3/4/4/8 by level. Set once, when the lure
+    lands on an un-lured cog, and never extended -- re-luring neither
+    stacks (3.0.0 removed that) nor refreshes. See CogStatus.apply_lure.
     """
     return data.gag(Track.LURE, level).rounds()
 
@@ -608,36 +487,30 @@ def lure_duration_rounds(level: int) -> int:
 def lure_can_expire_early(level: int, lure_tree_planted: bool = False) -> bool:
     """Whether a lure of this level can end before its rounds run out.
 
-    [CONFIRMED] TTR 3.3.0: "Lure gags with a base accuracy below 50% no
-    longer have a chance for Lure effects to expire early."
-
-    In current TTR this is False for every Lure gag -- the lowest base
-    accuracy in the game is Small Magnet at 55%. So the wake-up roll below
-    is unreachable in practice, and a lure reliably lasts its full
-    duration. The threshold is coded rather than hardcoded to False
-    because it is a rebalancing knob: a future patch that drops a gag
-    under 50% would switch early expiry back on for it.
+    [CONFIRMED] TTR 3.3.0: Lure gags with base accuracy below 50% no
+    longer have a chance to expire early. Currently False for every Lure
+    gag -- the lowest base accuracy in the game is Small Magnet at 55% --
+    so the wake-up roll is unreachable in practice today. Coded as a
+    threshold rather than hardcoded False because it's a rebalancing
+    knob: a future gag under 50% would switch this back on. See
+    docs/mechanics-notes.md#lure_can_expire_early.
     """
     base = data.gag(Track.LURE, level).prop_accuracy(organic=lure_tree_planted)
     return base < data.EARLY_EXPIRY_ACCURACY_FLOOR
 
 
 # [CONFIRMED] by the owner from play: ANY attack gag that lands on a
-# lured cog wakes it immediately -- not just Sound. The knockback bonus
-# is applied FIRST, so a Throw or Squirt still gets its +50% against the
-# sleeping cog, and only then does the lure end. If the cog survives it
-# attacks that same round, because by then it is awake.
+# lured cog wakes it immediately -- not just Sound. Knockback bonus is
+# applied FIRST (a Throw/Squirt still gets its +50% against the sleeping
+# cog), then the lure ends; if the cog survives it attacks that same
+# round, already awake. Drop is the exception that proves it: it always
+# MISSES a lured cog, so it never wakes anything.
 #
-# Drop is the exception that proves it: it always MISSES a lured cog, so
-# it never lands and never wakes anything.
-#
-# This was `None` -- an unfilled gap -- and only Sound cleared the lure,
-# on the reading that the wiki names Sound explicitly. The wiki naming
-# one track is not the wiki excluding the others. The cost of the gap
-# was not small: `prevented` multiplies by `lure_rounds_remaining`, so
-# every lure was paid for rounds it would never actually deliver once
-# anybody hit the cog, which made a lure-and-grind line look far
-# stronger than it plays.
+# This was `None` and only Sound cleared the lure, on the wrong reading
+# that the wiki naming Sound meant excluding other tracks. Cost: a lure
+# was paid for rounds (via `prevented * lure_rounds_remaining`) it would
+# never deliver once anybody hit the cog, overvaluing lure-and-grind.
+# See docs/mechanics-notes.md#lure_ends_on_damage--drop_misses_lured_cogs.
 LURE_ENDS_ON_DAMAGE = True
 DROP_MISSES_LURED_COGS = True
 
@@ -645,134 +518,61 @@ DROP_MISSES_LURED_COGS = True
 # land. Trap and Lure place effects rather than damage; Toon-Up heals.
 DAMAGE_TRACKS = (Track.SOUND, Track.THROW, Track.SQUIRT, Track.DROP)
 
-# Multiple Lure gags thrown in the same round raise each other's
-# accuracy. This IS modelled -- `multi_lure_bonus` below, applied in
+# Multiple Lure gags thrown together raise each other's accuracy.
+# Modelled in `multi_lure_bonus`, applied in
 # `simulator.apply_party_round` to the shared roll. Two group Lure 6s go
 # from 80% to 95%, measured.
 #
-# This comment used to say the opposite, and said it for long enough
-# that `docs/party-strategy.md` cited it to explain away a measurement
-# it did not like. Only the MAGNITUDE is open, and it is [ASSUMED]
-# rather than [TODO] -- see MULTI_LURE_ACCURACY_BONUS.
+# [CONFIRMED] that it exists and its shape. TTR wiki (Lure) update notes:
+# "Multiple Lure gags of the same type used simultaneously now grant a
+# bonus (20/15/10)% accuracy depending on the gag level discrepancies of
+# the additional Lure gags, with the bonus being smaller if low-level
+# Lure gags are used."
 #
-# [CONFIRMED] that it exists. TTR wiki (Lure), opening paragraph:
-# "Using multiple Lure gags simultaneously increases the accuracy." The
-# same page's update notes give the shape: "Multiple Lure gags of the
-# same type used simultaneously now grant a bonus (20/15/10)% accuracy
-# depending on the gag level discrepancies of the additional Lure gags,
-# with the bonus being smaller if low-level Lure gags are used."
+# ELIGIBILITY is [CONFIRMED] (`multi_lure_eligible`): "of the same type"
+# means matching TARGETING CLASS, not the same gag -- two group Lures
+# qualify, two Dollar Bills qualify, one of each does not.
 #
-# ELIGIBILITY is now [CONFIRMED] and implemented below in
-# `multi_lure_eligible`; only the MAGNITUDE is still open. From the
-# v4.0.0 patch notes, which spell out what "of the same type" means:
+# [ASSUMED] -- NOT [CONFIRMED] -- is which of 20/15/10 a given level gap
+# selects. `MULTI_LURE_ACCURACY_BONUS` maps gap 0 -> 20, gap 1 -> 15,
+# gap >=2 -> `MULTI_LURE_ACCURACY_BONUS_DEFAULT` (10). Owner-authorised
+# from the v4.0.0 notes on the reasoning that the bonus is inversely
+# proportional to the gap; the bucket boundaries themselves are an
+# inference no source states. WHAT WOULD SETTLE IT: measured hit rates
+# from two group Lures at known levels, enough trials to separate
+# 20/15/10 -- if measurement contradicts this table, change it and
+# nothing else. Sources exhausted and full reasoning:
+# docs/mechanics-notes.md#multi_lure_accuracy_bonus--the-one-assumed-value.
 #
-#     Group Lures paired with another Group Lure yield 'Lure Bonus'
-#     Dollar Bills paired with another Dollar Bill yield 'Lure Bonus'
-#     Group Lures and Dollar Bills used simultaneously do not grant
-#     'Lure Bonus'
-#
-# So it is the targeting class that must match, not the gag: two group
-# Lures qualify, two Bills qualify, one of each does not. In this
-# track's tables the Bills are exactly the single-target gags (levels
-# 1, 3, 5) and the Magnets, Goggles and Presentation the group ones
-# (2, 4, 6, 7), so `Gag.group` already carries the distinction.
-#
-# The same notes settle a neighbouring rule the model happens to get
-# right: "Organic Lure now shifts the base accuracy of Lure by an
-# additional 10% rather than being an additive bonus during the battle
-# calculation". `Gag.prop_accuracy(organic=True)` is a base-accuracy
-# shift of exactly +10 for all seven Lure gags, which is that rule --
-# and it matters beyond accuracy, because the notes add that the shift
-# "better determines who the overriding Lure Gag is".
-#
-# The DIRECTION is now corroborated, the magnitudes still are not.
-# A player's reading is that the bonus is inversely proportional to the
-# level gap between the lures -- same level pays most, a wide gap pays
-# least -- and the wiki's own qualifier agrees in direction: "with the
-# bonus being smaller if low-level Lure gags are used". A cheap lure
-# added beside a dear one IS the wide-gap case, so both clauses point
-# the same way.
-#
-# What that still does not give is which of 20/15/10 a given gap
-# selects, and the bucket boundaries are the whole content of the rule:
-# gap 0/1/2+ is the natural guess and it is a guess. Also unresolved:
-# whether "of the same type" means the same gag, the same single/group
-# class, or merely both being Lure; and how this composes with the
-# Trap+Lure bonus in `calc_prev_hits_bonus`.
-#
-# Sources chased and exhausted, so the next person need not repeat it:
-#   * The Accuracy page names a "Lure bonus" term that may push past the
-#     95% soft cap, but gives no formula for it.
-#   * Both cited rebalancing PDFs (v4.0.0 and December 2021) are
-#     image-based -- their streams decompress to graphics, not text --
-#     so the numbers cannot be read out programmatically.
-#   * OPEN TOONTOWN IS THE WRONG LEAD HERE, unusually. This is a TTR
-#     4.0.0 addition ("now grant"), so it postdates the Toontown Online
-#     code entirely and nothing in that lineage can confirm it.
-# [ASSUMED] -- NOT [CONFIRMED], and the distinction is the point.
-#
-# The project owner authorised filling this in on the balance of
-# evidence, having read the v4.0.0 patch notes directly. Three
-# independent statements point the same way:
-#   * "depending on the gag level discrepancies of the additional Lure
-#     gags" -- the gap is what indexes it;
-#   * "with the bonus being smaller if lower leveled Lure gags are
-#     used" -- a cheap Lure beside a dear one is the wide-gap case;
-#   * the player's own reading, that it is inversely proportional to
-#     the gap.
-# Mapping the three published values onto gaps of 0, 1 and 2+ in that
-# order is the only assignment consistent with all three. It remains an
-# inference about bucket boundaries that no source states.
-#
-# WHAT WOULD SETTLE IT: throwing two group Lures at known levels and
-# recording hit rates over enough trials to separate 20 from 15 from
-# 10. Until then treat any result that leans on this as resting on a
-# guess, and if measurement contradicts it, change these three numbers
-# and nothing else -- that is why they are a table and not inlined.
-#
-# One neighbouring rule from the same patch IS pinned, and the
-# simulator already obeyed it by inference rather than by citation.
-# [CONFIRMED] TTR wiki (Lure, 4.0.0 update changes): "High-level Lure
-# gags override the base accuracy of low-level Lure gags when used
-# simultaneously." That is exactly what `simulator.apply_party_round`
-# does when it keys a shared roll on (track, target) and takes
-# `max(...)` of the group's accuracies -- see the `best[key]` line
-# there, and `test_a_strong_lure_carries_a_weak_one_on_the_same_cog`.
+# A neighbouring rule from the same patch IS pinned: [CONFIRMED]
+# "High-level Lure gags override the base accuracy of low-level Lure
+# gags when used simultaneously" is what `simulator.apply_party_round`
+# does keying a shared roll on (track, target) and taking `max(...)` --
+# see `test_a_strong_lure_carries_a_weak_one_on_the_same_cog`.
 #
 # The search DOES allow stacked Lure (`party_search._playable` has no
-# rule against it). Rejecting it was a real bug: it made a genuine TTR
-# play unreachable. Undervalued and reachable beats correctly valued
-# and impossible.
+# rule against it) -- rejecting it made a genuine TTR play unreachable.
 MULTI_LURE_ACCURACY_BONUS = {0: 20, 1: 15}
 MULTI_LURE_ACCURACY_BONUS_DEFAULT = 10        # gap of 2 or more
 
 
 def multi_lure_eligible(level_a: int, level_b: int) -> bool:
     """Would these two Lures, thrown together, earn the Lure Bonus?
-
-    [CONFIRMED] TTR v4.0.0 patch notes: two group Lures qualify, two
-    Dollar Bills qualify, and a group Lure beside a Bill does not. The
-    matching is on targeting class rather than on the gag itself.
-
-    Eligibility is [CONFIRMED]; the magnitude in
-    `multi_lure_bonus` is [ASSUMED]. Keep the two apart -- this half
-    rests on published text and that half does not.
-    """
+    [CONFIRMED] (see the MULTI_LURE_ACCURACY_BONUS comment above):
+    matches on targeting class (group vs single-target), not the gag."""
     return (data.gag(Track.LURE, level_a).group
             == data.gag(Track.LURE, level_b).group)
 
 
 def multi_lure_bonus(levels) -> int:
     """Accuracy bonus for Lures thrown together, from their level gap.
+    Zero unless at least two are eligible (`multi_lure_eligible`,
+    [CONFIRMED]); the size is [ASSUMED] (`MULTI_LURE_ACCURACY_BONUS`).
 
-    Zero unless at least two are eligible -- see `multi_lure_eligible`,
-    which is the [CONFIRMED] half. The size is [ASSUMED]: see the note
-    on `MULTI_LURE_ACCURACY_BONUS`.
-
-    The gap is measured between the highest Lure and the next highest,
-    because the notes describe the bonus as coming from "the additional
-    Lure gags" against the one that overrides -- and the overriding gag
-    is the most accurate, which for Lure tracks level.
+    Gap is measured between the highest Lure and the next highest: the
+    notes describe the bonus as coming from "the additional Lure gags"
+    against the one that overrides, which for Lure is the most accurate
+    and so the highest level.
     """
     levels = sorted(levels, reverse=True)
     if len(levels) < 2:

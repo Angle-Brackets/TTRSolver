@@ -43,9 +43,28 @@ import random
 from enum import Enum
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from . import data, mechanics, simulator
+from . import data, facility, mechanics, outcomes as outcomes_mod, simulator
 from .data import gags as gags_mod
+from .search import expectimax
 from .state import Action, BattleState, Track
+
+# `outcomes`, `search.expectimax` and `facility` USED TO BE
+# FUNCTION-LOCAL IMPORTS here (in `SensiblePrior._incoming`,
+# `SolverPolicy.distribution` and `step`), and none of the three is a
+# cycle -- nothing they reach imports `party`. The only two modules that
+# import this one are `search.party_search` and `search.hybrid`, and
+# neither is reachable from `outcomes` (-> simulator, mechanics, data),
+# from `expectimax` (-> outcomes, simulator) or from `facility`
+# (-> data, state).
+#
+# Verified rather than reasoned: every module under solver/ imported in
+# its own fresh interpreter, plus `party_search`, `hybrid`, `rl.env`,
+# `outcomes` and `expectimax` each imported BEFORE this module.
+#
+# Why it is worth doing: `_incoming` runs once per cog per candidate
+# gag whenever a pickup round samples a teammate, and Python re-runs
+# `_handle_fromlist` on every one -- 8,641 import calls from these two
+# files in a 4,000-step pickup rollout.
 
 
 class Mode(str, Enum):
@@ -130,8 +149,6 @@ class SensiblePrior(TeammateModel):
         self.focus = focus
 
     def _incoming(self, cog) -> float:
-        from . import outcomes as outcomes_mod
-
         try:
             return float(outcomes_mod.worst_case_damage(cog))
         except (NotImplementedError, ValueError):
@@ -274,8 +291,6 @@ class SolverPolicy(TeammateModel):
 
     def distribution(self, state: BattleState, toon_index: int
                      ) -> List[Tuple[float, Optional[Action]]]:
-        from .search import expectimax
-
         if state.toons[toon_index].laff <= 0 or not state.active_cogs():
             return [(1.0, None)]
         rotated = _as_actor(state, toon_index)
@@ -389,7 +404,6 @@ def step(state: BattleState, mine: Optional[Action] = None,
     # The boundary is also where it belongs on the merits: a cog that
     # walks in should not be targetable by gags thrown in the round it
     # joined, nor get to swing in it. Both phases are done by here.
-    from . import facility
     facility.reinforce(nxt)
     return nxt, healed, nxt.is_terminal()
 

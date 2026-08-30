@@ -27,6 +27,16 @@ The consequence is worth stating plainly: **this is an estimate, and
 values from it are not comparable with `expectimax.solve`'s**. Nothing
 here is exact and nothing should be labelled as though it were.
 
+WHERE THE WEIGHTS LIVE
+----------------------
+Three tables price overlapping concepts on three scales: `QUICK_W` and
+`GREEDY_W` below, and `search/objective.Objective`, which neither fast
+scorer can read. `docs/scoring.md` is the inventory -- every term, which
+system defines it, which code paths read it, and where two of them price
+the same thing differently. Consult it before adding or moving a term;
+the audit exists because a weight was added by hand once and fitted
+against another term that was itself wrong.
+
 COST, AND WHY THE DEFAULTS ARE SMALL
 ------------------------------------
 A coordinated plan is a multiset of actions over four toons, so the
@@ -156,10 +166,23 @@ USE_POLICY = False
 #
 # So the simulation earns its keep, on the positions that discriminate,
 # and one position showing it flat was not evidence that it does not.
+# The sweep above is GREEDY_SHORTLIST's, not this constant's; the two
+# comment blocks were adjacent and ran together. See `GREEDY_SHORTLIST`.
+#
 # What a restored point of laff is worth against a point of cog damage,
-# for the two scorers that have no `objective` to read. Mirrors
-# `objective.laff_weight`, which is what `round_reward` charges for laff
-# LOST, so the shortlist and the reward agree on what laff is for.
+# for a scorer that has no `objective` to read. Mirrors
+# `objective.laff_weight` in INTENT, which is what `round_reward`
+# charges for laff LOST, so the shortlist and the reward agree on what
+# laff is for -- not in magnitude: `laff_weight` is 1.0 in every preset
+# but SURVIVE (3.0) and GLASS_CANNON (0.25).
+#
+# READ BY ONE SCORER, `_cheap_score`, and there for two different
+# things: the Toon-Up branch uses it as a heal weight, and the Trap
+# branch uses it as a PREVENTION weight (`forgone = HEAL_VALUE * threat
+# * rounds`). The other two scorers price laff restored through
+# `QUICK_W["heal"]` and `GREEDY_W["heal"]`, which both happen to equal
+# this. Three constants, one number, no link between them --
+# docs/scoring.md.
 # Swept over 45 identical buildings, AFTER the reinforcement-slot fix:
 #
 #     HEAL_VALUE   floors   finished
@@ -370,7 +393,43 @@ TRAP_DISCOUNT = 0.6
 # path; buys the guarantee that no track is cut by arithmetic alone.
 TRACK_PROBES = 3
 
+# How many of a toon's candidate actions `greedy_plan` simulates. The
+# sweep that settled it at 2 -- and the four-position table showing k=1
+# losing 1.54 on the mixed-hp board -- is the comment block above
+# `HEAL_VALUE`, where it ran together with that constant's own note.
 GREEDY_SHORTLIST = 2
+
+
+# THE THIRD SCORER'S WEIGHTS. `_cheap_score` ranks single actions by
+# arithmetic alone, and its terms used to be bare literals in the middle
+# of the function -- which is why an audit of "how many places price a
+# kill" kept missing one. Named here so they are greppable and can be
+# compared with the two tables above. NO VALUE CHANGED when they were
+# named; every number is what the literal was.
+#
+# docs/scoring.md is the inventory and records where these disagree with
+# `QUICK_W` and `GREEDY_W`. Read it before changing one.
+
+# Scarcity units in the fast scorers' own currency: a gag costs
+# `level + SCARCITY_UNITS / carry_limit`. See `_gag_units`, which is the
+# one definition of that price, and `Objective.scarcity_cost`, which
+# expresses the same idea on the objective's scale and cannot be read
+# from here.
+SCARCITY_UNITS = 20.0
+
+# Credit for an action that finishes a cog. Note this is the GREEDY
+# table's kill price (60.0) and not the QUICK table's (120.0), while the
+# fire branch of this same function charges `QUICK_W["kill"]` -- so one
+# function prices a gag kill and a pink-slip kill on two different
+# scales. Recorded, not changed: see docs/scoring.md, "where two systems
+# disagree".
+CHEAP_KILL_BONUS = 60.0
+
+# Credit per cog a Lure would catch. The flat term `expected_incoming`'s
+# docstring describes as having "no relation to what those cogs were
+# about to do" -- `prevented` replaced it in the two simulated scorers,
+# and this shortlist ranker still uses it.
+CHEAP_LURE_VALUE = 25.0
 
 
 def candidates(state: BattleState, toon_index: int,
@@ -748,14 +807,11 @@ def expected_incoming(state: BattleState) -> float:
 
     A lured cog contributes nothing: it skips its attack.
     """
-    from .. import outcomes as outcomes_mod
-
     total = 0.0
     for cog in state.active_cogs():
         if cog.status.lured:
             continue
-        total += sum(p * dmg for p, _name, dmg, hit
-                     in outcomes_mod.cog_attack_outcomes(cog) if hit)
+        total += _cog_threat(cog)
     return total
 
 
@@ -1189,6 +1245,69 @@ FIRE_FLOOR = 20.0
 MIN_LEAF_PROB = 1e-3
 
 
+def _restored(healed, toons) -> float:
+    """Laff a round actually put back, capped at each toon's headroom.
+
+    Shared by `_score_leaf` and `_greedy_score`, which measured it with
+    the same four lines apiece. Overhealing must not look like value,
+    and a sad toon is not healed at all.
+    """
+    total = 0.0
+    for amount, before in zip(healed, toons):
+        if amount > 0 and before.laff > 0:
+            total += min(amount, before.max_laff - before.laff)
+    return total
+
+
+def _landed(before_cogs, after_cogs) -> int:
+    """Hit points a round took off, counting BOTH layers of a v2.0.
+
+    See `remaining_hp` for why `cog.hp` alone reads zero when a suit
+    breaks. Shared by `_score_leaf` and `_greedy_score`.
+    """
+    return sum(remaining_hp(before) - remaining_hp(after)
+               for before, after in zip(before_cogs, after_cogs))
+
+
+def _killed(before_cogs, after_cogs) -> int:
+    """Cogs this round removed. Shared by `_score_leaf` and
+    `_greedy_score`."""
+    return sum(1 for before, after in zip(before_cogs, after_cogs)
+               if not before.status.is_dead and after.status.is_dead)
+
+
+def _gag_units(track, level: int, unlocked: int) -> float:
+    """What one gag costs the two fast scorers, in their own units.
+
+    `level + SCARCITY_UNITS / carry_limit` -- a level term plus a
+    scarcity term, which is `Objective.gag_cost` and
+    `Objective.scarcity_cost` in a different currency with the ratio
+    between them fixed. Neither scorer takes an objective, so neither
+    can read those fields; this is the stand-in. The disagreement is
+    catalogued in docs/scoring.md, not resolved here.
+
+    One definition because `_score_leaf` and `_cheap_score` each spelt
+    it out, with the same literal 20.0 and the same fallback.
+    """
+    try:
+        limit = gags_mod.carry_limit(track, level, unlocked) or 1
+    except (NotImplementedError, ValueError):
+        limit = 1
+    return float(level) + SCARCITY_UNITS / limit
+
+
+def _fire_price(cogs_remaining: int, floor: bool = False) -> float:
+    """What a pink slip costs a scorer, per cog still to come.
+
+    `floor=True` adds `FIRE_FLOOR`, which only `_score_leaf` charges --
+    see `FIRE_FLOOR` for why the callers differ. Reads the module
+    globals at call time, so a test that patches `FIRE_PRICE` or
+    `FIRE_FLOOR` still reaches every scorer.
+    """
+    return FIRE_PRICE * float(cogs_remaining) + (FIRE_FLOOR if floor
+                                                 else 0.0)
+
+
 def _roll_groups(plan) -> Dict[int, tuple]:
     """Toon index -> the shared die that toon's gag resolves on.
 
@@ -1228,21 +1347,12 @@ def _score_leaf(state: BattleState, plan, hits, record=None,
     # all, so a plan containing a heal scored strictly below the same
     # plan attacking and was truncated before evaluation -- the
     # shortlist-deletion failure this file has had three times.
-    restored = 0.0
-    for amount, before in zip(healed, state.toons):
-        if amount > 0 and before.laff > 0:
-            restored += min(amount, before.max_laff - before.laff)
-    landed = sum(remaining_hp(before) - remaining_hp(after)
-                 for before, after in zip(state.cogs, probe.cogs))
-    killed = sum(1 for before, after in zip(state.cogs, probe.cogs)
-                 if not before.status.is_dead and after.status.is_dead)
+    restored = _restored(healed, state.toons)
+    landed = _landed(state.cogs, probe.cogs)
+    killed = _killed(state.cogs, probe.cogs)
     price = 0.0
     for track, level, count, unlocked in _spent(state, probe):
-        try:
-            limit = gags_mod.carry_limit(track, level, unlocked) or 1
-        except (NotImplementedError, ValueError):
-            limit = 1
-        price += count * (level + 20.0 / limit)
+        price += count * _gag_units(track, level, unlocked)
     # Same horizon scaling the real reward applies. This decides which
     # plans are ever sampled, so ranking here at horizon 0 would drop
     # the conserving plan before anything could evaluate it -- the
@@ -1265,8 +1375,8 @@ def _score_leaf(state: BattleState, plan, hits, record=None,
     # been saved for, rather than against the fight's remaining length,
     # so it applies even in a genuine last battle. `FIRE_FLOOR` at zero
     # restores the old behaviour exactly.
-    price += (FIRE_PRICE * float(state.cogs_remaining)
-              + FIRE_FLOOR) * _fires_spent(state, probe)
+    price += _fire_price(state.cogs_remaining,
+                         floor=True) * _fires_spent(state, probe)
     return (landed
             + QUICK_W["heal"] * restored
             + QUICK_W["armed"] * armed_credit(state, probe)
@@ -1366,6 +1476,17 @@ def _expected_over_rolls(state: BattleState, plan, leaf) -> float:
 
 def _quick_score(state: BattleState, plan, objective=None) -> float:
     """Expected value of the round over every way the dice can fall.
+
+    NO SHIPPED CALLER PASSES `objective`. `plans` (this module),
+    `hybrid._judge` (which is what `hybrid.climb` scores with) and
+    `hybrid.best_plan`, plus `tools/train_heads.py`, all call this with
+    two arguments, so the
+    `waste_penalty` branch in `_score_leaf` is unreachable in practice
+    and overkill is charged only through `QUICK_W["waste"]`, which is
+    0.0. That is the defect docs/scoring.md was written to make
+    visible; it is recorded there rather than fixed here, because
+    turning it on changes numbers and every number in this file was
+    measured.
 
     `objective` is OPTIONAL and off by default, which is not laziness --
     the setting only half-applies. It steers this ranker but not the
@@ -1639,6 +1760,24 @@ def plan_waste(state: BattleState, plan) -> Tuple[float, float]:
     return max(0.0, float(raw - useful)), price
 
 
+def _waste_charge(state: BattleState, plan, weight: float) -> float:
+    """`weight x wasted_fraction x scarcity`, the one waste shape.
+
+    Both charges for overkill are this expression: `_waste_fraction`
+    calls it with a weight of 1 so `QUICK_W["waste"]` can scale the
+    result, and `waste_penalty` calls it with `objective.waste_weight`.
+    They were two copies of the arithmetic, which is part of how the
+    same concept came to be priced twice -- see docs/scoring.md.
+    """
+    wasted, scarcity = plan_waste(state, plan)
+    if wasted <= 0.0 or scarcity <= 0.0:
+        return 0.0
+    total = wasted + sum(cog.hp for cog in state.cogs
+                         if not cog.status.is_dead)
+    fraction = wasted / total if total > 0 else 0.0
+    return weight * fraction * scarcity
+
+
 def _waste_fraction(state: BattleState, plan) -> float:
     """`waste_penalty`'s shape without an objective's weight.
 
@@ -1646,13 +1785,11 @@ def _waste_fraction(state: BattleState, plan) -> float:
     takes no objective -- it ranks the policy's proposals inside
     `hybrid.climb`, which has none to give it -- so it cannot call
     `waste_penalty`, and the weight lives in `QUICK_W` instead.
+
+    Also read by `rl/env.py` as the `--precision` reward term, which is
+    the third weight on this one quantity. See docs/scoring.md.
     """
-    wasted, scarcity = plan_waste(state, plan)
-    if wasted <= 0.0 or scarcity <= 0.0:
-        return 0.0
-    total = wasted + sum(cog.hp for cog in state.cogs
-                         if not cog.status.is_dead)
-    return (wasted / total if total > 0 else 0.0) * scarcity
+    return _waste_charge(state, plan, 1.0)
 
 
 def waste_penalty(objective, state: BattleState, plan) -> float:
@@ -1676,14 +1813,7 @@ def waste_penalty(objective, state: BattleState, plan) -> float:
     weight = getattr(objective, "waste_weight", 0.0)
     if not weight:
         return 0.0
-    wasted, scarcity = plan_waste(state, plan)
-    if wasted <= 0.0 or scarcity <= 0.0:
-        return 0.0
-    total = wasted + sum(
-        cog.hp for cog in state.cogs if not cog.status.is_dead)
-    fraction = wasted / total if total > 0 else 0.0
-
-    return weight * fraction * scarcity
+    return _waste_charge(state, plan, weight)
 
 
 def round_reward(objective, laff_lost: int, spent, won: bool,
@@ -1904,18 +2034,13 @@ def _cheap_score(state: BattleState, index: int, action: Action) -> float:
         removed = float(max(0, target.hp))
         if target.status.suited:
             removed += float(target.max_hp)     # the Skelecog goes too
-        held = FIRE_PRICE * float(state.cogs_remaining)
+        held = _fire_price(state.cogs_remaining)
         return removed + QUICK_W["kill"] + _cog_threat(target) - held
 
     toon = state.toons[index]
 
-    try:
-        limit = gags_mod.carry_limit(
-            action.track, action.level,
-            toon.track_exp.get(action.track, 0)) or 1
-    except (NotImplementedError, ValueError):
-        limit = 1
-    price = 20.0 / limit + action.level
+    price = _gag_units(action.track, action.level,
+                       toon.track_exp.get(action.track, 0))
 
     if action.track == Track.TOON_UP:
         # What this gag can actually restore, not the party's whole
@@ -1938,7 +2063,7 @@ def _cheap_score(state: BattleState, index: int, action: Action) -> float:
     if action.track == Track.LURE:
         caught = (len(live) if action.target_index is None
                   else 1) if any(not c.status.lured for c in live) else 0
-        return 25.0 * caught - price
+        return CHEAP_LURE_VALUE * caught - price
     if action.track == Track.TRAP:
         # A trap is worth the damage it will deal when something lures a
         # cog onto it -- conditional, but not small: a level 5 trap hits
@@ -1990,9 +2115,7 @@ def _cheap_score(state: BattleState, index: int, action: Action) -> float:
         # would otherwise have skipped.
         forgone = 0.0
         if target is not None and not target.status.lured:
-            from .. import outcomes as outcomes_mod
-            threat = sum(p * dmg for p, _n, dmg, hit
-                         in outcomes_mod.cog_attack_outcomes(target) if hit)
+            threat = _cog_threat(target)
             # Rounds of sleep given up, from the lure that would spring
             # this trap. The CHEAPEST one the party holds, because that
             # is the one a sensible player spends on it: durations run
@@ -2025,7 +2148,7 @@ def _cheap_score(state: BattleState, index: int, action: Action) -> float:
             hit += int(damage * mechanics.KB_BONUS_MULTIPLIER)
         score += min(hit, max(0, cog.hp))
         if hit >= cog.hp:
-            score += 60.0
+            score += CHEAP_KILL_BONUS
     return score - price
 
 
@@ -2050,9 +2173,14 @@ def _greedy_score(state: BattleState, trial, objective) -> float:
     shortlist". The shortlist was fine. The stage that actually decides
     threw the same track away.
 
-    Laff restored is priced at `HEAL_VALUE`, shared with the other two
-    scorers so there is one number for what laff is worth rather than
-    three.
+    Laff restored is priced at `GREEDY_W["heal"]`. This docstring used
+    to say `HEAL_VALUE`, "shared with the other two scorers so there is
+    one number for what laff is worth rather than three" -- it is not
+    shared. `HEAL_VALUE` is read only by `_cheap_score`; the three
+    constants merely hold the same number, and the note above `QUICK_W`
+    records that sharing the heal weight WAS tried and refuted (raising
+    it to 12 gained the hybrid a point and cost the search two to
+    three). docs/scoring.md lists all three.
 
     It also used to play one ALL-HIT round, the same assumption that lost
     the CEO in `_quick_score`, and it matters more here than the branch
@@ -2073,7 +2201,7 @@ def _greedy_score(state: BattleState, trial, objective) -> float:
         if action is None:
             continue
         if action.fire:
-            price += FIRE_PRICE * float(state.cogs_remaining)
+            price += _fire_price(state.cogs_remaining)
         else:
             price += objective.gag_price(action.track, action.level,
                                          state.cogs_remaining)
@@ -2089,14 +2217,9 @@ def _greedy_score(state: BattleState, trial, objective) -> float:
         # Capped at the headroom actually available, so healing a toon
         # who is nearly full is worth what it really restores rather than
         # the gag's nominal value. Overhealing should not look like value.
-        restored = 0.0
-        for amount, before in zip(healed, state.toons):
-            if amount > 0 and before.laff > 0:
-                restored += min(amount, before.max_laff - before.laff)
-        landed = sum(remaining_hp(before) - remaining_hp(after)
-                     for before, after in zip(state.cogs, probe.cogs))
-        killed = sum(1 for before, after in zip(state.cogs, probe.cogs)
-                     if not before.status.is_dead and after.status.is_dead)
+        restored = _restored(healed, state.toons)
+        landed = _landed(state.cogs, probe.cogs)
+        killed = _killed(state.cogs, probe.cogs)
         return (landed
                 + GREEDY_W["heal"] * restored
                 + GREEDY_W["kill"] * killed

@@ -1,33 +1,28 @@
 """Reading a live battle from Toontown Realms' local Astron cluster.
 
-WHAT THIS IS. Realms -- what Toontown Offline became -- ships a full
-Astron server that runs on the player's own machine. Every value the
-screen readers infer from pixels is published there as a typed field:
-the cog's identity, its exact HP, every toon's laff, the pouch. This
-module subscribes to that stream and keeps an object store from it.
+Realms (what Toontown Offline became) ships a full Astron server on the
+player's own machine, and every value the screen readers infer from
+pixels is published there as a typed field: cog identity, exact HP,
+laff, the pouch. This module subscribes to that stream via the Message
+Director -- the designed extension point every AI/UberDOG process uses
+-- and keeps an object store from it. READ-ONLY: it sends two control
+messages (name itself, subscribe) plus `GET_ALL` queries, and never an
+object update or a command.
 
-Subscribing to the Message Director is how every AI and UberDOG process
-in an Astron cluster attaches. It is the designed extension point, it is
-local, and this module is READ-ONLY: it sends two control messages, one
-to name itself and one to subscribe, and never an object update or a
-command of any kind.
+NOT a source of game data: Realms is Toontown Online lineage and its
+balance is frozen where TTR's moved on (its level 12 has 200 HP, TTR's
+has 196 -- see `docs/realms.md`). Nothing read here may reach
+`solver/data/`, fit a weight, or score a policy. It IS good for proving
+the reader right -- whether `build_state` turns a `setHP` into the
+correct `CogState.hp` doesn't depend on which game's balance is live,
+and that's better ground truth than a screenshot.
 
-WHAT IT IS NOT. It is not a source of game data. Realms is Toontown
-Online lineage and its balance is frozen where TTR's moved on -- its
-level 12 has 200 HP because that is what Toontown had before TTR 3.0.0
-replaced the flat 10% boost with the `+14` term and made it 196.
-Nothing read here may be written into `solver/data/`, used to fit a
-weight, or used to score a policy. See `docs/realms.md`.
+Needs panda3d (`requirements-realms.txt`); `solver/live/__init__` must
+not import this module, and tests skip rather than fail when it's
+missing, matching `vision.py`'s arrangement with numpy.
 
-What it IS good for is proving the reader right. Whether `build_state`
-turns a `setHP` into the correct `CogState.hp` does not depend on which
-game's balance is in force, and this is far better ground truth for
-that than a screenshot will ever be.
-
-OPTIONAL DEPENDENCY. Needs panda3d, listed in requirements-realms.txt.
-`solver/live/__init__` must not import this module and the tests skip
-rather than fail when it is missing -- the same arrangement `vision.py`
-has with numpy.
+Debugging history, wrong diagnoses and wire-format dead ends:
+`docs/live-notes.md#solverliverealmspy`.
 """
 from __future__ import annotations
 
@@ -59,30 +54,26 @@ CONTROL_ADD_CHANNEL = 9000
 CONTROL_ADD_RANGE = 9002
 CONTROL_SET_CON_NAME = 9004
 
-# State server message types, from Astron's own numbering.
-#
-# SIX OF THESE WERE WRONG and it is worth saying which are evidenced.
-# Confirmed by observation: 2020 carried every one of 567 datagrams in
-# the first live capture and decoded as SET_FIELD, and 2014/2015 round
-# tripped a GET_ALL query into a full object. Those four match Astron's
-# documented numbering exactly, which is the reason for trusting it for
-# the rest rather than for the numbers previously here -- 2007, 2060 and
-# 2064-2067 were invented, and 2060 is really SET_OWNER, so an ownership
-# change was being applied as a relocation.
-#
-# `_unknown` counts anything unrecognised, so a number that is still
-# wrong shows up as a count instead of as silence.
+# State server message types, from Astron's own numbering. SIX OF THESE
+# WERE WRONG in an earlier guessed numbering (2007, 2060, 2064-2067
+# invented; 2060 was really SET_OWNER, so an ownership change was
+# applied as a relocation). [CONFIRMED] below means it decoded to a real
+# class/field on a live capture -- 2020 carried every one of 567
+# datagrams in the first live capture as SET_FIELD, and 2014/2015 round
+# tripped a GET_ALL query into a full object. `_unknown` counts anything
+# else, so a still-wrong number shows up as a count rather than silence.
+# See `docs/live-notes.md#state-server-message-numbering-six-of-the-constants-were-wrong`.
 OBJECT_GET_ALL = 2014                   # [CONFIRMED] live
 OBJECT_GET_ALL_RESP = 2015              # [CONFIRMED] live
 OBJECT_SET_FIELD = 2020                 # [CONFIRMED] live
 OBJECT_SET_FIELDS = 2021                # [CONFIRMED] live
 OBJECT_DELETE_RAM = 2032
 OBJECT_CHANGING_LOCATION = 2041
-# [CONFIRMED] live. In one fight 2042 delivered DistributedBattle and
-# DistributedSuit, 2043 delivered DistributedToon, and 2052 delivered
-# DistributedBattle -- 34 objects between them, every dclass id
-# resolving to a real class. These three are what a battle and the
-# player's own toon arrive on, and nothing else announces them.
+# [CONFIRMED] live: in one fight, 2042/2043/2052 delivered 34 objects
+# between them (DistributedBattle, DistributedSuit, DistributedToon),
+# every dclass id resolving to a real class. These three are what a
+# battle and the player's own toon arrive on, and nothing else
+# announces them.
 OBJECT_ENTER_LOCATION_WITH_REQUIRED = 2042      # [CONFIRMED] live
 OBJECT_ENTER_LOCATION_WITH_REQUIRED_OTHER = 2043    # [CONFIRMED] live
 OBJECT_ENTER_AI_WITH_REQUIRED = 2052            # [CONFIRMED] live
@@ -97,18 +88,13 @@ ENTER_MESSAGES = (OBJECT_ENTER_LOCATION_WITH_REQUIRED,
                   OBJECT_ENTER_OWNER_WITH_REQUIRED,
                   OBJECT_ENTER_OWNER_WITH_REQUIRED_OTHER)
 
-# 2040 AND 2046 ARE NOT ENTER MESSAGES. They arrive once per object,
-# which is why they were suspected, and parsing them that way delivered
-# ZERO objects across a whole fight while 2042/2043/2052 delivered 34.
-# `_enter` refused every one because the dclass id did not resolve --
-# the guess was wrong and the validation is what said so, rather than a
-# store full of objects named "<60000>".
-#
-# Left unparsed deliberately. They are almost certainly SET_LOCATION
-# (2040, a command TO the state server rather than a broadcast, so it
-# carries no object) and a GET_LOCATION reply (2044 and 2046 turn up
-# together). Neither describes an object, so neither is wanted; they
-# are counted in `_unknown` and ignored.
+# 2040 and 2046 are NOT enter messages, despite arriving once per
+# object like one: parsed as ENTER they delivered ZERO objects across a
+# whole fight (vs. 34 for 2042/2043/2052), and `_enter` refused every
+# one because the dclass id did not resolve. Left unparsed deliberately
+# -- almost certainly SET_LOCATION (2040) and a GET_LOCATION reply
+# (2044/2046 arrive together) -- and counted in `_unknown`. See
+# `docs/live-notes.md#2040-and-2046-are-not-enter-messages`.
 PROBE_ENTER = ()
 
 # The ..._OTHER forms carry a trailing block of non-required fields.
@@ -121,16 +107,12 @@ ENTER_WITH_OTHER = (OBJECT_ENTER_LOCATION_WITH_REQUIRED_OTHER,
 COG_CLASSES = ("DistributedSuitBase", "DistributedSuit",
                "DistributedFactorySuit", "DistributedMintSuit",
                "DistributedStageSuit", "DistributedTutorialSuit")
-# `DistributedBattleBase` LEADS THIS LIST for the same reason
-# `DistributedSuitBase` leads COG_CLASSES, and leaving it out was a real
-# bug: a SET_FIELD names no class, so the object is tagged with the
-# class the FIELD was declared on. Both `setState` and `setMembers` are
-# declared on the base, so a battle learned from the live stream is a
-# `DistributedBattleBase` and matched nothing here. Cogs were unaffected
-# because the base was in their list, which is exactly why it went
-# unnoticed -- the tool that called `refresh_all` first got the real
-# class from the ENTER path and worked, and the one that did not saw no
-# battles at all.
+# `DistributedBattleBase` leads this list for the same reason
+# `DistributedSuitBase` leads COG_CLASSES: a SET_FIELD names no class,
+# so the object is tagged with the class its field was declared on
+# (`setState`/`setMembers` are on the base), and omitting it meant a
+# battle learned from the live stream (rather than via ENTER) matched
+# nothing here. See `docs/live-notes.md#battle_classes-distributedbattlebase-has-to-lead-the-list`.
 BATTLE_CLASSES = ("DistributedBattleBase",
                   "DistributedBattle", "DistributedBattleBldg",
                   "DistributedLevelBattle", "DistributedBattleFactory",
@@ -170,14 +152,12 @@ def dc_path(override: Optional[str] = None) -> Path:
 class DCIndex:
     """Field id to name and value, using the game's own parser.
 
-    The numbering in a .dc file is the contract between client and
-    server, and it is NOT simply declaration order. A hand-rolled parser
-    that assumed so put `DistributedSuit.setPathPosition` at 492 and
-    decoded live cog traffic as `DistributedPlayer.setDISLname`, which
-    is wrong in a way that looks plausible until you notice street cogs
-    do not have account names. panda3d's `DCFile` is the parser the game
-    itself uses, so it is right by construction rather than by
-    agreement.
+    `.dc` field numbering is the wire contract and is NOT declaration
+    order -- a hand-rolled parser that assumed so put
+    `DistributedSuit.setPathPosition` at 492 and decoded live cog
+    traffic as `DistributedPlayer.setDISLname`. panda3d's `DCFile` is
+    the parser the game itself uses, so it's right by construction.
+    See `docs/live-notes.md#dcindex-use-the-games-own-parser-and-guard-dclass`.
     """
 
     def __init__(self, path: Optional[Path] = None,
@@ -207,14 +187,10 @@ class DCIndex:
     def dclass(self, dclass_id: int):
         """A class by index, or None. GUARDED, because panda3d ASSERTS.
 
-        `getFieldByIndex` politely returns None for a bad index;
-        `getClass` fails a C++ assertion and takes the thread with it.
-        The two live on the same object and behave differently, which is
-        how an out-of-range id off the wire killed the reader thread
-        rather than being skipped as one bad datagram.
-
-        Bounds are checked here rather than at each call site so there
-        is one place to be right about it.
+        `getFieldByIndex` returns None for a bad index; `getClass` fails
+        a C++ assertion and takes the thread with it -- an out-of-range
+        id off the wire once killed the reader this way. Bounds are
+        checked here, once, rather than at each call site.
         """
         if not isinstance(dclass_id, int):
             return None
@@ -272,11 +248,9 @@ class DCIndex:
         if not packer.endUnpack():
             return None, None
         # `unpackObject` returns a field's ARGUMENT LIST, so a
-        # single-argument field like setHP comes back as `(6,)` rather
-        # than `6`. Unwrap it: every caller wants the value, and a
-        # one-tuple that has to be indexed at every use site is a
-        # papercut that will eventually be forgotten somewhere.
-        # Multi-argument fields (setMembers, setState) keep their tuple.
+        # single-argument field like setHP comes back as `(6,)`, not
+        # `6`. Unwrap the common case; setMembers/setState keep their
+        # tuple since they take several arguments.
         if isinstance(value, (tuple, list)) and len(value) == 1:
             return consumed, value[0]
         return consumed, value
@@ -333,36 +307,24 @@ class ObjectStore:
               fill_only: bool = False) -> LiveObject:
         """Record an object's arrival.
 
-        `fill_only` writes just the fields we do not already have, and
-        it is what a QUERY reply must use.
-
-        A `GET_ALL` answer describes the object as the state server saw
-        it when the query was processed, so it is already stale by the
-        time it lands -- and applying it wholesale REVERTED values the
-        live stream had since delivered. With the battle roster being
-        re-queried every poll, a cog's HP was overwritten with a
-        pre-hit snapshot about twice a second, which read as health
-        stuck a round behind the fight.
-
-        The stream is the authority and the query is the bootstrap: use
-        it to learn what was missed before attaching, never to correct
-        what is already known.
+        `fill_only=True` (a QUERY reply) writes only fields not already
+        held. A `GET_ALL` answer is stale by the time it lands, and
+        applying it wholesale REVERTED values the live stream had since
+        delivered -- with the roster re-queried every poll, a cog's HP
+        was overwritten with a pre-hit snapshot twice a second, reading
+        as health stuck a round behind. The stream is authority, the
+        query is the bootstrap. See
+        `docs/live-notes.md#objectstoreenter-and-the-fill_only-rule`.
         """
         with self._lock:
             obj = self._touch(do_id)
             obj.dclass, obj.parent, obj.zone = dclass, parent, zone
             if fill_only:
-                # REFRESH WHAT THE STREAM DOES NOT MAINTAIN, and only
-                # that. `setdefault` was too blunt: it froze fields the
-                # stream never sends.
-                #
-                # `setInventory` is declared `ownrecv`, so the pouch goes
-                # to the owning client and not to a listener -- a query
-                # is the ONLY way it is ever seen. Filling it once and
-                # never again left the solver planning with the gags the
-                # toon started the session holding, which is a far worse
-                # error than the stale HP the fill-only rule was added
-                # to prevent.
+                # `setInventory` is `ownrecv`: the pouch goes to the
+                # owning client, not a listener, so a query is the ONLY
+                # way it's ever seen. Filling it once and never again
+                # left the solver planning with session-start gags,
+                # worse than the stale HP this rule prevents.
                 for name, value in fields.items():
                     if name not in obj.streamed:
                         obj.fields[name] = value
@@ -419,17 +381,13 @@ class ObjectStore:
 DNA_DEPARTMENTS = {"c": "bossbot", "s": "sellbot",
                    "m": "cashbot", "l": "lawbot"}
 
-# Cog code to our own key. [OPEN TOONTOWN SOURCE] -- this is a NAMING
-# map rather than game data, so it does not fall under the ban on
-# Realms numbers reaching `solver/data/`; nothing here is a stat.
-#
-# Five entries are [CONFIRMED BY OBSERVATION] from live captures: sc,
-# cc, f, pp, dt. Six more are confirmed from the game's OWN data pack,
-# which prints them into its log beside the localiser key -- 'mh' next
-# to #SuitMrHollywood, 'nd' to #SuitNameDropper, 'gh' to
-# #SuitGladHander, 'ms' to #SuitMoverShaker, 'm' to #SuitTheMingler,
-# 'cc' again to #SuitColdCaller. The rest follow the same scheme and an
-# unknown code returns None rather than a guess.
+# Cog code to our own key. [OPEN TOONTOWN SOURCE] -- a NAMING map, not
+# game data, so it is exempt from the ban on Realms numbers reaching
+# `solver/data/`. sc/cc/f/pp/dt are [CONFIRMED BY OBSERVATION] from live
+# captures; mh/nd/gh/ms/m/cc are confirmed from the game's own data
+# pack, which prints them beside the localiser key (e.g. 'mh' next to
+# #SuitMrHollywood). Unknown code returns None rather than a guess. See
+# `docs/live-notes.md#suit-dna`.
 DNA_COGS = {
     # Bossbot
     "f": "flunky", "p": "pencil_pusher", "ym": "yesman",
@@ -479,20 +437,17 @@ def parse_dna(raw) -> Optional[Tuple[str, str]]:
 def cog_level(level_dist) -> Optional[int]:
     """Absolute cog level from `setLevelDist`.
 
-    IT IS THE LEVEL MINUS ONE, not an offset into the cog's own range,
-    and the two are easy to confuse because they agree for every cog
-    whose range starts at 1. Four live reads settled it, cross-checked
-    against our own HP table rather than against Realms:
+    IT IS THE LEVEL MINUS ONE, not an offset into the cog's own range --
+    the two agree for any cog whose range starts at 1, which is what
+    makes them easy to confuse. Discriminated against our own HP table:
 
-        Flunky        dist 0, hp 6   -> level 1   (both readings agree)
-        Cold Caller   dist 0, hp 6   -> level 1   (both agree)
-        Penny Pincher dist 1, hp 12  -> level 2   (range starts at 2,
-                                                   so an offset would
-                                                   have been 0)
-        Double Talker dist 2, hp 20  -> level 3   (range starts at 3,
-                                                   offset would be 0)
+        Penny Pincher dist 1, hp 12 -> level 2 (range starts at 2,
+                                                 an offset would be 0)
+        Double Talker dist 2, hp 20 -> level 3 (range starts at 3,
+                                                 offset would be 0)
 
-    The last two discriminate, and both say `level = dist + 1`.
+    Both say `level = dist + 1`. Full 4-reading writeup:
+    `docs/live-notes.md#cog_level-its-the-level-minus-one-not-a-range-offset`.
     """
     if level_dist is None:
         return None
@@ -509,12 +464,11 @@ def cog_level(level_dist) -> Optional[int]:
 # Toontown's track order, which every one of these seven-long arrays is
 # in: setInventory's rows, setTrackAccess, setTrackBonusLevel.
 #
-# WRITTEN OUT RATHER THAN TAKEN FROM `Track`'s DECLARATION ORDER, which
-# happens to match today. Iterating the enum would couple the wire
-# format to the order members are declared in an unrelated file, and
-# reordering that enum -- an edit with no obvious connection to this
-# module -- would silently shift every gag count by one track. The wire
-# order is a property of the game, so it is stated here.
+# WRITTEN OUT RATHER THAN TAKEN FROM `Track`'s DECLARATION ORDER: that
+# would couple the wire format to an unrelated file's member order, and
+# reordering the enum would silently shift every gag count by one
+# track. The wire order is a property of the game, stated here. See
+# `docs/live-notes.md#track-order-is-written-out-not-taken-from-the-enum`.
 DC_TRACK_ORDER = ("toon_up", "trap", "lure", "sound",
                   "throw", "squirt", "drop")
 
@@ -530,14 +484,12 @@ def _track(name: str):
 def parse_inventory(blob) -> Optional[Dict]:
     """`setInventory` as {(Track, level): count}, or None.
 
-    The blob is a uint16 length then seven rows of seven bytes, one row
-    per track, one byte per level, holding the count carried. Verified
-    against a real toon: the Toon-Up row was all zeros and that toon's
-    `setTrackAccess[0]` was 0, which is an independent way of saying the
-    same thing.
-
-    Levels are 1-based here because the rest of this project counts them
-    that way -- `gag_counts[(Track.TRAP, 6)]` is TNT.
+    A uint16 length then seven rows of seven bytes (track x level),
+    holding the count carried. Verified against a real toon: the
+    Toon-Up row was all zeros and that toon's `setTrackAccess[0]` was 0,
+    an independent way of saying the same thing. Levels are 1-based here
+    to match the rest of the project -- `gag_counts[(Track.TRAP, 6)]` is
+    TNT.
     """
     if isinstance(blob, str):
         blob = blob.encode("latin-1", "replace")
@@ -564,9 +516,7 @@ def parse_track_access(values) -> Optional[frozenset]:
     """`setTrackAccess` as the set of tracks the toon owns.
 
     Seven flags in `DC_TRACK_ORDER`. A toon with [0, 1, 1, 1, 1, 1, 1]
-    has no Toon-Up, which is a real and awkward loadout rather than a
-    misread -- `docs/` has a whole thread about what a Toon-Up-less toon
-    can clear.
+    has no Toon-Up -- a real and awkward loadout, not a misread.
     """
     if not isinstance(values, (list, tuple)):
         return None
@@ -580,26 +530,19 @@ def parse_organic(values) -> Optional[frozenset]:
     """`setTrackBonusLevel` as the set of ORGANIC tracks.
 
     Seven entries in `DC_TRACK_ORDER`, -1 for "not organic" and
-    otherwise the level the bonus reaches. This project treats organic
-    as a property of the whole track (see `ToonState.organic_tracks`),
-    which is how TTR works: a track is earned organic by ToonTask and
-    every gag in it is organic thereafter. So any non-negative entry
-    makes the track organic and the level itself is dropped.
+    otherwise the level the bonus reaches. THE LEVEL IS 0-BASED AND 6
+    MEANS THE WHOLE TRACK, per the owner -- confirmed by a real toon
+    reading [-1, -1, -1, -1, 6, -1, -1] (Throw organic, all seven
+    levels). This project treats organic as a property of the whole
+    track (`ToonState.organic_tracks`, matching how TTR works), so any
+    non-negative entry makes the track organic and the level is dropped.
 
-    THE LEVEL IS 0-BASED AND 6 MEANS THE WHOLE TRACK, per the owner, so
-    a non-negative entry really does mean every gag in it -- the reading
-    this function already took. A real toon read
-    [-1, -1, -1, -1, 6, -1, -1]: Throw organic, all seven levels.
-
-    Whether it means the same THING in both games is a separate
-    question and the answer is no. Realms gives organic a flat +10% to
-    damage; TTR's bonus varies by track and also raises Lure accuracy,
-    which is why `Gag.organic_damage` is a per-gag column here rather
-    than a multiplier. So this correctly reads WHICH tracks are organic
-    and the solver will then price them by TTR's rules. That is the
-    right split -- reading a position is not reading a rule -- but it
-    does mean a damage number predicted here will not match what Realms
-    rolls. See `docs/realms.md`.
+    Realms' organic is NOT the same bonus as TTR's -- flat +10% damage
+    there vs. a per-track bonus that also raises Lure accuracy here
+    (`Gag.organic_damage`) -- so this reads WHICH tracks are organic and
+    the solver prices them by TTR's rules; a damage number predicted
+    here will not match what Realms rolls. See `docs/realms.md` and
+    `docs/live-notes.md#parse_inventory-parse_track_access-parse_organic`.
     """
     if not isinstance(values, (list, tuple)):
         return None
@@ -617,47 +560,27 @@ def parse_organic(values) -> Optional[frozenset]:
 class Members(NamedTuple):
     """`DistributedBattleBase.setMembers`, unpacked.
 
-    The DC declares twelve untyped-looking slots --
+    Twelve untyped-looking slots --
 
         setMembers(uint32[], string, string, string, string, string,
                    uint32[], string, string, string, string, int16)
 
-    -- which is Toontown's long-standing shape: the suits and their
-    four state strings, then the toons and theirs, then a timestamp.
-    Observed live as
+    -- Toontown's long-standing shape: suits and their four state
+    strings, then toons and theirs, then a timestamp. Observed live as
+    `([401005039], '', '', '0', '', '9', [100000001], '', '', '0', '',
+    -23220)`, one cog and one toon, a solo street battle. `suits` and
+    `toons` are what this project needs; `toons` gives the party size
+    (`BattleState.allies_standing`).
 
-        ([401005039], '', '', '0', '', '9', [100000001], '', '', '0',
-         '', -23220)
-
-    one cog and one toon, which is a solo street battle and reads
-    correctly as such.
-
-    `suits` and `toons` are the ones this project needs. `toons` in
-    particular answers directly what the panel currently asks the player
-    for: the party size, and so `BattleState.allies_standing`.
-
-    THE STATE STRINGS ARE TWO DIFFERENT ENCODINGS, which is the trap
-    here and was settled by observation rather than assumed. A second
-    capture, two cogs with the first one lured:
-
-        active='01'   lured='0'   traps='99'
-
-    `traps` has one character per suit. `active` and `lured` do NOT:
-    they are the INDICES of the suits in that state. One lured cog out
-    of two gives '0', where a per-suit encoding would have given '10'
-    or similar. The earlier single-cog capture (`lured=''`, `traps='9'`)
-    agrees with both readings and so decides nothing; it is the two-cog
-    frame that discriminates.
-
-    Reading `lured` as one-char-per-suit would therefore mark the wrong
-    cog asleep, in a solver where lure is the pivot of every Trap line.
-
-    WHAT A TRAP LOOKS LIKE IS STILL UNOBSERVED. Every capture so far has
-    '9' in every trap slot, and `setMembers` is only re-broadcast when
-    membership changes -- a trap set mid-round does not resend it -- so
-    a trapped cog has not been seen. `trapped_indices` therefore reports
-    only "this slot is not 9", which is enough to know a trap is there
-    and not enough to know which gag it is.
+    THE STATE STRINGS ARE TWO DIFFERENT ENCODINGS. `traps` is one
+    character per suit; `active` and `lured` are INDICES of suits in
+    that state, not per-suit flags -- a two-cog capture with the first
+    lured read `active='01' lured='0' traps='99'`, and one lured cog out
+    of two giving `'0'` only makes sense as an index (a per-suit
+    encoding would give `'10'`). Reading `lured` as one-char-per-suit
+    would mark the wrong cog asleep, in a solver where Lure is the pivot
+    of every Trap line. Full writeup, including why a single-cog capture
+    didn't discriminate: `docs/live-notes.md#members--setmembers`.
     """
     suits: Tuple[int, ...]
     suits_joining: str
@@ -710,23 +633,19 @@ class Members(NamedTuple):
     def traps(self) -> Dict[int, int]:
         """{cog doId: trap gag level}, from the roster's own slots.
 
-        ONE CHARACTER PER SUIT, and it is the trap gag's 0-BASED LEVEL
-        rather than a flag. '9' is the sentinel for no trap, which is
-        why every untrapped capture read '9' -- there are only seven
-        trap levels, so 0-6 are the real values and 9 cannot collide.
+        ONE CHARACTER PER SUIT, the trap gag's 0-BASED LEVEL rather than
+        a flag -- '9' is the no-trap sentinel (only seven trap levels,
+        so 0-6 are real and 9 cannot collide). [CONFIRMED] live: a
+        trapped Money Bags read '4' (decodes to level 5, Trapdoor; owner
+        confirmed that's what was thrown).
 
-        [CONFIRMED] live. A trapped Money Bags read '4'; the decode
-        says level 5, Trapdoor; the owner confirms a Trapdoor is what
-        they threw. Untrapped cogs have read '9' in every capture
-        across many fights.
-
-        AND THE ROSTER DOES REFRESH. This module previously said the
-        opposite: that `setMembers` is only re-broadcast on a membership
-        change, so a trap laid mid-round would never appear. That was
-        wrong -- the slot updated with the cog still in the fight. The
-        watched-attacks path stays as a fallback for the case where a
-        stale roster and a fresh observation disagree, but the roster is
-        authoritative and is preferred.
+        THE ROSTER DOES REFRESH -- this module used to claim `setMembers`
+        only re-broadcasts on membership change, so a mid-round trap
+        would never appear. Wrong: the slot updates with the cog still
+        in the fight. `chosen_traps` (from `setChosenToonAttacks`) stays
+        as a fallback for when a stale roster and a fresh observation
+        disagree, but the roster is authoritative. See
+        `docs/live-notes.md#members--setmembers`.
         """
         out: Dict[int, int] = {}
         for do_id, char in zip(self.suits, self.suit_traps):
@@ -855,22 +774,16 @@ class RealmsListener(threading.Thread):
     def refresh(self, do_id: int) -> None:
         """Ask the state server for everything it holds about `do_id`.
 
-        WHY THIS EXISTS. The stream carries CHANGES. An object generated
-        before the listener attached has therefore never been described
-        to it: the first live run saw 944 datagrams, decoded every one,
-        and still reported `hp=None` for a cog standing in front of the
-        player, because the cog's `setHP` was packed into a generate
-        message that had already been and gone.
+        The stream carries only CHANGES: the first live run saw 944
+        datagrams, decoded every one, and still reported `hp=None` for a
+        cog standing in front of the player, because its `setHP` was in
+        a generate message sent before the listener attached. Requiring
+        attachment before the fight starts isn't workable, so this asks
+        instead.
 
-        Requiring the tool to be attached before the fight starts is not
-        a workable rule for something a player turns on when they want
-        advice, so this asks.
-
-        IT IS STILL A READ. `OBJECT_GET_ALL` is a query: it mutates no
-        object, sends nothing to the client, and is answered on this
-        listener's own private channel. The read-only promise in this
-        module's docstring is about not changing the game, and a query
-        does not.
+        Still a read: `OBJECT_GET_ALL` mutates no object, sends nothing
+        to the client, and is answered on this listener's own private
+        channel. See `docs/live-notes.md#realmslistenerrefresh-and-refresh_battle_members`.
         """
         if self._sock is None:
             raise RealmsError("not connected")
@@ -884,15 +797,11 @@ class RealmsListener(threading.Thread):
     def refresh_battle_members(self) -> int:
         """Ask about every doId a battle names in `setMembers`.
 
-        THE MISSING LINK, and the reason a live capture showed a battle
-        with one suit in its roster and `cogs: 0` in the store. Cogs are
-        generated long before the fight -- they walk the street first --
-        so the listener has usually never seen a field update for them,
-        and `refresh_all` only asks about objects it already knows.
-
-        The battle itself is the thing that says which cogs matter, so
-        reading its roster and asking about those doIds directly is what
-        closes the loop.
+        THE MISSING LINK: a live capture showed a battle with one suit
+        in its roster and `cogs: 0` in the store, because cogs walk the
+        street before the fight and `refresh_all` only re-asks about
+        objects already known. The battle's own roster says which cogs
+        matter, so this asks about those doIds directly.
         """
         asked = 0
         for battle in self.battles():
@@ -969,15 +878,13 @@ class RealmsListener(threading.Thread):
             self.datagrams += 1
             try:
                 self.handle(payload)
-            except Exception:           # noqa: BLE001 -- see below
-                # DELIBERATELY BROAD. This is a socket, and one
-                # unparseable datagram must cost one datagram rather
-                # than the reader. The narrow tuple that used to be here
-                # (struct.error, IndexError, ValueError) did not cover
-                # panda3d's AssertionError, which comes out of C++ when
-                # an index is out of range -- it escaped, killed the
-                # listener thread, and left the panel showing a fight
-                # that had stopped updating.
+            except Exception:           # noqa: BLE001
+                # DELIBERATELY BROAD: one bad datagram must cost one
+                # datagram, not the reader thread. A narrower tuple
+                # (struct.error, IndexError, ValueError) missed panda3d's
+                # AssertionError (a C++ out-of-range index), which
+                # escaped and killed the thread, leaving the panel
+                # frozen on a fight that had stopped updating.
                 self.undecoded += 1
         return buf
 
@@ -1008,34 +915,31 @@ class RealmsListener(threading.Thread):
             do_id, parent, zone = struct.unpack_from("<III", body, 0)
             self.store.relocate(do_id, parent, zone)
         elif msgtype in PROBE_ENTER:
-            # UNDER INVESTIGATION, and self-validating. These arrive
-            # exactly once per object, which is the ENTER pattern, but
-            # the numbers are not ones this reader recognises. Parsing
-            # them as ENTER either yields a dclass id that resolves to a
-            # real class -- in which case that is what they are -- or it
-            # does not, and `_enter` declines and counts it. A wrong
-            # guess cannot enter the store.
+            # UNDER INVESTIGATION, and self-validating: parsing an
+            # unrecognised once-per-object message as ENTER either
+            # resolves to a real dclass (in which case that's what it
+            # is) or `_enter` declines and counts it -- a wrong guess
+            # cannot enter the store.
             self._unknown[msgtype] = self._unknown.get(msgtype, 0) + 1
             self._enter(body, with_other=True, msgtype=msgtype)
         else:
             self._unknown[msgtype] = self._unknown.get(msgtype, 0) + 1
 
     def _note_chosen_attacks(self, battle_do_id: int, value) -> None:
-        """Remember which Lure gag was thrown at which cog.
+        """Remember which Lure/Trap gag was thrown at which cog.
 
         `setMembers` says a cog IS lured and never which gag did it, and
-        the solver cannot use a lure without that: `lure_can_expire_early`
-        keys off the gag's level, so a cog marked lured with no level
-        raises the moment the search touches it.
-
+        `lure_can_expire_early` keys off the gag's level -- a cog marked
+        lured with no level raises the moment the search touches it.
         `setChosenToonAttacks(toonIds, tracks, levels, targets, ...)` is
-        the only thing that says. Targets are indices into the battle's
-        suit roster, so the roster has to be read at the same time --
-        cogs die and the indices shift.
+        the only field that says. Targets are indices into the battle's
+        suit roster, read at the same time since cogs die and indices
+        shift.
 
-        Only Lure is kept. Everything else the solver reads from state
-        rather than from intent, and intent is the weaker source: a
-        chosen attack is what a toon MEANT to do, and it may miss.
+        Only Lure and Trap are kept: everything else the solver reads
+        from state, and intent (what a toon MEANT to do, which may miss)
+        is the weaker source. See
+        `docs/live-notes.md#_note_chosen_attacks-tracking-lure-and-trap-intent`.
         """
         if not isinstance(value, (tuple, list)) or len(value) < 4:
             return
@@ -1049,15 +953,10 @@ class RealmsListener(threading.Thread):
         now = self.battle_rounds.get(battle_do_id, 0)
         for track, level, target in zip(tracks, levels, targets):
             if int(track) == trap_index:
-                # TRAPS COME FROM HERE BECAUSE `setMembers` WILL NOT SAY.
-                # Its `suit_traps` slots are authoritative but it is only
-                # re-broadcast when membership changes, so a trap laid
-                # mid-round never resends it and the roster still reads
-                # '99' with a cog visibly standing on a TNT.
-                #
-                # A trap is always aimed at ONE cog -- there is no group
-                # Trap -- so unlike Lure the target index is always a
-                # real slot and no battle-wide fallback is needed.
+                # A trap always targets exactly ONE cog (no group Trap),
+                # so unlike Lure the target index is always a real slot
+                # and no battle-wide fallback is needed. See doc pointer
+                # above for why `setMembers` alone isn't enough here.
                 self.traps_seen += 1
                 index = int(target)
                 if 0 <= index < len(members.suits):
@@ -1071,13 +970,9 @@ class RealmsListener(threading.Thread):
             # this project.
             found = (int(level) + 1, now)
 
-            # A BATTLE-WIDE FALLBACK, because the per-target index is not
-            # always usable. A GROUP Lure hits every cog and has no one
-            # target, so its `target` is a sentinel rather than a slot,
-            # and keying only on the slot recorded nothing at all -- the
-            # reader then refused a cog it had watched be lured, saying
-            # the Lure was thrown before it attached, which was untrue
-            # and unfixable by waiting.
+            # BATTLE-WIDE FALLBACK: a GROUP Lure's `target` is a sentinel
+            # rather than a slot, so keying only on the slot missed group
+            # Lures entirely -- see doc pointer above.
             self.last_lure[battle_do_id] = found
 
             index = int(target)
@@ -1085,22 +980,13 @@ class RealmsListener(threading.Thread):
             if single:
                 self.chosen_lures[members.suits[index]] = found
 
-            # A LURE SPENDS A TRAP, so forget any we were holding for the
-            # cogs this Lure reaches. A group Lure reaches all of them.
-            #
-            # Clearing on the LURE rather than on the cog turning up
-            # lured is the whole point: a trapped cog dragged onto its
-            # trap takes the damage and is knocked awake, so it never
-            # appears in `suits_lured` at all. Waiting for it to would
-            # have held the trap forever and had the solver plan a
-            # second combo for damage already collected.
-            #
-            # DELIBERATELY CONSERVATIVE. A Lure that MISSES leaves the
-            # trap in place and this forgets it anyway, so the solver
-            # stops seeing a combo that is really still available. That
-            # is the safe direction: under-claiming a trap costs a
-            # better line, over-claiming one plans damage that will
-            # never arrive.
+            # A LURE SPENDS A TRAP: clear any trap held for the cogs it
+            # reaches (all of them for a group Lure), on the LURE rather
+            # than on the cog appearing lured -- a cog dragged onto its
+            # own trap wakes and never appears in `suits_lured` at all.
+            # DELIBERATELY CONSERVATIVE: a Lure that misses still clears
+            # the trap here, which under-claims rather than over-claims
+            # a combo. See doc pointer above.
             reached = ([members.suits[index]] if single
                        else list(members.suits))
             for do_id in reached:
@@ -1109,27 +995,20 @@ class RealmsListener(threading.Thread):
     def apply_movie(self, battle_do_id: int, value) -> int:
         """Subtract a round's damage from the cogs, from `setMovie`.
 
-        WHY THIS IS NEEDED AT ALL. The server writes a cog's `setHP` at
-        COMMIT time and the value it writes is the HP going INTO that
-        round -- the damage a round deals only reaches the state server
-        at the NEXT commit. Confirmed against a live fight: HP 90 at one
-        commit, 61 at the next, with the owner confirming every gag in
-        between had hit.
+        The server writes `setHP` at COMMIT time to the HP going INTO
+        that round -- a round's damage only reaches the state server at
+        the NEXT commit (confirmed live: HP 90 at one commit, 61 at the
+        next, every gag in between having hit). That leaves the panel a
+        round stale exactly during `WaitForInput`, while the player
+        chooses, and no amount of re-querying fixes it.
 
-        That leaves the panel a round stale over exactly the window
-        where it is used: `WaitForInput`, while the player chooses. No
-        amount of re-querying fixes it, because the state server does
-        not have the number yet either.
-
-        `setMovie` does. It is `required broadcast ram` and carries the
-        round's resolution -- `ToonAttack.hp` is damage per target -- and
-        it arrives WITH the commit, before the animation plays. Applying
-        it moves the reader from a round behind to slightly ahead.
-
-        Safe to apply because `setHP` is ABSOLUTE: when the real value
-        turns up next commit it overwrites this rather than compounding
-        with it. This is a forward correction that the server later
-        confirms.
+        `setMovie` (`required broadcast ram`) carries the round's
+        resolution and arrives WITH the commit, before the animation
+        plays, so applying it moves the reader from a round behind to
+        slightly ahead. Safe because `setHP` is ABSOLUTE: the real value
+        at the next commit overwrites this rather than compounding with
+        it -- a forward correction the server later confirms. See
+        `docs/live-notes.md#apply_movie-correcting-for-stale-hp-and-the-doubled-datagram`.
         """
         if not isinstance(value, (list, tuple)) or len(value) < 5:
             return 0
@@ -1185,13 +1064,12 @@ class RealmsListener(threading.Thread):
     def _note_state(self, battle_do_id: int, value) -> None:
         """Count rounds by watching the battle's state machine.
 
-        A round is one movie: the toons choose, the movie plays, the
-        next round begins. `setState` walks that cycle, so counting
-        entries into the movie state counts rounds -- which is the only
-        way to know how much of a Lure is left, since NOTHING in the DC
-        carries lure duration. The whole 165KB file mentions "lure"
-        nowhere outside `setMembers`' untyped slots: it is AI-side state
-        and is never distributed.
+        A round is one movie (toons choose, movie plays, next round
+        begins); `setState` walks that cycle, so counting entries into
+        the movie state counts rounds. This is the only way to know how
+        much of a Lure is left -- the whole 165KB `.dc` file mentions
+        "lure" nowhere outside `setMembers`'s untyped slots, since lure
+        duration is AI-side state and is never distributed.
         """
         name = value[0] if isinstance(value, (tuple, list)) and value else value
         if isinstance(name, (bytes, bytearray)):
@@ -1225,20 +1103,16 @@ class RealmsListener(threading.Thread):
             # is nothing under this one now.
             self.chosen_traps.pop(cog_do_id, None)
             return None
-        # THE ROSTER WINS. It is the server's own answer and it names
-        # the gag, where the watched-attacks path only knows what was
-        # aimed and not whether it stuck.
+        # THE ROSTER WINS: it's the server's own answer and names the
+        # gag, where watched-attacks only knows what was aimed.
         from_roster = members.traps().get(cog_do_id)
         if from_roster is not None:
             return from_roster
-        # THE FALLBACK HAS NEVER FIRED and should not be relied on. A
-        # live capture counted two Trap attacks (`traps_seen == 2`) and
-        # stored none of them, so the target in `setChosenToonAttacks`
-        # is evidently not a roster slot for Trap the way it is for a
-        # single-target Lure. It is left in place because it costs
-        # nothing and the roster is authoritative anyway -- but it is
-        # unverified, and anything that starts depending on it needs to
-        # establish what that target actually is first.
+        # UNVERIFIED, HAS NEVER FIRED: a live capture had `traps_seen ==
+        # 2` and stored neither, so `setChosenToonAttacks`'s target is
+        # evidently not a Trap roster slot the way it is for Lure. Left
+        # in place since it's free and the roster wins anyway -- see
+        # `docs/live-notes.md#trap_on--lure_age`.
         entry = self.chosen_traps.get(cog_do_id)
         return None if entry is None else entry[0]
 
@@ -1253,11 +1127,10 @@ class RealmsListener(threading.Thread):
             return None
         entry = self.chosen_lures.get(cog_do_id)
         if entry is None:
-            # Fall back to the last Lure thrown in THIS battle. Right
-            # for a group Lure, right for a solo fight, and the only
-            # case it can be wrong is two different Lure levels aimed at
-            # different cogs in one round -- which needs a party, and a
-            # party cannot be searched yet anyway.
+            # Fall back to the last Lure thrown in this battle: right
+            # for a group Lure and a solo fight; wrong only for two
+            # different Lure levels in one round in a party, which can't
+            # be searched yet anyway.
             entry = self.last_lure.get(battles[0].do_id)
         if entry is None:
             return None
