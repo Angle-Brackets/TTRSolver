@@ -1038,8 +1038,6 @@ def toons_at_risk(state: BattleState) -> float:
     when the second is worth far more. Scaling prevention by how close
     to death the toon is would act early, where the game is still
     winnable, and is the thing to try next.
-    """
-
     Nothing in any scorer charged for losing a toon. A sad toon takes
     their whole pouch out of the run -- in a building that is every
     later floor -- and the only way it registered was indirectly,
