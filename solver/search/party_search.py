@@ -784,6 +784,46 @@ def expected_incoming(state: BattleState) -> float:
 WAKE_COSTS_PREVENTED = True
 
 
+LURE_IS_SPENT_ON_SLEEPERS = True
+"""Whether a lure's value is capped by when you would wake the cog.
+
+True caps it at `reach`: quiet you are going to spend yourself is not
+quiet you can bank. That reasoning describes a plan which works through
+the sleepers.
+
+THE OWNER SAYS THAT IS NOT THE PLAN A SOLO VP IS WON WITH, and they are
+right about the game. You lure the field with a Presentation, LEAVE the
+sleepers alone, and fight the cogs that walk in to replace the ones you
+kill -- three cogs simply out of the fight for the whole duration.
+Under that plan the lure delivers every round it promises and `reach`
+prices it at about a quarter.
+
+VALUING IT IN FULL STILL PLAYS WORSE. Solo VP, 200 runs a cell, five
+slips, paired:
+
+    cogs a round   capped    full     paired
+               8    81.5%   67.0%   +13/-42  p<0.001
+              12    20.0%   16.5%   +15/-22  p=0.32
+              20     0.0%    0.0%   +0/-0
+
+Fourteen points worse where there is signal. So the cap stays, and what
+was refuted is this crude removal of it rather than the strategy.
+
+WHY THEY DO NOT CONTRADICT. `reach = inf` values EVERY lure at its full
+duration, including the cogs the plan is about to attack -- and it
+lures with about half its actions at every size measured. The strategy
+depends on a distinction this scorer cannot draw: which sleepers are
+being left alone and which are next. A one-round scorer sees no such
+intent, so "full duration" here means "always over-credit" rather than
+"credit the ones you will not touch".
+
+Drawing that distinction properly is the open problem. It wants the
+plan's own targets -- a cog nobody in the plan attacks is left asleep,
+one being hit is woken this round -- which is knowable from the plan
+and is not what either setting does.
+"""
+
+
 LURED_KILL_SILENCES_NOTHING = True
 """Whether killing an already-lured cog credits `prevented` nothing.
 
@@ -835,6 +875,19 @@ def prevented(before: BattleState, after: BattleState) -> float:
     asleep = sum(1 for c in after.active_cogs() if c.status.lured)
     # How many rounds before the party gets round to any given sleeper.
     reach = max(1.0, asleep / float(standing))
+    if not LURE_IS_SPENT_ON_SLEEPERS:
+        # LEAVING THEM ASLEEP IS THE STRATEGY, not a failure to get
+        # round to them. The owner: lure the field with a Presentation,
+        # never touch the sleepers, and fight the cogs that walk in to
+        # replace the ones you kill. Three cogs are simply out of the
+        # fight for the whole duration.
+        #
+        # `reach` prices the opposite plan -- that you will work through
+        # the sleepers and wake each one yourself -- and so charges a
+        # 15-round Presentation for about four rounds of quiet solo.
+        # That is the gag a solo VP is built around, valued at a
+        # quarter of what it delivers.
+        reach = float("inf")
 
     total = 0.0
     for old, new in zip(before.cogs, after.cogs):
