@@ -17,9 +17,16 @@ stat table, and the project owner confirms they are identical.
 WHAT IS NOT PUBLISHED, AND SO IS A PARAMETER
 --------------------------------------------
 How many cogs each round contains. The wiki gives the level bands and
-nothing else, so `COG_ROUND` and `SKELECOG_ROUND` are [ASSUMED] and the
-right way to use this module is to sweep them rather than trust one
-value. `vp_plan` takes them as arguments for exactly that reason.
+nothing else. These were [ASSUMED] at 12 apiece; the owner has since
+reported twenty across a solo VP, ten a round, and that is what they
+now hold. Still parameters -- `vp_plan` takes them as arguments -- but
+no longer guesses.
+
+WHERE A SOLO VP IS LOST, measured at that size: the skelecog round, not
+the cog round. It reaches round two 97% of the time and loses there
+47% of the time holding five slips. Arriving at the skelecogs with laff
+left is the whole problem, which is why the fights that fail do so with
+about seventy gags still in the pouch.
 
 A ROUND IS A FLOOR, and the waves are the holdout. That mapping is why
 this fits the existing machinery with no new mechanics: four cogs on the
@@ -50,9 +57,19 @@ from . import facility
 from .data import gags as gags_mod
 from .state import BattleState, CogState, ToonState, Track
 
-# [ASSUMED] -- the wiki publishes neither. Sweep them.
-COG_ROUND = 12
-SKELECOG_ROUND = 12
+# [OWNER, from play] -- twenty cogs across a SOLO VP, ten in each round.
+# The wiki publishes neither count, so this was [ASSUMED] at 12 apiece
+# until the owner reported the real number from a fight they had just
+# won. Their observation beats the guess and beats anything derivable.
+#
+# TWENTY IS THE WHOLE FIGHT, not each round, and getting that wrong is
+# worth recording because it inverted a conclusion. Set as 20 AND 20 --
+# forty cogs -- a solo VP measured 0.0% cleared and died in the first
+# round half the time, which said the fight was impossible while the
+# owner was beating it. At 10 and 10 it reads 50.7% with five slips: a
+# coin flip they won, which is what actually happened.
+COG_ROUND = 10
+SKELECOG_ROUND = 10
 
 # [CONFIRMED] wiki: the two rounds' level bands.
 COG_LEVELS = (1, 12)
