@@ -400,7 +400,7 @@ export default function App() {
           onClick={() => call('reconsider')}
           title="Reject this suggestion and show the next best for this board"
         >
-          {model.thinking ? 'thinking…' : 'Reconsider'}
+          Reconsider
         </button>
         {/* HOW MANY PINK SLIPS THE SOLVER MAY PLAN WITH. Zero by
             default, which is the only safe default: the count is read

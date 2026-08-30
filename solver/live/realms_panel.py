@@ -313,7 +313,16 @@ class RealmsWorker(threading.Thread):
                 except Exception:           # noqa: BLE001
                     return
             self._rejected.add(key)
-        self._last_key = ()
+        # NOT `self._last_key = ()`. That was here to force a recompute
+        # and it silently undid the rejection: `tick` clears the set
+        # whenever the position key differs, and an empty key always
+        # differs. The rejection was wiped on the very next tick, before
+        # anything could read it -- which is why the button appeared to
+        # do nothing at all.
+        #
+        # `ask_now` already forces the recompute on its own, through the
+        # `_asked` arm of the same condition, and leaves the key alone
+        # so the board still counts as unchanged.
         self.ask_now()
 
     def set_max_fires(self, count) -> None:

@@ -457,6 +457,72 @@ NO_DROP_INTO_OWN_LURE = True
 # right. Legality was never the constraint.
 ALWAYS_PROBE_PASS = True
 
+PROBE_CHEAPEST_KILL = True
+"""Offer the SMALLEST gag that kills each cog, alongside the policy's.
+
+The scorer already prefers the cheap kill and never gets the chance to
+say so. On a lone level 1 Cold Caller with 6 hp it rates a Cupcake at
+129.5 and a Storm Cloud at 118.5 -- it knows -- but `climb` only ever
+judges what the policy proposes, and the policy's top three were all
+big gags. That is the same shape as the pink slip collapse: a menu with
+no cheap option on it, and a judge blamed for a proposal it never saw.
+
+`_track_key` probing does not cover this. It offers the best of each
+TRACK by the policy's own ranking, which on a 6 hp cog is the biggest
+Throw and the biggest Squirt, not the smallest one that finishes the
+job. The distinction the menu is missing is not track, it is size.
+
+One entry per live cog, so the cost is bounded by the board rather than
+the pouch, and only when something in the pouch actually kills it
+outright.
+"""
+
+
+def _cheapest_kills(state, seat: int):
+    """Indices of the smallest single-target gag that kills each cog.
+
+    Cheapest by DAMAGE, not by level: a level 4 Throw can out-damage a
+    level 5 Squirt, and what is being avoided is spilled damage rather
+    than spent training. Ties break to the lower level, which is the
+    cheaper gag to replace.
+
+    Lure, Trap and Toon-Up are skipped -- they do not damage, so "kills
+    it" does not apply -- and so is a lured target, where knockback
+    changes the arithmetic this is deliberately not trying to model.
+    """
+    from .. import mechanics
+    from ..rl import env as env_mod
+    from ..state import Track
+
+    if not PROBE_CHEAPEST_KILL or seat >= len(state.toons):
+        return []
+    toon = state.toons[seat]
+    out = []
+    for index, cog in enumerate(state.cogs):
+        if cog.status.is_dead or cog.status.lured:
+            continue
+        best = None
+        for action_index, entry in enumerate(env_mod.ACTIONS):
+            if (entry is None or entry.fire or entry.target_index != index
+                    or entry.track in (Track.LURE, Track.TRAP,
+                                       Track.TOON_UP)):
+                continue
+            if toon.gag_counts.get((entry.track, entry.level), 0) <= 0:
+                continue
+            try:
+                dmg = mechanics.calc_toon_damage(
+                    entry.track, entry.level,
+                    organic=toon.is_organic(entry.track))
+            except Exception:           # noqa: BLE001 - unpriced gag
+                continue
+            if dmg < cog.hp:
+                continue
+            if best is None or (dmg, entry.level) < best[0]:
+                best = ((dmg, entry.level), action_index)
+        if best is not None:
+            out.append(best[1])
+    return out
+
 
 def _wastes_a_drop(state, plan) -> bool:
     """Does this plan throw a Drop at cogs that will all be asleep?
@@ -957,6 +1023,12 @@ def climb(state: BattleState, rng=random, budget: int = 16,
                         and np.isfinite(values[env_mod.PASS_INDEX])
                         and env_mod.PASS_INDEX not in order):
                     order.append(env_mod.PASS_INDEX)
+            # OUTSIDE the track probes, because this is wanted whether
+            # or not they are on: solo runs with them off, and solo is
+            # where the overkill was reported.
+            for index in _cheapest_kills(state, seat):
+                if index not in order and np.isfinite(values[index]):
+                    order.append(index)
             for index in order:
                 if not np.isfinite(values[index]):
                     continue

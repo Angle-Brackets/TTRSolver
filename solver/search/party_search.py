@@ -784,6 +784,14 @@ def expected_incoming(state: BattleState) -> float:
 WAKE_COSTS_PREVENTED = True
 
 
+LURED_KILL_SILENCES_NOTHING = True
+"""Whether killing an already-lured cog credits `prevented` nothing.
+
+It should, and the flag exists to measure it rather than to leave the
+choice open. See the branch in `prevented`.
+"""
+
+
 def prevented(before: BattleState, after: BattleState) -> float:
     """Incoming damage a round removed, by luring or by killing.
 
@@ -836,7 +844,40 @@ def prevented(before: BattleState, after: BattleState) -> float:
         if not threat:
             continue
         if new.status.is_dead:
-            total += threat                      # silenced for good
+            # KILLING AN ALREADY-LURED COG SILENCES NOTHING THIS ROUND,
+            # and crediting it the full awake threat is what made the
+            # panel spend a pink slip on a sleeping Mr. Hollywood while
+            # an identical one stood awake beside it. Both fires scored
+            # 484.9 -- exactly equal -- so the choice fell to whichever
+            # the policy happened to rank first, and the scorer had no
+            # opinion at all on the one question that mattered.
+            #
+            # This is the principle three paragraphs up, applied to the
+            # branch that was missing it: "an already-lured cog buys
+            # nothing new. It was paid for when the lure landed." A
+            # lured cog is contributing zero already, so removing it
+            # removes zero MORE per round.
+            #
+            # It does not make killing sleepers bad, and must not be
+            # read that way. `QUICK_W["kill"]` prices removal
+            # separately and permanently -- this term is only the
+            # damage-per-round silenced, which its own docstring says.
+            # What changes is that an awake cog is now the better
+            # target when everything else is equal, which is the whole
+            # of the complaint.
+            if not (LURED_KILL_SILENCES_NOTHING and old.status.lured):
+                total += threat                  # silenced for good
+            else:
+                # SCALED BY THE LURE LEFT, not zeroed. A cog asleep for
+                # three more rounds is already silent for as long as the
+                # party will reach it, so killing it silences nothing;
+                # one about to wake is nearly as good a target as an
+                # awake one, and a flat zero priced those two the same.
+                #
+                # Same `reach` horizon the crediting branches use, so
+                # the three agree about how far ahead this term looks.
+                left = min(float(old.status.lure_rounds_remaining), reach)
+                total += threat * max(0.0, 1.0 - left / reach)
         elif new.status.lured and not old.status.lured:
             rounds = min(float(new.status.lure_rounds_remaining), reach)
             total += threat * max(0.0, rounds)
