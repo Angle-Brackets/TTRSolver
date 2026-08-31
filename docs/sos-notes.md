@@ -54,6 +54,16 @@ ordinary timed status effects, the same shape as a lure countdown.
 * **An SOS costs the toon's turn.** Unlike a unite, which is free, so
   an SOS is an ordinary action and belongs in the action table rather
   than in the wrapper `hybrid.climb` uses for unites.
+* **Only the Trap cards are delayed. Everything else hits at once.**
+  Sound, Throw, Squirt and Drop deal their damage immediately when the
+  card is played; Trap places something that pays out later. So the
+  seven shapes split into "an attack" and "a setup", and only the
+  setup needs a second round to be worth anything.
+* **Drop SOS always misses a lured cog**, and hits every unlured one
+  immediately. That is the wiki's sole stated exception to SOS gags
+  never missing, and the owner confirms it from play, so the wake
+  question above simply does not arise for Drop: it never touches a
+  sleeping cog.
 * **The Trap cards PLACE TRAPS, they do not deal damage.** Clerk Will,
   Penny and Clara put Quicksand, Trapdoor and TNT in front of every
   cog; the damage arrives when something lures the cogs onto them. The
@@ -82,11 +92,13 @@ ordinary timed status effects, the same shape as a lure countdown.
    Marked uncertain because they said so. It decides whether the
    natural combo is *trap-SOS then lure* (two rounds, one action each)
    or whether the two can be stacked.
-2. **Do Sound and Throw SOS wake the lured cogs they hit?**
+2. **Do Sound, Throw and Squirt SOS wake the lured cogs they hit?**
    `mechanics.LURE_ENDS_ON_DAMAGE` says a landed attack ends a lure. If
    it applies, Moe Zart's 75 to all wakes the whole field, which is
    often a bad trade; if not, it is free damage. Same question that
    made `prevented` hard to get right.
+
+   NOT a question for Drop, which is settled below.
 3. **How does an SOS Toon's Toon-Up split across a party?** The table
    gives 60/30/20/15 for one to four toons, so it is not a simple
    division. Solo only needs the first column, which is all this
