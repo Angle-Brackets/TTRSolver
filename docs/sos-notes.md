@@ -15,22 +15,28 @@ against ~50 incoming a round, where an 80 Toon-Up unite buys about 1.6.
 
 ## The shape of the problem
 
-Roughly 28 cards, but only seven mechanical shapes, and six of them are
-things the solver already does:
+25 renewable cards, but only six mechanical shapes, and five of them
+are things the solver already does:
 
 | shape | cards | reuses |
 |---|---|---|
 | heal all toons, scaled by how many are standing | 3 | `unites.apply_toon_up` |
 | place a trap on every cog | 3 | `CogStatus.trapped` / `trap_level` |
 | lure every cog for 4/5/6 rounds | 3 | `status.apply_lure`, already per-cog |
-| damage every cog | 5 | existing group damage |
+| damage every cog | 3 | existing group damage |
 | damage every **unlured** cog | 3 | existing, plus Drop-misses-lured |
 | restock 12 of one track, highest levels first | 7 | `unites.apply_gag_up`'s top-down fill |
-| pink slip every cog | 1 | existing fire, applied to each target |
+| pink slip every cog | — | excluded, see below |
 
 Plus two accuracy effects — Cogs Miss (−75% cog accuracy) and Toons Hit
-(+75% gag accuracy) for a number of rounds — which are new but are
-ordinary timed status effects, the same shape as a lure countdown.
+(+75% gag accuracy) for a number of rounds.
+
+**Model these as timed status effects, which is [OWNER] how TTR itself
+does it** — the same shape as a lure countdown, and the wiki lists them
+beside Lured and Trapped on the Status effects page rather than as
+special cases. So the right home is `CogStatus` / a toon-side
+equivalent with a round counter, not a bag of special rules in the
+scorer.
 
 ## [CONFIRMED] TTR wiki (SOS Toon)
 
@@ -84,25 +90,43 @@ ordinary timed status effects, the same shape as a lure countdown.
   derives damage FROM the level, so modelling this needs an explicit
   trap damage instead, or three pseudo-levels.
 
-## Unsettled — do not implement past these
+## Everything wakes a sleeper [OWNER, from play]
 
-1. **Does placing an SOS trap un-lure a lured cog?** The owner thinks
-   so ("I think it will unlure cogs that are lured to place the SOS
-   card"), reasoning that a trap cannot be laid under a sleeping cog.
-   Marked uncertain because they said so. It decides whether the
-   natural combo is *trap-SOS then lure* (two rounds, one action each)
-   or whether the two can be stacked.
-2. **Do Sound, Throw and Squirt SOS wake the lured cogs they hit?**
-   `mechanics.LURE_ENDS_ON_DAMAGE` says a landed attack ends a lure. If
-   it applies, Moe Zart's 75 to all wakes the whole field, which is
-   often a bad trade; if not, it is free damage. Same question that
-   made `prevented` hard to get right.
+Both questions that were open here are settled, and they settle the
+same way:
 
-   NOT a question for Drop, which is settled below.
-3. **How does an SOS Toon's Toon-Up split across a party?** The table
+* **Placing an SOS trap un-lures the cogs it is placed on.** A trap
+  cannot be laid under a sleeping cog. So Clerk Clara into a lured
+  field wakes it and leaves TNT on the floor, and the combo is
+  necessarily *trap first, lure second* -- two rounds, one action each.
+  It cannot be stacked onto an existing lure.
+* **Sound, Throw and Squirt SOS un-lure too, because they are
+  attacks.** Exactly what `mechanics.LURE_ENDS_ON_DAMAGE` already says
+  about ordinary gags, so no new rule is needed -- Moe Zart's 75 to all
+  wakes the whole field, and that is usually a bad trade rather than
+  free damage.
+* Drop is the one that cannot, since it never lands on a sleeper.
+
+So the only SOS that leaves a lure intact is another Lure, and the only
+SOS that is a setup rather than an attack is Trap.
+
+## Not modelled: the three specials
+
+Rocky (Throw 132), Loopy Loopenloop (Squirt 115) and Lord Lowden Clear
+(pink slip to all) are **[OWNER] excluded on purpose**. They come from
+limited-time ToonTasks during Operation: Storm Sellbot and the other
+Operations, and are not renewable the way the VP cards are. Modelling a
+reward the player cannot farm would let the solver plan around
+something that runs out and never comes back.
+
+That leaves 25 cards, all earned by rescuing SOS Toons after a VP.
+
+## Still unsettled
+
+1. **How does an SOS Toon's Toon-Up split across a party?** The table
    gives 60/30/20/15 for one to four toons, so it is not a simple
-   division. Solo only needs the first column, which is all this
-   project would use today.
+   division. Solo needs only the first column, which is all this
+   project would use today, so it blocks nothing.
 
 ## Rough cost
 
