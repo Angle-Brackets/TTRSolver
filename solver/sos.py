@@ -198,6 +198,45 @@ ACCURACY_SWING = 75
 SOS_PRICE = 250.0
 
 
+def describe(card: Card, recipients: int = 1) -> str:
+    """One phrase naming the card and what it will do.
+
+    For the advice line, so a player reads "Flippy -- 180 laff to you"
+    rather than a bare name they would have to look up. `recipients` is
+    how many toons are standing, because a heal SPLITS across them and
+    the number a solo toon sees is not the number a four-toon team does.
+    """
+    if card.kind == HEAL:
+        share = heal_share(card, max(1, recipients))
+        who = "you" if recipients <= 1 else f"each of {recipients} toons"
+        return f"{card.name} -- {share} laff to {who}"
+    if card.kind == TRAP:
+        return f"{card.name} -- a {card.amount} damage trap on every cog"
+    if card.kind == LURE:
+        rounds = "round" if card.amount == 1 else "rounds"
+        return f"{card.name} -- lures every cog for {card.amount} {rounds}"
+    if card.kind == DAMAGE_ALL:
+        return f"{card.name} -- {card.amount} damage to every cog"
+    if card.kind == DAMAGE_UNLURED:
+        return f"{card.name} -- {card.amount} damage to every unlured cog"
+    if card.kind == RESTOCK:
+        # `.value` is the wire slug, so Toon-Up reads "toon_up" to a
+        # player who has never seen the enum.
+        what = ("every track" if card.track is None
+                else card.track.value.replace("_", "-").title())
+        return (f"{card.name} -- restocks {card.amount} gags of "
+                f"{what}, highest first")
+    if card.kind == TOONS_HIT:
+        rounds = "round" if card.amount == 1 else "rounds"
+        return (f"{card.name} -- +{ACCURACY_SWING}% gag accuracy for "
+                f"{card.amount} {rounds}")
+    if card.kind == COGS_MISS:
+        rounds = "round" if card.amount == 1 else "rounds"
+        return (f"{card.name} -- -{ACCURACY_SWING}% cog accuracy for "
+                f"{card.amount} {rounds}")
+    raise ValueError(f"unknown card kind {card.kind!r}")
+
+
 def rolls_accuracy(card: Card) -> bool:
     """Does this card resolve on an accuracy die? Never.
 

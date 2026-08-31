@@ -41,3 +41,11 @@ body { font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
 .track-squirt  { --accent: #4fcdd6; }
 .track-drop    { --accent: #9b8ee8; }
 .track-none    { --accent: oklch(45% 0.02 258); }
+
+/* The two SENTINEL tracks. Neither is a gag track, and both were
+   missing here, so `var(--accent)` resolved to nothing: the left rail
+   painted transparent and the eyebrow lost its colour. Keyed to their
+   own art rather than to a gag -- pink for the slip, the card orange
+   for an SOS. */
+.track-fire    { --accent: #f06fa8; }
+.track-sos     { --accent: #e8873a; }

@@ -305,3 +305,64 @@ class PriceTest(unittest.TestCase):
             self.assertGreater(best, card)
         finally:
             ps.QUICK_W["price"] = old_w
+
+
+class RenderTest(unittest.TestCase):
+    """The advice line. Every card must produce one, and none may raise.
+
+    An SOS has `track=None` and `is_pass=False`, so `advise._render`
+    fell through to `data.gag(None, None)` and raised `no gag at no
+    track (a pass) level 0` -- and the panel's own fallback then raised
+    AttributeError on `None.value` while handling it. Exactly the shape
+    of the fire bug that renderer already carries a comment about.
+    """
+
+    def _state(self):
+        e = env_mod.BattleEnv(rng=random.Random(7), sampler=_sampler,
+                              coordinated=True)
+        e.reset()
+        return e.state
+
+    def test_every_card_renders(self):
+        from solver.live import advise
+        state = self._state()
+        for card in sos_mod.CARDS:
+            with self.subTest(card=card.name):
+                line = advise._render(Action(track=None, sos=card.name), state)
+                self.assertIn(card.name, line)
+                self.assertTrue(line.startswith("call "))
+
+    def test_the_panel_renders_it_too(self):
+        from solver.live import realms_panel as rp
+        state = self._state()
+        line = rp._render(Action(track=None, sos="Flippy"), state)
+        self.assertIn("Flippy", line)
+
+    def test_the_panel_fallback_survives_a_track_less_action(self):
+        """The fallback exists to survive a failure in the shared
+        renderer; it must not raise while doing so."""
+        from solver.live import realms_panel as rp
+        for act in (Action(track=None, sos="Flippy"),
+                    Action(track=None, fire=True, target_index=0)):
+            with self.subTest(action=act):
+                self.assertIsInstance(rp._render(act, None), str)
+
+    def test_a_heal_splits_across_the_toons_standing(self):
+        """[CONFIRMED] wiki: Flippy is 180 to a lone toon, halving as
+        more share it -- 180/90/60/45."""
+        card = sos_mod.BY_NAME["Flippy"]
+        self.assertIn("180", sos_mod.describe(card, 1))
+        self.assertIn("90", sos_mod.describe(card, 2))
+        self.assertIn("60", sos_mod.describe(card, 3))
+        self.assertIn("45", sos_mod.describe(card, 4))
+
+    def test_a_track_is_named_the_way_a_player_writes_it(self):
+        line = sos_mod.describe(sos_mod.BY_NAME["Professor Guffaw"], 1)
+        self.assertIn("Toon-Up", line)
+        self.assertNotIn("toon_up", line)
+
+    def test_the_slug_and_level_the_page_gets(self):
+        from solver.live import realms_panel as rp
+        card = Action(track=None, sos="Flippy")
+        self.assertEqual(rp._track_of(card), "sos")
+        self.assertIsNone(rp._level_of(card))

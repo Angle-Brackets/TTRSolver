@@ -147,6 +147,15 @@ def _render(action, state) -> str:
     except Exception:                   # pragma: no cover - defensive
         if action is None or getattr(action, "is_pass", False):
             return "pass"
+        # Guard the track-less actions FIRST. This fallback exists to
+        # survive a failure in the shared renderer, and it used to raise
+        # AttributeError on `None.value` while doing so -- turning a
+        # recoverable problem into a crash, for exactly the two actions
+        # (fire, SOS) most likely to have caused it.
+        if getattr(action, "sos", None):
+            return f"call {action.sos}"
+        if getattr(action, "fire", False):
+            return "pink slip"
         return f"{action.track.value} {action.level}"
 
 

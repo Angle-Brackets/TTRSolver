@@ -380,6 +380,18 @@ def _render(action, state) -> str:
         entry = data.cog(cog.department, cog.cog_type)
         return (f"pink slip on cog {action.target_index + 1} "
                 f"({entry.display}, {cog.hp}/{cog.max_hp} hp)")
+    if getattr(action, "sos", None):
+        # LIKE A FIRE, an SOS has no track and no level and `is_pass` is
+        # False, so it fell through to `data.gag(None, None)` and raised
+        # `no gag at no track (a pass) level 0`. Unreachable while
+        # nothing could propose a card; reachable since `_sos_probes`.
+        from .. import sos as sos_mod
+
+        card = sos_mod.BY_NAME.get(action.sos)
+        if card is None:
+            return f"call {action.sos}"
+        standing = sum(1 for t in state.toons if t.laff > 0) or 1
+        return "call " + sos_mod.describe(card, standing)
     gag = data.gag(action.track, action.level)
     if action.target_index is None:
         return f"{gag.display} on all cogs"
