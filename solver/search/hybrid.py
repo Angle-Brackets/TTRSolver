@@ -1114,20 +1114,11 @@ def climb(state: BattleState, rng=random, budget: int = 16,
             except (NotImplementedError, ValueError, KeyError):
                 return inner, float("-inf")
 
-        base_plan, base_value = _value_of(state)
-        best_value, best_choice, best_plan = base_value, None, base_plan
-        for choice in unites_mod.candidates(state.toons[0]):
-            probe = state.clone()
-            try:
-                unites_mod.apply(probe.toons[0], choice)
-            except Exception:               # noqa: BLE001 - unpriced gag
-                continue
-            plan_u, value_u = _value_of(probe)
-            # Charged, so a unite has to beat doing nothing BY MORE
-            # than its price rather than merely beat it.
-            value_u -= unites_mod.UNITE_PRICE
-            if value_u > best_value:
-                best_value, best_choice, best_plan = value_u, choice, plan_u
+        # `unites.best_with_unite` is the shared implementation, taking
+        # the engine as a callable. The exact search needs the identical
+        # comparison and had no way to reach this one, which is why TTR
+        # -- which runs that search -- could not use a unite at all.
+        best_choice, best_plan = unites_mod.best_with_unite(state, _value_of)
 
         global LAST_UNITE
         LAST_UNITE = best_choice

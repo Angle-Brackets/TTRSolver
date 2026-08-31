@@ -173,3 +173,72 @@ class NothingIsOfferedWithoutEvidenceTest(unittest.TestCase):
         from solver.search import hybrid
         self.assertTrue(hybrid.OFFER_UNITES)
         self.assertTrue(hybrid.OFFER_SOS)
+
+
+class BothEnginesOfferUnitesTest(unittest.TestCase):
+    """TTR could not use a unite at all.
+
+    Unites were a wrapper that existed only around `hybrid.climb`, and
+    the TTR overlay runs `advise` -> `expectimax.best_action_iterative`.
+    So the whole feature was invisible on that client, not by decision
+    but because the two engines had no way to share the comparison.
+    """
+
+    def test_the_wrapper_is_engine_agnostic(self):
+        from solver import unites
+        self.assertTrue(callable(unites.best_with_unite))
+
+    def test_it_picks_nothing_when_none_are_held(self):
+        from solver import unites
+        state = _party_board()
+        for toon in state.toons:
+            toon.unites_held = 0
+        calls = []
+
+        def value_of(st):
+            calls.append(st)
+            return "answer", 10.0
+
+        choice, answer = unites.best_with_unite(state, value_of)
+        self.assertIsNone(choice)
+        self.assertEqual(answer, "answer")
+        # Exactly one evaluation: the no-unite baseline. This is what
+        # keeps the exact search's latency unchanged for a player whose
+        # holdings are unknown.
+        self.assertEqual(len(calls), 1)
+
+    def test_a_unite_must_beat_the_price_not_merely_the_baseline(self):
+        from solver import unites
+        state = _party_board(laff=40)
+        state.toons[0].unites_held = 5
+        seen = {"n": 0}
+
+        def value_of(st):
+            seen["n"] += 1
+            # Every unite looks better, but by less than it costs.
+            return "u" if seen["n"] > 1 else "base", (
+                10.0 + unites.UNITE_PRICE - 1.0 if seen["n"] > 1 else 10.0)
+
+        choice, answer = unites.best_with_unite(state, value_of)
+        self.assertGreater(seen["n"], 1, "no candidate was evaluated")
+        self.assertIsNone(choice)
+        self.assertEqual(answer, "base")
+
+    def test_a_unite_that_clears_the_price_wins(self):
+        from solver import unites
+        state = _party_board(laff=40)
+        state.toons[0].unites_held = 5
+        seen = {"n": 0}
+
+        def value_of(st):
+            seen["n"] += 1
+            return "u" if seen["n"] > 1 else "base", (
+                10.0 + unites.UNITE_PRICE + 1.0 if seen["n"] > 1 else 10.0)
+
+        choice, answer = unites.best_with_unite(state, value_of)
+        self.assertIsNotNone(choice)
+        self.assertEqual(answer, "u")
+
+    def test_the_search_path_reports_one(self):
+        from solver.live import advise
+        self.assertTrue(hasattr(advise, "LAST_UNITE"))

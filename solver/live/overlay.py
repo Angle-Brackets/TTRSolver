@@ -449,6 +449,7 @@ class Worker(threading.Thread):
 
     def _on_advice(self, lines, state, action=None) -> None:
         from . import advise as advise_mod
+        from .. import unites as unites_mod
 
         model = self.model
         model.thinking = False
@@ -460,6 +461,14 @@ class Worker(threading.Thread):
                 model.gag, model.gag_at = lines[0], time.time()
                 model.track = advise_mod.track_of(action)
                 model.gag_level = (action.level if model.track else None)
+                # The unite chosen ALONGSIDE the gag, if any. Read from
+                # the module global rather than the action because a
+                # unite costs no turn and so is not the move -- the
+                # round is "use this, then throw that". Cleared every
+                # time, or a stale one lingers over a later round.
+                chosen = getattr(advise_mod, "LAST_UNITE", None)
+                model.unite = ("" if chosen is None
+                               else unites_mod.describe(chosen))
         self._post()
 
     def mark_lured(self, index, lured) -> None:

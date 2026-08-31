@@ -324,11 +324,24 @@ def _panel(frame):
     return read_panel(frame)
 
 
+# The unite the last `advise` call chose, or None. A module global for
+# the same reason `hybrid.LAST_UNITE` is one: a unite is not the move,
+# so it cannot ride back inside the action, and every caller of this
+# already unpacks a fixed 3-tuple.
+LAST_UNITE = None
+
+
 def advise(frame, readings, snapshot=None, objective=None,
            depth: int = DEFAULT_DEPTH, budget: float = DEFAULT_BUDGET,
            ignore_checksum: bool = False, allies: int = 0):
-    """(text, state) for what to do now, or (reasons, None)."""
+    """(text, state) for what to do now, or (reasons, None).
+
+    A unite chosen alongside the gag is left in `LAST_UNITE`, the way
+    `hybrid.climb` reports one, because it is not an alternative to the
+    action and does not belong in the returned move.
+    """
     from ..search import expectimax
+    from .. import unites as unites_mod
 
     snapshot = snapshot or _snapshot()
     panel = _panel(frame)
@@ -343,10 +356,31 @@ def advise(frame, readings, snapshot=None, objective=None,
 
     state = result.state
     objective = objective or objectives.DEFAULT
-    _value, action = expectimax.best_action_iterative(
-        state, depth=depth, objective=objective,
-        epsilon=DEFAULT_EPSILON, time_budget=budget,
-        exact_plies=DEFAULT_EXACT_PLIES)
+
+    def _value_of(st):
+        value, act = expectimax.best_action_iterative(
+            st, depth=depth, objective=objective,
+            epsilon=DEFAULT_EPSILON, time_budget=budget,
+            exact_plies=DEFAULT_EXACT_PLIES)
+        return act, (float("-inf") if act is None else value)
+
+    # UNITE FIRST, THEN THROW -- the same comparison the policy path
+    # makes, through the same helper. This path had none, so TTR could
+    # not use a unite at all: they were a wrapper that existed only
+    # around `hybrid.climb`, and this overlay runs the exact search.
+    #
+    # A unite costs no action, so it is not an alternative to the gag
+    # and never replaces `action`; it is reported alongside it.
+    global LAST_UNITE
+    LAST_UNITE = None
+    if unites_mod.OFFER_UNITES_IN_SEARCH:
+        LAST_UNITE, action = unites_mod.best_with_unite(state, _value_of)
+        if LAST_UNITE is not None:
+            # In place: the round is played from this state and the
+            # unite lands before the gag.
+            unites_mod.apply(state.toons[0], LAST_UNITE)
+    else:
+        action, _value = _value_of(state)
     if action is None:
         return ["no legal move -- nothing left to throw"], state, None
     return [_render(action, state)], state, action

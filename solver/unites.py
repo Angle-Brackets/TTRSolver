@@ -134,6 +134,21 @@ UNITE_COSTS_THE_ROUND: Optional[bool] = False
 # `tests/test_unites.py` checks the shape of.
 UNITE_PRICE = 200.0
 
+# Whether the EXACT SEARCH offers unites. Separate from
+# `hybrid.OFFER_UNITES` because the cost is different in kind: the
+# policy re-plans in milliseconds, while `best_action_iterative` gets a
+# time budget per call, so wrapping it multiplies the wait by one plus
+# the number of candidates.
+#
+# Safe in the common case, and that is not luck. `candidates` returns
+# nothing at all when the toon holds no unites, and `unites_held`
+# defaults to 0 because the readers cannot see a unite pouch -- so a
+# player the overlay knows nothing about pays exactly one search, as
+# before. Only a toon known to be carrying them pays more, and
+# `candidates` is pruned hard: a Toon-Up only if it heals within 5 of
+# its face value, a Gag-Up only for a track with real room.
+OFFER_UNITES_IN_SEARCH = True
+
 
 class UnknownUniteRule(NotImplementedError):
     """Raised where the answer to the [TODO] above would be needed."""
@@ -377,6 +392,41 @@ def apply(toon, choice) -> int:
     if kind == "gag_up":
         return apply_gag_up(toon, arg)
     raise ValueError(f"unknown unite {kind!r}")
+
+
+def best_with_unite(state, value_of, price: Optional[float] = None):
+    """Pick the best (unite, answer) pair for `state`, or (None, answer).
+
+    UNITE FIRST, THEN THROW. Evaluated by transforming the state and
+    re-planning on it, so the gag is chosen against the laff and gags
+    the unite just restored -- which is what the game does in the
+    planning phase.
+
+    `value_of(state) -> (answer, value)` is the engine. Passing it in is
+    the point: the policy path and the exact search both need this and
+    had no way to share it, so the exact search simply never considered
+    a unite and TTR could not use one at all.
+
+    The unite is charged separately, so a plan that uses one has to beat
+    the plan that does not BY MORE than the price, rather than merely
+    beat it.
+    """
+    if price is None:
+        price = UNITE_PRICE
+    best_answer, best_value = value_of(state)
+    best_choice = None
+    if not state.toons:
+        return None, best_answer
+    for choice in candidates(state.toons[0]):
+        probe = state.clone()
+        try:
+            apply(probe.toons[0], choice)
+        except Exception:               # noqa: BLE001 - unpriced gag
+            continue
+        answer, value = value_of(probe)
+        if value - price > best_value:
+            best_value, best_choice, best_answer = value - price, choice, answer
+    return best_choice, best_answer
 
 
 def describe(choice) -> str:
