@@ -234,11 +234,19 @@ def toon_from_object(obj, max_fires: int = 0, max_unites: int = 0,
     # with no cap would spend a resource farmed from boss runs without
     # being asked.
     #
-    # One number, so it cannot tell a Toon-Up unite from a Gag-Up --
-    # `realms.parse_resistance` says why the categories are left
-    # undecoded rather than guessed.
+    # Toon-Up and Gag-Up only. The categories decode off the in-game
+    # menu -- see `realms.RESISTANCE_CATEGORIES` -- so Jellybeans are
+    # excluded (a battle cannot spend one) and so is Toon-Down, which is
+    # CUSTOM TO REALMS and does not exist in the game this solver is
+    # for. Counting either would inflate the pouch with unites the
+    # search can never play.
+    #
+    # Still one number, so it cannot tell a Toon-Up unite from a Gag-Up.
+    # That is now a modelling gap rather than a missing reading:
+    # `realms.gag_up_tracks` decodes the finer answer and nothing
+    # consumes it, because `ToonState.unites_held` is an int.
     if max_unites:
-        held = realms_mod.parse_resistance(obj.get("setResistanceMessages"))
+        held = realms_mod.battle_unites(obj.get("setResistanceMessages"))
         if held:
             toon.unites_held = min(held, int(max_unites))
 

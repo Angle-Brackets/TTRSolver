@@ -238,19 +238,46 @@ The table is read from the install at runtime, never vendored, and lives
 in `solver/live/realms.py` -- the reader decoding an id, the same job
 `parse_inventory` does for a pouch. It does not go in `solver/data/`.
 
-### Unites are counted, NOT categorised
+### Unites: the categories, from the menu itself
 
-Ids group as `category * 100 + index`: 0-4, 100-107, 200-203, 300-304.
-It is tempting to read category 0 as Toon-Up because it has five entries
-and `TOON_UP_VALUES` has five, and category 1 as Gag-Up because eight is
-seven tracks plus all-tracks.
+Ids are `category * 100 + index`. This was left undecoded at first --
+nothing in the install names the categories, the only "resistance" files
+in the archives being three particle effects -- until the owner supplied
+the in-game SpeedChat menu.
 
-**Nothing in the install confirms it.** The only "resistance" files in
-the archives are three particle effects. So `parse_resistance` returns
-the TOTAL and nothing finer, and the cost is stated rather than hidden:
-`unites_held` is one number, so a toon holding only Toon-Up unites is
-still offered a Gag-Up. Fixing that needs the category table, not more
-inference.
+    category 0   ids 0-4       Toon-Up      5 entries
+    category 1   ids 100-107   Gag-Up       8 entries
+    category 2   ids 200-203   Jellybeans   4 entries
+    category 3   ids 300-304   Toon-Down    5 entries
+
+[OWNER] from the menu, and the entry counts corroborate rather than
+establish it: category 0 holds exactly 5 and `TOON_UP_VALUES` has
+exactly 5; category 1 holds exactly 8, which is seven tracks plus
+all-tracks.
+
+The submenus confirm both, also [OWNER] from the menu:
+
+* **Gag-Up** reads Toon-Up, Trap, Lure, Sound, Throw, Squirt, Drop,
+  All -- Toontown's canonical track order, then all-tracks. So index 107
+  is "All" and not an eighth track. `GAG_UP_TRACKS`.
+* **Jellybeans** reads 100, 200, 350, 600, which settles category 2 as
+  money and nothing else. `JELLYBEAN_VALUES`, recorded and unused.
+
+**Toon-Down is CUSTOM TO REALMS** -- [OWNER] "Toon-Down is custom, don't
+implement it". It is not merely unmodelled; it does not exist in the
+game this solver is for. That makes this whole table Realms-specific and
+it must never be carried across to TTR: a build that invents a category
+is precisely the lineage hazard this document is about.
+
+`battle_unites` therefore counts Toon-Up and Gag-Up only. On the
+captured toon that is 12985 against a grand total of 21973, so counting
+everything would have inflated the pouch by two thirds with unites no
+battle can spend.
+
+One gap remains, and it is now a modelling choice rather than a missing
+reading: `ToonState.unites_held` is a single int, so the search cannot
+ask "do I hold a Lure restock". `realms.gag_up_tracks` decodes that
+answer already and nothing consumes it.
 
 ### The caps
 

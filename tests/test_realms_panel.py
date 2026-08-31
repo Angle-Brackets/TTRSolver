@@ -643,10 +643,38 @@ class ConsumableReadingTest(unittest.TestCase):
     RESISTANCE = [[0, 998], [1, 999], [100, 999], [300, 998]]
     FRIENDS = [(2001, 100), (3112, 100), (2011, 5), (999999, 100)]
 
-    def test_unites_total_across_categories(self):
+    def test_categories_come_off_the_in_game_menu(self):
         from solver.live import realms as realms_mod
         self.assertEqual(realms_mod.parse_resistance(self.RESISTANCE),
-                         998 + 999 + 999 + 998)
+                         {"toon_up": 998 + 999, "gag_up": 999,
+                          "toon_down": 998})
+
+    def test_only_toon_up_and_gag_up_are_spendable(self):
+        """Jellybeans buy nothing in a battle, and Toon-Down is custom
+        to Realms -- it does not exist in the game this solver is for,
+        so counting it would inflate the pouch."""
+        from solver.live import realms as realms_mod
+        self.assertEqual(realms_mod.battle_unites(self.RESISTANCE),
+                         998 + 999 + 999)
+
+    def test_the_gag_up_submenu_is_track_order(self):
+        """[OWNER] from the menu: Toon-Up, Trap, Lure, Sound, Throw,
+        Squirt, Drop, All -- canonical track order, then all-tracks."""
+        from solver.live import realms as realms_mod
+        rows = [[100 + i, i + 1] for i in range(8)]
+        self.assertEqual(
+            realms_mod.gag_up_tracks(rows),
+            {"toon_up": 1, "trap": 2, "lure": 3, "sound": 4, "throw": 5,
+             "squirt": 6, "drop": 7, None: 8})
+
+    def test_an_unknown_category_is_kept_under_its_number(self):
+        """A build that adds one should surprise us, not vanish."""
+        from solver.live import realms as realms_mod
+        self.assertEqual(realms_mod.parse_resistance([[900, 3]]), {"9": 3})
+
+    def test_toon_down_is_never_spendable(self):
+        from solver.live import realms as realms_mod
+        self.assertEqual(realms_mod.battle_unites([[300, 50], [304, 50]]), 0)
 
     def test_unites_absent_reads_none_not_zero(self):
         from solver.live import realms as realms_mod

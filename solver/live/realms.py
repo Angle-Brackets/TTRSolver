@@ -512,36 +512,109 @@ def parse_inventory(blob) -> Optional[Dict]:
     return counts
 
 
-def parse_resistance(value) -> Optional[int]:
-    """How many unites the toon holds in total, or None.
+# `setResistanceMessages` ids are `category * 100 + index`, and the
+# categories are the SpeedChat "Unites" menu in its own order.
+#
+# [OWNER] from the in-game menu, which reads Toon-Up, Gag-Up,
+# Jellybeans, Toon-Down. This was left undecoded until that screenshot,
+# because nothing in the install names them -- the only "resistance"
+# files in the archives are three particle effects -- and the entry
+# counts alone were not evidence.
+#
+# They do corroborate it, though, which is why this is a reading rather
+# than a guess: category 0 holds exactly 5 ids and `TOON_UP_VALUES` has
+# exactly 5 values, and category 1 holds exactly 8, which is the seven
+# gag tracks plus all-tracks.
+RESISTANCE_CATEGORIES = {0: "toon_up", 1: "gag_up",
+                         2: "jellybeans", 3: "toon_down"}
 
-    `setResistanceMessages` is a list of [id, count] pairs. Captured
-    live, ids group by hundreds -- 0-4, 100-107, 200-203, 300-304 --
-    which is `category * 100 + index` and looks like Toon-Up, restock,
-    money and one more.
+# The Gag-Up submenu, in its own order. [OWNER] from the in-game menu:
+# Toon-Up, Trap, Lure, Sound, Throw, Squirt, Drop, All -- which is
+# Toontown's canonical track order followed by all-tracks, and is what
+# makes index 107 "All" rather than an eighth track.
+GAG_UP_TRACKS = {0: "toon_up", 1: "trap", 2: "lure", 3: "sound",
+                 4: "throw", 5: "squirt", 6: "drop", 7: None}
 
-    THE CATEGORIES ARE NOT DECODED, deliberately. Nothing in the install
-    names them: the only "resistance" files in the archives are three
-    particle effects. Guessing that category 0 is Toon-Up because it has
-    five entries and `TOON_UP_VALUES` has five is the kind of
-    plausible-looking fill this project forbids, so this returns the
-    TOTAL and nothing finer.
+# [OWNER] from the in-game menu: 100, 200, 350, 600. Recorded because it
+# confirms category 2 is money and nothing else; the solver has no use
+# for it, and a battle cannot spend one.
+JELLYBEAN_VALUES = (100, 200, 350, 600)
 
-    The cost of that is real and worth stating: `unites_held` is one
-    number, so a toon holding only Toon-Up unites is still offered a
-    Gag-Up. Fixing it needs the category table, not more inference.
+# The two the solver models.
+#
+# Jellybeans buy nothing in a battle. **Toon-Down is CUSTOM TO REALMS**
+# -- [OWNER] "Toon-Down is custom, don't implement it" -- so it is not
+# merely unmodelled, it does not exist in the game this solver is for.
+#
+# That makes the whole category table REALMS-SPECIFIC, and it must not
+# be carried across to TTR. A build that invents a category is exactly
+# the lineage hazard docs/realms.md is about: this decodes a reader's
+# wire format, and says nothing about what TTR offers.
+BATTLE_UNITES = ("toon_up", "gag_up")
+
+
+def parse_resistance(value) -> Optional[Dict[str, int]]:
+    """`setResistanceMessages` as {category name: count}, or None.
+
+    Unknown categories are kept under their number, so a build that
+    adds one shows up as a surprise rather than vanishing quietly.
     """
     if value is None:
         return None
-    total = 0
+    out: Dict[str, int] = {}
     try:
         for row in value:
             if len(row) < 2:
                 return None
-            total += max(0, int(row[1]))
+            ident, count = int(row[0]), max(0, int(row[1]))
+            name = RESISTANCE_CATEGORIES.get(ident // 100, str(ident // 100))
+            out[name] = out.get(name, 0) + count
     except (TypeError, ValueError):
         return None
-    return total
+    return out
+
+
+def battle_unites(value) -> Optional[int]:
+    """How many unites the toon holds that a BATTLE can spend, or None.
+
+    Toon-Up and Gag-Up only. This used to be the grand total, which
+    counted Jellybeans and Toon-Down as if they were unites the search
+    could play -- on the captured toon that read 3994 where the
+    spendable figure is 3993 across two categories, and on a normal toon
+    it would be wrong by whatever jellybean unites they happen to carry.
+    """
+    parsed = parse_resistance(value)
+    if parsed is None:
+        return None
+    return sum(parsed.get(kind, 0) for kind in BATTLE_UNITES)
+
+
+def gag_up_tracks(value) -> Optional[Dict[Optional[str], int]]:
+    """Which Gag-Up unites are held, as {track name or None: count}.
+
+    None is the all-tracks unite. Returns None if the field is absent.
+
+    Not consumed by anything yet, and that is deliberate:
+    `ToonState.unites_held` is a single number, so the search cannot ask
+    "do I hold a Lure restock". This decodes what the wire says so the
+    gap is a modelling choice rather than a missing reading.
+    """
+    if value is None:
+        return None
+    out: Dict[Optional[str], int] = {}
+    try:
+        for row in value:
+            ident, count = int(row[0]), max(0, int(row[1]))
+            if ident // 100 != 1 or count <= 0:
+                continue
+            index = ident % 100
+            if index not in GAG_UP_TRACKS:
+                continue
+            key = GAG_UP_TRACKS[index]
+            out[key] = out.get(key, 0) + count
+    except (TypeError, ValueError, IndexError):
+        return None
+    return out
 
 
 def npc_names(override: Optional[str] = None) -> Dict[int, str]:
