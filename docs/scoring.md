@@ -204,3 +204,63 @@ more. Win rates were used only to check the change harms nothing:
 Two seed blocks where two are shown. Ordinary play spends no cards at
 any price from 150 to 400, so the price is not what protects it — the
 mechanics are. Only hard content moves at all.
+
+## Do the consumables get spammed? And does any of this need a retrain?
+
+**No retrain.** Three facts settle it:
+
+* `env.ACTIONS` holds **no SOS entry and no unite entry** — 0 of 250.
+  The policy cannot emit either; SOS arrives through `hybrid._sos_probes`
+  and a unite through the wrapper around `climb`. Only fires are in the
+  table, 4 of them.
+* The observation contains neither `unites_held` nor `sos_cards`. The
+  policy is blind to consumables.
+* Training optimises `round_reward`; `climb` judges with `QUICK_W`.
+  Everything changed here was `QUICK_W` and the prices — inference, not
+  the training signal.
+
+So consumable use is decided entirely by the scorer, and retraining
+would not move it.
+
+### What it actually spends
+
+150 runs a cell, then 200 held out, with 5 slips, 5 unites and all 29
+cards available in EVERY cell including the easy ones:
+
+| | win | slips | unites | cards |
+|---|---|---|---|---|
+| d3 | 100% | 0.63 | 0.01 | 0.00 |
+| d5 | 100% | 1.16 | 0.32 | 0.00 |
+| d7 | 99% | 3.22 | 2.22 | 0.07 |
+| d9 | 63% | 4.73 | 4.66 | 1.05 |
+| VP | 95% | 4.89 | 3.56 | 0.19 |
+
+Unites and cards behave: nothing on easy content, heavy use only where
+the fight is otherwise lost (d9 goes 3% -> 63%, the VP 31% -> 95%).
+
+**Slips did not.** 0.63 a battle at difficulty 3, in a fight lasting 3.7
+rounds and won every time — the one resource the owner said should be
+for bosses. Unchanged at survive 0 and 400, so it predated this work.
+
+### FIRE_FLOOR 20 -> 120
+
+`FIRE_FLOOR` exists for exactly this and had already been swept — but
+that sweep ran when a solo VP read about 86%. With consumables it reads
+94%, and the headroom that opened was enough to raise the floor for free:
+
+| floor | d3 slips | d5 slips | d9 win | VP win | VP slips |
+|---|---|---|---|---|---|
+| 20 | .63 / .58 | 1.16 / 1.12 | 63 / 66% | 95 / 95% | 4.89 / 4.88 |
+| 60 | .00 / .00 | .12 / .15 | 65 / 70% | 94 / 94% | 4.69 / 4.66 |
+| 120 | .00 / .00 | .03 / .05 | 65 / 67% | 95 / 94% | 3.96 / 4.03 |
+| 200 | .00 | .03 | 53% | 85% | 2.93 |
+
+120 zeroes the slip spent on easy content and spends nearly a whole slip
+LESS per VP at the same win rate. 200 is too far. d9 is within noise
+between 60 and 120; the economy separates them.
+
+The refactor lock caught the change and was read before re-recording:
+**9 picks moved, 8 of them `fire` to a gag**, one a gag-to-gag cascade
+from the hill-climb settling differently. All 53 shifted scores are
+positions whose scored action is itself a fire, so the floor reaches
+fire-bearing plans only, as designed.

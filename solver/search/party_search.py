@@ -1339,7 +1339,26 @@ FIRE_PRICE = 20.0
 # for -2 on the VP. Held out the building gain vanished (23.6 -> 24.0)
 # and the VP cost grew to -4.4, +12/-23, p=0.09. So it stays at zero,
 # and GAG overkill remains unfixed -- see `QUICK_W["waste"]`.
-FIRE_FLOOR = 20.0
+# RE-SWEPT once unites and SOS existed, and 20 no longer holds up. That
+# sweep ran when a solo VP read about 86%; with consumables it reads 94%,
+# and the headroom that appeared was enough to raise the floor for free.
+# 150 runs a cell, then 200 on held-out seeds, everything available in
+# every cell -- 5 slips, 5 unites, all 29 cards:
+#
+#     floor   d3 slips   d5 slips   d9 win    vp win   vp slips
+#        20   .63 /.58  1.16 /1.12  63 / 66%  95 / 95%  4.89 /4.88
+#        60   .00 /.00   .12 / .15  65 / 70%  94 / 94%  4.69 /4.66
+#       120   .00 /.00   .03 / .05  65 / 67%  95 / 94%  3.96 /4.03
+#       200   .00        .03        53%       85%       2.93
+#
+# 120 zeroes the slip spent on easy content -- the owner's rule is that
+# standard play should not need one -- and spends nearly a whole slip
+# LESS per VP at the same win rate, which is the point of keeping them.
+# 200 is too far: d9 falls to 53% and the VP to 85%.
+#
+# d9 is within noise between 60 and 120 (65/70 against 65/67 across the
+# two blocks); the economy is what separates them.
+FIRE_FLOOR = 120.0
 
 
 # A branch this unlikely is not worth a probe. The pruned mass is
