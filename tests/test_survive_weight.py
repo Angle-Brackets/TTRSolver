@@ -132,3 +132,44 @@ class ShippedValueTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NothingIsOfferedWithoutEvidenceTest(unittest.TestCase):
+    """`OFFER_UNITES` and `OFFER_SOS` are on, and that must stay safe
+    for live advice.
+
+    Neither consumable is visible to the readers: the Local API reports
+    no unite pouch and nothing reads SOS cards off the screen, so
+    `session.build_state` sets neither field. Both therefore have to
+    default to "hold none" rather than "hold anything", or the overlay
+    would advise spending a resource it has no evidence of -- the
+    invented-state failure CLAUDE.md warns about.
+    """
+
+    def test_a_freshly_built_toon_holds_neither(self):
+        # Exactly the constructor call `session.build_state` makes: no
+        # unites, no cards, no fires named.
+        toon = ToonState(laff=85, max_laff=137,
+                         track_exp={Track.THROW: 7},
+                         gag_counts={(Track.THROW, 4): 3},
+                         organic_tracks=frozenset())
+        self.assertEqual(toon.unites_held, 0)
+        self.assertEqual(dict(toon.sos_cards), {})
+
+    def test_and_so_is_offered_neither(self):
+        from solver import unites
+        from solver.search import hybrid
+        toon = ToonState(laff=85, max_laff=137,
+                         track_exp={Track.THROW: 7},
+                         gag_counts={(Track.THROW, 4): 3},
+                         organic_tracks=frozenset())
+        state = _party_board()
+        state.toons = [toon]
+        self.assertFalse(unites.available(toon))
+        self.assertEqual(list(unites.candidates(toon)), [])
+        self.assertEqual(hybrid._sos_probes(state, 0), [])
+
+    def test_the_flags_really_are_on(self):
+        from solver.search import hybrid
+        self.assertTrue(hybrid.OFFER_UNITES)
+        self.assertTrue(hybrid.OFFER_SOS)

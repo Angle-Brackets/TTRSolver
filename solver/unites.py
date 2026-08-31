@@ -176,6 +176,7 @@ def apply_toon_up(toon, value: int) -> int:
     restored = toon_up_restored(value, toon.laff, toon.max_laff)
     toon.laff = min(toon.max_laff, toon.laff + restored)
     toon.unite_cooldown = COOLDOWN_ROUNDS
+    toon.unites_held = max(0, getattr(toon, "unites_held", 0) - 1)
     return restored
 
 
@@ -281,6 +282,7 @@ def apply_gag_up(toon, track=None) -> int:
         budget=(GAG_UP_ALL_TRACKS_MAX if track is None
                 else GAG_UP_SINGLE_TRACK_MAX))
     toon.unite_cooldown = COOLDOWN_ROUNDS
+    toon.unites_held = max(0, getattr(toon, "unites_held", 0) - 1)
     return added
 
 
@@ -291,8 +293,16 @@ def tick_cooldown(toon) -> None:
 
 
 def available(toon) -> bool:
-    """Is a unite usable by this toon this round?"""
-    return getattr(toon, "unite_cooldown", 0) <= 0
+    """Is a unite usable by this toon this round?
+
+    BOTH conditions. The cooldown alone made the supply unlimited, and
+    an unlimited supply is not a modelling nicety -- it took solo
+    buildings from 26% to 100% on one seed block and 27% to 99% on
+    another, spending about four unites a building. See
+    `ToonState.unites_held` for why the default is zero.
+    """
+    return (getattr(toon, "unite_cooldown", 0) <= 0
+            and getattr(toon, "unites_held", 0) > 0)
 
 
 def candidates(toon):

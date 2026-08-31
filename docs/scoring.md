@@ -106,3 +106,62 @@ is no cost side to trade against.
   the term values a unite's heal and not a teammate's.
 * **Nothing here is a party result.** Every cell is one toon, except the
   heal gate, which is three and sat at 89.2% identically across weights.
+
+## Turning the flags on, and the unite stock that had to come first
+
+`OFFER_UNITES` and `OFFER_SOS` are both on.
+
+Enabling them exposed that **a unite had no stock at all**.
+`unites.available` checked only the cooldown, so every toon held an
+unlimited supply. Solo buildings at difficulty 8 went 26.0% -> 100.0%
+and 27.0% -> 99.0%, spending about four unites a building. That is not
+the game and it is not something a price can fix, because the resource
+was free.
+
+`ToonState.unites_held` now holds the count, defaults to **0**, is
+carried through `clone` (anything spent must be, or a sweep reports
+usage that never happened -- the standing note on `fires`), and is
+decremented wherever the cooldown is set. `available` requires both.
+
+The default of zero is the safety property for live advice. Neither
+consumable is visible to the readers -- the Local API reports no unite
+pouch and nothing reads SOS cards off the screen -- so
+`session.build_state` sets neither field. Both therefore read as "holds
+none", nothing is offered, and **turning the flags on changes nothing on
+screen today**. `tests/test_survive_weight.py` pins that.
+
+### It reserves them for hard content on its own
+
+The worry was that consumables would trivialise ordinary play. Measured
+at survive=400, 5 unites held and a full 29-card book, 120 runs a cell:
+
+| difficulty | win | unites/run | cards/run |
+|---|---|---|---|
+| 3 | 100% | 0.00 | 0.00 |
+| 5 | 100% | 0.15 | 0.00 |
+| 7 | 100% | 2.54 | 0.00 |
+| 9 | 42% | 4.88 | 1.16 |
+| VP, 12 cogs | 93% | 3.48 | 0.17 |
+
+Ordinary street play spends nothing. The owner's rule -- standard play
+should not need consumables -- falls out of the prices rather than
+needing a hard-coded exemption for buildings.
+
+**The earlier "it trivialises buildings" reading was an artifact of
+testing at difficulty 8**, which is near the top of a 1-9 scale and
+wins only 26% solo WITHOUT consumables. A toon losing three fights in
+four is not standard play, and spending a heal there is correct.
+
+`SURVIVAL_CAP` was swept as a candidate fix for that non-problem and is
+left at 4.0. Lowering it reduces consumable use everywhere in
+proportion (at 2.0: buildings 90.8% on 2.64 unites, VP 85.8% on 2.38) --
+it does not separate easy content from hard, because the thing that
+separates them is how much danger the toon is actually in, which the
+term already reads.
+
+### Still missing
+
+The overlay cannot offer either until it knows what the player holds.
+The honest options are a UI input for unite and card counts, or reading
+them off the screen; neither exists yet. Until one does, these flags are
+live-inert and matter only to offline search and measurement.

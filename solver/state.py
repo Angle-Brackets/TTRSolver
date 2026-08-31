@@ -107,6 +107,19 @@ class ToonState:
     # identical but for it are not the same position.
     unite_cooldown: int = 0
 
+    # How many unites this toon HOLDS. Zero by default, and that default
+    # is the whole point: the live readers cannot see a unite pouch --
+    # the Local API does not report one and nothing reads it off the
+    # screen -- so an unknown holding must offer nothing rather than
+    # everything. It used to be unbounded, `available` checking only the
+    # cooldown, and solo buildings went 26% -> 100% because the solver
+    # spent about four unites a building it had no evidence of holding.
+    # A harness that wants them sets this explicitly.
+    #
+    # [CONFIRMED] wiki: "Toons can hold up to 100 unites per type",
+    # which is `CARRY_LIMIT`.
+    unites_held: int = 0
+
     # SOS cards held, by SOS Toon name. [CONFIRMED] wiki: up to 100 of
     # each. Empty by default, which is what keeps every existing
     # position unchanged -- an SOS is only ever a legal action for a
@@ -541,6 +554,8 @@ class BattleState:
                 pouch_capacity=t.pouch_capacity,
                 fire_capacity=t.fire_capacity,
                 unite_cooldown=t.unite_cooldown,
+                # SPENT, so carried -- see the note on `fires` below.
+                unites_held=t.unites_held,
                 sos_cards=t.sos_cards,
                 # Pink slips are SPENT, so they must be carried. Omitting
                 # this defaulted every clone to zero and the fires simply

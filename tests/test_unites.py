@@ -17,10 +17,13 @@ from solver.data import gags as gags_mod
 from solver.state import ToonState, Track
 
 
-def _toon(laff=40, max_laff=137, counts=None):
+def _toon(laff=40, max_laff=137, counts=None, held=10):
+    # `held` is explicit because `unites_held` defaults to 0 and a toon
+    # holding none is offered none. The live readers cannot see a unite
+    # pouch, so "unknown" has to mean "offer nothing".
     return ToonState(laff, max_laff,
                      {Track.THROW: 7, Track.SQUIRT: 7, Track.DROP: 7},
-                     dict(counts or {}), frozenset())
+                     dict(counts or {}), frozenset(), unites_held=held)
 
 
 class ToonUpTest(unittest.TestCase):
@@ -297,7 +300,7 @@ class TieBreakTest(unittest.TestCase):
         toon = ToonState(70, 137,
                          {t: 7 for t in Track if t is not Track.TOON_UP},
                          {(Track.TRAP, 4): 10}, frozenset(),
-                         pouch_capacity=80)
+                         pouch_capacity=80, unites_held=10)
         gag_ups = [c for c in unites.candidates(toon) if c[0] == "gag_up"]
         self.assertTrue(gag_ups)
         self.assertIsNone(gag_ups[0][1],
@@ -313,3 +316,60 @@ class TieBreakTest(unittest.TestCase):
         every = unites.apply_gag_up(fresh(), None)
         one = unites.apply_gag_up(fresh(), Track.THROW)
         self.assertGreater(every, one)
+
+
+class StockTest(unittest.TestCase):
+    """A unite has to be HELD. The cooldown alone left the supply
+    unlimited, which took solo buildings from 26% to 100% on one seed
+    block and 27% to 99% on another -- the solver spending about four
+    unites a building it had no evidence of holding."""
+
+    def test_none_held_means_none_available(self):
+        self.assertFalse(unites.available(_toon(held=0)))
+
+    def test_none_held_means_nothing_offered(self):
+        self.assertEqual(list(unites.candidates(_toon(laff=40, held=0))), [])
+
+    def test_the_default_is_none(self):
+        """The live readers cannot see a unite pouch, so an unbuilt
+        field must offer nothing rather than everything."""
+        bare = ToonState(40, 137, {Track.THROW: 7}, {}, frozenset())
+        self.assertEqual(bare.unites_held, 0)
+        self.assertFalse(unites.available(bare))
+
+    def test_using_one_spends_one(self):
+        toon = _toon(held=3)
+        unites.apply_toon_up(toon, 20)
+        self.assertEqual(toon.unites_held, 2)
+
+    def test_a_gag_up_spends_one_too(self):
+        toon = _toon(held=3, counts={(Track.THROW, 1): 1})
+        unites.apply_gag_up(toon, Track.THROW)
+        self.assertEqual(toon.unites_held, 2)
+
+    def test_the_last_one_runs_out(self):
+        toon = _toon(held=1)
+        unites.apply_toon_up(toon, 20)
+        for _ in range(unites.COOLDOWN_ROUNDS):
+            unites.tick_cooldown(toon)
+        self.assertEqual(toon.unite_cooldown, 0)
+        self.assertFalse(unites.available(toon),
+                         "cooldown expired but the pouch is empty")
+
+    def test_it_never_goes_negative(self):
+        toon = _toon(held=0)
+        unites.apply_toon_up(toon, 20)
+        self.assertEqual(toon.unites_held, 0)
+
+    def test_a_clone_carries_the_stock(self):
+        """Anything spent must survive `clone`, or it evaporates and a
+        sweep reports usage that never happened -- the bug `fires` has
+        a standing comment about."""
+        from solver.state import BattleState, CogState
+        from solver import data
+        hp = data.cog_max_hp(3)
+        state = BattleState(toon=_toon(held=7),
+                            cogs=[CogState(department="sellbot",
+                                           cog_type="cold_caller", level=3,
+                                           hp=hp, max_hp=hp)])
+        self.assertEqual(state.clone().toons[0].unites_held, 7)

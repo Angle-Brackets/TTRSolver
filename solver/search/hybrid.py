@@ -475,7 +475,16 @@ almost always None. The panel reads this to name the unite it is
 advising; nothing else should depend on it.
 """
 
-OFFER_UNITES = False
+# On. Swept: see docs/scoring.md. A unite now needs `unites_held > 0`,
+# which the live readers never set, so this changes nothing on screen
+# until something tells the overlay what the player is carrying -- and
+# offline it reserves itself for hard content on its own. Measured at
+# survive=400 with 5 held and a full card book, 120 runs a cell:
+# difficulty 3 spends 0.00 unites and 0.00 cards at a 100% clear, d5
+# spends 0.15, d7 2.54, d9 4.88 at 42%, the VP 3.48 at 93%. The owner's
+# rule -- standard play should not need consumables -- falls out of the
+# prices rather than needing a rule about buildings.
+OFFER_UNITES = True
 
 # An SOS card cannot be PROPOSED, only played. The whole `climb` menu is
 # indices into `env.ACTIONS`, and no SOS has an index -- adding one would
@@ -490,7 +499,7 @@ OFFER_UNITES = False
 #
 # Off until measured. `party_search` prices a call at `SOS_PRICE`, which
 # is deliberately steep enough that one wins only where it dominates.
-OFFER_SOS = False
+OFFER_SOS = True
 """Whether `climb` may open a round by using a unite.
 
 A ROUND IS TWO DECISIONS when a unite is available -- use one, then
