@@ -181,3 +181,59 @@ class PouchCapacityTest(unittest.TestCase):
         toon.gag_counts = {k: 0 for k in toon.gag_counts}
         toon.unite_cooldown = 0
         self.assertGreater(unites.apply_gag_up(toon, None), 0)
+
+
+class FillOrderTest(unittest.TestCase):
+    """A restock fills from the TOP DOWN, evenly across tracks. [OWNER]
+
+    Filling level 1 upward, one track at a time, spends the whole
+    thirty on Squirting Flowers and Cupcakes and leaves the gags worth
+    having untouched -- which made a Gag-Up look nearly worthless and
+    was the first version of this.
+    """
+
+    def _empty(self):
+        return ToonState(100, 137,
+                         {t: 7 for t in Track if t is not Track.TOON_UP},
+                         {}, frozenset(), pouch_capacity=80)
+
+    def test_all_tracks_fills_the_top_first(self):
+        toon = self._empty()
+        unites.apply_gag_up(toon, None)
+        low = sum(n for (_t, level), n in toon.gag_counts.items()
+                  if level <= 4)
+        high = sum(n for (_t, level), n in toon.gag_counts.items()
+                   if level >= 5)
+        self.assertEqual(low, 0, "spent budget on the bottom of the pouch")
+        self.assertGreater(high, 0)
+
+    def test_all_tracks_spreads_rather_than_draining_one(self):
+        toon = self._empty()
+        unites.apply_gag_up(toon, None)
+        touched = {track for (track, _lv), n in toon.gag_counts.items()
+                   if n > 0}
+        self.assertGreaterEqual(len(touched), 5,
+                                f"only filled {len(touched)} tracks")
+
+    def test_a_single_track_unite_focuses_on_that_track(self):
+        """[OWNER] "unless it's a single gag track which obviously then
+        it will focus in on that one from the top down"."""
+        toon = self._empty()
+        added = unites.apply_gag_up(toon, Track.THROW)
+        self.assertEqual(added, unites.GAG_UP_SINGLE_TRACK_MAX)
+        elsewhere = sum(n for (track, _lv), n in toon.gag_counts.items()
+                        if track is not Track.THROW)
+        self.assertEqual(elsewhere, 0, "leaked into other tracks")
+        self.assertEqual(toon.gag_counts.get((Track.THROW, 6), 0),
+                         gags_mod.gag(Track.THROW, 6).max_carry,
+                         "did not fill the top of the track first")
+
+    def test_it_never_exceeds_a_gag_s_own_limit(self):
+        """The cap that was always right, kept honest through the
+        rewrite of the fill order."""
+        toon = self._empty()
+        for _ in range(6):
+            toon.unite_cooldown = 0
+            unites.apply_gag_up(toon, None)
+        for (track, level), n in toon.gag_counts.items():
+            self.assertLessEqual(n, gags_mod.gag(track, level).max_carry)

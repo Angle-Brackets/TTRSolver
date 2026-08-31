@@ -212,26 +212,45 @@ def apply_gag_up(toon, track=None) -> int:
     pouch_room = max(0, int(getattr(toon, "pouch_capacity", 80)) - held)
 
     added = 0
-    for tr in tracks:
-        room_in_track = per_track
-        for level in range(1, gags_mod.POUCH_EXEMPT_LEVEL):
-            if (added >= budget or room_in_track <= 0
-                    or added >= pouch_room):
+    # TOP DOWN, AND EVENLY ACROSS TRACKS. [OWNER] Filling from level 1
+    # upward, one track at a time, spends the whole 30 on Squirting
+    # Flowers and Cupcakes and leaves the gags worth having untouched --
+    # which made a Gag-Up look nearly worthless and was the first
+    # version of this.
+    #
+    # Highest level first, one gag per track per pass, so a restock
+    # tops up the scarce end evenly rather than emptying the budget
+    # into whichever track happens to be first in the list.
+    #
+    # Four caps bind at once: each gag's own `max_carry`, 7 per track,
+    # 30 in total, and what the pouch can still hold.
+    per_track_added = {tr: 0 for tr in tracks}
+    for level in range(gags_mod.POUCH_EXEMPT_LEVEL - 1, 0, -1):
+        progressed = True
+        while progressed:
+            progressed = False
+            for tr in tracks:
+                if added >= budget or added >= pouch_room:
+                    break
+                if per_track_added[tr] >= per_track:
+                    continue
+                if toon.track_exp.get(tr, 0) < level:
+                    continue
+                try:
+                    cap = gags_mod.gag(tr, level).max_carry
+                except (KeyError, ValueError, NotImplementedError):
+                    continue
+                have = toon.gag_counts.get((tr, level), 0)
+                if have >= cap:
+                    continue
+                toon.gag_counts[(tr, level)] = have + 1
+                added += 1
+                per_track_added[tr] += 1
+                progressed = True
+            if added >= budget or added >= pouch_room:
                 break
-            if toon.track_exp.get(tr, 0) < level:
-                continue
-            try:
-                cap = gags_mod.gag(tr, level).max_carry
-            except (KeyError, ValueError, NotImplementedError):
-                continue
-            have = toon.gag_counts.get((tr, level), 0)
-            room = min(cap - have, room_in_track, budget - added,
-                       pouch_room - added)
-            if room <= 0:
-                continue
-            toon.gag_counts[(tr, level)] = have + room
-            added += room
-            room_in_track -= room
+        if added >= budget or added >= pouch_room:
+            break
     toon.unite_cooldown = COOLDOWN_ROUNDS
     return added
 
