@@ -403,3 +403,36 @@ Re-running those across the training spread needs care, because training
 changes TWO things at once -- accuracy, and which gags the pouch can
 hold -- so a naive sweep reads as a difficulty result. The d5 win rate
 falls 100% to 22% between training 7 and 3 on that account alone.
+
+### Both re-ran clean on realistic toons
+
+`FIRE_FLOOR` and `SOS_PRICE` were the two flagged as at risk. Re-run on
+the toons `facility_position` actually builds -- **mean training 4.65,
+not 7**, parties of two to four, matched to their street -- 250 runs a
+cell, paired on seeds:
+
+| FIRE_FLOOR | win | slips | vs 20 |
+|---|---|---|---|
+| 20 | 89.2% | 17.33 | |
+| 60 | 88.4% | 17.03 | +1/-3 p=0.625 |
+| **120** | **88.8%** | **16.91** | +5/-6 p=1.000 |
+| 200 | 85.6% | 16.58 | +3/-12 p=0.035 |
+
+| SOS_PRICE | win | cards | vs 250 |
+|---|---|---|---|
+| **250** | **88.8%** | **0.74** | |
+| 400 | 87.2% | 0.47 | +0/-4 p=0.125 |
+| 150 | 89.6% | 1.03 | +3/-1 p=0.625 |
+
+Both shipped values hold. 120 is indistinguishable from 20 (p=1.000)
+while spending fewer slips, and 200 still overshoots. 250 beats the old
+400 directionally on every seed that moved (+0/-4) and 150 is noise.
+
+So the maxed-toon bias did not invalidate either number. It remains a
+real limitation of the method, not of these two results.
+
+Note this is the sampler's own distribution, so unlike the solo sweeps
+above these are PARTY runs. Slips read about 17 a run because each of
+two to four toons carries five, not because anything restocks --
+`_next_floor` clones the state, so the pouch, laff and slips all carry
+across floors.
