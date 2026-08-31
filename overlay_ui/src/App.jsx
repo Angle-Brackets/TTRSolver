@@ -44,21 +44,29 @@ const gagArt = (track, level) =>
 // miss, and it is in neither sos_textures.bam nor inventory_icons.bam),
 // so a runtime extraction like the lure icon was not available.
 import pinkSlipArt from './assets/pink-slip.png'
+import sosCardArt from './assets/sos-card.png'
+import uniteFistArt from './assets/unite-fist.png'
 
 const PinkSlip = () => (
   <img src={pinkSlipArt} alt="" className="size-11 object-contain" />
 )
 
-// An SOS card. Placeholder until the game's own icon is to hand -- it
-// is not in the phase files under any obvious name, the way the lure
-// magnet and the emblems are.
+// The SOS cards, and the Toon Resistance fist for unites.
+//
+// NEITHER IS IN THE PHASE FILES, which is why they are committed here
+// rather than extracted at runtime the way the lure magnet and the
+// department emblems are. Searching the archives for them was wasted
+// effort: the SOS icon is the WIKI's `SOS icon.png`, the same place the
+// pink slip came from. The fist is `Resistance_symbol.png`, which does
+// live in a game archive -- Realms', whose .pak files are Panda3D
+// multifiles with compressed subfiles, so the repo's own reader
+// refuses them and `panda3d.core.Multifile` is needed instead.
 const SosCard = () => (
-  <svg viewBox="0 0 24 24" className="size-11" aria-hidden="true">
-    <rect x="3" y="4" width="18" height="16" rx="2"
-          fill="#fde68a" stroke="#b45309" strokeWidth="1.4" />
-    <path d="M7 9h10M7 12h10M7 15h6"
-          stroke="#92400e" strokeWidth="1.2" strokeLinecap="round" />
-  </svg>
+  <img src={sosCardArt} alt="" className="size-11 object-contain" />
+)
+
+const UniteFist = () => (
+  <img src={uniteFistArt} alt="" className="size-4 shrink-0 object-contain" />
 )
 
 // Falls back to the department emblem, which is the honest picture when
@@ -198,8 +206,9 @@ function Advice({ model }) {
             into the advice line would read as a choice between them,
             which is the one thing it is not. */}
         {showing && model.unite && (
-          <div className="text-[11px] font-semibold text-warning">
-            + {model.unite}
+          <div className="flex items-center gap-1 text-[11px] font-semibold text-warning">
+            <UniteFist />
+            {model.unite}
           </div>
         )}
         <div
