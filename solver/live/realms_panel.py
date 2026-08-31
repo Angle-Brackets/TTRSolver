@@ -211,8 +211,9 @@ def rows_from_state(state) -> List[CogRow]:
                           health=max(0.0, min(1.0, health)),
                           art_key=f"{cog.department}-{cog.cog_type}",
                           department=cog.department, index=index,
-                          lured=cog.status.lured, choices=[],
-                          identified=True))
+                          lured=cog.status.lured,
+                          trapped=getattr(cog.status, "trapped", False),
+                          choices=[], identified=True))
     return out
 
 
@@ -839,6 +840,10 @@ class RealmsApi:
 
     def mark_lured(self, *_args) -> None:
         """Inert. Lure state comes from the battle roster."""
+        return None
+
+    def mark_trapped(self, *_args) -> None:
+        """Inert. Trap state comes from the battle roster."""
         return None
 
     def set_toon_count(self, count) -> None:

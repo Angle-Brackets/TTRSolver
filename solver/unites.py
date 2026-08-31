@@ -95,6 +95,29 @@ from typing import Dict, Optional
 # [CONFIRMED] wiki. The five Toon-Up unites, by laff restored.
 TOON_UP_VALUES = (20, 35, 50, 65, 80)
 
+# A full heal, as a Toon-Up "value". Realms offers one where TTR does
+# not, so it is a sentinel rather than a number: no laff figure is
+# correct for it, since what it restores depends on the toon.
+MAX_TOON_UP = "max"
+
+
+def toon_up_values(toon=None) -> tuple:
+    """The Toon-Up unites this toon's game issues.
+
+    PER TOON, because the builds differ and neither may overwrite the
+    other. `TOON_UP_VALUES` above is TTR, [CONFIRMED] wiki. Realms
+    issues 10, 20, 40, 80 and MAX -- [OWNER] from its in-game menu --
+    and that reading lives in `solver/live/realms.py` and is injected
+    here by the Realms reader.
+
+    docs/realms.md is the rule this obeys: Realms is Toontown Online
+    lineage, so nothing read from it may become the solver's own table.
+    Letting it set a value on the STATE keeps the reading where it
+    belongs and leaves the shipped table meaning TTR.
+    """
+    values = getattr(toon, "toon_up_values", None)
+    return tuple(values) if values else TOON_UP_VALUES
+
 # [CONFIRMED] wiki: "restock a maximum of 7 gags for a single track and
 # restock a maximum of 30 gags for all tracks".
 GAG_UP_SINGLE_TRACK_MAX = 7
@@ -168,17 +191,23 @@ def costs_the_round() -> bool:
     return UNITE_COSTS_THE_ROUND
 
 
-def toon_up_restored(value: int, laff: int, max_laff: int) -> int:
+def toon_up_restored(value, laff: int, max_laff: int, values=None) -> int:
     """Laff a Toon-Up unite actually restores, capped by headroom.
 
-    `value` must be one of the five the game issues; an arbitrary number
-    is refused rather than rounded to the nearest, since the whole point
-    of the table is that the game does not offer anything else.
+    `value` must be one the game issues, or `MAX_TOON_UP`; an arbitrary
+    number is refused rather than rounded to the nearest, since the
+    whole point of the table is that the game offers nothing else.
+
+    `values` is that game's table -- see `toon_up_values`. Omitted, it
+    means TTR's, which is what every offline harness wants.
     """
-    if value not in TOON_UP_VALUES:
+    if value == MAX_TOON_UP:
+        return max(0, int(max_laff) - int(laff))
+    if value not in (values or TOON_UP_VALUES):
+        issued = values or TOON_UP_VALUES
         raise ValueError(
             f"{value} is not a Toon-Up unite; the game issues "
-            f"{', '.join(str(v) for v in TOON_UP_VALUES)}")
+            f"{', '.join(str(v) for v in issued)}")
     return max(0, min(int(value), int(max_laff) - int(laff)))
 
 
@@ -188,7 +217,8 @@ def apply_toon_up(toon, value: int) -> int:
     Immediate, because that is how the game behaves in the planning
     phase: the laff is back before the gag is chosen.
     """
-    restored = toon_up_restored(value, toon.laff, toon.max_laff)
+    restored = toon_up_restored(value, toon.laff, toon.max_laff,
+                                values=toon_up_values(toon))
     toon.laff = min(toon.max_laff, toon.laff + restored)
     toon.unite_cooldown = COOLDOWN_ROUNDS
     toon.unites_held = max(0, getattr(toon, "unites_held", 0) - 1)
@@ -397,12 +427,37 @@ def candidates(toon):
     out = []
 
     headroom = int(toon.max_laff) - int(toon.laff)
-    for value in TOON_UP_VALUES:
-        if headroom >= value - 5:
+    for value in toon_up_values(toon):
+        if value == MAX_TOON_UP:
+            # ONLY WHEN IT STRICTLY OUT-HEALS THE BIGGEST NUMBER. A MAX
+            # and an 80 restore the same 40 to a toon down 40, cost the
+            # same `UNITE_PRICE`, and therefore TIE -- and `climb`
+            # breaks ties by evaluation order, so the one offered first
+            # wins. MAX sorts first because it heals most, which would
+            # spend the premium card to do a lesser card's job.
+            #
+            # This is the same trap the all-tracks Gag-Up tie fell into,
+            # and there the fix was to order the better one first.
+            # Here "better" is the CHEAPER card when the heal is equal,
+            # so the rule is about offering rather than ordering.
+            #
+            # It also drops MAX for a toon down 2, where every option is
+            # waste and the right move is to throw a gag.
+            numbers = [v for v in toon_up_values(toon) if v != MAX_TOON_UP]
+            if headroom > max(numbers, default=0):
+                out.append(("toon_up", value))
+        elif headroom >= value - 5:
             out.append(("toon_up", value))
     # Largest first: they are mutually exclusive this round, and a
-    # bigger heal that is NOT wasted always beats a smaller one.
-    out.sort(key=lambda kv: -kv[1] if kv[0] == "toon_up" else 0)
+    # bigger heal that is NOT wasted always beats a smaller one. MAX
+    # sorts above every number, and must not reach the numeric key,
+    # which would raise on a string.
+    def _heal_rank(kv):
+        if kv[0] != "toon_up":
+            return 0
+        return float("-inf") if kv[1] == MAX_TOON_UP else -kv[1]
+
+    out.sort(key=_heal_rank)
 
     owned = [t for t, xp in toon.track_exp.items() if xp > 0]
     # ALL-TRACKS FIRST, and the order is load-bearing. A single-track
@@ -485,6 +540,8 @@ def best_with_unite(state, value_of, price: Optional[float] = None):
 def describe(choice) -> str:
     """One phrase for the panel."""
     kind, arg = choice
+    if kind == "toon_up" and arg == MAX_TOON_UP:
+        return "full Toon-Up unite"
     if kind == "toon_up":
         return f"{arg} Toon-Up unite"
     return ("Gag-Up unite (all tracks)" if arg is None

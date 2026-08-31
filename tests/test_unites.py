@@ -460,3 +460,81 @@ class PerKindStockTest(unittest.TestCase):
         for choice in unites.candidates(toon):
             with self.subTest(choice=choice):
                 self.assertIn(unites.stock_key(choice), toon.unite_stock)
+
+
+class PerBuildToonUpTest(unittest.TestCase):
+    """The Toon-Up table is per toon, because the builds differ.
+
+    TTR issues 20/35/50/65/80 ([CONFIRMED] wiki). Realms issues
+    10/20/40/80/MAX ([OWNER] from its in-game menu). Neither may
+    overwrite the other, and docs/realms.md is why the Realms one lives
+    in the reader and reaches the solver on the STATE.
+    """
+
+    REALMS = (10, 20, 40, 80, unites.MAX_TOON_UP)
+
+    def _toon(self, laff=60, values=()):
+        from solver.state import ToonState
+        return ToonState(laff, 137, {t: 7 for t in Track}, {}, frozenset(),
+                         pouch_capacity=80, unites_held=5,
+                         toon_up_values=values)
+
+    def _offers(self, laff, values):
+        toon = self._toon(laff, values)
+        return [a for k, a in unites.candidates(toon) if k == "toon_up"]
+
+    def test_the_shipped_table_is_still_ttrs(self):
+        self.assertEqual(unites.TOON_UP_VALUES, (20, 35, 50, 65, 80))
+
+    def test_the_default_is_ttr(self):
+        self.assertEqual(self._offers(60, ()), [80, 65, 50, 35, 20])
+
+    def test_a_realms_toon_gets_realms_values(self):
+        self.assertEqual(self._offers(20, self.REALMS),
+                         [unites.MAX_TOON_UP, 80, 40, 20, 10])
+
+    def test_max_restores_the_headroom(self):
+        toon = self._toon(60, self.REALMS)
+        self.assertEqual(unites.apply(toon, ("toon_up", unites.MAX_TOON_UP)),
+                         77)
+        self.assertEqual(toon.laff, 137)
+
+    def test_max_is_offered_only_when_it_out_heals_the_biggest(self):
+        """A MAX and an 80 both restore 40 to a toon down 40, cost the
+        same, and therefore TIE -- and ties break by evaluation order,
+        so the premium card would win and do a lesser card's job."""
+        self.assertNotIn(unites.MAX_TOON_UP, self._offers(97, self.REALMS))
+        self.assertIn(unites.MAX_TOON_UP, self._offers(56, self.REALMS))
+
+    def test_a_nearly_full_toon_is_offered_nothing(self):
+        self.assertEqual(self._offers(135, self.REALMS), [])
+
+    def test_max_sorts_above_every_number(self):
+        offered = self._offers(20, self.REALMS)
+        self.assertEqual(offered[0], unites.MAX_TOON_UP)
+
+    def test_it_describes_as_a_full_heal(self):
+        self.assertEqual(unites.describe(("toon_up", unites.MAX_TOON_UP)),
+                         "full Toon-Up unite")
+
+    def test_a_value_the_build_does_not_issue_is_refused(self):
+        """An arbitrary number is refused rather than rounded -- the
+        point of the table is that the game offers nothing else."""
+        with self.assertRaises(ValueError):
+            unites.toon_up_restored(35, 60, 137, values=self.REALMS)
+        self.assertEqual(unites.toon_up_restored(40, 60, 137,
+                                                 values=self.REALMS), 40)
+
+    def test_max_keys_to_the_same_stock_as_any_toon_up(self):
+        """The wire counts Toon-Up unites, not values, so all of them
+        spend the one entry."""
+        self.assertEqual(unites.stock_key(("toon_up", unites.MAX_TOON_UP)),
+                         unites.stock_key(("toon_up", 40)))
+
+    def test_the_reader_carries_the_realms_table(self):
+        try:
+            from solver.live import realms as realms_mod
+        except Exception as exc:        # noqa: BLE001 - optional dep
+            self.skipTest(f"realms reader unavailable: {exc}")
+        self.assertEqual(realms_mod.TOON_UP_VALUES, self.REALMS)
+        self.assertNotEqual(realms_mod.TOON_UP_VALUES, unites.TOON_UP_VALUES)

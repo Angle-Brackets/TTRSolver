@@ -136,6 +136,15 @@ class ToonState:
     # bug that once restocked a real pouch from a discarded candidate.
     unite_stock: Dict[tuple, int] = field(default_factory=dict)
 
+    # The Toon-Up unites THIS TOON'S GAME issues, or () for TTR's.
+    #
+    # Per toon because the builds differ and neither may overwrite the
+    # other: TTR issues 20/35/50/65/80 ([CONFIRMED] wiki) and Realms
+    # issues 10/20/40/80/MAX ([OWNER] from its menu). docs/realms.md
+    # forbids Realms data becoming the solver's own table, so the
+    # Realms reader sets this on the state instead.
+    toon_up_values: tuple = ()
+
     # SOS cards held, by SOS Toon name. [CONFIRMED] wiki: up to 100 of
     # each. Empty by default, which is what keeps every existing
     # position unchanged -- an SOS is only ever a legal action for a
@@ -573,6 +582,7 @@ class BattleState:
                 # SPENT, so carried -- see the note on `fires` below.
                 unites_held=t.unites_held,
                 unite_stock=t.unite_stock,
+                toon_up_values=t.toon_up_values,
                 sos_cards=t.sos_cards,
                 # Pink slips are SPENT, so they must be carried. Omitting
                 # this defaulted every clone to zero and the fires simply

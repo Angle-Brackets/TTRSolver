@@ -264,6 +264,12 @@ def toon_from_object(obj, max_fires: int = 0, max_unites: int = 0,
                 if count > 0:
                     stock[("gag_up", track)] = count
             toon.unite_stock = stock
+            # And WHICH Toon-Up unites this build issues. Realms offers
+            # 10/20/40/80/MAX where TTR offers 20/35/50/65/80, so
+            # without this the heal predicted is simply the wrong
+            # number. Set on the state, never on `unites.TOON_UP_VALUES`
+            # -- that table is TTR's and docs/realms.md keeps it so.
+            toon.toon_up_values = realms_mod.TOON_UP_VALUES
 
     # SOS CARDS. `setNPCFriendsDict` names them exactly, so unlike the
     # unites this loses nothing. The cap limits how many CALLS the

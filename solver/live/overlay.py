@@ -126,6 +126,8 @@ class CogRow:
     index: Optional[int] = None
     # Asleep on a Lure. Marked by the player, not read from the plate.
     lured: bool = False
+    # Trapped by a Trap gag. Marked by the player or read from state.
+    trapped: bool = False
     # What this plate could be, given its department and level. Offered
     # in the panel when the readers cannot name it: at most five, often
     # fewer, and the player can simply see which one it is.

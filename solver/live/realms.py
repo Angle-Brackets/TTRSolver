@@ -126,6 +126,9 @@ TOON_CLASSES = ("DistributedToon", "DistributedTemporaryToon")
 MOVIE_STATE = "PlayMovie"
 
 
+from .. import unites as unites_mod
+
+
 class RealmsError(RuntimeError):
     """Realms is not installed, is not running, or is missing a file."""
 
@@ -534,6 +537,17 @@ RESISTANCE_CATEGORIES = {0: "toon_up", 1: "gag_up",
 # makes index 107 "All" rather than an eighth track.
 GAG_UP_TRACKS = {0: "toon_up", 1: "trap", 2: "lure", 3: "sound",
                  4: "throw", 5: "squirt", 6: "drop", 7: None}
+
+# The Toon-Up submenu. [OWNER] from the in-game menu: 10, 20, 40, 80,
+# MAX -- which is NOT TTR's 20/35/50/65/80.
+#
+# It goes here and not in `unites.TOON_UP_VALUES`, which stays TTR's
+# [CONFIRMED] wiki table. Realms is Toontown Online lineage and this is
+# a different build again -- it carries a Toon-Down category TTR has no
+# equivalent for -- so overwriting the shipped table with it is exactly
+# what docs/realms.md forbids. The reader hands it to the STATE instead,
+# via `ToonState.toon_up_values`.
+TOON_UP_VALUES = (10, 20, 40, 80, unites_mod.MAX_TOON_UP)
 
 # [OWNER] from the in-game menu: 100, 200, 350, 600. Recorded because it
 # confirms category 2 is money and nothing else; the solver has no use

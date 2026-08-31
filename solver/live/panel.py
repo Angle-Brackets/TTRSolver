@@ -106,7 +106,8 @@ def model_json(model: Model) -> str:
         "rows": [{"name": r.name, "level": r.level,
                   "health": r.health, "identified": r.identified,
                   "art": r.art_key, "department": r.department,
-                  "index": r.index, "choices": r.choices, "lured": r.lured}
+                  "index": r.index, "choices": r.choices, "lured": r.lured,
+                  "trapped": getattr(r, "trapped", False)}
                  for r in model.rows],
         "problems": list(model.problems),
         "evidence": model.evidence,
