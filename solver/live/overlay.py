@@ -488,6 +488,14 @@ class Worker(threading.Thread):
         if watcher is not None:
             watcher.mark_lured(index, bool(lured))
 
+    def mark_trapped(self, index, trapped) -> None:
+        """The player says this cog is trapped with a Trap gag."""
+        try:
+            row = self.model.rows[int(index)]
+            row.trapped = bool(trapped)
+        except (TypeError, ValueError, IndexError):
+            pass
+
     def name_cog(self, index, cog) -> None:
         """The player naming a plate, applied at once.
 

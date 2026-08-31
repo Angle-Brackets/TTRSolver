@@ -242,3 +242,78 @@ class BothEnginesOfferUnitesTest(unittest.TestCase):
     def test_the_search_path_reports_one(self):
         from solver.live import advise
         self.assertTrue(hasattr(advise, "LAST_UNITE"))
+
+
+class TrappedLureTest(unittest.TestCase):
+    """Reported from live play: a lone trapped level 5 Ambulance Chaser
+    with a Trapdoor in front, advised a GROUP Small Magnet.
+
+    `_track_key` is (track, group), so the menu carries the policy's
+    favourite single lure and its favourite group lure -- and the LEVEL
+    inside each is the policy's alone. Nothing compared one level
+    against another, so the cheap single lure the scorer prefers was
+    never offered.
+    """
+
+    def _board(self, trapped=True):
+        from solver import data
+        from solver.state import BattleState, CogState
+        hp = data.cog_max_hp(5)
+        cog = CogState(department="lawbot", cog_type="ambulance_chaser",
+                       level=5, hp=hp, max_hp=hp)
+        if trapped:
+            cog.status.trapped = True
+            cog.status.trap_level = 5
+        counts = {(Track.LURE, lv): 5 for lv in range(1, 8)}
+        for track in (Track.THROW, Track.SQUIRT, Track.SOUND, Track.DROP):
+            for level in range(1, 8):
+                counts[(track, level)] = 5
+        toon = ToonState(80, 137, {t: 7 for t in Track}, counts,
+                         frozenset({Track.THROW}), pouch_capacity=80)
+        return BattleState(toon=toon, cogs=[cog])
+
+    def test_every_lure_lands_at_the_same_rate_on_a_trapped_cog(self):
+        """Why the CHEAPEST is right rather than the most accurate: the
+        trapped bonus takes all of them to the 95 cap, so the printed
+        accuracy stops being a difference at all."""
+        from solver import simulator
+        from solver.state import Action
+        seen = set()
+        for level in range(1, 8):
+            record = []
+            probe = self._board().clone()
+            simulator.apply_party_round(
+                probe, [Action(track=Track.LURE, level=level, target_index=0)],
+                hits=[True], record=record)
+            seen.add(record[0][2])
+        self.assertEqual(seen, {95})
+
+    def test_the_scorer_prefers_the_cheap_one(self):
+        from solver.state import Action
+        cheap = ps._quick_score(
+            self._board(), [Action(track=Track.LURE, level=1, target_index=0)],
+            random.Random(0))
+        dear = ps._quick_score(
+            self._board(), [Action(track=Track.LURE, level=5, target_index=0)],
+            random.Random(0))
+        self.assertGreater(cheap, dear)
+
+    def test_it_no_longer_advises_a_group_lure_on_one_cog(self):
+        from solver.search import hybrid
+        plan = hybrid.climb(self._board(), random.Random(0), budget=8)
+        self.assertIsNotNone(plan[0])
+        self.assertEqual(plan[0].track, Track.LURE)
+        self.assertIsNotNone(plan[0].target_index,
+                             "a group lure on a single cog")
+
+    def test_the_probe_fires_only_on_a_trapped_board(self):
+        """Narrow on purpose. Offering cheap gags everywhere starves the
+        track sweep at the panel's budget of 8: measured, difficulty 9
+        fell 60% to 42% and the VP 94% to 81%."""
+        from solver.search import hybrid
+        self.assertFalse(hybrid.PROBE_ORDER_EARLY)
+        self.assertEqual(hybrid._cheapest_lures(self._board(False), 0, None),
+                         hybrid._cheapest_lures(self._board(False), 0, None))
+        untrapped = hybrid.climb(self._board(False), random.Random(0),
+                                 budget=8)
+        self.assertIsNotNone(untrapped[0])

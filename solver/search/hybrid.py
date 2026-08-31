@@ -525,6 +525,51 @@ the difference nobody has modelled.
 """
 
 PROBE_CHEAPEST_KILL = True
+
+# The same idea for LURE, which `_cheapest_kills` deliberately skips
+# because a lure deals no damage and "kills it" does not apply.
+#
+# `_track_key` is (track, group), so the menu carries the policy's
+# favourite single lure and its favourite group lure -- and the LEVEL
+# inside each is the policy's alone, with nothing comparing one level
+# against another. Reported from live play and reproduced: a lone
+# trapped level 5 Ambulance Chaser with a Trapdoor in front, where the
+# panel advised a GROUP Small Magnet. The scorer ranks $1 Bill 1785.26
+# against Small Magnet's 1784.12 and would have chosen it -- it was
+# never offered, because the policy's favourite single lure was $10
+# Bill at 1779.07.
+#
+# What a lure's level buys is duration and accuracy, and against a
+# trapped cog the duration is often worth nothing, since the trap
+# resolves at once. That is a judgement the scorer can make and the
+# policy cannot, so the cheapest of each scope is put in front of it.
+PROBE_CHEAPEST_LURE = True
+
+# WHERE the targeted probes sit, which matters more than whether they
+# exist -- and the answer is NOT "early", which was measured and lost.
+#
+# At the panel's budget of 8 the probes queued behind the track sweep
+# are never reached, so moving them ahead of it looked like a fix. It
+# reverses which sweep gets starved, and the track sweep is worth far
+# more: 200 runs a cell, everything available, difficulty 9 fell 60% to
+# 42% and the VP 94% to 81%, with rounds nearly doubling on easy content
+# (d3 3.7 -> 6.4) as cheap gags dragged fights out.
+#
+# So the ordering stands and `PROBE_CHEAPEST_KILL` really is mostly
+# unreached live. That is a budget problem, not an ordering one, and it
+# is left recorded rather than papered over.
+PROBE_ORDER_EARLY = False
+
+# The one narrow exception, and it is narrow on purpose: a LURE aimed at
+# a TRAPPED cog. There the lure's level buys nothing -- the trap
+# resolves at once, so duration is worthless -- and every lure lands at
+# the same 95% cap anyway, which makes the cheapest strictly correct.
+# At most two entries, only on boards holding a trapped cog, so it costs
+# the track sweep almost nothing.
+#
+# Reported from live play: a lone trapped level 5 Ambulance Chaser with
+# a Trapdoor, advised a GROUP Small Magnet.
+PROBE_LURE_ON_TRAP = True
 """Offer the SMALLEST gag that kills each cog, alongside the policy's.
 
 The scorer already prefers the cheap kill and never gets the chance to
@@ -582,6 +627,35 @@ def _sos_probes(state, seat: int):
     return [Action(track=None, sos=name)
             for name, count in held.items()
             if count > 0 and name in sos_mod.BY_NAME]
+
+
+def _cheapest_lures(state, seat: int, legal=None):
+    """Indices of the LOWEST-level lure this toon holds, per scope.
+
+    One single-target and one group, so the scorer can weigh a cheap
+    inaccurate lure against the expensive accurate one the policy
+    prefers. It decides; this only makes sure it is asked.
+
+    Skipped when every live cog is already lured -- there is nothing to
+    put to sleep, and `legal_actions` has its own view on that.
+    """
+    from ..rl import env as env_mod
+    from ..state import Track
+
+    live = [c for c in state.cogs if not c.status.is_dead]
+    if not live or all(c.status.lured for c in live):
+        return []
+    best = {}
+    for index, entry in enumerate(env_mod.ACTIONS):
+        if entry is None or entry.fire or entry.track is not Track.LURE:
+            continue
+        if legal is not None and not legal[index]:
+            continue
+        scope = entry.target_index is None
+        current = best.get(scope)
+        if current is None or entry.level < current[0]:
+            best[scope] = (entry.level, index)
+    return [index for _level, index in best.values()]
 
 
 def _cheapest_kills(state, seat: int, legal=None):
@@ -1147,6 +1221,36 @@ def climb(state: BattleState, rng=random, budget: int = 16,
             values = _logits(model, state, seat, pending, reject)
             mask_for_seat = np.isfinite(values)
             order = list(np.argsort(values)[::-1][:width])
+            # THE TARGETED PROBES GO IN BEFORE THE BROAD ONE, and the
+            # order is load-bearing at the budget the panel actually
+            # uses. `budget` is 8 live; the track probe appends up to
+            # fourteen entries, so anything queued behind it is never
+            # evaluated. Measured on the reported board -- a lone
+            # trapped Ambulance Chaser -- the cheap-lure probe changed
+            # nothing at budget 8 or 12 and only bit at 20. That made
+            # `PROBE_CHEAPEST_KILL` largely dead in live play too, which
+            # is not what its own measurement assumed.
+            #
+            # These are one or two entries each and are aimed at a
+            # specific known blind spot, so they earn a place ahead of a
+            # sweep of every track.
+            def _add_targeted():
+                for index in _cheapest_kills(state, seat, mask_for_seat):
+                    if index not in order and np.isfinite(values[index]):
+                        order.append(index)
+                if PROBE_CHEAPEST_LURE:
+                    for index in _cheapest_lures(state, seat, mask_for_seat):
+                        if index not in order and np.isfinite(values[index]):
+                            order.append(index)
+
+            if PROBE_ORDER_EARLY:
+                _add_targeted()
+            elif PROBE_LURE_ON_TRAP and PROBE_CHEAPEST_LURE and any(
+                    c.status.trapped and not c.status.is_dead
+                    for c in state.cogs):
+                for index in _cheapest_lures(state, seat, mask_for_seat):
+                    if index not in order and np.isfinite(values[index]):
+                        order.append(index)
             if probe_tracks or _menu_is_degenerate(order, values):
                 # The best of every track this toon can actually play,
                 # in the policy's own within-track order.
@@ -1179,12 +1283,8 @@ def climb(state: BattleState, rng=random, budget: int = 16,
                         and np.isfinite(values[env_mod.PASS_INDEX])
                         and env_mod.PASS_INDEX not in order):
                     order.append(env_mod.PASS_INDEX)
-            # OUTSIDE the track probes, because this is wanted whether
-            # or not they are on: solo runs with them off, and solo is
-            # where the overkill was reported.
-            for index in _cheapest_kills(state, seat, mask_for_seat):
-                if index not in order and np.isfinite(values[index]):
-                    order.append(index)
+            if not PROBE_ORDER_EARLY:
+                _add_targeted()
             trials = [env_mod.action_at(int(index)) for index in order
                       if np.isfinite(values[index])]
             if OFFER_SOS:

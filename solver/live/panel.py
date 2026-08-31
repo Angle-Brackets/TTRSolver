@@ -147,20 +147,9 @@ class Api:
         return model_json(self._state.model)
 
     def prefer_engine(self, name) -> None:
-        """INERT here. This panel has one engine.
-
-        The other panel runs a policy and the search side by side and
-        lets the badge swap between them. This one only ever runs the
-        search, so there is nothing to swap to: `model.engine` is never
-        set, the badge does not render, and the click cannot happen.
-
-        It exists anyway, for the same reason `name_cog` and
-        `mark_lured` exist over there -- THE PAGE IS SHARED. A call site
-        in App.jsx reaches whatever Api is behind it, and a missing
-        method fails at click time with nothing the player will ever
-        see. `tests/test_panel_bridge` enforces that and is what caught
-        this one.
-        """
+        """Swap which engine's answer is on screen."""
+        # Delegate to the worker handling engine preference.
+        self._worker.prefer_engine(name)
 
     def set_max_fires(self, count) -> None:
         """INERT here. Nothing on this side reads a pink slip count.
@@ -235,6 +224,12 @@ class Api:
         cog that is actually asleep is wrong in all four ways.
         """
         self._worker.mark_lured(index, bool(lured))
+        self._worker.ask_now()
+
+    def mark_trapped(self, index, trapped) -> None:
+        """Mark a cog trapped with a trap gag, or untrapped again."""
+        if hasattr(self._worker, "mark_trapped"):
+            self._worker.mark_trapped(index, bool(trapped))
         self._worker.ask_now()
 
     def name_cog(self, slot, cog) -> None:
