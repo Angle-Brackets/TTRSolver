@@ -165,3 +165,42 @@ The overlay cannot offer either until it knows what the player holds.
 The honest options are a UI input for unite and card counts, or reading
 them off the screen; neither exists yet. Until one does, these flags are
 live-inert and matter only to offline search and measurement.
+
+## The SOS price, and the turn it was charged for twice
+
+[OWNER] "An SOS card is slightly less valuable than a unite because a
+unite can be used AND you can do something in your turn, whereas an SOS
+card eats your turn."
+
+Correct, and the model already knew it. An SOS occupies the toon's
+action slot, so the plan holds no gag for that toon and the damage terms
+fall out on their own, with nothing priced. Measured with BOTH prices
+zeroed over 90 positions:
+
+| comparison | median | mean |
+|---|---|---|
+| best gag alone − card alone | 203 | 273 |
+| unite + that gag − card alone | 841 | 892 |
+
+The old prices were `UNITE_PRICE` 200 and `SOS_PRICE` 400, a gap of 200
+— within three points of the turn cost the mechanics were already
+charging. An SOS therefore had to clear roughly double its true
+handicap.
+
+`SOS_PRICE` is now **250**. The 50 that remains is scarcity, which is a
+preference rather than a measurement: cards are farmed from whole boss
+runs.
+
+**This was not swept for win rate**, and `solver/sos.py` says why — that
+sweep's answer is known and wrong, because cheaper cards always clear
+more. Win rates were used only to check the change harms nothing:
+
+| SOS price | d3 cards/run | d5 cards/run | d9 win | VP win |
+|---|---|---|---|---|
+| 150 | 0.00 | 0.00 | 48% | 93% |
+| 250 | 0.00 | 0.00 | 43% / 55% | 94% / 97% |
+| 400 | 0.00 | 0.00 | 42% / 47% | 93% / 97% |
+
+Two seed blocks where two are shown. Ordinary play spends no cards at
+any price from 150 to 400, so the price is not what protects it — the
+mechanics are. Only hard content moves at all.

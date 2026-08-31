@@ -261,3 +261,47 @@ class EveryCardSurvivesARoundTest(unittest.TestCase):
                     e.step(env_mod.PASS_INDEX,
                            action=Action(track=None, sos=card.name))
                     e.step(env_mod.PASS_INDEX)
+
+
+class PriceTest(unittest.TestCase):
+    """The gap to a unite is scarcity ONLY; the turn is charged by the
+    mechanics.
+
+    An SOS occupies the action slot, so the plan holds no gag for that
+    toon and the damage terms drop without anything being priced.
+    Measured with both prices zeroed, the best gag alone beats the card
+    alone by about 203 points. A price gap of the same size would charge
+    the turn twice.
+    """
+
+    def test_it_sits_slightly_above_a_unite(self):
+        from solver import unites
+        gap = sos_mod.SOS_PRICE - unites.UNITE_PRICE
+        self.assertGreater(gap, 0, "an SOS must still cost more")
+        self.assertLess(gap, 203,
+                        "a gap at or above the measured turn cost charges "
+                        "the turn twice")
+
+    def test_spending_the_turn_costs_something_without_any_price(self):
+        """The mechanical half, with prices out of the way.
+
+        On a FULL toon, where the heal is entirely wasted, so what
+        separates the two is only the gag the card did not throw. At 12
+        laff the card rightly wins instead -- 180 restored beats any one
+        gag -- which is why this pins the healthy case.
+        """
+        state = _board(3)
+        state.toons[0].laff = state.toons[0].max_laff
+        actions = [a for a in simulator.legal_actions(state)
+                   if a.track is not None]
+        old_w = ps.QUICK_W["price"]
+        try:
+            ps.QUICK_W["price"] = 0.0
+            gag = max(actions,
+                      key=lambda a: ps._quick_score(state, [a], random.Random(0)))
+            best = ps._quick_score(state, [gag], random.Random(0))
+            card = ps._quick_score(state, [Action(track=None, sos="Flippy")],
+                                   random.Random(0))
+            self.assertGreater(best, card)
+        finally:
+            ps.QUICK_W["price"] = old_w
