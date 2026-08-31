@@ -313,7 +313,37 @@ QUICK_W = {
     # that is the ONLY thing that kills pays almost nothing while the
     # same gag into a nearly-dead cog pays nearly in full.
     "waste": 0.0,
-    "risk": 0.0,        # CHARGED, per standing toon a round could sink
+    "risk": 0.0,
+    # Rounds of incoming the party's laff covers, capped. The only term
+    # that reads laff LEVEL rather than a delta.
+    #
+    # IT DOES NOTHING FOR GAG CHOICE AND EVERYTHING FOR UNITES, which
+    # is what `survival_rounds` predicts and what the sweep shows.
+    # Solo VP, 80 runs a cell:
+    #
+    #   weight   unites   8 cogs   12 cogs   20 cogs   unites/run @20
+    #        0      off    80.0%     23.8%      0.0%             0.0
+    #     1600      off    77.5%     21.2%      0.0%             0.0
+    #        0       on    83.8%     18.8%      0.0%             0.3
+    #      200       on    88.8%     43.8%      0.0%             1.3
+    #      800       on    96.2%     78.8%      0.0%             3.3
+    #     1600       on    96.2%     81.2%      0.0%             5.0
+    #
+    # With unites OFF the term is flat to slightly negative at every
+    # weight -- laff level cannot move a choice that does not change
+    # laff. With them ON it is worth sixty points at 12 cogs, and every
+    # one of those points is a unite being spent: 5.0 a run at the top.
+    #
+    # SO THIS IS A PREFERENCE, NOT A TUNING. The owner holds unites as
+    # an absolute last resort because spending them freely "trivializes
+    # a lot of stuff", and a weight that wins by spending five a fight
+    # is buying wins with a currency farmed from whole CFO runs. Left
+    # at 0.0 for the owner to set against how dearly they hold them.
+    #
+    # AND IT DOES NOT REACH THE REAL FIGHT. A 20-cog solo VP stays at
+    # 0.0% at every weight and every unite budget tried, though it
+    # survives 16.1 rounds against 30.2. The wall is somewhere else.
+    "survive": 0.0,        # CHARGED, per standing toon a round could sink
     "price": 1.0,       # gags spent
 }
 
@@ -1061,6 +1091,51 @@ def killed_threat(before: BattleState, after: BattleState) -> float:
     return total
 
 
+SURVIVAL_CAP = 4.0
+"""Rounds of survival past which more laff stops mattering to a choice.
+
+Uncapped, a maxed toon on a quiet board scores enormous survival and the
+term drowns everything else. Four rounds is long enough that a plan
+which buys a fifth is not choosing between life and death any more.
+"""
+
+
+def survival_rounds(state: BattleState) -> float:
+    """How many rounds of incoming the party's laff currently covers.
+
+    THE ONE THING NO SCORER COULD SEE. Every other term here is a DELTA
+    across the round -- damage dealt, damage prevented, laff restored by
+    a gag -- and `_score_leaf` simulates the toon phase only, so laff
+    does not move within it. A term reading laff LEVEL is therefore
+    constant across gag choices and cannot change which gag is picked.
+    That is exactly why `QUICK_W["risk"]` was swept over 0/5/15/40 and
+    changed not one game in 900: a constant cannot move an argmax.
+
+    It is NOT constant across the other decision. "Use a unite, then
+    throw" and "throw" differ by up to 80 laff, so this is the term
+    that makes a unite visible -- and without it a unite scored exactly
+    zero, measured: 329.40 before restoring 80 laff and 329.40 after.
+
+    In ROUNDS rather than in laff, because laff alone is not
+    comparable across boards. Thirty laff is comfortable against two
+    Cold Callers and nearly dead against four level 12s, and it is the
+    second that decides whether to spend a unite. Reading it against
+    `expected_incoming` says so directly.
+
+    Capped by `SURVIVAL_CAP`; see there.
+    """
+    standing = [t for t in state.toons if t.laff > 0]
+    if not standing:
+        return 0.0
+    incoming = expected_incoming(state)
+    if incoming <= 0:
+        # Nothing is swinging -- every plan survives, so this cannot
+        # discriminate and should not be allowed to dominate.
+        return SURVIVAL_CAP
+    laff = min(t.laff for t in standing)
+    return min(SURVIVAL_CAP, laff / incoming)
+
+
 def toons_at_risk(state: BattleState) -> float:
     """Standing toons a round of incoming damage could knock out.
 
@@ -1390,6 +1465,8 @@ def _score_leaf(state: BattleState, plan, hits, record=None,
                if objective is not None else 0.0)
             - (QUICK_W["risk"] * toons_at_risk(probe)
                if QUICK_W["risk"] else 0.0)
+            + (QUICK_W["survive"] * survival_rounds(probe)
+               if QUICK_W["survive"] else 0.0)
             - QUICK_W["price"] * price)
 
 
