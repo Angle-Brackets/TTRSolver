@@ -121,6 +121,32 @@ something that runs out and never comes back.
 
 That leaves 25 cards, all earned by rescuing SOS Toons after a VP.
 
+## An SOS cannot miss, and must not share a roll
+
+[OWNER, from play] SOS cards cannot miss. The only failures are
+situational rather than dice: Drop against a lured cog, and a Trap that
+nothing ever springs. Everything else lands.
+
+**The player's own gags still roll normally, and independently.** If
+Moe Zart is called while another toon throws an Elephant Trunk, the
+Trunk can miss and Moe Zart cannot -- even though both are Sound and
+both hit every cog.
+
+THAT IS A DIRECT COLLISION WITH `party_search._roll_groups`, which
+exists precisely to stop gags of the same track on the same target
+resolving independently:
+
+    groups[index] = (action.track, action.target_index)
+
+Two Sound actions in one round therefore share a die today, and a
+shared die would make Moe Zart miss whenever the Trunk does. An SOS has
+to be excluded from the grouping the same way fires and passes already
+are -- they are skipped there because they never roll, and an SOS never
+rolls either.
+
+Getting this wrong would be invisible in a win rate and obvious in a
+trace: an SOS that "missed".
+
 ## The Toon-Up split, settled — and it reuses what exists
 
 It IS a simple division; the table only looked irregular because the
