@@ -199,11 +199,24 @@ def apply_gag_up(toon, track=None) -> int:
     tracks = ([track] if track is not None
               else [t for t in toon.track_exp if toon.track_exp.get(t, 0) > 0])
 
+    # THE POUCH IS A THIRD CAP, and leaving it out let a Gag-Up add 30
+    # every time with no ceiling: a toon restocked five times carried
+    # 266 gags against a capacity of 80. The wiki's two caps are per
+    # USE; the pouch is what a toon can hold at all.
+    #
+    # Level 7 is exempt from the pouch (POUCH_EXEMPT_LEVEL) and is not
+    # restocked here anyway, so the total counts levels 1-6 only --
+    # the same rule the gag menu's "Total gags" label follows.
+    held = sum(n for (_t, level), n in toon.gag_counts.items()
+               if level < gags_mod.POUCH_EXEMPT_LEVEL)
+    pouch_room = max(0, int(getattr(toon, "pouch_capacity", 80)) - held)
+
     added = 0
     for tr in tracks:
         room_in_track = per_track
         for level in range(1, gags_mod.POUCH_EXEMPT_LEVEL):
-            if added >= budget or room_in_track <= 0:
+            if (added >= budget or room_in_track <= 0
+                    or added >= pouch_room):
                 break
             if toon.track_exp.get(tr, 0) < level:
                 continue
@@ -212,7 +225,8 @@ def apply_gag_up(toon, track=None) -> int:
             except (KeyError, ValueError, NotImplementedError):
                 continue
             have = toon.gag_counts.get((tr, level), 0)
-            room = min(cap - have, room_in_track, budget - added)
+            room = min(cap - have, room_in_track, budget - added,
+                       pouch_room - added)
             if room <= 0:
                 continue
             toon.gag_counts[(tr, level)] = have + room

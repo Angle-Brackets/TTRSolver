@@ -136,3 +136,48 @@ class TheRulesThatAreNotInTheWikiTest(unittest.TestCase):
         from solver.search import party_search as ps
         self.assertGreater(unites.UNITE_PRICE, ps.FIRE_PRICE)
         self.assertGreater(unites.UNITE_PRICE, ps.FIRE_FLOOR)
+
+
+class PouchCapacityTest(unittest.TestCase):
+    """A Gag-Up cannot fill past what the toon can carry.
+
+    The wiki's two caps -- 7 for one track, 30 for all -- are per USE.
+    The pouch is a third cap and leaving it out let a restock add 30
+    every time with no ceiling: a toon restocked five times carried 266
+    gags against a capacity of 80, and a VP trace showed 567.
+    """
+
+    def _full(self):
+        import random
+        from solver.rl import env as env_mod
+        toon = ToonState(100, 137,
+                         {t: 7 for t in Track if t is not Track.TOON_UP},
+                         {}, frozenset(), pouch_capacity=80)
+        env_mod.restock(toon, random.Random(3))
+        return toon
+
+    def _pouch(self, toon):
+        return sum(n for (_t, level), n in toon.gag_counts.items()
+                   if level < gags_mod.POUCH_EXEMPT_LEVEL)
+
+    def test_a_full_pouch_gains_nothing(self):
+        toon = self._full()
+        self.assertEqual(self._pouch(toon), toon.pouch_capacity)
+        toon.unite_cooldown = 0
+        self.assertEqual(unites.apply_gag_up(toon, None), 0)
+
+    def test_repeated_restocks_stop_at_capacity(self):
+        toon = self._full()
+        toon.gag_counts = {k: max(0, v - 6) for k, v in toon.gag_counts.items()}
+        for _ in range(5):
+            toon.unite_cooldown = 0
+            unites.apply_gag_up(toon, None)
+            self.assertLessEqual(self._pouch(toon), toon.pouch_capacity,
+                                 "restocked past the pouch")
+
+    def test_it_still_fills_a_pouch_with_room(self):
+        """The cap must not be so eager it refuses a legitimate restock."""
+        toon = self._full()
+        toon.gag_counts = {k: 0 for k in toon.gag_counts}
+        toon.unite_cooldown = 0
+        self.assertGreater(unites.apply_gag_up(toon, None), 0)
