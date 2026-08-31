@@ -231,3 +231,137 @@ class EffectTest(unittest.TestCase):
         self.assertEqual(state.toons_hit_rounds, 5)
         sos.apply(sos.BY_NAME["Julius Wheezer"], state)
         self.assertEqual(state.cogs_miss_rounds, 5)
+
+
+class IntegrationTest(unittest.TestCase):
+    """An SOS as an ordinary action: legal, playable, and never rolling."""
+
+    def _state(self, cards=None, cogs=2):
+        from solver import data
+        from solver.state import BattleState, CogState, ToonState
+        tracks = [t for t in Track if t is not Track.TOON_UP]
+        toon = ToonState(40, 137, {t: 7 for t in tracks},
+                         {(Track.THROW, 5): 2}, frozenset())
+        toon.sos_cards = dict(cards or {})
+        built = []
+        for level in (12, 11, 10, 9)[:cogs]:
+            hp = data.cog_max_hp(level)
+            built.append(CogState(department="sellbot",
+                                  cog_type="mr_hollywood", level=level,
+                                  hp=hp, max_hp=hp))
+        return BattleState(toon=toon, cogs=built)
+
+    def test_a_toon_holding_none_is_offered_none(self):
+        """The property that keeps every existing position unchanged."""
+        from solver import simulator
+        state = self._state()
+        self.assertEqual(
+            [a for a in simulator.legal_actions(state) if a.sos], [])
+
+    def test_a_held_card_becomes_a_legal_action(self):
+        from solver import simulator
+        state = self._state({"Flippy": 1})
+        names = [a.sos for a in simulator.legal_actions(state) if a.sos]
+        self.assertEqual(names, ["Flippy"])
+
+    def test_playing_one_spends_the_card(self):
+        from solver import simulator
+        from solver.state import Action
+        state = self._state({"Flippy": 2})
+        simulator.apply_toon_action(state, Action(track=None, sos="Flippy"),
+                                    hit=True)
+        self.assertEqual(state.toons[0].sos_cards["Flippy"], 1)
+        self.assertEqual(state.toons[0].laff, 137)
+
+    def test_calling_one_you_do_not_hold_raises(self):
+        from solver import simulator
+        from solver.state import Action
+        with self.assertRaises(KeyError):
+            simulator.apply_toon_action(
+                self._state(), Action(track=None, sos="Flippy"), hit=True)
+
+    def test_an_sos_action_is_not_a_pass(self):
+        """`is_pass` keys on a null track, which an SOS also has. Fires
+        already caused this exact bug once."""
+        from solver.state import Action
+        action = Action(track=None, sos="Flippy")
+        self.assertFalse(action.is_pass)
+        self.assertIsNone(action.track)
+
+    def test_an_sos_never_misses(self):
+        from solver import simulator
+        from solver.state import Action
+        state = self._state({"Moe Zart": 1})
+        self.assertEqual(
+            simulator.toon_action_accuracy(
+                state, Action(track=None, sos="Moe Zart")), 100)
+
+    def test_an_sos_does_not_share_the_party_s_accuracy_roll(self):
+        """Moe Zart must not miss because someone's Elephant Trunk did.
+        Both are Sound; a shared die would bind them together."""
+        from solver.search import party_search as ps
+        from solver.state import Action
+        plan = [Action(track=Track.SOUND, level=4, target_index=None),
+                Action(track=None, sos="Moe Zart")]
+        groups = ps._roll_groups(plan)
+        self.assertIn(0, groups, "the real gag should roll")
+        self.assertNotIn(1, groups, "the SOS must not be in a roll group")
+
+    def test_the_clone_carries_the_cards(self):
+        state = self._state({"Flippy": 3})
+        self.assertEqual(state.clone().toons[0].sos_cards, {"Flippy": 3})
+
+
+class TimedEffectTest(unittest.TestCase):
+
+    def _state(self):
+        from solver import data
+        from solver.state import BattleState, CogState, ToonState
+        toon = ToonState(80, 137, {Track.DROP: 1}, {(Track.DROP, 7): 1},
+                         frozenset())
+        hp = data.cog_max_hp(9)
+        cog = CogState(department="sellbot", cog_type="mr_hollywood",
+                       level=9, hp=hp, max_hp=hp)
+        return BattleState(toon=toon, cogs=[cog])
+
+    def test_toons_hit_raises_gag_accuracy(self):
+        """Drop is the least accurate track and the one it rescues."""
+        from solver import mechanics
+        state = self._state()
+        plain = mechanics.calc_toon_accuracy(
+            Track.DROP, 5, state.toons[0], [], toons_hit=False)
+        boosted = mechanics.calc_toon_accuracy(
+            Track.DROP, 5, state.toons[0], [], toons_hit=True)
+        self.assertGreater(boosted, plain)
+
+    def test_it_still_respects_the_hard_cap(self):
+        """4.3.3 made the 95 cap soft and the wiki never says by how
+        much, so the project keeps it hard. This must not be the one
+        exception that quietly ignores that."""
+        from solver import data, mechanics
+        state = self._state()
+        boosted = mechanics.calc_toon_accuracy(
+            Track.THROW, 1, state.toons[0], [], toons_hit=True)
+        self.assertLessEqual(boosted, data.ACCURACY_CAP)
+
+    def test_the_effects_are_in_the_state_key(self):
+        """A Cogs Miss changes the cog phase, so two positions
+        identical but for one are not the same node -- the
+        `free_passes` lesson."""
+        from solver import outcomes
+        a = self._state()
+        b = self._state()
+        b.cogs_miss_rounds = 3
+        self.assertNotEqual(outcomes.state_key(a), outcomes.state_key(b))
+
+    def test_they_count_down_each_round(self):
+        from solver import simulator
+        state = self._state()
+        state.toons_hit_rounds = 2
+        state.cogs_miss_rounds = 1
+        simulator._resolve_cog_phase(state)
+        self.assertEqual(state.toons_hit_rounds, 1)
+        self.assertEqual(state.cogs_miss_rounds, 0)
+        simulator._resolve_cog_phase(state)
+        self.assertEqual(state.toons_hit_rounds, 0)
+        self.assertEqual(state.cogs_miss_rounds, 0, "went negative")

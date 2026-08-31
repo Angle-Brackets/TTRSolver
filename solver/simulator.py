@@ -20,6 +20,7 @@ round counter still being > 0.
 import random
 from typing import Dict, List, Optional, Sequence, Tuple
 
+from . import sos as sos_mod
 from . import data
 from . import facility
 from . import mechanics
@@ -151,6 +152,19 @@ def legal_actions(state: BattleState) -> List[Action]:
     for i, cog in enumerate(state.cogs):
         if toon.fires > 0 and not cog.status.is_dead:
             actions.append(Action(track=None, target_index=i, fire=True))
+
+    # SOS TOONS, offered only when the toon holds the card. Every
+    # existing position has an empty `sos_cards`, so this adds nothing
+    # anywhere until a caller stocks one -- which is what keeps the
+    # behaviour lock green.
+    #
+    # An SOS costs the turn, so it is an ordinary action beside the
+    # gags rather than something layered on top, and it is finite and
+    # strictly decreasing like a pink slip, so it does not threaten the
+    # termination argument above.
+    for name, held in getattr(toon, "sos_cards", {}).items():
+        if held > 0:
+            actions.append(Action(track=None, sos=name))
 
     for (track, level), count in toon.gag_counts.items():
         if count <= 0:
@@ -325,6 +339,11 @@ def toon_action_accuracy(state: BattleState, action: Action,
     invisible on a maxed team, which is every boss position modelled so
     far, and wrong for any mixed party.
     """
+    if action.sos is not None:
+        # [CONFIRMED] wiki: no SOS gag misses, since 2.6.7. The
+        # situational failures -- Drop on a lured cog, a trap nothing
+        # springs -- are handled where the effect is applied, not here.
+        return 100
     if action.is_pass or action.fire:
         # A PINK SLIP CANNOT MISS, and it needs its own arm here rather
         # than riding on the pass guard: a fire has `track=None` too,
@@ -343,7 +362,8 @@ def toon_action_accuracy(state: BattleState, action: Action,
     return mechanics.calc_toon_accuracy(
         action.track, action.level, toon,
         _targets_for(state, action), all_cogs=state.cogs,
-        lure_tree_planted=toon.is_organic(action.track))
+        lure_tree_planted=toon.is_organic(action.track),
+        toons_hit=state.toons_hit_rounds > 0)
 
 
 def apply_toon_action(state: BattleState, action: Action,
@@ -373,6 +393,29 @@ def apply_toon_action(state: BattleState, action: Action,
         # the quantity going down.
         if not any(cog.status.lured for cog in state.active_cogs()):
             state.free_passes = max(0, state.free_passes - 1)
+        return 0, 0
+
+    if action.sos is not None:
+        # An SOS Toon answers the call. Spends the card and the turn,
+        # cannot miss, and resolves at once except for Trap, which
+        # places something a later Lure collects.
+        #
+        # Reported as 0 damage for the same reason a fire is: every
+        # scorer reads the return value as damage dealt by the TOON,
+        # and an SOS that healed 180 or lured a field dealt none.
+        # `sos.apply` returns what it actually did, for callers that
+        # want it.
+        from . import sos as sos_mod
+
+        held = toon.sos_cards.get(action.sos, 0)
+        if held <= 0:
+            raise KeyError(
+                f"toon was told to call {action.sos} and holds none -- "
+                f"the plan cannot be played")
+        cards = dict(toon.sos_cards)
+        cards[action.sos] = held - 1
+        toon.sos_cards = cards
+        sos_mod.apply(sos_mod.BY_NAME[action.sos], state)
         return 0, 0
 
     if action.fire:
@@ -587,12 +630,27 @@ def _tick_lure(cog: CogState, rng=random) -> bool:
 def _resolve_cog_phase(state: BattleState) -> int:
     """Returns total damage dealt to the toon this round."""
     total_dmg = 0
+    # COGS MISS. [CONFIRMED] wiki: an SOS reduces cog attack accuracy by
+    # 75% for 3-5 rounds. Applied as a multiplier on the roll rather
+    # than a subtraction, since "by 75%" is a reduction OF the accuracy,
+    # not 75 points off it -- a 90% attack becomes 22.5%, not 15%.
+    miss_factor = (1.0 - sos_mod.ACCURACY_SWING / 100.0
+                   if state.cogs_miss_rounds > 0 else 1.0)
+    # The SOS effects run down with the round, like a lure. Ticked
+    # here, once, alongside the lure timers -- the cog phase is the one
+    # place every round passes through exactly once.
+    if state.toons_hit_rounds > 0:
+        state.toons_hit_rounds -= 1
+    if state.cogs_miss_rounds > 0:
+        state.cogs_miss_rounds -= 1
+
     for cog in state.active_cogs():
         if cog.status.lured and not _tick_lure(cog):
             continue    # lure held: cog skips its attack
 
         attack_name = mechanics.pick_cog_attack(cog)
         dmg, acc = mechanics.cog_attack_damage_and_accuracy(cog, attack_name)
+        acc = int(round(acc * miss_factor))
         if not mechanics.roll_hit(acc):
             continue
         # Teammates give a single-target attack somewhere else to land.

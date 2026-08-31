@@ -23,6 +23,7 @@ import math
 import random
 from typing import Tuple
 
+from . import sos as sos_mod
 from . import data
 from .state import Track, CogState, ToonState
 
@@ -211,13 +212,19 @@ def forced_accuracy(track: Track, target_cogs):
 
 def calc_toon_accuracy(track: Track, level: int, toon: ToonState,
                         target_cogs, lure_tree_planted: bool = False,
-                        all_cogs=None) -> int:
+                        all_cogs=None, toons_hit: bool = False) -> int:
     """Full atkAcc, bonus included, capped at 95. This is the value the
     hit/miss roll uses. For the wake-up input, use
     lure_accuracy_before_bonus() instead -- it is a different number.
 
     Pass `all_cogs=state.cogs` to get the luredRatio accuracy bonus; without
-    it the bonus term is 0, as it was before luredRatio was modeled."""
+    it the bonus term is 0, as it was before luredRatio was modeled.
+
+    `toons_hit` applies the SOS effect of the same name: [CONFIRMED]
+    wiki, +75% gag accuracy for 3-5 rounds. A multiplier rather than 75
+    points, matching Cogs Miss in `_resolve_cog_phase` -- and applied
+    BEFORE the 95 cap, so it cannot push a gag past what the game
+    allows."""
     forced = forced_accuracy(track, target_cogs)
     if forced is not None:
         return forced
@@ -231,6 +238,18 @@ def calc_toon_accuracy(track: Track, level: int, toon: ToonState,
     # increased to 5%". The exemption is Drop against a lured cog, which
     # always misses -- and that case has already returned 0 above.
     acc = max(acc, data.ACCURACY_FLOOR)
+
+    if toons_hit:
+        # [CONFIRMED] wiki: an SOS raises gag accuracy by 75% for 3-5
+        # rounds. A multiplier, matching Cogs Miss, not 75 points.
+        #
+        # Applied BEFORE the cap on purpose. The note below records
+        # that 4.3.3 made the cap soft and that Toons Hit is one of the
+        # things that lifts it -- but the wiki never says by how much,
+        # so the existing decision is to keep it hard. Honouring that
+        # here rather than quietly making an exception: this raises a
+        # 60% gag to 95 and leaves a 95% gag where it is.
+        acc = int(round(acc * (1.0 + sos_mod.ACCURACY_SWING / 100.0)))
 
     # The 95 cap became a SOFT cap in 4.3.3 (stun/Lure/Trap/Toons Hit can
     # push it higher), but the wiki never quantifies "slightly" or gives a

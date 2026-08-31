@@ -107,6 +107,12 @@ class ToonState:
     # identical but for it are not the same position.
     unite_cooldown: int = 0
 
+    # SOS cards held, by SOS Toon name. [CONFIRMED] wiki: up to 100 of
+    # each. Empty by default, which is what keeps every existing
+    # position unchanged -- an SOS is only ever a legal action for a
+    # toon that holds one.
+    sos_cards: Dict[str, int] = field(default_factory=dict)
+
     # Pink slips, "fires". [CONFIRMED] wiki: they fire a targeted cog out
     # of battle with a cannon and eliminate BOTH layers of a Version 2.0.
     # The owner confirms the rest from play: using one costs the toon's
@@ -535,6 +541,7 @@ class BattleState:
                 pouch_capacity=t.pouch_capacity,
                 fire_capacity=t.fire_capacity,
                 unite_cooldown=t.unite_cooldown,
+                sos_cards=t.sos_cards,
                 # Pink slips are SPENT, so they must be carried. Omitting
                 # this defaulted every clone to zero and the fires simply
                 # evaporated -- a CEO sweep reported "20 used every run"
@@ -683,11 +690,23 @@ class Action:
     # removes a Version 2.0's Skelecog form along with its suit.
     fire: bool = False
 
+    # The name of an SOS Toon, when this action is calling one. An SOS
+    # costs the toon's turn like any gag, so it belongs here rather
+    # than in the wrapper unites needed -- see solver/sos.py.
+    #
+    # Like a fire, it has no track and no level, so anything guarding
+    # on `is_pass` alone will mistake it for a gag and reach for
+    # `action.track.value`. That exact bug shipped once for fires; the
+    # `is_pass` property below excludes both for the same reason.
+    sos: Optional[str] = None
+
     @property
     def is_pass(self) -> bool:
-        return self.track is None and not self.fire
+        return self.track is None and not self.fire and self.sos is None
 
     def describe(self) -> str:
+        if self.sos:
+            return f"SOS {self.sos}"
         if self.fire:
             return f"fire -> {self.target_index}"
         if self.is_pass:

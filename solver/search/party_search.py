@@ -1398,11 +1398,19 @@ def _roll_groups(plan) -> Dict[int, tuple]:
     in a way the game does not allow, and overvalues stacking a track on
     one target -- the error `apply_party_round` was written to avoid.
 
-    Fires and passes never roll, so they are absent.
+    Fires, passes and SOS calls never roll, so they are absent.
+
+    THE SOS EXEMPTION IS NOT COSMETIC. An SOS cannot miss, and its
+    accuracy is independent of the party's: call Moe Zart while another
+    toon throws an Elephant Trunk and the Trunk may miss while Moe Zart
+    does not, though both are Sound and both hit every cog. Keyed into
+    the same group they would share a die, and the SOS would fail
+    whenever the gag did.
     """
     groups: Dict[int, tuple] = {}
     for index, action in enumerate(plan):
-        if action is None or action.is_pass or action.fire:
+        if (action is None or action.is_pass or action.fire
+                or action.sos is not None):
             continue
         groups[index] = (action.track, action.target_index)
     return groups
