@@ -476,6 +476,21 @@ advising; nothing else should depend on it.
 """
 
 OFFER_UNITES = False
+
+# An SOS card cannot be PROPOSED, only played. The whole `climb` menu is
+# indices into `env.ACTIONS`, and no SOS has an index -- adding one would
+# change `n_actions` and invalidate every trained policy. So the policy
+# is silent about them and the probe below supplies them directly, the
+# way `_cheapest_kills` supplies a move the logits rank nowhere.
+#
+# Unites escaped this by being free: they are a wrapper around the whole
+# climb, applied before it. An SOS COSTS THE TURN, so it has to compete
+# inside the plan against the gag it displaces, and the only thing that
+# can weigh that is `judge`.
+#
+# Off until measured. `party_search` prices a call at `SOS_PRICE`, which
+# is deliberately steep enough that one wins only where it dominates.
+OFFER_SOS = False
 """Whether `climb` may open a round by using a unite.
 
 A ROUND IS TWO DECISIONS when a unite is available -- use one, then
@@ -536,6 +551,28 @@ It pays most where there is no slip to fall back on, which is the
 opposite of where it was found: the board that prompted it had five
 slips and the fix that mattered there was `FIRE_PRICE`'s floor.
 """
+
+
+def _sos_probes(state, seat: int):
+    """The SOS cards this toon holds, as actions to try.
+
+    One per distinct card rather than per copy -- calling the same card
+    twice in a round is the same move, and the count only decides
+    whether it is available at all.
+
+    Deliberately unranked. There is no policy signal to sort these by,
+    so they go to `judge` in table order and the score decides; with
+    `SOS_PRICE` charged per call, a card that is not clearly better than
+    the gag it displaces loses on its own.
+    """
+    held = getattr(state.toons[seat], "sos_cards", None)
+    if not held:
+        return []
+    from ..state import Action
+    from .. import sos as sos_mod
+    return [Action(track=None, sos=name)
+            for name, count in held.items()
+            if count > 0 and name in sos_mod.BY_NAME]
 
 
 def _cheapest_kills(state, seat: int, legal=None):
@@ -1148,10 +1185,13 @@ def climb(state: BattleState, rng=random, budget: int = 16,
             for index in _cheapest_kills(state, seat, mask_for_seat):
                 if index not in order and np.isfinite(values[index]):
                     order.append(index)
-            for index in order:
-                if not np.isfinite(values[index]):
-                    continue
-                action = env_mod.action_at(int(index))
+            trials = [env_mod.action_at(int(index)) for index in order
+                      if np.isfinite(values[index])]
+            if OFFER_SOS:
+                # Appended, not merged: these have no index and no
+                # logit, so they cannot be ordered against the rest.
+                trials.extend(_sos_probes(state, seat))
+            for action in trials:
                 trial = list(plan)
                 trial[seat] = None if action.is_pass else action
                 if trial == plan:

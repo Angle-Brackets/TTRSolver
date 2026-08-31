@@ -183,3 +183,52 @@ A `solver/sos.py` with a ~28-row table and seven effect functions, most
 delegating to code that already exists, plus an explicit trap-damage
 field and two timed accuracy effects. Comparable to the unites work:
 about a day, plus measurement.
+
+## Wired, and why nothing is chosen yet
+
+`simulator.legal_actions` emits one action per card held, so the exact
+search could always find them. **`hybrid.climb` could not, and it is the
+engine the overlay runs.** Its whole menu is indices into `env.ACTIONS`,
+which contains no SOS -- and cannot, because adding entries changes
+`n_actions` and invalidates every trained policy. Every card was
+therefore unreachable in play while looking implemented.
+
+`hybrid._sos_probes` supplies them directly, the way `_cheapest_kills`
+supplies a move the logits rank nowhere. Unites escaped this by being
+free -- they are a wrapper applied around the whole climb. An SOS costs
+the turn, so it has to compete inside the plan against the gag it
+displaces, and only `judge` can weigh that.
+
+Behind `OFFER_SOS`, off, like `OFFER_UNITES`.
+
+### The price is not what is stopping it
+
+Measured, solo, 12 laff, four cogs, Flippy in hand (180 laff to a lone
+toon -- more than the toon's maximum):
+
+    QUICK_W["survive"]      Flippy      a gag
+             0.0 (shipped)  -400.00      80.85
+            50.0            -200.00      99.25
+           200.0            +400.00     154.46
+          1000.0           +3600.00     448.89
+
+At the shipped weight Flippy scores **exactly -400.00**, which is
+`SOS_PRICE` and nothing else. The 180-point heal contributes zero. So
+lowering the price would not help: at price 0 it reads 0.00 and still
+loses to any gag.
+
+The cause is the one `survival_rounds` already documents. `_score_leaf`
+simulates the toon phase only, so laff does not move within it, and the
+only term that can see a heal is the one reading laff LEVEL --
+`survival_rounds`, weight 0.0. It is the same wall that made a unite
+score 329.40 before restoring 80 laff and 329.40 after.
+
+**So Toon-Up SOS, Toon-Up unites and any future heal are all blocked on
+one unmade decision: what `QUICK_W["survive"]` should be.** That is a
+calibration question needing a sweep, not a value to pick here.
+
+Cards that do something other than heal are not blocked the same way,
+because their effect is a delta the scorer already reads. At
+`survive=1000` the pick over 20 boards was **Lil Oldman**, not Flippy --
+luring every cog for six rounds both prevents damage and shows up in
+the survival term, while the heal only shows up in one.
