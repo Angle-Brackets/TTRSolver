@@ -79,8 +79,20 @@ def play(env, action):
 
 def solo_loadout(rng, laff: int = 100, max_laff: int = 137,
                  fires: int = 0, unites: int = 0, sos_cards=None,
-                 pouch_capacity: int = 80):
-    """A valid maxed solo toon.
+                 pouch_capacity: int = 80, training: int = 7):
+    """A valid solo toon, maxed by default.
+
+    `training` IS NOT A DETAIL. `trackExp` is `(training - 1) * 10`, so a
+    maxed track adds +60 accuracy -- against a spread of only 35 points
+    between the weakest and strongest gag in a track. At 7 the cap
+    therefore flattens the whole line against low-level cogs and gag
+    choice stops depending on accuracy at all; at 3 or 4 it does not.
+
+    That matters because `facility_position` samples the real spread and
+    only about 13% of its tracks are maxed, while every A/B measurement
+    in this project forced 7 -- so the numbers describe the one regime
+    where accuracy cannot discriminate. Pass something else to check a
+    decision outside it.
 
     NO TOON-UP TRAINING, deliberately. A solo toon cannot heal itself,
     so training it spends part of an 80-gag pouch on gags that can never
@@ -94,7 +106,7 @@ def solo_loadout(rng, laff: int = 100, max_laff: int = 137,
     from ..state import ToonState, Track
 
     tracks = [t for t in Track if t is not Track.TOON_UP]
-    toon = ToonState(laff, max_laff, {t: 7 for t in tracks}, {},
+    toon = ToonState(laff, max_laff, {t: training for t in tracks}, {},
                      frozenset({Track.THROW}),
                      pouch_capacity=pouch_capacity)
     env_mod.restock(toon, rng)

@@ -358,3 +358,48 @@ Two in about three and a half thousand. A penalty for it would be tuning
 a 0.06% case, and this file already records what happened the last time
 a plausible-looking menu change went in unmeasured: difficulty 9 fell
 60% to 42%.
+
+## Every A/B in this file was run on a maxed toon
+
+`trackExp` is `(training - 1) * 10`, so a maxed track adds **+60**
+accuracy -- against a spread of only **35** points between the weakest
+and strongest gag in a track (Lure runs 55 to 90). Maxed, the 95 cap
+therefore flattens the entire line against low-level cogs and gag choice
+stops depending on accuracy at all. It separates again from cog level 8
+up, and at training 3 it separates everywhere.
+
+`facility_position` samples the real spread, and it is not maxed --
+across 300 sampled parties:
+
+| training | tracks | trackExp |
+|---|---|---|
+| 2 | 125 | +10 |
+| 3 | 465 | +20 |
+| 4 | 920 | +30 |
+| 5 | 1458 | +40 |
+| 6 | 547 | +50 |
+| 7 | 537 | +60 |
+
+**About 13% maxed.** Every sweep recorded above -- `survive`,
+`FIRE_FLOOR`, `SOS_PRICE`, `SCARCITY_UNITS`, probe placement -- forced
+training 7, so all of them describe the one regime where accuracy cannot
+discriminate between gags. `harness.solo_loadout` now takes `training`
+so a decision can be checked outside it.
+
+Which conclusions are actually at risk:
+
+* **`SCARCITY_UNITS` is not.** Only levels 6 and 7 have a carry limit of
+  5 or fewer, and a toon trained to 5 holds no level 6 or 7 gags at all,
+  so the knob is inert below training 6. Measuring it on maxed toons was
+  accidentally the only place it does anything.
+* **`FIRE_FLOOR` and `SOS_PRICE` are.** Both price a guaranteed effect
+  against a gag that can miss, and at lower training gags miss more, so
+  the alternative they are weighed against is weaker than it was in the
+  sweep.
+* **`QUICK_W["survive"]` mildly.** A heal is not accuracy-dependent, but
+  the gag it displaces is.
+
+Re-running those across the training spread needs care, because training
+changes TWO things at once -- accuracy, and which gags the pouch can
+hold -- so a naive sweep reads as a difficulty result. The d5 win rate
+falls 100% to 22% between training 7 and 3 on that account alone.

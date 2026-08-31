@@ -130,3 +130,56 @@ class CheckPositionTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TrainingTest(unittest.TestCase):
+    """`training` is not a detail.
+
+    `trackExp` is `(training - 1) * 10`, so a maxed track adds +60
+    accuracy against a spread of only 35 points between the weakest and
+    strongest gag in a track. Maxed, the 95 cap flattens the whole line
+    against low-level cogs and gag choice stops depending on accuracy;
+    at 3 or 4 it does not.
+
+    `facility_position` samples the real spread and only about 13% of
+    its tracks are maxed, while every A/B measurement in this project
+    forced 7.
+    """
+
+    def test_it_defaults_to_maxed(self):
+        from solver import mechanics
+        toon = harness.solo_loadout(random.Random(1))
+        self.assertEqual(mechanics.calc_track_exp(toon, Track.LURE), 60)
+
+    def test_lower_training_lowers_the_bonus(self):
+        from solver import mechanics
+        for level, expect in ((7, 60), (5, 40), (3, 20), (1, 0)):
+            toon = harness.solo_loadout(random.Random(1), training=level)
+            self.assertEqual(mechanics.calc_track_exp(toon, Track.LURE),
+                             expect)
+
+    def test_maxed_flattens_the_lure_line_and_lower_does_not(self):
+        """The finding this parameter exists for."""
+        from solver import data, mechanics
+        from solver.state import CogState
+        hp = data.cog_max_hp(5)
+        cogs = [CogState(department="lawbot", cog_type="ambulance_chaser",
+                         level=5, hp=hp, max_hp=hp)]
+        maxed = harness.solo_loadout(random.Random(1), training=7)
+        part = harness.solo_loadout(random.Random(1), training=3)
+        at_max = {mechanics.calc_toon_accuracy(Track.LURE, lv, maxed, cogs,
+                                               all_cogs=cogs)
+                  for lv in range(1, 8)}
+        at_part = {mechanics.calc_toon_accuracy(Track.LURE, lv, part, cogs,
+                                                all_cogs=cogs)
+                   for lv in range(1, 8)}
+        self.assertEqual(at_max, {95}, "maxed should sit on the cap")
+        self.assertGreater(len(at_part), 1, "undertrained should separate")
+
+    def test_scarce_gags_only_exist_when_trained_for(self):
+        """Levels 6 and 7 are the only gags with a carry limit of 5 or
+        fewer, so `SCARCITY_UNITS` is inert below training 6 -- which is
+        why measuring it on maxed toons was the right place."""
+        for level in (3, 5):
+            toon = harness.solo_loadout(random.Random(2), training=level)
+            self.assertFalse([k for k in toon.gag_counts if k[1] > level])
