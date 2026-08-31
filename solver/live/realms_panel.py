@@ -115,13 +115,9 @@ def _track_of(action):
     raised AttributeError on the first fire the panel was ever offered.
     Nothing read the slip count until now, so nothing ever offered one.
     """
-    if action is None or action.is_pass:
-        return None
-    if getattr(action, "fire", False):
-        return "fire"
-    if getattr(action, "sos", None):
-        return "sos"
-    return action.track.value
+    from .advise import track_of
+
+    return track_of(action)
 
 
 def _level_of(action):

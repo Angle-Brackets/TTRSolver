@@ -366,3 +366,46 @@ class RenderTest(unittest.TestCase):
         card = Action(track=None, sos="Flippy")
         self.assertEqual(rp._track_of(card), "sos")
         self.assertIsNone(rp._level_of(card))
+
+
+class TrackSlugTest(unittest.TestCase):
+    """`advise.track_of` is the TTR overlay's path and had the same
+    hole: it guarded `is_pass` and `fire` but not SOS, so it reached
+    `action.track.value` and raised. It also returned None for a fire,
+    which showed the styling a PASS gets -- and both panels render
+    through the same page, so TTR lost the pink slip icon that Realms
+    shows for the identical recommendation.
+    """
+
+    def test_an_sos_has_a_slug(self):
+        from solver.live import advise
+        self.assertEqual(advise.track_of(Action(track=None, sos="Flippy")),
+                         "sos")
+
+    def test_a_fire_has_one_too(self):
+        from solver.live import advise
+        self.assertEqual(
+            advise.track_of(Action(track=None, fire=True, target_index=0)),
+            "fire")
+
+    def test_a_pass_has_none(self):
+        from solver.live import advise
+        self.assertIsNone(advise.track_of(Action(track=None)))
+        self.assertIsNone(advise.track_of(None))
+
+    def test_a_gag_is_its_own_track(self):
+        from solver.live import advise
+        self.assertEqual(
+            advise.track_of(Action(track=Track.THROW, level=4)), "throw")
+
+    def test_both_panels_agree(self):
+        """Two panels colouring the same recommendation differently
+        would be worse than the coupling, so one defers to the other."""
+        from solver.live import advise
+        from solver.live import realms_panel as rp
+        for act in (Action(track=None, sos="Flippy"),
+                    Action(track=None, fire=True, target_index=0),
+                    Action(track=None),
+                    Action(track=Track.DROP, level=5)):
+            with self.subTest(action=act):
+                self.assertEqual(rp._track_of(act), advise.track_of(act))

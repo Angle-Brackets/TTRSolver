@@ -359,10 +359,27 @@ def _panel_with_training(frame, snapshot):
 
 
 def track_of(action) -> Optional[str]:
-    """The recommended gag's track name, for a caller that wants to
-    colour it. None for a pass or a pink slip, which have no track."""
-    if action is None or action.is_pass or getattr(action, "fire", False):
+    """The recommended action's slug for the page, or None for a pass.
+
+    "fire" and "sos" are SENTINELS, not gag tracks. The page keys its
+    icon and accent off this, so returning None for them showed the
+    styling a pass gets -- and firing, calling for help and doing
+    nothing should not look alike.
+
+    Both track-less actions have `track=None` with `is_pass` False, so
+    the old guard reached `action.track.value` and raised on an SOS.
+    That was unreachable until `hybrid._sos_probes` could propose one.
+
+    This is the single implementation; `realms_panel._track_of` defers
+    to it, because two panels colouring the same recommendation
+    differently would be worse than the coupling.
+    """
+    if action is None or action.is_pass:
         return None
+    if getattr(action, "fire", False):
+        return "fire"
+    if getattr(action, "sos", None):
+        return "sos"
     return action.track.value
 
 
