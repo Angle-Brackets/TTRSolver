@@ -224,6 +224,15 @@ def apply_gag_up(toon, track=None) -> int:
     #
     # Four caps bind at once: each gag's own `max_carry`, 7 per track,
     # 30 in total, and what the pouch can still hold.
+    # COPY ON WRITE. `ToonState.clone` SHARES `gag_counts` between a
+    # state and its clones -- see the note there -- so mutating the dict
+    # in place restocks every state that shares it, including the real
+    # one being planned from. `_spend_gag` copies for exactly this
+    # reason and this did not, so every unite CANDIDATE that `climb`
+    # evaluated and discarded still refilled the toon's pouch: traps
+    # grew from 25 to 51 across a VP in which no Gag-Up was ever chosen.
+    counts = dict(toon.gag_counts)
+
     per_track_added = {tr: 0 for tr in tracks}
     for level in range(gags_mod.POUCH_EXEMPT_LEVEL - 1, 0, -1):
         progressed = True
@@ -240,10 +249,10 @@ def apply_gag_up(toon, track=None) -> int:
                     cap = gags_mod.gag(tr, level).max_carry
                 except (KeyError, ValueError, NotImplementedError):
                     continue
-                have = toon.gag_counts.get((tr, level), 0)
+                have = counts.get((tr, level), 0)
                 if have >= cap:
                     continue
-                toon.gag_counts[(tr, level)] = have + 1
+                counts[(tr, level)] = have + 1
                 added += 1
                 per_track_added[tr] += 1
                 progressed = True
@@ -251,6 +260,7 @@ def apply_gag_up(toon, track=None) -> int:
                 break
         if added >= budget or added >= pouch_room:
             break
+    toon.gag_counts = counts
     toon.unite_cooldown = COOLDOWN_ROUNDS
     return added
 

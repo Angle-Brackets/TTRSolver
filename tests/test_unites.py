@@ -237,3 +237,46 @@ class FillOrderTest(unittest.TestCase):
             unites.apply_gag_up(toon, None)
         for (track, level), n in toon.gag_counts.items():
             self.assertLessEqual(n, gags_mod.gag(track, level).max_carry)
+
+
+class CloneIsolationTest(unittest.TestCase):
+    """A restock on a clone must not reach the state it was cloned from.
+
+    `ToonState.clone` SHARES `gag_counts` -- copy-on-write, with
+    `_spend_gag` copying before it mutates. `apply_gag_up` did not
+    copy, so every unite candidate `climb` evaluated AND DISCARDED
+    still refilled the real pouch. Traps grew from 25 to 51 across a VP
+    in which no Gag-Up was ever chosen, which is how it surfaced.
+    """
+
+    def _state(self):
+        from solver import data
+        from solver.state import BattleState, CogState
+        hp = data.cog_max_hp(4)
+        toon = ToonState(60, 137,
+                         {t: 7 for t in Track if t is not Track.TOON_UP},
+                         {(Track.THROW, 5): 1}, frozenset(),
+                         pouch_capacity=80)
+        cog = CogState(department="sellbot", cog_type="glad_hander",
+                       level=4, hp=hp, max_hp=hp)
+        return BattleState(toon=toon, cogs=[cog])
+
+    def test_restocking_a_clone_leaves_the_original_alone(self):
+        state = self._state()
+        before = dict(state.toons[0].gag_counts)
+        unites.apply_gag_up(state.clone().toons[0], None)
+        self.assertEqual(state.toons[0].gag_counts, before)
+
+    def test_healing_a_clone_leaves_the_original_alone(self):
+        state = self._state()
+        laff = state.toons[0].laff
+        unites.apply_toon_up(state.clone().toons[0], 50)
+        self.assertEqual(state.toons[0].laff, laff)
+
+    def test_the_clone_itself_really_is_restocked(self):
+        """The isolation must not be achieved by doing nothing."""
+        state = self._state()
+        clone = state.clone()
+        self.assertGreater(unites.apply_gag_up(clone.toons[0], None), 0)
+        self.assertNotEqual(clone.toons[0].gag_counts,
+                            state.toons[0].gag_counts)
