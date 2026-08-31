@@ -1465,6 +1465,18 @@ def _score_leaf(state: BattleState, plan, hits, record=None,
     # restores the old behaviour exactly.
     price += _fire_price(state.cogs_remaining,
                          floor=True) * _fires_spent(state, probe)
+    # An SOS is charged the same way and far more dearly. [OWNER] a
+    # last resort, or for a very good move -- which is what a price
+    # says: the card has to beat the alternative BY MORE than this.
+    #
+    # Read off the PLAN rather than by diffing inventories, because
+    # unlike a slip an SOS may be spent by any seat and the plan
+    # already names which.
+    sos_calls = sum(1 for a in plan
+                    if a is not None and getattr(a, "sos", None))
+    if sos_calls:
+        from .. import sos as sos_mod
+        price += sos_mod.SOS_PRICE * sos_calls
     return (landed
             + QUICK_W["heal"] * restored
             + QUICK_W["armed"] * armed_credit(state, probe)
@@ -1633,6 +1645,17 @@ def _playable(state: BattleState, plan) -> bool:
     for toon, action in zip(state.toons, plan):
         # A hold throws nothing, so there is no gag to check for.
         if action is None or action.is_pass:
+            continue
+        if action.fire:
+            continue          # spends a slip, not a gag
+        if action.sos is not None:
+            # Spends a CARD, not a gag. Without this an SOS looks like a
+            # gag the toon holds none of -- no track, no level -- and
+            # the plan is rejected as unplayable before it is ever
+            # scored. Which is exactly what happened: every SOS came
+            # back at -inf.
+            if toon.sos_cards.get(action.sos, 0) <= 0:
+                return False
             continue
         if toon.gag_counts.get((action.track, action.level), 0) <= 0:
             return False
@@ -2092,6 +2115,13 @@ def _cheap_score(state: BattleState, index: int, action: Action) -> float:
     # ordering is the whole point of offering it. Checked before the
     # price lookup, which would ask `data.gag(None, 0)`.
     if action.is_pass:
+        return 0.0
+
+    if action.sos is not None:
+        # Scored by playing it, since the shapes are too different to
+        # price by formula -- a heal, a field lure and a mass trap have
+        # no common currency. `_quick_score` does the same thing by
+        # simulating the round.
         return 0.0
 
     if action.fire:

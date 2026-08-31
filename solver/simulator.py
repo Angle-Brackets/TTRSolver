@@ -810,6 +810,11 @@ def _check_pouches(state: BattleState,
     for index, action in enumerate(actions):
         if action is None or action.is_pass or action.fire:
             continue
+        if action.sos is not None:
+            # Spends a CARD, not a gag. Without this it is read as a gag
+            # with a null track that the toon holds none of, and the
+            # round is refused before it starts.
+            continue
         # Indexes `state.toons` exactly as the resolution below does, so
         # an over-long `actions` raises the same IndexError it always
         # did, only sooner.
@@ -885,9 +890,25 @@ def apply_party_round(state: BattleState,
         if action is not None and action.fire:
             apply_toon_action(state, action, hit=True, actor=i)
 
+    # SOS TOONS RESOLVE HERE TOO, and for the same two reasons. They
+    # have no track, so the sort below would raise "None is not in
+    # list" on them exactly as it did on slips; and they cannot miss,
+    # so nothing about them belongs in the roll-group machinery.
+    #
+    # BEFORE THE GAGS IS [ASSUMED]. No source states where in a round
+    # an SOS lands, and it only matters in a party -- solo there is one
+    # action. Chosen to match slips rather than invented separately,
+    # and it is the ordering that makes the useful plays legible: a
+    # teammate's Lure SOS puts the field to sleep before another toon's
+    # Throw arrives to collect the knockback.
+    for i, action in enumerate(actions):
+        if action is not None and getattr(action, "sos", None):
+            apply_toon_action(state, action, hit=True, actor=i)
+
     order = sorted(
         (i for i, a in enumerate(actions)
-         if a is not None and not a.is_pass and not a.fire),
+         if a is not None and not a.is_pass and not a.fire
+         and a.sos is None),
         key=lambda i: ATTACK_ORDER.index(actions[i].track))
 
     # Hits so far this round, for the stun bonus: one entry per landed

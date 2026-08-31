@@ -365,3 +365,51 @@ class TimedEffectTest(unittest.TestCase):
         simulator._resolve_cog_phase(state)
         self.assertEqual(state.toons_hit_rounds, 0)
         self.assertEqual(state.cogs_miss_rounds, 0, "went negative")
+
+
+class PricingTest(unittest.TestCase):
+    """An SOS is dear, so only a strong move buys one. [OWNER]"""
+
+    def _board(self, laff):
+        from solver import data
+        from solver.state import BattleState, CogState, ToonState
+        tracks = [t for t in Track if t is not Track.TOON_UP]
+        toon = ToonState(laff, 137, {t: 7 for t in tracks},
+                         {(Track.THROW, 5): 3}, frozenset())
+        toon.sos_cards = {"Flippy": 2, "Moe Zart": 2, "Lil Oldman": 1}
+        cogs = [CogState(department="sellbot", cog_type="mr_hollywood",
+                         level=lv, hp=data.cog_max_hp(lv),
+                         max_hp=data.cog_max_hp(lv))
+                for lv in (12, 12, 11, 11)]
+        return BattleState(toon=toon, cogs=cogs)
+
+    def _score(self, laff, action):
+        from solver.search import party_search as ps
+        saved = ps.QUICK_W["survive"]
+        try:
+            ps.QUICK_W["survive"] = 800.0
+            return ps._quick_score(self._board(laff), [action])
+        finally:
+            ps.QUICK_W["survive"] = saved
+
+    def test_it_is_dearer_than_a_unite(self):
+        from solver import sos as sos_mod, unites
+        self.assertGreater(sos_mod.SOS_PRICE, unites.UNITE_PRICE)
+
+    def test_a_card_is_scored_at_all(self):
+        """Every SOS came back -inf once, because three separate guards
+        read an action with no track as a gag the toon did not hold:
+        `_playable`, `_check_pouches`, and the round's sort by
+        ATTACK_ORDER. A finite score is the regression test."""
+        from solver.state import Action
+        for name in ("Flippy", "Moe Zart", "Lil Oldman"):
+            score = self._score(60, Action(track=None, sos=name))
+            self.assertNotEqual(score, float("-inf"), name)
+
+    def test_a_heal_wins_when_dying_and_loses_when_healthy(self):
+        """What the price is for: a last resort, not a habit."""
+        from solver.state import Action
+        heal = Action(track=None, sos="Flippy")
+        gag = Action(track=Track.THROW, level=5, target_index=0)
+        self.assertGreater(self._score(25, heal), self._score(25, gag))
+        self.assertLess(self._score(120, heal), self._score(120, gag))

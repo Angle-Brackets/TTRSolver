@@ -148,6 +148,31 @@ ACCURACY_UPDATE = "2.6.7, 12 December 2019"
 # [CONFIRMED] wiki, both directions.
 ACCURACY_SWING = 75
 
+# What calling an SOS costs the SEARCH, in the units
+# `party_search.FIRE_PRICE` (20) and `unites.UNITE_PRICE` (200) use.
+#
+# [OWNER] "extremely costly to use, again last resort or to have a very
+# good move." Set above a unite because the cards are stronger -- a
+# Flippy is 180 laff where the best Toon-Up unite is 80 -- and because
+# each one is two cards from rescuing a toon after a VP.
+#
+# "OR TO HAVE A VERY GOOD MOVE" is what a price already expresses, and
+# is the reason this is a price rather than a ban. A card has to beat
+# the alternative BY MORE than this, so an ordinary round never buys
+# one and a round where it changes the outcome still can.
+#
+# DO NOT SWEEP IT FOR WIN RATE, for the reason recorded on
+# `unites.UNITE_PRICE`: that sweep has a known answer and it is the
+# wrong one. Cheaper cards always clear more VPs, and the search would
+# be right about the number while spending a currency farmed from whole
+# boss runs. A preference, like `objective.waste_weight`.
+#
+# NOTE IT ONLY BITES ONCE SURVIVAL IS VALUED. With
+# `QUICK_W["survive"]` at 0 a heal scores nothing at all, so Flippy
+# would be declined at any price -- the scorer cannot see laff it
+# already has. The two settings have to move together.
+SOS_PRICE = 400.0
+
 
 def rolls_accuracy(card: Card) -> bool:
     """Does this card resolve on an accuracy die? Never.
