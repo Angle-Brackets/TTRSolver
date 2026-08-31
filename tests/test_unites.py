@@ -280,3 +280,36 @@ class CloneIsolationTest(unittest.TestCase):
         self.assertGreater(unites.apply_gag_up(clone.toons[0], None), 0)
         self.assertNotEqual(clone.toons[0].gag_counts,
                             state.toons[0].gag_counts)
+
+
+class TieBreakTest(unittest.TestCase):
+    """An all-tracks restock is offered before any single track.
+
+    They usually TIE on a one-round score -- both put the same best gag
+    in hand this round -- and `climb` breaks ties by evaluation order.
+    Measured: Gag-Up lure and Gag-Up all both scored 3985.0 on the same
+    board, and the single track won, taking 7 gags instead of 30 for
+    the same cooldown. The extra 23 pay off in later rounds, which a
+    one-round scorer cannot see, so the tie is broken here.
+    """
+
+    def test_all_tracks_comes_first(self):
+        toon = ToonState(70, 137,
+                         {t: 7 for t in Track if t is not Track.TOON_UP},
+                         {(Track.TRAP, 4): 10}, frozenset(),
+                         pouch_capacity=80)
+        gag_ups = [c for c in unites.candidates(toon) if c[0] == "gag_up"]
+        self.assertTrue(gag_ups)
+        self.assertIsNone(gag_ups[0][1],
+                          "a single track is offered before all tracks")
+
+    def test_all_tracks_really_does_restore_more(self):
+        """The premise. If a single track ever gave more, the ordering
+        would be wrong rather than merely arbitrary."""
+        def fresh():
+            return ToonState(70, 137,
+                             {t: 7 for t in Track if t is not Track.TOON_UP},
+                             {}, frozenset(), pouch_capacity=80)
+        every = unites.apply_gag_up(fresh(), None)
+        one = unites.apply_gag_up(fresh(), Track.THROW)
+        self.assertGreater(every, one)

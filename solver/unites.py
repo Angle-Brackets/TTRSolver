@@ -312,6 +312,19 @@ def candidates(toon):
     out.sort(key=lambda kv: -kv[1] if kv[0] == "toon_up" else 0)
 
     owned = [t for t, xp in toon.track_exp.items() if xp > 0]
+    # ALL-TRACKS FIRST, and the order is load-bearing. A single-track
+    # restock and an all-tracks one usually TIE on a one-round score --
+    # both put the same best gag in hand this round -- and `climb`
+    # breaks ties by evaluation order, so whichever is offered first
+    # wins. Measured: Gag-Up lure and Gag-Up all both scored 3985.0 on
+    # the same board, and the panel took the single track. That is 7
+    # gags instead of 30 for the same cooldown.
+    #
+    # The one-round scorer cannot see the difference because the extra
+    # 23 gags pay off later, so the tie is broken here instead, in
+    # favour of the one that restores more.
+    if len(owned) > 1:
+        out.append(("gag_up", None))
     for track in owned:
         room = 0
         for level in range(1, gags_mod.POUCH_EXEMPT_LEVEL):
@@ -324,8 +337,6 @@ def candidates(toon):
             room += max(0, cap - toon.gag_counts.get((track, level), 0))
         if room >= GAG_UP_SINGLE_TRACK_MAX:
             out.append(("gag_up", track))
-    if len(owned) > 1:
-        out.append(("gag_up", None))
     return out
 
 
