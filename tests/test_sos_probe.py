@@ -143,3 +143,116 @@ class HealIsInvisibleTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EnvCanPlayOneTest(unittest.TestCase):
+    """`BattleEnv.step` takes an index, and no SOS has one.
+
+    Without the override an SOS chosen by `climb` maps to `PASS_INDEX`
+    and the toon does nothing, so a measurement would count the card as
+    used while nothing happened.
+    """
+
+    def test_stepping_an_index_is_unchanged(self):
+        a = env_mod.BattleEnv(rng=random.Random(7), sampler=_sampler,
+                              coordinated=True)
+        b = env_mod.BattleEnv(rng=random.Random(7), sampler=_sampler,
+                              coordinated=True)
+        a.reset()
+        b.reset()
+        ra = a.step(env_mod.PASS_INDEX)
+        rb = b.step(env_mod.PASS_INDEX, action=None)
+        self.assertEqual(ra[2], rb[2])
+        self.assertEqual(ra[3], rb[3])
+
+    def test_a_card_is_actually_spent(self):
+        e = env_mod.BattleEnv(rng=random.Random(7), sampler=_sampler,
+                              coordinated=True)
+        e.reset()
+        held = e.state.toons[0].sos_cards["Lil Oldman"]
+        e.step(env_mod.PASS_INDEX,
+               action=Action(track=None, sos="Lil Oldman"))
+        self.assertEqual(e.state.toons[0].sos_cards.get("Lil Oldman", 0),
+                         held - 1)
+
+    def test_the_card_takes_effect(self):
+        """Lil Oldman lures every cog; a pass lures none. This is what
+        separates a card that was played from one silently dropped."""
+        e = env_mod.BattleEnv(rng=random.Random(7), sampler=_sampler,
+                              coordinated=True)
+        e.reset()
+        self.assertFalse(any(c.status.lured for c in e.state.cogs))
+        e.step(env_mod.PASS_INDEX,
+               action=Action(track=None, sos="Lil Oldman"))
+        live = [c for c in e.state.cogs if not c.status.is_dead]
+        self.assertTrue(live and all(c.status.lured for c in live))
+
+
+class SosLureSurvivesACogPhaseTest(unittest.TestCase):
+    """An SOS lure has no gag level, and the expiry rule looked one up.
+
+    `sos.apply` passes `level=None` deliberately -- a card is not a gag.
+    `_tick_lure` then asked `lure_can_expire_early(None)`, which reached
+    `data.gag(LURE, None)` and raised. Every Lure card therefore crashed
+    the first cog phase after it was played, which no test caught
+    because scoring simulates the toon phase only.
+    """
+
+    def test_a_lure_card_survives_the_round_it_is_played(self):
+        e = env_mod.BattleEnv(rng=random.Random(7), sampler=_sampler,
+                              coordinated=True)
+        e.reset()
+        e.step(env_mod.PASS_INDEX,
+               action=Action(track=None, sos="Lil Oldman"))
+        live = [c for c in e.state.cogs if not c.status.is_dead]
+        self.assertTrue(live and all(c.status.lured for c in live))
+
+    def test_every_lure_card_does(self):
+        for name in ("Stinky Ned", "Nancy Gas", "Lil Oldman"):
+            with self.subTest(card=name):
+                e = env_mod.BattleEnv(rng=random.Random(7),
+                                      sampler=_sampler, coordinated=True)
+                e.reset()
+                e.state.toons[0].sos_cards = {name: 1}
+                e.step(env_mod.PASS_INDEX, action=Action(track=None, sos=name))
+
+    def test_an_sos_lure_never_expires_early(self):
+        from solver import mechanics
+        self.assertFalse(mechanics.lure_can_expire_early(None))
+
+    def test_a_real_gag_level_is_unaffected(self):
+        from solver import mechanics
+        for level in range(1, 8):
+            self.assertFalse(mechanics.lure_can_expire_early(level))
+
+
+class EveryCardSurvivesARoundTest(unittest.TestCase):
+    """Play all 29 through two full rounds.
+
+    The lure crash was invisible because every existing SOS test scored
+    a card rather than playing one, and scoring simulates the toon phase
+    only. This is the cheap comprehensive version of the check that
+    caught it: two rounds, so a delayed effect resolves as well.
+    """
+
+    def _sampler(self, rng):
+        st = env_mod.facility_position(rng)
+        tracks = [t for t in Track if t is not Track.TOON_UP]
+        toon = ToonState(60, 137, {t: 7 for t in tracks}, {},
+                         frozenset({Track.THROW}), pouch_capacity=80)
+        env_mod.restock(toon, rng)
+        st.toons = [toon]
+        return st
+
+    def test_all_of_them(self):
+        for card in sos_mod.CARDS:
+            for seed in (7, 11):
+                with self.subTest(card=card.name, seed=seed):
+                    e = env_mod.BattleEnv(rng=random.Random(seed),
+                                          sampler=self._sampler,
+                                          coordinated=True)
+                    e.reset()
+                    e.state.toons[0].sos_cards = {card.name: 1}
+                    e.step(env_mod.PASS_INDEX,
+                           action=Action(track=None, sos=card.name))
+                    e.step(env_mod.PASS_INDEX)

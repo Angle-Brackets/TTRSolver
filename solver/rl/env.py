@@ -725,10 +725,21 @@ class BattleEnv:
         phi_after = 0.0 if done else float(len(after.active_toons()))
         return self.survival_shaping * (self.gamma * phi_after - phi_before)
 
-    def step(self, index: int):
-        """-> (observation, mask, reward, done, info)."""
+    def step(self, index: int, action=None):
+        """-> (observation, mask, reward, done, info).
+
+        `action` overrides `index` for a move THE TABLE CANNOT EXPRESS.
+        `ACTIONS` holds no SOS card and cannot without changing
+        `n_actions` and invalidating every trained policy, so an SOS
+        chosen by `hybrid.climb` mapped to `PASS_INDEX` here and was
+        silently played as a pass -- a measurement would have counted
+        the card as used while the toon did nothing.
+
+        Training never passes it: the policy can only emit an index, so
+        this stays None on that path.
+        """
         before = self.state
-        action = action_at(index)
+        action = action_at(index) if action is None else action
 
         if self.coordinated:
             self.pending[self.actor] = None if action.is_pass else action

@@ -514,6 +514,16 @@ def lure_can_expire_early(level: int, lure_tree_planted: bool = False) -> bool:
     knob: a future gag under 50% would switch this back on. See
     docs/mechanics-notes.md#lure_can_expire_early.
     """
+    if level is None:
+        # An SOS lure, which is not a gag and has no level. [CONFIRMED]
+        # TTR wiki: all SOS gags have perfect accuracy and cannot miss,
+        # and 100 is above EARLY_EXPIRY_ACCURACY_FLOOR, so the answer
+        # falls out of the same rule rather than being a new one.
+        #
+        # `sos.apply` passes level=None on purpose; before this the
+        # lookup below raised `no gag at lure level None` the first time
+        # a card was played through a cog phase.
+        return False
     base = data.gag(Track.LURE, level).prop_accuracy(organic=lure_tree_planted)
     return base < data.EARLY_EXPIRY_ACCURACY_FLOOR
 
