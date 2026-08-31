@@ -512,6 +512,104 @@ def parse_inventory(blob) -> Optional[Dict]:
     return counts
 
 
+def parse_resistance(value) -> Optional[int]:
+    """How many unites the toon holds in total, or None.
+
+    `setResistanceMessages` is a list of [id, count] pairs. Captured
+    live, ids group by hundreds -- 0-4, 100-107, 200-203, 300-304 --
+    which is `category * 100 + index` and looks like Toon-Up, restock,
+    money and one more.
+
+    THE CATEGORIES ARE NOT DECODED, deliberately. Nothing in the install
+    names them: the only "resistance" files in the archives are three
+    particle effects. Guessing that category 0 is Toon-Up because it has
+    five entries and `TOON_UP_VALUES` has five is the kind of
+    plausible-looking fill this project forbids, so this returns the
+    TOTAL and nothing finer.
+
+    The cost of that is real and worth stating: `unites_held` is one
+    number, so a toon holding only Toon-Up unites is still offered a
+    Gag-Up. Fixing it needs the category table, not more inference.
+    """
+    if value is None:
+        return None
+    total = 0
+    try:
+        for row in value:
+            if len(row) < 2:
+                return None
+            total += max(0, int(row[1]))
+    except (TypeError, ValueError):
+        return None
+    return total
+
+
+def npc_names(override: Optional[str] = None) -> Dict[int, str]:
+    """NPC id -> name, from the install's own `npctoons.json`.
+
+    SOS cards are NPC friends: `setNPCFriendsDict` is a list of
+    (npc_id, count). The table lives in `phase_3/data/npctoons.json`
+    inside `ttrm_dat_01.pak`.
+
+    READ FROM THE INSTALL, never vendored. It is Realms data and so
+    Toontown Online lineage, which must not reach `solver/data/` -- see
+    docs/realms.md. Here it is the reader decoding an id, the same job
+    `parse_inventory` does for a pouch.
+    """
+    import json
+
+    from panda3d.core import Filename, Multifile
+
+    root = install_dir(override) / "resources" / "default"
+    out: Dict[int, str] = {}
+    for pak in sorted(root.glob("ttrm_dat_*.pak")):
+        mf = Multifile()
+        if not mf.openRead(Filename.fromOsSpecific(str(pak))):
+            continue
+        index = mf.findSubfile("phase_3/data/npctoons.json")
+        if index < 0:
+            continue
+        try:
+            table = json.loads(bytes(mf.readSubfile(index)).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            continue
+        for key, row in table.items():
+            name = row.get("name") if isinstance(row, dict) else None
+            if name:
+                try:
+                    out[int(key)] = name
+                except (TypeError, ValueError):
+                    continue
+    return out
+
+
+def parse_npc_friends(value, names: Optional[Dict[int, str]] = None
+                      ) -> Optional[Dict[str, int]]:
+    """`setNPCFriendsDict` as {card name: count}, or None.
+
+    Ids the table does not name are DROPPED rather than guessed at. An
+    unnamed card cannot be matched to `sos.BY_NAME` anyway, and a card
+    the solver cannot identify must not become one it can.
+    """
+    if value is None:
+        return None
+    if names is None:
+        try:
+            names = npc_names()
+        except Exception:               # noqa: BLE001 - reader, not truth
+            names = {}
+    out: Dict[str, int] = {}
+    try:
+        for row in value:
+            npc_id, count = int(row[0]), int(row[1])
+            name = names.get(npc_id)
+            if name and count > 0:
+                out[name] = out.get(name, 0) + count
+    except (TypeError, ValueError, IndexError):
+        return None
+    return out
+
+
 def parse_track_access(values) -> Optional[frozenset]:
     """`setTrackAccess` as the set of tracks the toon owns.
 

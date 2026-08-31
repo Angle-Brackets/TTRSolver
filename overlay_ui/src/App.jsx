@@ -14,7 +14,7 @@ const EMPTY = {
   // `preferred_engine` and `search_ready` decide whether to show the
   // waiting ellipsis.
   preferred_engine: 'rl', search_ready: false,
-  max_fires: 0, unite: '',
+  max_fires: 0, max_unites: 0, max_sos: 0, unite: '',
   lure_icon: '', map_icon: '',
   zone: '', neighborhood: '', district: '', invasion: '',
 }
@@ -461,6 +461,39 @@ export default function App() {
             max="99"
             value={model.max_fires}
             onChange={(e) => call('set_max_fires', Number(e.target.value))}
+            className="input input-xs h-[20px] w-[42px] px-1 text-[10px]"
+          />
+        </label>
+        {/* The other two consumables, same contract as slips: a cap on
+            what the solver may SPEND, never a count of what is held.
+            The counts come off the wire -- setResistanceMessages and
+            setNPCFriendsDict -- so a cap can never invent a pouch, and
+            0 means never advise one. */}
+        <label
+          className="flex items-center gap-1 text-[10px] opacity-60"
+          title="Most unites the solver may plan with. 0 = never advise one."
+        >
+          <span className="font-semibold uppercase tracking-wide">unites</span>
+          <input
+            type="number"
+            min="0"
+            max="99"
+            value={model.max_unites}
+            onChange={(e) => call('set_max_unites', Number(e.target.value))}
+            className="input input-xs h-[20px] w-[42px] px-1 text-[10px]"
+          />
+        </label>
+        <label
+          className="flex items-center gap-1 text-[10px] opacity-60"
+          title="Most SOS cards the solver may plan with. 0 = never advise one."
+        >
+          <span className="font-semibold uppercase tracking-wide">sos</span>
+          <input
+            type="number"
+            min="0"
+            max="99"
+            value={model.max_sos}
+            onChange={(e) => call('set_max_sos', Number(e.target.value))}
             className="input input-xs h-[20px] w-[42px] px-1 text-[10px]"
           />
         </label>

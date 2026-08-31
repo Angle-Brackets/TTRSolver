@@ -222,6 +222,15 @@ class Model:
     # its second wave or a building to its next floor.
     max_fires: int = 0
 
+    # The most UNITES and SOS CARDS the solver may plan with, whatever
+    # the toon holds. Zero like `max_fires`, and for the same reason:
+    # both are farmed from boss runs, so spending one is the player's
+    # call rather than the solver's. A cap of zero means never advise
+    # one, which is also what an unread pouch gives -- so the safe
+    # default and the unknown case agree.
+    max_unites: int = 0
+    max_sos: int = 0
+
     # The unite the panel is advising ALONGSIDE the gag, as a phrase
     # ("80 Toon-Up unite"), or "" for none.
     #

@@ -118,6 +118,8 @@ def model_json(model: Model) -> str:
         "engine": model.engine,
         "preferred_engine": model.preferred_engine,
         "max_fires": model.max_fires,
+        "max_unites": model.max_unites,
+        "max_sos": model.max_sos,
         "unite": model.unite,
         "search_ready": model.search_ready,
         "rl_gag": model.rl_gag,
@@ -164,6 +166,24 @@ class Api:
 
         Present because THE PAGE IS SHARED, the same reason
         `prefer_engine` is. See that method.
+        """
+
+    def set_max_unites(self, count) -> None:
+        """INERT here. Present because THE PAGE IS SHARED.
+
+        The TTR overlay CAN advise a unite -- `advise` runs the same
+        `unites.best_with_unite` the policy does -- but nothing on this
+        side reads a unite pouch, so `unites_held` stays 0 and no
+        candidate is offered. Wiring this needs a source for the count,
+        not a setter.
+        """
+
+    def set_max_sos(self, count) -> None:
+        """INERT here. Present because THE PAGE IS SHARED.
+
+        Same as `set_max_unites`, and worse: a card budget alone does
+        not say WHICH cards are held, and a card the reader cannot see
+        must not become one it can.
         """
 
     def reconsider(self) -> None:

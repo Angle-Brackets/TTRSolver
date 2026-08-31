@@ -219,6 +219,15 @@ def rows_from_state(state) -> List[CogRow]:
 class RealmsWorker(threading.Thread):
     """Reads the cluster, searches when the position moves, posts a Model."""
 
+    # CLASS-LEVEL, not only set in `__init__`. The consumable caps must
+    # read 0 on an instance built any other way -- the tests construct
+    # one with `__new__` -- because 0 is the safe value: it advises none
+    # of a resource farmed from boss runs. An AttributeError here would
+    # be the good failure; silently inheriting a stale cap would not.
+    max_fires = 0
+    max_unites = 0
+    max_sos = 0
+
     def __init__(self, outbox: "queue.Queue", objective, depth: int,
                  budget: float, listener=None, engine: str = "both"):
         super().__init__(daemon=True)
@@ -237,6 +246,8 @@ class RealmsWorker(threading.Thread):
         # policy's picks and there is no measurement to contradict them.
         self.engine = engine
         self.max_fires = 0
+        self.max_unites = 0
+        self.max_sos = 0
         # Moves the player has turned down for the CURRENT position, as
         # `hybrid.reject_key` values. Cleared when the board changes: a
         # rejection is about this board, not about the move in general.
@@ -358,6 +369,40 @@ class RealmsWorker(threading.Thread):
         self._last_key = ()
         self.ask_now()
 
+    def set_max_unites(self, count) -> None:
+        """Cap the unites the solver may plan with. Zero advises none.
+
+        The same shape as `set_max_fires`: what the toon HOLDS comes off
+        the wire (`setResistanceMessages`), and this caps how many the
+        player is willing to spend, which nothing on the wire can say.
+        """
+        try:
+            value = int(count)
+        except (TypeError, ValueError):
+            return
+        with self._lock:
+            self.max_unites = max(0, min(99, value))
+            self.model.max_unites = self.max_unites
+        self._last_key = ()
+        self.ask_now()
+
+    def set_max_sos(self, count) -> None:
+        """Cap the SOS cards the solver may plan with. Zero advises none.
+
+        Caps the number of CALLS, not which cards -- those come from
+        `setNPCFriendsDict`, so the budget can never invent a card the
+        toon does not hold.
+        """
+        try:
+            value = int(count)
+        except (TypeError, ValueError):
+            return
+        with self._lock:
+            self.max_sos = max(0, min(99, value))
+            self.model.max_sos = self.max_sos
+        self._last_key = ()
+        self.ask_now()
+
     def prefer_engine(self, name) -> None:
         """Swap which engine's answer is on screen. No recomputation.
 
@@ -459,7 +504,9 @@ class RealmsWorker(threading.Thread):
         from . import realms_session
 
         result = realms_session.build_state(self.listener,
-                                            max_fires=self.max_fires)
+                                            max_fires=self.max_fires,
+                                            max_unites=self.max_unites,
+                                            max_sos=self.max_sos)
         model = self.model
         model.window_found = True
         model.detected_battle = result.state is not None
@@ -712,6 +759,8 @@ class RealmsWorker(threading.Thread):
 
         self.model.allow_level_7 = self.allow_level_7
         self.model.max_fires = self.max_fires
+        self.model.max_unites = self.max_unites
+        self.model.max_sos = self.max_sos
         self.model.objective = self.objective_name
         self.model.budget = self.budget
         # LATEST WINS. This was a FIFO that dropped the NEWEST model when
@@ -762,6 +811,12 @@ class RealmsApi:
     def set_max_fires(self, count) -> None:
         """The pink slip cap box. Zero means never advise a fire."""
         self._worker.set_max_fires(count)
+
+    def set_max_unites(self, count) -> None:
+        self._worker.set_max_unites(count)
+
+    def set_max_sos(self, count) -> None:
+        self._worker.set_max_sos(count)
 
     def reconsider(self) -> None:
         """Reject the move on screen and offer the next best."""

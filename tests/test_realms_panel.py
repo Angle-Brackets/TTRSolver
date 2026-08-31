@@ -585,3 +585,94 @@ class UniteLineTest(unittest.TestCase):
                          "Gag-Up unite (all tracks)")
         self.assertEqual(unites.describe(("gag_up", Track.THROW)),
                          "Gag-Up unite (throw)")
+
+
+class ConsumableCapsTest(unittest.TestCase):
+    """Caps for unites and SOS cards, the same contract as slips.
+
+    Both halves are required. The wire says what is HELD
+    (`setResistanceMessages`, `setNPCFriendsDict`) and the cap says what
+    the player will SPEND. Neither alone may grant one: a cap with no
+    reading would invent a pouch, and a reading with no cap would spend
+    a resource farmed from boss runs without being asked.
+    """
+
+    def test_the_defaults_are_zero_even_without_init(self):
+        """The tests build a worker with `__new__`, and 0 is the safe
+        value, so it must not depend on `__init__` having run."""
+        obj = realms_panel.RealmsWorker.__new__(realms_panel.RealmsWorker)
+        self.assertEqual(obj.max_fires, 0)
+        self.assertEqual(obj.max_unites, 0)
+        self.assertEqual(obj.max_sos, 0)
+
+    def test_the_setters_clamp(self):
+        w = worker(FakeListener([], {}))
+        for setter, attr in (("set_max_unites", "max_unites"),
+                             ("set_max_sos", "max_sos")):
+            with self.subTest(setter=setter):
+                getattr(w, setter)(-5)
+                self.assertEqual(getattr(w, attr), 0)
+                getattr(w, setter)(1000)
+                self.assertEqual(getattr(w, attr), 99)
+                getattr(w, setter)(3)
+                self.assertEqual(getattr(w, attr), 3)
+
+    def test_rubbish_is_ignored_rather_than_crashing(self):
+        w = worker(FakeListener([], {}))
+        w.set_max_unites(4)
+        w.set_max_sos(4)
+        w.set_max_unites("many")
+        w.set_max_sos(None)
+        self.assertEqual(w.max_unites, 4)
+        self.assertEqual(w.max_sos, 4)
+
+    def test_the_model_carries_them_to_the_page(self):
+        from solver.live.panel import model_json
+        w = worker(FakeListener([], {}))
+        w.set_max_unites(2)
+        w.set_max_sos(7)
+        import json
+        payload = json.loads(model_json(w.model))
+        self.assertEqual(payload["max_unites"], 2)
+        self.assertEqual(payload["max_sos"], 7)
+
+
+class ConsumableReadingTest(unittest.TestCase):
+    """Decoding the two wire fields, against values captured live."""
+
+    RESISTANCE = [[0, 998], [1, 999], [100, 999], [300, 998]]
+    FRIENDS = [(2001, 100), (3112, 100), (2011, 5), (999999, 100)]
+
+    def test_unites_total_across_categories(self):
+        from solver.live import realms as realms_mod
+        self.assertEqual(realms_mod.parse_resistance(self.RESISTANCE),
+                         998 + 999 + 999 + 998)
+
+    def test_unites_absent_reads_none_not_zero(self):
+        from solver.live import realms as realms_mod
+        self.assertIsNone(realms_mod.parse_resistance(None))
+
+    def test_cards_resolve_by_name(self):
+        from solver.live import realms as realms_mod
+        names = {2001: "Flippy", 3112: "Lil Oldman", 2011: "Clerk Clara"}
+        self.assertEqual(
+            realms_mod.parse_npc_friends(self.FRIENDS, names),
+            {"Flippy": 100, "Lil Oldman": 100, "Clerk Clara": 5})
+
+    def test_an_unnamed_id_is_dropped_not_guessed(self):
+        """999999 is in the wire data and in no table. A card the solver
+        cannot identify must not become one it can."""
+        from solver.live import realms as realms_mod
+        out = realms_mod.parse_npc_friends(self.FRIENDS, {2001: "Flippy"})
+        self.assertEqual(out, {"Flippy": 100})
+
+    def test_every_card_a_live_toon_held_is_known_to_the_solver(self):
+        """The 16 ids captured from a running client, resolved through
+        the install's own npctoons.json, all appear in `sos.BY_NAME`."""
+        from solver import sos as sos_mod
+        held = ["Melody Wavers", "Professor Pete", "Barnacle Bessie",
+                "Franz Neckvein", "Moe Zart", "Sid Sonata",
+                "Barbara Seville", "Lil Oldman", "Stinky Ned", "Nancy Gas",
+                "Clerk Clara", "Flippy", "Daffy Don", "Madam Chuckle",
+                "Soggy Bottom", "Julius Wheezer"]
+        self.assertEqual([n for n in held if n not in sos_mod.BY_NAME], [])

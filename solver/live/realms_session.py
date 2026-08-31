@@ -168,7 +168,8 @@ def cog_from_object(obj, lured: bool = False,
     return cog, []
 
 
-def toon_from_object(obj, max_fires: int = 0
+def toon_from_object(obj, max_fires: int = 0, max_unites: int = 0,
+                     max_sos: int = 0
                      ) -> Tuple[Optional[ToonState], List[str]]:
     """The player's toon object as a `ToonState`, or why it cannot be.
 
@@ -225,6 +226,37 @@ def toon_from_object(obj, max_fires: int = 0
         except (TypeError, ValueError):
             problems.append(f"toon {obj.do_id}: setPinkSlips is "
                             f"{slips!r}, which is not a count")
+
+    # UNITES. `setResistanceMessages`, same ownrecv shape. Both halves
+    # are required, exactly as for slips: the wire says what is HELD and
+    # the cap says what the player will SPEND, and neither alone may
+    # grant one. A cap with no reading would invent a pouch; a reading
+    # with no cap would spend a resource farmed from boss runs without
+    # being asked.
+    #
+    # One number, so it cannot tell a Toon-Up unite from a Gag-Up --
+    # `realms.parse_resistance` says why the categories are left
+    # undecoded rather than guessed.
+    if max_unites:
+        held = realms_mod.parse_resistance(obj.get("setResistanceMessages"))
+        if held:
+            toon.unites_held = min(held, int(max_unites))
+
+    # SOS CARDS. `setNPCFriendsDict` names them exactly, so unlike the
+    # unites this loses nothing. The cap limits how many CALLS the
+    # solver may plan, never which cards exist.
+    if max_sos:
+        cards = realms_mod.parse_npc_friends(obj.get("setNPCFriendsDict"))
+        if cards:
+            budget = int(max_sos)
+            trimmed, spent = {}, 0
+            for name in sorted(cards):
+                if spent >= budget:
+                    break
+                take = min(cards[name], budget - spent)
+                trimmed[name] = take
+                spent += take
+            toon.sos_cards = trimmed
     return toon, []
 
 
@@ -276,7 +308,8 @@ def pick_battle(listener, battles, player_do_id: Optional[int] = None):
 
 
 def build_state(listener, player_do_id: Optional[int] = None,
-                round_num: int = 0, max_fires: int = 0) -> RealmsBuild:
+                round_num: int = 0, max_fires: int = 0,
+                max_unites: int = 0, max_sos: int = 0) -> RealmsBuild:
     """A `BattleState` from what the listener currently holds.
 
     `player_do_id` names which toon is being advised. With one toon in
@@ -350,7 +383,9 @@ def build_state(listener, player_do_id: Optional[int] = None,
         problems.append(f"toon {player_do_id}: not received yet")
         toon = None
     else:
-        toon, why = toon_from_object(player, max_fires=max_fires)
+        toon, why = toon_from_object(player, max_fires=max_fires,
+                                     max_unites=max_unites,
+                                     max_sos=max_sos)
         problems.extend(why)
 
     # Every reason at once, like `session.build_state`: being told one

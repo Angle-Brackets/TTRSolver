@@ -196,3 +196,70 @@ Which cross-checks three ways against tables Realms never touched: our
 Throw makes Birthday Cake 110 damage; and the cog being lured forces
 accuracy and adds knockback. An exact kill, chosen for reasons that can
 be checked by hand.
+
+## Consumable holdings, read from a live client
+
+Captured from a running Realms client (toon #100000001, 100 laff), which
+settles a question this project had been answering by assumption: the
+overlay CAN know what the player is carrying.
+
+    setPinkSlips          0
+    setResistanceMessages [[0,998],[1,999],[2,999],[3,999],[4,998],
+                           [100,999]...[107,999],
+                           [200,999]...[203,998],
+                           [300,998]...[304,998]]
+    setNPCFriendsDict     [(4125,100),(2003,100),(1116,100),(2311,100),
+                           (4119,99),(4219,100),(4115,100),(3112,100),
+                           (1323,100),(2308,100),(2011,100),(2001,100),
+                           (2132,100),(2121,100),(5124,100),(4230,100)]
+    setMaxNPCFriends      16
+
+All three are `required ownrecv db` -- the same keywords as
+`setInventory`, which the reader already decodes -- so they arrive by
+the same route.
+
+**The toon is invisible until it re-generates.** The stream carries only
+changes and the player's toon is generated at login, before the listener
+attaches, so `toons()` reads zero however long it waits. A zone change
+regenerates it; walking through a tunnel is enough. This cost an hour of
+looking for a subscription bug that was not there.
+
+### SOS cards resolve exactly
+
+`setNPCFriendsDict` is (npc id, count), and
+`phase_3/data/npctoons.json` inside `ttrm_dat_01.pak` names all 712
+NPCs. All 16 ids the live toon held resolve, and all 16 are in
+`sos.BY_NAME`: Flippy, Moe Zart, Lil Oldman, Clerk Clara, Professor
+Pete, Barnacle Bessie, Franz Neckvein, Sid Sonata, Barbara Seville,
+Stinky Ned, Nancy Gas, Daffy Don, Madam Chuckle, Melody Wavers, Soggy
+Bottom, Julius Wheezer.
+
+The table is read from the install at runtime, never vendored, and lives
+in `solver/live/realms.py` -- the reader decoding an id, the same job
+`parse_inventory` does for a pouch. It does not go in `solver/data/`.
+
+### Unites are counted, NOT categorised
+
+Ids group as `category * 100 + index`: 0-4, 100-107, 200-203, 300-304.
+It is tempting to read category 0 as Toon-Up because it has five entries
+and `TOON_UP_VALUES` has five, and category 1 as Gag-Up because eight is
+seven tracks plus all-tracks.
+
+**Nothing in the install confirms it.** The only "resistance" files in
+the archives are three particle effects. So `parse_resistance` returns
+the TOTAL and nothing finer, and the cost is stated rather than hidden:
+`unites_held` is one number, so a toon holding only Toon-Up unites is
+still offered a Gag-Up. Fixing that needs the category table, not more
+inference.
+
+### The caps
+
+`max_fires`, `max_unites` and `max_sos` are all the same contract: the
+wire says what is HELD, the cap says what the player will SPEND, and
+**neither alone grants anything**. A cap with no reading would invent a
+pouch; a reading with no cap would spend a resource farmed from boss
+runs without being asked. All three default to 0.
+
+The counts in this capture (998/999 per unite, 100 per card) are a
+maxed-out sandbox toon on an offline build, not typical play. They show
+the FORMAT, and nothing about what a real player carries.
