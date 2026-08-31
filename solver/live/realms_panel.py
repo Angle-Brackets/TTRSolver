@@ -119,12 +119,16 @@ def _track_of(action):
         return None
     if getattr(action, "fire", False):
         return "fire"
+    if getattr(action, "sos", None):
+        return "sos"
     return action.track.value
 
 
 def _level_of(action):
     """A fire has no level; a gag has its own."""
-    if action is None or action.is_pass or getattr(action, "fire", False):
+    if (action is None or action.is_pass
+            or getattr(action, "fire", False)
+            or getattr(action, "sos", None)):
         return None
     return action.level
 

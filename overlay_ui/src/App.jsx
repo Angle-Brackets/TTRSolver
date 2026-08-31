@@ -14,7 +14,7 @@ const EMPTY = {
   // `preferred_engine` and `search_ready` decide whether to show the
   // waiting ellipsis.
   preferred_engine: 'rl', search_ready: false,
-  max_fires: 0,
+  max_fires: 0, unite: '',
   lure_icon: '', map_icon: '',
   zone: '', neighborhood: '', district: '', invasion: '',
 }
@@ -47,6 +47,18 @@ import pinkSlipArt from './assets/pink-slip.png'
 
 const PinkSlip = () => (
   <img src={pinkSlipArt} alt="" className="size-11 object-contain" />
+)
+
+// An SOS card. Placeholder until the game's own icon is to hand -- it
+// is not in the phase files under any obvious name, the way the lure
+// magnet and the emblems are.
+const SosCard = () => (
+  <svg viewBox="0 0 24 24" className="size-11" aria-hidden="true">
+    <rect x="3" y="4" width="18" height="16" rx="2"
+          fill="#fde68a" stroke="#b45309" strokeWidth="1.4" />
+    <path d="M7 9h10M7 12h10M7 15h6"
+          stroke="#92400e" strokeWidth="1.2" strokeLinecap="round" />
+  </svg>
 )
 
 // Falls back to the department emblem, which is the honest picture when
@@ -141,7 +153,9 @@ function Advice({ model }) {
   const showing = Boolean(model.advice) && model.in_battle
   const track = showing && model.track ? model.track : 'none'
   const firing = showing && model.track === 'fire'
-  const art = showing && !firing ? gagArt(model.track, model.gag_level) : null
+  const calling = showing && model.track === 'sos'
+  const art = showing && !firing && !calling
+    ? gagArt(model.track, model.gag_level) : null
   return (
     <div
       className={`track-${track} relative flex items-center gap-3 overflow-hidden rounded-box bg-base-200 px-4 py-3`}
@@ -162,14 +176,30 @@ function Advice({ model }) {
           <PinkSlip />
         </div>
       )}
+      {calling && (
+        <div className="flex size-11 shrink-0 items-center justify-center drop-shadow">
+          <SosCard />
+        </div>
+      )}
       <div className="min-w-0">
         {showing && model.track && (
           <div
             className="text-[10px] font-semibold tracking-[0.14em]"
             style={{ color: 'var(--accent)' }}
           >
-            {firing ? 'PINK SLIP' : model.track.replace('_', '-').toUpperCase()}
+            {firing ? 'PINK SLIP'
+              : calling ? 'SOS'
+              : model.track.replace('_', '-').toUpperCase()}
             {model.gag_level ? ` · ${model.gag_level}` : ''}
+          </div>
+        )}
+        {/* A UNITE IS NOT THE MOVE. It costs no action, so the round
+            is "use this, THEN throw that" -- two things. Folding it
+            into the advice line would read as a choice between them,
+            which is the one thing it is not. */}
+        {showing && model.unite && (
+          <div className="text-[11px] font-semibold text-warning">
+            + {model.unite}
           </div>
         )}
         <div

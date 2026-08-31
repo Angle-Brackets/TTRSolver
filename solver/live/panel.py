@@ -118,6 +118,7 @@ def model_json(model: Model) -> str:
         "engine": model.engine,
         "preferred_engine": model.preferred_engine,
         "max_fires": model.max_fires,
+        "unite": model.unite,
         "search_ready": model.search_ready,
         "rl_gag": model.rl_gag,
         "search_gag": model.search_gag,

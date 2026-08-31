@@ -221,6 +221,16 @@ class Model:
     # no used-count to maintain and nothing to reset when a VP moves to
     # its second wave or a building to its next floor.
     max_fires: int = 0
+
+    # The unite the panel is advising ALONGSIDE the gag, as a phrase
+    # ("80 Toon-Up unite"), or "" for none.
+    #
+    # A separate field rather than part of the advice, because a unite
+    # is not the move. It costs no action, so the round is "use this,
+    # THEN throw that" -- two things, and folding them into one line
+    # would read as a choice between them. An SOS is the opposite: it
+    # costs the turn, so it IS the move and goes in `gag` like any gag.
+    unite: str = ""
     # Where the toon is, from the Local API. The solver does not use it
     # -- a street does not change a round -- but it tells the player at a
     # glance whether the panel is talking to the game at all, which the
