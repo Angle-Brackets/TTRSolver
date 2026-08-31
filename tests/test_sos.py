@@ -122,3 +122,112 @@ class AccuracyTest(unittest.TestCase):
         self.assertIn("fire", source,
                       "the exemption pattern this must follow is gone")
         self.assertTrue(all(not sos.rolls_accuracy(c) for c in sos.CARDS))
+
+
+class EffectTest(unittest.TestCase):
+    """Playing a card actually does what the card says."""
+
+    def _board(self, laff=40, lured=False):
+        from solver import data
+        from solver.state import BattleState, CogState, ToonState
+        tracks = [t for t in Track if t is not Track.TOON_UP]
+        toon = ToonState(laff, 137, {t: 7 for t in tracks},
+                         {(Track.THROW, 5): 1}, frozenset(),
+                         pouch_capacity=80)
+        cogs = []
+        for level in (12, 11, 10, 9):
+            hp = data.cog_max_hp(level)
+            cog = CogState(department="sellbot", cog_type="mr_hollywood",
+                           level=level, hp=hp, max_hp=hp)
+            if lured:
+                cog.status.apply_lure(90, 4, level=5)
+            cogs.append(cog)
+        return BattleState(toon=toon, cogs=cogs)
+
+    def test_flippy_gives_a_solo_toon_the_lot(self):
+        state = self._board(laff=40)
+        sos.apply(sos.BY_NAME["Flippy"], state)
+        self.assertEqual(state.toons[0].laff, 137)   # 40 + 180, capped
+
+    def test_a_heal_never_overheals(self):
+        state = self._board(laff=130)
+        report = sos.apply(sos.BY_NAME["Flippy"], state)
+        self.assertEqual(report["healed"], 7)
+        self.assertEqual(state.toons[0].laff, 137)
+
+    def test_sound_hits_everything_and_wakes_it(self):
+        state = self._board(lured=True)
+        report = sos.apply(sos.BY_NAME["Moe Zart"], state)
+        self.assertEqual(report["hit"], 4)
+        self.assertEqual(sum(1 for c in state.cogs if c.status.lured), 0)
+
+    def test_drop_hits_nothing_on_a_lured_field(self):
+        state = self._board(lured=True)
+        report = sos.apply(sos.BY_NAME["Barnacle Bessie"], state)
+        self.assertEqual(report["hit"], 0)
+        self.assertEqual(sum(1 for c in state.cogs if c.status.lured), 4,
+                         "Drop must leave the sleepers asleep")
+
+    def test_a_trap_card_places_and_un_lures(self):
+        state = self._board(lured=True)
+        report = sos.apply(sos.BY_NAME["Clerk Clara"], state)
+        self.assertEqual(report["trapped"], 4)
+        self.assertEqual(sum(1 for c in state.cogs if c.status.lured), 0)
+        self.assertTrue(all(c.status.trapped for c in state.cogs))
+
+    def test_an_sos_trap_springs_for_its_own_damage(self):
+        """Not the gag's. Clerk Clara is 180 and TNT the gag happens to
+        match, but Clerk Will is 60 where Quicksand is 50."""
+        from solver import simulator
+        for name, expected in (("Clerk Will", 60), ("Clerk Penny", 120),
+                               ("Clerk Clara", 180)):
+            state = self._board()
+            sos.apply(sos.BY_NAME[name], state)
+            self.assertEqual(simulator._apply_trap_trigger(state.cogs[0]),
+                             expected, name)
+
+    def test_springing_clears_the_sos_damage(self):
+        from solver import simulator
+        state = self._board()
+        sos.apply(sos.BY_NAME["Clerk Clara"], state)
+        simulator._apply_trap_trigger(state.cogs[0])
+        self.assertIsNone(state.cogs[0].status.trap_damage)
+        self.assertFalse(state.cogs[0].status.trapped)
+
+    def test_a_normal_gag_trap_is_unaffected(self):
+        """The override must not capture the ordinary path."""
+        from solver import data, simulator
+        from solver.state import CogState
+        hp = data.cog_max_hp(12)
+        cog = CogState(department="sellbot", cog_type="mr_hollywood",
+                       level=12, hp=hp, max_hp=hp)
+        cog.status.trapped = True
+        cog.status.trap_level = 6
+        self.assertEqual(simulator._apply_trap_trigger(cog), 180)
+
+    def test_lure_cards_lure_the_field_for_their_duration(self):
+        state = self._board()
+        sos.apply(sos.BY_NAME["Lil Oldman"], state)
+        self.assertTrue(all(c.status.lured for c in state.cogs))
+        self.assertEqual(state.cogs[0].status.lure_rounds_remaining, 6)
+
+    def test_professor_pete_restocks_forty_five(self):
+        state = self._board()
+        report = sos.apply(sos.BY_NAME["Professor Pete"], state)
+        self.assertEqual(report["restocked"], 45)
+
+    def test_a_single_track_card_restocks_twelve_of_that_track(self):
+        state = self._board()
+        report = sos.apply(sos.BY_NAME["Baker Bridget"], state)
+        self.assertEqual(report["restocked"], 12)
+        elsewhere = sum(n for (track, _lv), n
+                        in state.toons[0].gag_counts.items()
+                        if track is not Track.THROW)
+        self.assertEqual(elsewhere, 0, "leaked into another track")
+
+    def test_the_accuracy_cards_set_a_timed_effect(self):
+        state = self._board()
+        sos.apply(sos.BY_NAME["Sticky Lou"], state)
+        self.assertEqual(state.toons_hit_rounds, 5)
+        sos.apply(sos.BY_NAME["Julius Wheezer"], state)
+        self.assertEqual(state.cogs_miss_rounds, 5)

@@ -162,6 +162,13 @@ class CogStatus:
     # a cog onto it, by which time the action is long gone.
     trap_organic: bool = False
 
+    # An SOS trap carries its OWN damage rather than deriving it from a
+    # gag level. The three Trap cards are named after real trap gags and
+    # place them, but at SOS-tier numbers -- Quicksand 60 against the
+    # gag's 50, Trapdoor 120 against 85, TNT 180 matching. `trap_level`
+    # cannot express that, so this overrides it when set.
+    trap_damage: Optional[int] = None
+
     is_dead: bool = False
 
     # A Version 2.0 Cog is wearing its outer suit. [CONFIRMED] wiki: a
@@ -234,6 +241,7 @@ class CogStatus:
         self.trap_track = None
         self.trap_level = None
         self.trap_organic = False
+        self.trap_damage = None
 
     def copy(self) -> "CogStatus":
         return CogStatus(
@@ -444,19 +452,36 @@ class BattleState:
     # trap-and-wait line, which can need many rounds.
     free_passes: int = 3
 
+    # Battle-wide timed status effects from SOS Toons. [OWNER] TTR
+    # models Toons Hit and Cogs Miss exactly as it models Lured and
+    # Trapped -- an effect with a round counter -- so they live here
+    # with one, rather than as special cases in a scorer.
+    #
+    # [CONFIRMED] wiki: +75% gag accuracy and -75% cog accuracy, for 3,
+    # 4 or 5 rounds depending on the card's tier.
+    #
+    # These BELONG in `outcomes.state_key`. Two positions identical but
+    # for a Cogs Miss are not the same position -- that is the
+    # `free_passes` lesson, recorded below.
+    toons_hit_rounds: int = 0
+    cogs_miss_rounds: int = 0
+
     def __init__(self, cogs: List[CogState], toon: Optional[ToonState] = None,
                  toons: Optional[List[ToonState]] = None,
                  round_num: int = 0, free_passes: int = 3,
                  cogs_remaining: int = 0,
                  holdout: Optional[List[CogState]] = None,
                  kind: str = "street", street: str = "",
-                 allies_standing: int = 0):
+                 allies_standing: int = 0,
+                 toons_hit_rounds: int = 0, cogs_miss_rounds: int = 0):
         if (toon is None) == (toons is None):
             raise ValueError("pass exactly one of `toon` or `toons`")
         self.toons = list(toons) if toons is not None else [toon]
         self.cogs = cogs
         self.round_num = round_num
         self.free_passes = free_passes
+        self.toons_hit_rounds = toons_hit_rounds
+        self.cogs_miss_rounds = cogs_miss_rounds
         self.cogs_remaining = cogs_remaining
         self.holdout = list(holdout) if holdout else []
         self.kind = kind
@@ -526,6 +551,8 @@ class BattleState:
             kind=self.kind,
             street=self.street,
             allies_standing=self.allies_standing,
+            toons_hit_rounds=self.toons_hit_rounds,
+            cogs_miss_rounds=self.cogs_miss_rounds,
         )
 
     def active_cogs(self) -> List[CogState]:

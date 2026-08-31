@@ -179,60 +179,59 @@ def apply_toon_up(toon, value: int) -> int:
     return restored
 
 
-def apply_gag_up(toon, track=None) -> int:
-    """Restock `toon` now and start its cooldown. Returns gags added.
+def restock_pouch(toon, track=None, budget=None, per_track=None) -> int:
+    """Top up a pouch, highest levels first, evenly across tracks.
 
-    `track` None means the all-tracks unite. Both caps bind: at most 7
-    into one track, at most 30 in total, and never past a gag's own
-    carry limit or the pouch's.
+    THE SHARED RESTOCK. A Gag-Up unite and an SOS restock card do the
+    same thing at different sizes -- [OWNER] "restock cards operate
+    like unites, highest level gags to lowest, restock all is evenly
+    done across all tracks" -- so they run one implementation rather
+    than two that drift.
 
-    Level 7 gags are POUCH_EXEMPT and are deliberately not restocked
-    here -- the wiki describes a restock of gags, and treating the
-    exempt tier as free refills would hand the search an unlimited
-    supply of the strongest gag in the game. Left out rather than
-    guessed; see the [TODO] below.
+        Gag-Up unite      7 into one track    30 across all
+        SOS restock      12 into one track    45 across all
+
+    `budget` is the total this restock may add; `per_track` caps any
+    single track, or None for no sub-cap. The single-track variants
+    pass the same number for both, since one track IS the whole
+    budget. The all-tracks variants leave `per_track` open: the wiki
+    states a per-track figure only for the single-track reward, and the
+    even round-robin below spreads the total anyway -- 30 over six
+    tracks is five apiece and never approaches seven.
+
+    Four caps bind at once and they are genuinely different rules:
+    each gag's own `max_carry`, `per_track`, `budget`, and what the
+    pouch can still hold.
     """
     from .data import gags as gags_mod
 
-    per_track = GAG_UP_SINGLE_TRACK_MAX
-    budget = GAG_UP_ALL_TRACKS_MAX if track is None else per_track
+    if budget is None:
+        budget = (GAG_UP_ALL_TRACKS_MAX if track is None
+                  else GAG_UP_SINGLE_TRACK_MAX)
+    if per_track is None and track is not None:
+        per_track = budget
+    limit = per_track if per_track is not None else budget
+
     tracks = ([track] if track is not None
               else [t for t in toon.track_exp if toon.track_exp.get(t, 0) > 0])
 
-    # THE POUCH IS A THIRD CAP, and leaving it out let a Gag-Up add 30
-    # every time with no ceiling: a toon restocked five times carried
-    # 266 gags against a capacity of 80. The wiki's two caps are per
-    # USE; the pouch is what a toon can hold at all.
+    # THE POUCH IS A THIRD CAP. Leaving it out let a restock add its
+    # whole budget with no ceiling: 86 gags to 266 after five, and a VP
+    # trace ending on 567 against a capacity of 80.
     #
-    # Level 7 is exempt from the pouch (POUCH_EXEMPT_LEVEL) and is not
-    # restocked here anyway, so the total counts levels 1-6 only --
-    # the same rule the gag menu's "Total gags" label follows.
+    # Level 7 is pouch-exempt and is not restocked anyway, so the total
+    # counts levels 1-6 -- the rule the gag menu's "Total gags" follows.
     held = sum(n for (_t, level), n in toon.gag_counts.items()
                if level < gags_mod.POUCH_EXEMPT_LEVEL)
     pouch_room = max(0, int(getattr(toon, "pouch_capacity", 80)) - held)
 
-    added = 0
-    # TOP DOWN, AND EVENLY ACROSS TRACKS. [OWNER] Filling from level 1
-    # upward, one track at a time, spends the whole 30 on Squirting
-    # Flowers and Cupcakes and leaves the gags worth having untouched --
-    # which made a Gag-Up look nearly worthless and was the first
-    # version of this.
-    #
-    # Highest level first, one gag per track per pass, so a restock
-    # tops up the scarce end evenly rather than emptying the budget
-    # into whichever track happens to be first in the list.
-    #
-    # Four caps bind at once: each gag's own `max_carry`, 7 per track,
-    # 30 in total, and what the pouch can still hold.
-    # COPY ON WRITE. `ToonState.clone` SHARES `gag_counts` between a
-    # state and its clones -- see the note there -- so mutating the dict
-    # in place restocks every state that shares it, including the real
-    # one being planned from. `_spend_gag` copies for exactly this
-    # reason and this did not, so every unite CANDIDATE that `climb`
-    # evaluated and discarded still refilled the toon's pouch: traps
-    # grew from 25 to 51 across a VP in which no Gag-Up was ever chosen.
+    # COPY ON WRITE. `ToonState.clone` SHARES `gag_counts`, so mutating
+    # in place restocks every state that shares it -- including the one
+    # being planned from. `_spend_gag` copies for this reason and this
+    # did not, so every discarded candidate still refilled the pouch.
     counts = dict(toon.gag_counts)
 
+    added = 0
     per_track_added = {tr: 0 for tr in tracks}
     for level in range(gags_mod.POUCH_EXEMPT_LEVEL - 1, 0, -1):
         progressed = True
@@ -241,7 +240,7 @@ def apply_gag_up(toon, track=None) -> int:
             for tr in tracks:
                 if added >= budget or added >= pouch_room:
                     break
-                if per_track_added[tr] >= per_track:
+                if per_track_added[tr] >= limit:
                     continue
                 if toon.track_exp.get(tr, 0) < level:
                     continue
@@ -261,6 +260,26 @@ def apply_gag_up(toon, track=None) -> int:
         if added >= budget or added >= pouch_room:
             break
     toon.gag_counts = counts
+    return added
+
+
+def apply_gag_up(toon, track=None) -> int:
+    """Restock `toon` now and start its cooldown. Returns gags added.
+
+    `track` None means the all-tracks unite. Both caps bind: at most 7
+    into one track, at most 30 in total, and never past a gag's own
+    carry limit or the pouch's.
+
+    Level 7 gags are POUCH_EXEMPT and are deliberately not restocked
+    here -- the wiki describes a restock of gags, and treating the
+    exempt tier as free refills would hand the search an unlimited
+    supply of the strongest gag in the game. Left out rather than
+    guessed; see the [TODO] below.
+    """
+    added = restock_pouch(
+        toon, track,
+        budget=(GAG_UP_ALL_TRACKS_MAX if track is None
+                else GAG_UP_SINGLE_TRACK_MAX))
     toon.unite_cooldown = COOLDOWN_ROUNDS
     return added
 

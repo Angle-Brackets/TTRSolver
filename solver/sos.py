@@ -186,3 +186,90 @@ def heal_share(card: Card, recipients: int) -> int:
     if recipients <= 0:
         return 0
     return card.amount // recipients
+
+
+def apply(card: Card, state, caller: int = 0, rng=None) -> Dict[str, int]:
+    """Play `card` for toon `caller`. Mutates `state`. Reports what it did.
+
+    Every effect lands at once except TRAP, which places something a
+    later Lure collects. Nothing rolls: an SOS cannot miss.
+
+    The report is a dict rather than a number because the shapes are
+    not commensurable -- laff restored, cogs hit, gags returned, rounds
+    of a status effect -- and collapsing them to one figure is how a
+    scorer ends up crediting a heal for damage.
+    """
+    from . import unites as unites_mod
+
+    toons = [t for t in state.toons if t.laff > 0]
+    live = [c for c in state.cogs if not c.status.is_dead]
+
+    if card.kind == HEAL:
+        share = heal_share(card, len(toons))
+        healed = 0
+        for toon in toons:
+            room = max(0, int(toon.max_laff) - int(toon.laff))
+            gain = min(share, room)
+            toon.laff += gain
+            healed += gain
+        return {"healed": healed, "recipients": len(toons)}
+
+    if card.kind == RESTOCK:
+        added = 0
+        for toon in toons:
+            added += unites_mod.restock_pouch(
+                toon, card.track, budget=card.amount)
+        return {"restocked": added, "toons": len(toons)}
+
+    if card.kind == LURE:
+        # Perfect accuracy, so the lure simply lands. `apply_lure`
+        # wants the accuracy it landed at for the luredRatio bonus; an
+        # SOS cannot miss, so that is 100.
+        for cog in live:
+            cog.status.apply_lure(100, card.amount, level=None)
+        return {"lured": len(live), "rounds": card.amount}
+
+    if card.kind == TRAP:
+        # PLACES a trap; the damage arrives when a lure follows. And it
+        # WAKES anything asleep, because a trap cannot be laid under a
+        # sleeping cog.
+        placed = 0
+        for cog in live:
+            cog.status.lured = False
+            cog.status.lure_rounds_remaining = 0
+            cog.status.trapped = True
+            cog.status.trap_damage = card.amount
+            cog.status.trap_organic = False
+            placed += 1
+        return {"trapped": placed, "damage": card.amount}
+
+    if card.kind in (DAMAGE_ALL, DAMAGE_UNLURED):
+        targets = (live if card.kind == DAMAGE_ALL
+                   else [c for c in live if not c.status.lured])
+        hit = 0
+        for cog in targets:
+            cog.hp -= card.amount
+            if card.kind == DAMAGE_ALL:
+                # An attack ends a lure, exactly as an ordinary gag
+                # does. Drop never reaches here: it has no lured
+                # targets to wake.
+                cog.status.lured = False
+                cog.status.lure_rounds_remaining = 0
+            if cog.hp <= 0:
+                if cog.status.suited:
+                    # A Version 2.0 sheds its suit and continues.
+                    cog.status.suited = False
+                    cog.hp = cog.max_hp
+                else:
+                    cog.hp = 0
+                    cog.status.is_dead = True
+            hit += 1
+        return {"hit": hit, "damage": card.amount}
+
+    if card.kind in (TOONS_HIT, COGS_MISS):
+        field = ("toons_hit_rounds" if card.kind == TOONS_HIT
+                 else "cogs_miss_rounds")
+        setattr(state, field, card.amount)
+        return {"rounds": card.amount, "effect": card.kind}
+
+    raise ValueError(f"unknown SOS kind {card.kind!r}")

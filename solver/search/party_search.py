@@ -1246,14 +1246,19 @@ def armed_credit(before: BattleState, after: BattleState) -> float:
     for old, new in zip(before.cogs, after.cogs):
         if new.status.is_dead or not new.status.trapped:
             continue
-        if old.status.trapped or new.status.trap_level is None:
+        if old.status.trapped:
             continue          # already armed before this round
-        try:
-            damage = mechanics.calc_toon_damage(
-                Track.TRAP, new.status.trap_level,
-                organic=new.status.trap_organic)
-        except (NotImplementedError, ValueError, KeyError):
+        if new.status.trap_level is None and new.status.trap_damage is None:
             continue
+        if new.status.trap_damage is not None:
+            damage = int(new.status.trap_damage)   # an SOS trap
+        else:
+            try:
+                damage = mechanics.calc_toon_damage(
+                    Track.TRAP, new.status.trap_level,
+                    organic=new.status.trap_organic)
+            except (NotImplementedError, ValueError, KeyError):
+                continue
         total += TRAP_DISCOUNT * float(min(damage, max(0, new.hp)))
     return total
 

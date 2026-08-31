@@ -583,6 +583,12 @@ def state_key(state: BattleState) -> Tuple:
             # `free_passes` is in this key for the same reason, and was
             # left out when IT was added.
             state.allies_standing,
+            # Timed SOS effects. A Cogs Miss running changes the cog
+            # phase and a Toons Hit changes every accuracy roll, so two
+            # positions identical but for one are not the same node --
+            # the `free_passes` test above, applied.
+            state.toons_hit_rounds,
+            state.cogs_miss_rounds,
         )
     return (
         tuple((t.laff,

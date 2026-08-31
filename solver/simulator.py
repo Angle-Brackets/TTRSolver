@@ -289,9 +289,18 @@ def _apply_trap_trigger(cog: CogState) -> int:
     # so a trap was being resolved at 90 while a Grand Piano of the same
     # level resolved at 170, and any comparison between Trap and another
     # track was measuring that discrepancy rather than the game.
-    dmg = data.gag(Track.TRAP, cog.status.trap_level).damage_at(
-        1.0, organic=cog.status.trap_organic)
+    if cog.status.trap_damage is not None:
+        # AN SOS TRAP CARRIES ITS OWN DAMAGE. `Clerk Will` and friends
+        # place a named trap gag at SOS-tier numbers -- 60/120/180
+        # against the gags' own 50/85/180 -- which a level cannot
+        # express. Checked before the level so the card wins where both
+        # are somehow set.
+        dmg = int(cog.status.trap_damage)
+    else:
+        dmg = data.gag(Track.TRAP, cog.status.trap_level).damage_at(
+            1.0, organic=cog.status.trap_organic)
     cog.status.trapped = False
+    cog.status.trap_damage = None
     cog.status.trap_track = None
     cog.status.trap_level = None
     cog.status.trap_organic = False
