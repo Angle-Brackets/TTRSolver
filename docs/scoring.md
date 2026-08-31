@@ -264,3 +264,67 @@ The refactor lock caught the change and was read before re-recording:
 from the hill-climb settling differently. All 53 shifted scores are
 positions whose scored action is itself a fire, so the floor reaches
 fire-bearing plans only, as designed.
+
+## The harness bug that produced four false results
+
+Every measurement script re-implemented the same action-to-index
+mapping, and every one ended it the same way:
+
+    i = env.PASS_INDEX
+    if action is not None and not action.is_pass:
+        for k, entry in enumerate(env.ACTIONS): ...
+    env.step(i)
+
+**That fallback is the bug.** `PASS_INDEX` is not "I could not express
+this action", it is "hold this round". So an action the table cannot
+name becomes a toon standing still, and the run reports a strategy
+failure where the truth is a harness failure -- silently, plausibly,
+and in a form that reads exactly like a finding.
+
+It cost four separate measurements:
+
+* a fire has `track=None`, so a script filtering on `track is not None`
+  passed instead of firing;
+* an SOS has no index at all, so it passed instead of calling;
+* both together read **0% at difficulty 9 and on the VP**, against 60%
+  and 94% from a harness that mapped them;
+* separately, a solo toon given Toon-Up training spends part of an
+  80-gag pouch on gags it can never throw (it cannot heal itself), and
+  a pouch built at every gag's carry limit sums far past `pouch_capacity`
+  -- both read 0% too;
+* and `facility_position` returns `cogs=[]`, because `BattleEnv.reset`
+  builds the board, so a state used before `reset` has nothing to fight.
+
+`solver/rl/harness.py` is the single implementation. `play` RAISES
+`UnplayableAction` rather than falling back to a pass, `solo_loadout`
+builds a valid solo toon, and `check_position` refuses a board that
+cannot measure anything. A measurement that stops is worth more than one
+that quietly measures the wrong policy.
+
+## SCARCITY_UNITS: swept, and left at 20
+
+[OWNER] "It should be weighted by the fact you can carry 7 $10 bills and
+only 3 hypnos." `_gag_units` already charges
+`level + SCARCITY_UNITS / carry_limit`, so a Hypno-goggles (level 6,
+carry 3) costs 12.67 against a Small Magnet's (level 2, carry 25) 2.80.
+
+Swept at 0, 20, 60 and 150, 150 runs a cell, through the harness above:
+
+| units | d5 win / scarce | d9 win / scarce | VP win / scarce |
+|---|---|---|---|
+| 0 | 100% 88% | 13% 69% | 41% 78% |
+| 20 | 100% 88% | 10% 68% | 45% 78% |
+| 60 | 100% 83% | 8% 64% | 47% 75% |
+| 150 | 100% 80% | 8% 55% | 45% 69% |
+
+"scarce" is the share of thrown gags whose carry limit is 5 or fewer.
+Raising the weight does hoard them -- 69% to 55% at difficulty 9 -- but
+no win-rate signal separates 0 from 150 at this sample size, the two
+hard cells moving in opposite directions. **Left at 20**, because a
+shipped constant should not move on a wash, and `solver/search/party_search.py`
+already warns that these weights disagree across three scorers.
+
+What the sweep does establish: Hypno-goggles is 61.5% of lures thrown at
+difficulty 9 and 62.2% in the VP, and that is not the scarcity term
+failing to bite -- it is the term being outweighed by a genuinely better
+gag on a multi-cog board.
