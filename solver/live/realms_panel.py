@@ -561,8 +561,18 @@ class RealmsWorker(threading.Thread):
 
             from ..search import hybrid
 
+            hybrid.LAST_UNITE = None
             plan = hybrid.climb(state, random.Random(0), budget=8,
                                 reject=frozenset(self._rejected))
+            # The unite `climb` chose, if any, for the line above the
+            # advice. Read straight after the call because it is a
+            # module global that the next call overwrites.
+            chosen = hybrid.LAST_UNITE
+            if chosen is None:
+                self.model.unite = ""
+            else:
+                from .. import unites as unites_mod
+                self.model.unite = unites_mod.describe(chosen)
         except Exception:               # pragma: no cover - optional path
             return None
         return plan[0] if plan else None
@@ -653,6 +663,11 @@ class RealmsWorker(threading.Thread):
         self.model.thinking = False
 
         if self.model.preferred_engine == "search":
+            # The expectimax path does not model unites, so a unite
+            # suggested beside the POLICY's move must not linger over
+            # the search's. Better no advice than advice for a plan
+            # that is no longer on screen.
+            self.model.unite = ""
             self.model.gag = text
             self.model.gag_at = time.time()
             self.model.track = track

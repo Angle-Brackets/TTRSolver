@@ -552,3 +552,36 @@ class CheapestKillProbeTest(unittest.TestCase):
             self.assertEqual(hybrid._cheapest_kills(self._board(6), 0), [])
         finally:
             hybrid.PROBE_CHEAPEST_KILL = original
+
+
+class UniteLineTest(unittest.TestCase):
+    """The unite line is populated, and cleared when it no longer applies.
+
+    `Model.unite` was serialised to the page and never set by anything,
+    so the line could not appear however many unites were chosen.
+    """
+
+    def test_the_field_starts_empty(self):
+        w = worker(FakeListener([], {}))
+        self.assertEqual(w.model.unite, "")
+
+    def test_the_search_answer_clears_it(self):
+        """Expectimax does not model unites, so a unite suggested
+        beside the POLICY's move must not linger over the search's."""
+        w = worker(FakeListener([], {}))
+        w.model.unite = "80 Toon-Up unite"
+        w.model.preferred_engine = "search"
+        w.model.search_gag = "Presentation on all"
+        w.model.search_ready = True
+        w.prefer_engine("search")
+        self.assertEqual(w.model.gag, "Presentation on all")
+
+    def test_describe_gives_the_phrase_the_line_shows(self):
+        from solver import unites
+        from solver.state import Track
+        self.assertEqual(unites.describe(("toon_up", 80)),
+                         "80 Toon-Up unite")
+        self.assertEqual(unites.describe(("gag_up", None)),
+                         "Gag-Up unite (all tracks)")
+        self.assertEqual(unites.describe(("gag_up", Track.THROW)),
+                         "Gag-Up unite (throw)")
