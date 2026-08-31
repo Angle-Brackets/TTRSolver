@@ -328,3 +328,33 @@ What the sweep does establish: Hypno-goggles is 61.5% of lures thrown at
 difficulty 9 and 62.2% in the VP, and that is not the scarcity term
 failing to bite -- it is the term being outweighed by a genuinely better
 gag on a multi-cog board.
+
+## Why there is no group-waste penalty
+
+On a one-cog board a group gag and a single gag score IDENTICALLY --
+`$1 Bill single` and `$1 Bill GROUP` both read 1785.26 on the reported
+Ambulance Chaser position. The model has no concept of a group gag
+wasting its breadth; the only things separating two lures are level and
+carry limit, through `_gag_units`.
+
+That has a visible consequence. Asked what happens when the pouch holds
+nothing below Big Magnet, the panel advises **Big Magnet GROUP** on the
+lone cog, because at `4 + 20/15 = 5.33` it is cheaper than a $10 Bill at
+`5 + 20/7 = 7.86`. Which is arguably right -- a toon carries 15 Big
+Magnets and 7 $10 Bills, so spending the magnet is the better resource
+decision even though it is the "group" gag. From $10 Bill up it picks
+the single bill; from Hypno up it abandons the lure and throws instead.
+
+**Left alone, because it does not happen.** Group gags thrown onto a
+single live cog, across 150 runs a cell:
+
+| | group gags thrown | onto one cog |
+|---|---|---|
+| difficulty 5 | 659 | 0 |
+| difficulty 9 | 1410 | 1 |
+| VP, 12 cogs | 1476 | 1 |
+
+Two in about three and a half thousand. A penalty for it would be tuning
+a 0.06% case, and this file already records what happened the last time
+a plausible-looking menu change went in unmeasured: difficulty 9 fell
+60% to 42%.
