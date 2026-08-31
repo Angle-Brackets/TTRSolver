@@ -121,12 +121,35 @@ something that runs out and never comes back.
 
 That leaves 25 cards, all earned by rescuing SOS Toons after a VP.
 
-## Still unsettled
+## The Toon-Up split, settled — and it reuses what exists
 
-1. **How does an SOS Toon's Toon-Up split across a party?** The table
-   gives 60/30/20/15 for one to four toons, so it is not a simple
-   division. Solo needs only the first column, which is all this
-   project would use today, so it blocks nothing.
+It IS a simple division; the table only looked irregular because the
+divisor differs from a gag's.
+
+    Madam Chuckle   1:60   2:30   3:20   4:15     = 60 / X
+    Daffy Don       1:120  2:60   3:40   4:30     = 120 / X
+    Flippy          1:180  2:90   3:60   4:45     = 180 / X
+
+[OWNER] The difference from a player's Toon-Up is WHO COUNTS. A toon
+cannot heal itself, so a gag splits across `len(others)` -- up to three
+in a four-toon party. An SOS Toon is the one throwing, so every
+standing toon is a recipient: up to four.
+
+`simulator` already does this, in the group Toon-Up branch:
+
+    others = [i for i, other in enumerate(state.toons)
+              if i != toon_index and other.laff > 0]
+    share = amount // len(others)
+
+An SOS heal is the same line with the recipient list built to INCLUDE
+the caller. Nothing else changes.
+
+It also explains why Flippy is worth so much to a solo toon while a
+Toon-Up gag is worth nothing there. Solo, the gag has zero recipients
+and does nothing at all; the SOS has one recipient and so divides by
+one -- the full 180.
+
+Nothing in this file is unsettled now.
 
 ## Rough cost
 
