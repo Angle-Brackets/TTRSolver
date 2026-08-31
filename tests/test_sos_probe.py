@@ -95,7 +95,12 @@ class ReachesTheJudgeTest(unittest.TestCase):
         ps.QUICK_W["survive"] = 1000.0
         hybrid.OFFER_SOS = True
         plan = hybrid.climb(_board(19), random.Random(19), budget=10)
-        self.assertEqual(getattr(plan[0], "sos", None), "Lil Oldman")
+        # Flippy, and it used to be Lil Oldman. Pinning `incoming` in
+        # `survival_rounds` stopped the lure being paid twice -- once as
+        # `prevented` and again through the incoming it removed -- and
+        # on 12 laff the 180-point heal is the better card. The change
+        # is the fix working, not a regression.
+        self.assertEqual(getattr(plan[0], "sos", None), "Flippy")
 
     def test_the_flag_off_means_never(self):
         ps.QUICK_W["survive"] = 1000.0

@@ -343,7 +343,20 @@ QUICK_W = {
     # AND IT DOES NOT REACH THE REAL FIGHT. A 20-cog solo VP stays at
     # 0.0% at every weight and every unite budget tried, though it
     # survives 16.1 rounds against 30.2. The wall is somewhere else.
-    "survive": 0.0,        # CHARGED, per standing toon a round could sink
+    # 400, swept. See docs/scoring.md. Two seed blocks of 200 runs a
+    # cell: solo buildings are BIT-IDENTICAL at every weight from 0 to
+    # 800 (26.0% and 27.0%, +0/-0), because with `incoming` pinned this
+    # term is constant across the whole action menu and cannot reorder
+    # it. Solo VP at 12 cogs with unites goes 35.0% -> 95.0% and
+    # 31.5% -> 92.5%; with a bounded book of SOS cards, 27.0% -> 52.5%
+    # and 24.5% -> 49.0%. The unite curve plateaus from 200, SOS climbs
+    # to about 600 because `SOS_PRICE` is double `UNITE_PRICE`; 400 sits
+    # mid-plateau for one and near peak for the other.
+    #
+    # Inert until `OFFER_UNITES` or `OFFER_SOS` is turned on: with
+    # neither, nothing can change a toon's laff mid-plan, so this
+    # contributes the same constant to every candidate.
+    "survive": 400.0,      # CHARGED, per standing toon a round could sink
     "price": 1.0,       # gags spent
 }
 
@@ -1100,7 +1113,7 @@ which buys a fifth is not choosing between life and death any more.
 """
 
 
-def survival_rounds(state: BattleState) -> float:
+def survival_rounds(state: BattleState, incoming=None) -> float:
     """How many rounds of incoming the party's laff currently covers.
 
     THE ONE THING NO SCORER COULD SEE. Every other term here is a DELTA
@@ -1123,11 +1136,21 @@ def survival_rounds(state: BattleState) -> float:
     `expected_incoming` says so directly.
 
     Capped by `SURVIVAL_CAP`; see there.
+
+    `incoming` OVERRIDES what the board says is coming, and the caller
+    in `_quick_score` always passes the PRE-PLAN figure. Measured, solo
+    buildings, 200 runs a cell on two seed blocks: letting it move with
+    the plan cost 26.0% -> 10.0% and 27.0% -> 14.5% at weight 400,
+    p<0.001 both blocks, because killing or luring a cog lowers incoming
+    and so this term rewarded it a second time. `prevented` and the
+    damage terms already price exactly that. Held fixed, the term varies
+    only with LAFF, which is the one thing no other term can see, so it
+    cannot reorder gag choices while still making a heal visible.
     """
     standing = [t for t in state.toons if t.laff > 0]
     if not standing:
         return 0.0
-    incoming = expected_incoming(state)
+    incoming = expected_incoming(state) if incoming is None else incoming
     if incoming <= 0:
         # Nothing is swinging -- every plan survives, so this cannot
         # discriminate and should not be allowed to dominate.
@@ -1490,7 +1513,11 @@ def _score_leaf(state: BattleState, plan, hits, record=None,
                if objective is not None else 0.0)
             - (QUICK_W["risk"] * toons_at_risk(probe)
                if QUICK_W["risk"] else 0.0)
-            + (QUICK_W["survive"] * survival_rounds(probe)
+            # `expected_incoming(state)`, not of `probe`: see
+            # `survival_rounds`. With the board's own figure this term
+            # double-counts damage prevention and reorders gag choice.
+            + (QUICK_W["survive"] * survival_rounds(
+                probe, incoming=expected_incoming(state))
                if QUICK_W["survive"] else 0.0)
             - QUICK_W["price"] * price)
 
