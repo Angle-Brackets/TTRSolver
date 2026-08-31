@@ -318,7 +318,7 @@ class TieBreakTest(unittest.TestCase):
         self.assertGreater(every, one)
 
 
-class StockTest(unittest.TestCase):
+class HoldingCountTest(unittest.TestCase):
     """A unite has to be HELD. The cooldown alone left the supply
     unlimited, which took solo buildings from 26% to 100% on one seed
     block and 27% to 99% on another -- the solver spending about four
@@ -373,3 +373,90 @@ class StockTest(unittest.TestCase):
                                            cog_type="cold_caller", level=3,
                                            hp=hp, max_hp=hp)])
         self.assertEqual(state.clone().toons[0].unites_held, 7)
+
+
+class PerKindStockTest(unittest.TestCase):
+    """WHICH unites are held, not just how many.
+
+    `unites_held` is one number, so a toon carrying only a Lure restock
+    was still offered a Squirt one. `unite_stock` keys on the same pair
+    `candidates` yields, so the two cannot drift.
+    """
+
+    def _toon(self, stock=None, held=10):
+        from solver.state import ToonState
+        return ToonState(60, 137, {t: 7 for t in Track}, {}, frozenset(),
+                         pouch_capacity=80, unites_held=held,
+                         unite_stock=dict(stock or {}))
+
+    def test_only_the_track_held_is_offered(self):
+        toon = self._toon({("gag_up", "lure"): 2})
+        gag_ups = [c for c in unites.candidates(toon) if c[0] == "gag_up"]
+        self.assertEqual([getattr(a, "value", a) for _k, a in gag_ups],
+                         ["lure"])
+
+    def test_all_tracks_needs_its_own_entry(self):
+        """Gag-Up All is a separate item in the menu, so holding seven
+        single-track restocks does not grant it."""
+        toon = self._toon({("gag_up", "throw"): 1})
+        self.assertNotIn(("gag_up", None), unites.candidates(toon))
+        toon = self._toon({("gag_up", None): 1})
+        self.assertIn(("gag_up", None), unites.candidates(toon))
+
+    def test_a_toon_up_keys_on_the_kind_alone(self):
+        """The wire counts Toon-Up unites but the VALUES are the
+        build's own, so keying on the number would invent a distinction
+        the reading cannot support."""
+        toon = self._toon({("toon_up", None): 1})
+        values = [a for k, a in unites.candidates(toon) if k == "toon_up"]
+        self.assertGreater(len(values), 1)
+
+    def test_holding_none_of_a_kind_offers_none_of_it(self):
+        toon = self._toon({("gag_up", "lure"): 1})
+        self.assertEqual(
+            [c for c in unites.candidates(toon) if c[0] == "toon_up"], [])
+
+    def test_an_empty_stock_means_unknown_and_permits_everything(self):
+        """Every offline harness supplies a count and no kinds.
+        Filtering those to nothing would silence the feature wherever
+        it is measured."""
+        toon = self._toon({})
+        kinds = {c[0] for c in unites.candidates(toon)}
+        self.assertEqual(kinds, {"toon_up", "gag_up"})
+
+    def test_using_one_takes_it_from_the_stock(self):
+        toon = self._toon({("gag_up", "lure"): 2, ("toon_up", None): 1})
+        unites.apply(toon, ("toon_up", 20))
+        self.assertEqual(toon.unite_stock[("toon_up", None)], 0)
+        self.assertEqual(toon.unite_stock[("gag_up", "lure")], 2)
+
+    def test_a_gag_up_takes_from_its_own_track(self):
+        toon = self._toon({("gag_up", "lure"): 2, ("gag_up", "throw"): 1})
+        unites.apply(toon, ("gag_up", Track.LURE))
+        self.assertEqual(toon.unite_stock[("gag_up", "lure")], 1)
+        self.assertEqual(toon.unite_stock[("gag_up", "throw")], 1)
+
+    def test_spending_is_copy_on_write(self):
+        """`clone` SHARES this dict. Mutating it in place is the bug
+        that once grew a Trap pouch from 25 to 51 with no unite used --
+        every discarded search candidate spent from the real toon."""
+        from solver import data
+        from solver.state import BattleState, CogState
+        hp = data.cog_max_hp(3)
+        state = BattleState(
+            toon=self._toon({("toon_up", None): 3}),
+            cogs=[CogState(department="sellbot", cog_type="cold_caller",
+                           level=3, hp=hp, max_hp=hp)])
+        before = dict(state.toon.unite_stock)
+        probe = state.clone()
+        unites.apply(probe.toons[0], ("toon_up", 50))
+        self.assertEqual(dict(state.toon.unite_stock), before)
+        self.assertEqual(probe.toons[0].unite_stock[("toon_up", None)], 2)
+
+    def test_the_key_matches_what_candidates_yields(self):
+        """If these drift, a unite is offered and then not spent."""
+        toon = self._toon({("toon_up", None): 1, ("gag_up", "lure"): 1,
+                           ("gag_up", None): 1})
+        for choice in unites.candidates(toon):
+            with self.subTest(choice=choice):
+                self.assertIn(unites.stock_key(choice), toon.unite_stock)

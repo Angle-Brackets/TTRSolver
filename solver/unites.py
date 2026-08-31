@@ -192,6 +192,7 @@ def apply_toon_up(toon, value: int) -> int:
     toon.laff = min(toon.max_laff, toon.laff + restored)
     toon.unite_cooldown = COOLDOWN_ROUNDS
     toon.unites_held = max(0, getattr(toon, "unites_held", 0) - 1)
+    _spend_stock(toon, ("toon_up", value))
     return restored
 
 
@@ -298,6 +299,7 @@ def apply_gag_up(toon, track=None) -> int:
                 else GAG_UP_SINGLE_TRACK_MAX))
     toon.unite_cooldown = COOLDOWN_ROUNDS
     toon.unites_held = max(0, getattr(toon, "unites_held", 0) - 1)
+    _spend_stock(toon, ("gag_up", track))
     return added
 
 
@@ -318,6 +320,53 @@ def available(toon) -> bool:
     """
     return (getattr(toon, "unite_cooldown", 0) <= 0
             and getattr(toon, "unites_held", 0) > 0)
+
+
+def stock_key(choice) -> tuple:
+    """The `ToonState.unite_stock` key a `candidates` pair spends.
+
+    A Toon-Up keys on the KIND ALONE, deliberately. The wire says how
+    many Toon-Up unites are held but not of which value, and the values
+    a build offers are its own -- Realms carries a category TTR does not
+    -- so keying on the number would invent a distinction the reading
+    cannot support. A Gag-Up keys on its track, which the wire does give
+    exactly.
+    """
+    kind, arg = choice
+    if kind == "gag_up":
+        return (kind, getattr(arg, "value", arg))
+    return (kind, None)
+
+
+def in_stock(toon, choice) -> bool:
+    """Does this toon hold the unite `choice` needs?
+
+    An EMPTY stock means unknown rather than none -- see
+    `ToonState.unite_stock` -- so it permits everything, and
+    `unites_held` remains the gate that says whether any unite exists.
+    """
+    stock = getattr(toon, "unite_stock", None)
+    if not stock:
+        return True
+    return stock.get(stock_key(choice), 0) > 0
+
+
+def _spend_stock(toon, choice) -> None:
+    """Take one from the stock, COPY-ON-WRITE.
+
+    `clone` shares this dict, so mutating it in place would spend a
+    real pouch from a discarded search candidate -- the aliasing bug
+    that once grew a Trap pouch from 25 to 51 with no unite used.
+    """
+    stock = getattr(toon, "unite_stock", None)
+    if not stock:
+        return
+    key = stock_key(choice)
+    if key not in stock:
+        return
+    fresh = dict(stock)
+    fresh[key] = max(0, fresh[key] - 1)
+    toon.unite_stock = fresh
 
 
 def candidates(toon):
@@ -381,7 +430,11 @@ def candidates(toon):
             room += max(0, cap - toon.gag_counts.get((track, level), 0))
         if room >= GAG_UP_SINGLE_TRACK_MAX:
             out.append(("gag_up", track))
-    return out
+    # WHAT IS ACTUALLY HELD, when the reading says. A toon carrying only
+    # a Lure restock was still offered a Squirt one, because a single
+    # `unites_held` count cannot tell them apart; `unite_stock` can, and
+    # an empty stock still permits everything.
+    return [c for c in out if in_stock(toon, c)]
 
 
 def apply(toon, choice) -> int:

@@ -120,6 +120,22 @@ class ToonState:
     # which is `CARRY_LIMIT`.
     unites_held: int = 0
 
+    # WHICH unites are held, when that is known: {(kind, track): count},
+    # where kind is "toon_up" or "gag_up" and track is the track slug or
+    # None for a Toon-Up and for the all-tracks Gag-Up.
+    #
+    # EMPTY MEANS UNKNOWN, NOT NONE, and that is the one place here the
+    # default is permissive. `unites_held` is the deny -- it is 0 unless
+    # something read a pouch -- so an empty stock beside a nonzero total
+    # can only mean "N unites, kind unrecorded", which is what every
+    # offline harness supplies. Filtering those to nothing would silence
+    # the feature everywhere it is measured.
+    #
+    # Mutated COPY-ON-WRITE, never in place: `clone` shares this dict
+    # the way it shares `gag_counts`, and mutating it in place is the
+    # bug that once restocked a real pouch from a discarded candidate.
+    unite_stock: Dict[tuple, int] = field(default_factory=dict)
+
     # SOS cards held, by SOS Toon name. [CONFIRMED] wiki: up to 100 of
     # each. Empty by default, which is what keeps every existing
     # position unchanged -- an SOS is only ever a legal action for a
@@ -556,6 +572,7 @@ class BattleState:
                 unite_cooldown=t.unite_cooldown,
                 # SPENT, so carried -- see the note on `fires` below.
                 unites_held=t.unites_held,
+                unite_stock=t.unite_stock,
                 sos_cards=t.sos_cards,
                 # Pink slips are SPENT, so they must be carried. Omitting
                 # this defaulted every clone to zero and the fires simply

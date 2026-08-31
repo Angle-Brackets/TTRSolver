@@ -246,9 +246,24 @@ def toon_from_object(obj, max_fires: int = 0, max_unites: int = 0,
     # `realms.gag_up_tracks` decodes the finer answer and nothing
     # consumes it, because `ToonState.unites_held` is an int.
     if max_unites:
-        held = realms_mod.battle_unites(obj.get("setResistanceMessages"))
+        messages = obj.get("setResistanceMessages")
+        held = realms_mod.battle_unites(messages)
         if held:
             toon.unites_held = min(held, int(max_unites))
+            # WHICH ones, so a toon carrying only a Lure restock is not
+            # offered a Squirt one. Toon-Up keys on the kind alone --
+            # the wire gives a count per value but the values are the
+            # build's own, and Realms is not TTR -- while Gag-Up keys on
+            # the track, which the menu names exactly.
+            by_kind = realms_mod.parse_resistance(messages) or {}
+            stock = {}
+            if by_kind.get("toon_up"):
+                stock[("toon_up", None)] = by_kind["toon_up"]
+            for track, count in (realms_mod.gag_up_tracks(messages)
+                                 or {}).items():
+                if count > 0:
+                    stock[("gag_up", track)] = count
+            toon.unite_stock = stock
 
     # SOS CARDS. `setNPCFriendsDict` names them exactly, so unlike the
     # unites this loses nothing. The cap limits how many CALLS the

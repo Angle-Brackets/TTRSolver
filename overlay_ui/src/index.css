@@ -8,14 +8,14 @@
   name: "ttr";
   default: true;
   color-scheme: dark;
-  --color-base-100: oklch(16% 0.012 258);
-  --color-base-200: oklch(20% 0.014 258);
-  --color-base-300: oklch(26% 0.016 258);
-  --color-base-content: oklch(93% 0.008 258);
-  --color-primary: oklch(64% 0.13 232);
+  --color-base-100: oklch(14% 0.012 258);
+  --color-base-200: oklch(18% 0.014 258);
+  --color-base-300: oklch(24% 0.016 258);
+  --color-base-content: oklch(95% 0.008 258);
+  --color-primary: oklch(66% 0.14 232);
   --color-primary-content: oklch(98% 0.01 232);
   --color-success: oklch(76% 0.15 158);
-  --color-warning: oklch(80% 0.13 76);
+  --color-warning: oklch(82% 0.14 76);
   --color-error: oklch(66% 0.18 22);
   --radius-box: 0.75rem;
   --radius-field: 0.5rem;
@@ -27,25 +27,62 @@ html, body { height: 100%; }
    viewport back to itself -- so the window could grow and never shrink.
    The background is painted on body instead, so a window briefly taller
    than its content still looks right. */
-body { font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
-       background: var(--color-base-100); }
+body {
+  font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  background: var(--color-base-100);
+}
 
 /* Track accents. Chosen for contrast on this background and NOT taken
    from the game -- TTR's gag menu palette is not confirmed anywhere in
    this project. */
-.track-toon_up { --accent: #e08ac4; }
-.track-trap    { --accent: #e8834a; }
-.track-lure    { --accent: #6fc96f; }
-.track-sound   { --accent: #5ba8e8; }
-.track-throw   { --accent: #e8c34a; }
-.track-squirt  { --accent: #4fcdd6; }
-.track-drop    { --accent: #9b8ee8; }
-.track-none    { --accent: oklch(45% 0.02 258); }
+.track-toon_up { --accent: #e08ac4; --accent-glow: rgba(224, 138, 196, 0.25); }
+.track-trap    { --accent: #e8834a; --accent-glow: rgba(232, 131, 74, 0.25); }
+.track-lure    { --accent: #6fc96f; --accent-glow: rgba(111, 201, 111, 0.25); }
+.track-sound   { --accent: #5ba8e8; --accent-glow: rgba(91, 168, 232, 0.25); }
+.track-throw   { --accent: #e8c34a; --accent-glow: rgba(232, 195, 74, 0.25); }
+.track-squirt  { --accent: #4fcdd6; --accent-glow: rgba(79, 205, 214, 0.25); }
+.track-drop    { --accent: #9b8ee8; --accent-glow: rgba(155, 142, 232, 0.25); }
+.track-none    { --accent: oklch(45% 0.02 258); --accent-glow: rgba(255, 255, 255, 0.05); }
 
-/* The two SENTINEL tracks. Neither is a gag track, and both were
-   missing here, so `var(--accent)` resolved to nothing: the left rail
-   painted transparent and the eyebrow lost its colour. Keyed to their
-   own art rather than to a gag -- pink for the slip, the card orange
-   for an SOS. */
-.track-fire    { --accent: #f06fa8; }
-.track-sos     { --accent: #e8873a; }
+/* The two SENTINEL tracks. Neither is a gag track. Pink for slip, orange/amber for SOS. */
+.track-fire    { --accent: #f06fa8; --accent-glow: rgba(240, 111, 168, 0.35); }
+.track-sos     { --accent: #f59e0b; --accent-glow: rgba(245, 158, 11, 0.35); }
+
+/* Card glow and border helper */
+.card-track-glow {
+  border-left: 3px solid var(--accent);
+  box-shadow: inset 0 0 20px -5px var(--accent-glow), 0 4px 12px -2px rgba(0, 0, 0, 0.4);
+}
+
+/* Target Cog Highlighting animation & styling */
+@keyframes target-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 1px rgba(232, 195, 74, 0.8), 0 0 12px 2px rgba(232, 195, 74, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 0 1px rgba(232, 195, 74, 1), 0 0 18px 4px rgba(232, 195, 74, 0.5);
+  }
+}
+
+.cog-target-highlight {
+  animation: target-pulse 2s infinite ease-in-out;
+  background-color: rgba(232, 195, 74, 0.07) !important;
+  border-radius: 0.5rem;
+}
+
+/* Custom scrollbar for CogPicker and dropdowns */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.35);
+}
+

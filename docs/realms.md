@@ -274,10 +274,27 @@ captured toon that is 12985 against a grand total of 21973, so counting
 everything would have inflated the pouch by two thirds with unites no
 battle can spend.
 
-One gap remains, and it is now a modelling choice rather than a missing
-reading: `ToonState.unites_held` is a single int, so the search cannot
-ask "do I hold a Lure restock". `realms.gag_up_tracks` decodes that
-answer already and nothing consumes it.
+That gap is closed. `ToonState.unite_stock` holds
+`{(kind, track): count}` and `unites.candidates` filters on it, so a
+toon carrying only a Lure restock is no longer offered a Squirt one.
+Gag-Up All is a separate menu item and keys separately: holding seven
+single-track restocks does not grant it.
+
+A Toon-Up keys on the KIND ALONE. The wire counts them per value, but
+the values a build offers are its own -- Realms carries a category TTR
+does not -- so keying on the number would invent a distinction the
+reading cannot support.
+
+**An empty stock means unknown, not none**, and that is the one
+permissive default here. `unites_held` is the deny: it is 0 unless
+something read a pouch, so an empty stock beside a nonzero count can
+only mean "N unites, kind unrecorded", which is what every offline
+harness supplies. Filtering those to nothing would silence the feature
+wherever it is measured.
+
+Spending is COPY-ON-WRITE. `clone` shares the dict the way it shares
+`gag_counts`, and mutating it in place is the aliasing bug that once
+grew a Trap pouch from 25 to 51 with no unite used.
 
 ### The caps
 
