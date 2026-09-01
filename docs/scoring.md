@@ -584,3 +584,39 @@ the remaining headroom is thin.
 Difficulty 9 is where it matters most -- worst 0.755 against best 0.991
 -- and where the scorer is least sharp (rho +0.545, 6 of 94 positions
 wrong). If effort goes anywhere, it goes there.
+
+## `survive` re-run on realistic toons: 400 holds
+
+The last of the three weights still resting on maxed-toon measurement.
+Re-run the way `FIRE_FLOOR` and `SOS_PRICE` were -- on the toons
+`facility_position` actually builds, mean training 4.65 and 4.71,
+parties of two to four matched to their street, 250 runs a cell, paired
+on seeds:
+
+| survive | block A | block B |
+|---|---|---|
+| 0 | 77.6% | 74.4% |
+| 100 | 81.6% (+12/-2, p=0.013) | — |
+| 200 | 86.0% (+21/-0, p<0.001) | 84.4% (+25/-0, p<0.001) |
+| **400** | **87.2% (+25/-1)** | **84.0% (+25/-1)** |
+| 800 | 87.2% (+26/-2) | 84.8% (+26/-0) |
+
+Monotone to 200 and flat after, on both blocks -- the same shape the
+maxed-toon sweep found. 400 sits mid-plateau and stands.
+
+All three weights flagged as maxed-toon-dependent have now been re-run
+and all three held. The bias was real as a limitation of method and
+changed none of the values.
+
+### The re-run found a crash, which is the better result
+
+The first held-out attempt died with `no gag at trap level None` from
+`_apply_trap_trigger`. An SOS trap sets `trap_damage` and leaves
+`trap_level` None -- a card's 60/120/180 is not a gag level -- and
+`CogStatus.copy` carried `trapped` but not the damage, so a cloned cog
+was still marked trapped with both fields None.
+
+Every search clones, so it fired in play while no test saw it: the tests
+all sprang the trap on the original state. Third instance of this exact
+omission, after `fires` in `ToonState.clone` and `suited` in the same
+copy function.
