@@ -99,7 +99,15 @@ import random
 from pathlib import Path
 from typing import List, Mapping, Optional, Sequence
 
-from ..state import Action, BattleState
+from .. import data
+from .. import mechanics
+from .. import party as party_mod
+from .. import sos as sos_mod
+from .. import unites as unites_mod
+from ..rl import env as env_mod
+from ..state import Action, BattleState, Track
+from . import objective as objective_mod
+from . import party_search
 
 # How much of the follow-up round counts when `judge="deep"`. Less than
 # one because the second round is played by a greedy stand-in rather
@@ -138,7 +146,6 @@ def _load():
         _REASON = f"{_EXPORT.name} could not be read: {exc}"
         return None
 
-    from ..rl import env as env_mod
     mismatch = env_mod.check_export(payload)
     if mismatch:
         # Trained against a different observation or action table. A
@@ -195,7 +202,6 @@ def _logits(model, state: BattleState, seat: int, pending,
             reject=None):
     import numpy as np
 
-    from ..rl import env as env_mod
 
     # A policy exported before the slip feature changed scale must be
     # fed the layout it was fitted to. Absent key means version 1, the
@@ -253,7 +259,6 @@ def propose(state: BattleState, rng, sample: bool = True,
     a mapping rather than a list because `None` already means "pass" in
     a plan, and a pinned pass and an open seat are not the same thing.
     """
-    from ..rl import env as env_mod
 
     model = _load()
     if model is None:
@@ -332,8 +337,6 @@ def rollout_judge(state: BattleState, plan, seed: int, depth: int = 3,
     view pushes where it should. What is refuted is asking the policy to
     grade itself.
     """
-    from .. import party as party_mod
-    from . import objective as objective_mod
     from . import party_search as ps
 
     objective = objective or objective_mod.BALANCED
@@ -402,8 +405,6 @@ def _judge(state: BattleState, plan, deep: bool) -> float:
     track probes -2.8, this -2.8. Plain one-ply `_quick_score` at budget
     8 has beaten all of them.
     """
-    from .. import party as party_mod
-    from . import objective as objective_mod
     from . import party_search as ps
 
     first = ps._quick_score(state, plan)
@@ -622,8 +623,6 @@ def _sos_probes(state, seat: int):
     held = getattr(state.toons[seat], "sos_cards", None)
     if not held:
         return []
-    from ..state import Action
-    from .. import sos as sos_mod
     return [Action(track=None, sos=name)
             for name, count in held.items()
             if count > 0 and name in sos_mod.BY_NAME]
@@ -639,8 +638,6 @@ def _cheapest_lures(state, seat: int, legal=None):
     Skipped when every live cog is already lured -- there is nothing to
     put to sleep, and `legal_actions` has its own view on that.
     """
-    from ..rl import env as env_mod
-    from ..state import Track
 
     live = [c for c in state.cogs if not c.status.is_dead]
     if not live or all(c.status.lured for c in live):
@@ -670,9 +667,6 @@ def _cheapest_kills(state, seat: int, legal=None):
     it" does not apply -- and so is a lured target, where knockback
     changes the arithmetic this is deliberately not trying to model.
     """
-    from .. import mechanics
-    from ..rl import env as env_mod
-    from ..state import Track
 
     if not PROBE_CHEAPEST_KILL or seat >= len(state.toons):
         return []
@@ -734,8 +728,6 @@ def _wastes_a_drop(state, plan) -> bool:
     Drop arrives, and Drop-behind-Lure is then a real play rather than a
     wasted Piano. Only Drops with no such partner are rejected.
     """
-    from .. import data
-    from ..state import Track
 
     live = {i for i, c in enumerate(state.cogs) if not c.status.is_dead}
     if not live:
@@ -803,7 +795,6 @@ def _track_key(entry):
     seven, and in practice far fewer, because a toon holding no group
     gag in a track contributes one entry for it as before.
     """
-    from .. import data
 
     if not GROUP_PROBES:
         return entry.track
@@ -910,7 +901,6 @@ def _menu_is_degenerate(order, values) -> bool:
     """Is every candidate in the top-k the same kind of move?"""
     import numpy as np
 
-    from ..rl import env as env_mod
 
     if not PROBE_WHEN_DEGENERATE:
         return False
@@ -1151,7 +1141,6 @@ def climb(state: BattleState, rng=random, budget: int = 16,
 
     import numpy as np
 
-    from ..rl import env as env_mod
     from . import party_search as ps
 
     if not available():
@@ -1173,8 +1162,7 @@ def climb(state: BattleState, rng=random, budget: int = 16,
     # that uses one has to beat the plan that does not BY MORE than the
     # price, not merely beat it.
     if OFFER_UNITES and allow_unites and not fixed and state.toons:
-        from .. import unites as unites_mod
-
+    
         def _value_of(st):
             inner = climb(st, rng, budget=budget, width=width,
                           probe_tracks=probe_tracks, deep=deep,

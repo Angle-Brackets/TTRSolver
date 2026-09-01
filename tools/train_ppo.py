@@ -642,6 +642,28 @@ def main():
         # misreads its input, because OBS_DIM does not move when a
         # slot's scale does. See `env.OBS_VERSION`.
         "obs_version": env_mod.OBS_VERSION,
+        # THE REWARD THIS WAS TRAINED AGAINST. Without it a shipped
+        # policy cannot be told apart from one trained with different
+        # shaping, and the question "was the reward coupled to
+        # `_quick_score`?" has no answer from the artifact -- it had to
+        # be reasoned from the defaults instead, which is not evidence.
+        #
+        # All of these default to 0.0, so a plain run records zeros and
+        # says so, which is the point: silence and "off" stop looking
+        # alike.
+        "reward": {
+            "precision": args.precision,
+            "fire_cost": args.fire_cost,
+            "shaping": args.shaping,
+            "survival_shaping": args.survival_shaping,
+            "gamma": args.gamma,
+            "objective": args.objective,
+        },
+        "training": {
+            "steps": args.steps,
+            "seed": args.seed,
+            "hidden": args.hidden,
+        },
     }
     Path(args.export).write_text(json.dumps(payload), encoding="utf-8")
     print(f"  exported to {args.export} "

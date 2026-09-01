@@ -103,3 +103,37 @@ class EverythingMovedTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OptionalNumpyTest(unittest.TestCase):
+    """Hoisting imports must not drag numpy into the solver.
+
+    `solver/` runs on the standard library alone -- `live/vision.py` is
+    the documented exception. `hybrid` uses numpy and keeps those six
+    imports FUNCTION-LOCAL for exactly that reason, while its twenty
+    solver-module imports were hoisted.
+    """
+
+    def test_importing_the_solver_does_not_need_numpy(self):
+        import subprocess
+        import sys
+        code = (
+            "import sys\n"
+            "import solver.search.hybrid, solver.search.party_search\n"
+            "import solver.search.weights, solver.rl.env, solver.live\n"
+            "bad = [m for m in sys.modules if m.split('.')[0] in "
+            "('numpy', 'panda3d', 'torch')]\n"
+            "print(','.join(sorted(bad)))\n")
+        out = subprocess.run([sys.executable, "-c", code],
+                             capture_output=True, text=True, cwd=".")
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertEqual(out.stdout.strip(), "",
+                         "an optional dependency reached the import path")
+
+    def test_hybrid_still_defers_numpy(self):
+        source = pathlib.Path("solver/search/hybrid.py").read_text(
+            encoding="utf-8")
+        for line in source.split("\n"):
+            if "import numpy" in line:
+                self.assertTrue(line.startswith((" ", "\t")),
+                                "numpy must stay function-local: " + line)
