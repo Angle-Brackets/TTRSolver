@@ -43,6 +43,11 @@ from typing import List, Optional
 from .overlay import ADVICE_LINGER, CogRow, Model
 from .panel import DIST, PULL_INTERVAL_MS, model_json
 
+# Evaluations `hybrid.climb` may spend per answer. See the call site for
+# the measurement; the short version is that the old 8 was starving the
+# probes and cost about ten points of win rate for five milliseconds.
+PANEL_BUDGET = 24
+
 POLL_INTERVAL = 0.4
 
 # Realms sends a field the moment it changes, so unlike the screen
@@ -615,7 +620,21 @@ class RealmsWorker(threading.Thread):
             from ..search import hybrid
 
             hybrid.LAST_UNITE = None
-            plan = hybrid.climb(state, random.Random(0), budget=8,
+            # BUDGET 24, not 8. Eight was below `climb`'s own default
+            # of 16 with nothing justifying it, and it starved the
+            # targeted probes: they are appended after the track sweep,
+            # so at 8 they are never evaluated and `PROBE_CHEAPEST_KILL`
+            # was dead in live play.
+            #
+            # Measured on the sampler's own parties, 250 runs a cell on
+            # two seed blocks: 88.8% -> 98.4% and 85.2% -> 99.2%,
+            # +24/-0 and +35/-0 paired, p<0.001 both. It also spends
+            # FEWER slips (18.4 -> 14.5), because the cheap-kill probe
+            # finally gets to offer the gag that does the job.
+            #
+            # It costs 5 milliseconds. Warm latency is 1.9ms at 8 and
+            # 7ms at 24, against a poll interval measured in hundreds.
+            plan = hybrid.climb(state, random.Random(0), budget=PANEL_BUDGET,
                                 reject=frozenset(self._rejected))
             # The unite `climb` chose, if any, for the line above the
             # advice. Read straight after the call because it is a

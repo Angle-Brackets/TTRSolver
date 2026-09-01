@@ -436,3 +436,38 @@ above these are PARTY runs. Slips read about 17 a run because each of
 two to four toons carries five, not because anything restocks --
 `_next_floor` clones the state, so the pouch, laff and slips all carry
 across floors.
+
+## The panel's search budget was the single biggest defect
+
+`climb`'s own default is 16. The panel passed **8**, below it, with
+nothing in the code justifying the number. That is what starved the
+targeted probes: they are appended after the track sweep, so at 8 they
+are never evaluated, and `PROBE_CHEAPEST_KILL` was dead in live play --
+recorded above as "a budget problem" and left there.
+
+Measured on the sampler's own parties, 250 runs a cell, two seed blocks,
+paired on seeds:
+
+| budget | block A win | block B win | slips/run | warm latency |
+|---|---|---|---|---|
+| 8 | 88.8% | 85.2% | 18.4 | 1.9 ms |
+| 16 | — | 95.6% (+27/-1) | 17.7 | 2.7 ms |
+| 20 | 98.4% (+24/-0) | 98.4% (+33/-0) | 16.0 | 5.0 ms |
+| **24** | — | **99.2% (+35/-0)** | **14.5** | **7 ms** |
+| 30 | 98.4% | — | 13.0 | 8.6 ms |
+
+Fourteen points of win rate, p<0.001 on both blocks, and it spends
+FEWER slips -- 18.4 down to 14.5 -- because the cheap-kill probe finally
+gets to offer the gag that does the job instead of a level 7 group gag.
+The cost is five milliseconds against a poll interval measured in
+hundreds.
+
+`PANEL_BUDGET = 24`, mid-plateau: 20 through 30 all read 98-99%, and
+both blocks are monotone up to it with a mechanism that explains why.
+
+`tools/paired_confirm.py` and `tools/sweep_weight.py` passed 8 as well
+and now pass 24, so a future sweep measures the configuration that
+ships rather than one nobody runs. **Every number recorded above this
+section was measured at budget 8** and is a lower bound on what the
+panel now does; the weights were compared against each other at a fixed
+budget, so their ORDERING stands, but the absolute win rates do not.

@@ -45,7 +45,7 @@ def play(seed):
         guard += 1
         if e.rounds != seen:
             seen = e.rounds
-            plan = hybrid.climb(e.state, rng, budget=8)
+            plan = hybrid.climb(e.state, rng, budget=24)
         a = plan[e.actor] if plan and e.actor < len(plan) else None
         idx = env_mod.PASS_INDEX
         if a is not None and not a.is_pass:

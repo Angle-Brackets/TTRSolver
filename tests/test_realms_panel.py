@@ -704,3 +704,49 @@ class ConsumableReadingTest(unittest.TestCase):
                 "Clerk Clara", "Flippy", "Daffy Don", "Madam Chuckle",
                 "Soggy Bottom", "Julius Wheezer"]
         self.assertEqual([n for n in held if n not in sos_mod.BY_NAME], [])
+
+
+class PanelBudgetTest(unittest.TestCase):
+    """The panel's search budget.
+
+    Eight was below `climb`'s own default of 16, with nothing
+    justifying it, and it starved the targeted probes -- they are
+    appended after the track sweep, so at 8 they are never reached and
+    `PROBE_CHEAPEST_KILL` was dead in live play.
+    """
+
+    def test_it_is_at_least_the_library_default(self):
+        import inspect
+        from solver.search import hybrid
+        default = inspect.signature(hybrid.climb).parameters["budget"].default
+        self.assertGreaterEqual(realms_panel.PANEL_BUDGET, default)
+
+    def test_it_is_the_measured_value(self):
+        """250 runs a cell on two seed blocks: 88.8% -> 98.4% and
+        85.2% -> 99.2%, +24/-0 and +35/-0 paired."""
+        self.assertEqual(realms_panel.PANEL_BUDGET, 24)
+
+    def test_the_probes_are_reachable_at_it(self):
+        """The point of raising it. At 8 the cheap-lure probe changed
+        nothing on the reported trapped board; it needs the budget to
+        get evaluated at all."""
+        import random
+        from solver import data
+        from solver.search import hybrid
+        from solver.state import BattleState, CogState, ToonState, Track
+        hp = data.cog_max_hp(5)
+        cog = CogState(department="lawbot", cog_type="ambulance_chaser",
+                       level=5, hp=hp, max_hp=hp)
+        cog.status.trapped = True
+        cog.status.trap_level = 5
+        counts = {(Track.LURE, lv): 5 for lv in range(1, 8)}
+        for track in (Track.THROW, Track.SQUIRT, Track.SOUND, Track.DROP):
+            for level in range(1, 8):
+                counts[(track, level)] = 5
+        toon = ToonState(80, 137, {t: 7 for t in Track}, counts,
+                         frozenset({Track.THROW}), pouch_capacity=80)
+        state = BattleState(toon=toon, cogs=[cog])
+        plan = hybrid.climb(state, random.Random(0),
+                            budget=realms_panel.PANEL_BUDGET)
+        self.assertEqual(plan[0].track, Track.LURE)
+        self.assertIsNotNone(plan[0].target_index)
