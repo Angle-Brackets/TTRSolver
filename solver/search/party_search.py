@@ -51,12 +51,18 @@ import itertools
 import random
 from typing import Dict, List, Optional, Sequence, Tuple
 
+from .. import data
+from .. import mechanics
+from .. import outcomes as outcomes_mod
 from .. import party as party_mod
 from .. import simulator
+from .. import sos as sos_mod
 from ..party import Mode, TeammateModel
 from ..data import gags as gags_mod
+from ..data.gags import POUCH_EXEMPT_LEVEL
 from ..state import Action, BattleState, Track
 from . import expectimax
+from . import features as features_mod
 from . import objective as objective_mod
 from . import policy
 
@@ -669,7 +675,6 @@ def plans(state: BattleState, mode: Mode = Mode.PICKUP,
     # behaviour rather than to silence.
     scores = None
     if USE_POLICY and policy.available():
-        from . import features as features_mod
 
         try:
             scores = policy.rank(state, playable,
@@ -825,7 +830,6 @@ def remaining_hp(cog) -> int:
 
 def _cog_threat(cog) -> float:
     """Expected damage one cog deals in a round, if it is awake."""
-    from .. import outcomes as outcomes_mod
 
     return sum(p * dmg for p, _name, dmg, hit
                in outcomes_mod.cog_attack_outcomes(cog) if hit)
@@ -1219,7 +1223,6 @@ def toons_at_risk(state: BattleState) -> float:
     luring visibly lowers the count and the scorer can finally see that
     it does.
     """
-    from .. import outcomes as outcomes_mod
 
     standing = [t for t in state.toons if t.laff > 0]
     if not standing:
@@ -1256,8 +1259,6 @@ def armed_credit(before: BattleState, after: BattleState) -> float:
     attacking that cog directly; here the plan has already been played
     and the question is only what the board is now worth.
     """
-    from .. import data
-    from .. import mechanics
 
     holds_lure = any(key[0] == Track.LURE and count > 0
                      for toon in after.toons if toon.laff > 0
@@ -1465,7 +1466,6 @@ def _score_leaf(state: BattleState, plan, hits, record=None,
     `objective`, when given, adds `waste_penalty` on top of the fixed
     `QUICK_W` terms. See `_quick_score`.
     """
-    from .. import data
 
     probe = state.clone()
     try:
@@ -1517,7 +1517,6 @@ def _score_leaf(state: BattleState, plan, hits, record=None,
     sos_calls = sum(1 for a in plan
                     if a is not None and getattr(a, "sos", None))
     if sos_calls:
-        from .. import sos as sos_mod
         price += sos_mod.SOS_PRICE * sos_calls
     return (landed
             + QUICK_W["heal"] * restored
@@ -1679,7 +1678,6 @@ def _playable(state: BattleState, plan) -> bool:
     gag can land on a toon who has none left -- or twice on a toon
     holding one.
     """
-    from .. import data
 
     # Everyone holding is legal but cannot win, and it is the one plan a
     # rollout can spin on. Nothing restocks a pouch, so a round where
@@ -1837,8 +1835,6 @@ def plan_waste(state: BattleState, plan) -> Tuple[float, float]:
     *choice* rather than the dice. Throwing a Railroad at a nearly-dead
     cog is the same decision whether or not it hits.
     """
-    from .. import data
-    from .. import mechanics
 
     live = [(i, cog) for i, cog in enumerate(state.cogs)
             if not cog.status.is_dead]
@@ -1984,7 +1980,6 @@ def round_reward(objective, laff_lost: int, spent, won: bool,
     the solo search uses, so a party line and a solo line are at least
     denominated in the same units.
     """
-    from ..data.gags import POUCH_EXEMPT_LEVEL
 
     reward = -objective.laff_weight * float(laff_lost)
     for entry in spent:
@@ -2149,8 +2144,6 @@ def _cheap_score(state: BattleState, index: int, action: Action) -> float:
     scoring zero for dealing no damage, which is the mistake that would
     quietly delete the Lure strategies again.
     """
-    from .. import data
-    from .. import mechanics
 
     live = [cog for cog in state.cogs if not cog.status.is_dead]
     if not live:
@@ -2468,8 +2461,7 @@ def evaluate(state: BattleState, depth: int = 1,
         return 0.0, None
     if depth <= 0:
         if leaf == "learned":
-            from . import features as features_mod
-
+    
             learned = policy.value(state, features_mod.extract(state))
             if learned is not None:
                 return learned, None
