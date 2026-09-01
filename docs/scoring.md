@@ -620,3 +620,58 @@ Every search clones, so it fired in play while no test saw it: the tests
 all sprang the trap on the original state. Third instance of this exact
 omission, after `fires` in `ToonState.clone` and `suited` in the same
 copy function.
+
+## What the scorer gets wrong at difficulty 9, and why it stays wrong
+
+The corrected ranker study left one lead: difficulty 9 is where the
+stakes are real (worst candidate 0.755 against best 0.991) and where
+`_quick_score` is least sharp (rho +0.545, wrong on 6 of 94).
+
+**All six misses are the same mistake.** On a fresh board -- 3 or 4
+cogs, none lured, none trapped -- it takes a long group Lure where the
+outcomes prefer group Sound:
+
+| seed | scorer picked | won | MC-best | won | score gap |
+|---|---|---|---|---|---|
+| 770015 | Presentation/all | 0.88 | Railroad/all | 0.94 | +1042.6 |
+| 770032 | Presentation/all | 0.94 | Railroad/all | 1.00 | +918.8 |
+| 770059 | Presentation/all | 0.94 | Railroad/all | 1.00 | +1049.1 |
+| 770091 | Presentation/all | 0.94 | Railroad/all | 1.00 | +1072.6 |
+| 770104 | Wedding Cake/all | 0.94 | Railroad/all | 1.00 | +706.1 |
+| 770110 | Presentation/all | 0.94 | Railroad/all | 1.00 | +914.9 |
+
+Decomposed on seed 770032 (four cogs, levels 10/9/11/10):
+
+    Presentation/all   0 damage, 0 kills, prevented 144.7 x 9.0 = 1301.9
+                       total 1898.5
+    Railroad/all     360 damage, 0 kills, prevented   0.0        =    0.0
+                       total 1003.7
+
+So it is `QUICK_W["prevent"] = 9.0`: a point of prevented damage is
+worth nine of dealt damage, and an eight-round group Lure on four cogs
+prevents a great deal.
+
+### THE OBVIOUS FIX IS WRONG, MEASURED
+
+Lowering the weight makes the ranker much worse, not better:
+
+| prevent | rho | picked the best | captures |
+|---|---|---|---|
+| 4 | +0.269 | 49/99 (49%) | 38% |
+| 6 | +0.418 | 69/96 (72%) | 80% |
+| **9** | **+0.545** | **88/94 (94%)** | **96%** |
+| 12 | +0.516 | 91/97 (94%) | 97% |
+| 18 | +0.514 | 92/98 (94%) | 97% |
+| 30 | +0.478 | 94/99 (95%) | 97% |
+
+9.0 sits at the bottom edge of a broad plateau. Below it the ranker
+falls apart -- regret quadruples from 0.004 to 0.073 at 4.0 -- and above
+it nothing improves. The six misses are the irreducible residual of a
+weight that is right, not evidence that it is wrong.
+
+That also fits its provenance: 9.0 was swept and confirmed on untouched
+seeds, taking the CEO from 9.0% to 54.0% at zero leftovers
+(+96/-6, p<0.0001), the largest confirmed effect in this project.
+
+**Nothing changed.** The lead is closed: the residual is worth 0.004 of
+win rate and every way of chasing it costs more.
