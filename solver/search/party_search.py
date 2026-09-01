@@ -100,53 +100,6 @@ SAMPLES = 8
 # results were almost entirely discarded by the truncation.
 SCORE_BUDGET = 40
 
-# Whether the trained policy ranks the candidate pool. OFF, and the
-# measurement is why.
-#
-# The policy is a better RANKER than the arithmetic -- regret@6 of 3.22
-# against 9.93 on 375 held-out positions, with random at 12.09. But
-# wired in here it made the search WORSE: over four seeds on a real
-# battered-party position, mean +88.39 against +89.72 with it off, and
-# a 50% slower shortlist build.
-#
-# The reason is a wiring mistake rather than a bad model. The policy
-# currently only decides which plans enter the pool that `_quick_score`
-# then ranks, and the final `max_plans` cut is made on `_quick_score`
-# alone -- so the policy's ordering is computed and then discarded. All
-# the union achieves at that point is to displace plans the arithmetic
-# would have picked with plans it rates lower, which is exactly the
-# regression observed.
-#
-# The wiring bug IS fixed -- the policy score now orders plans within a
-# stratum as well as choosing bucket membership, so it reaches the final
-# cut. It still loses, at every width tried:
-#
-#     width   policy OFF   policy ON
-#         8      +88.06      +87.29
-#        16      +89.34      +87.29
-#        30      +89.34      +87.29
-#        60      +89.72      +88.29
-#
-# So the model, not the plumbing. The cause is in the LABELS. The
-# teacher estimated each plan from 16 samples of a per-round spread of
-# about 31, giving a standard error near 7.8 -- while the median value
-# gap between the best plan and the sixth is 3.54. The labels are
-# noisier than the distinctions they are meant to teach, so the
-# teacher's ordering among good plans is mostly noise and the policy
-# learned it faithfully.
-#
-# That also explains why the offline metric looked so good. regret@6
-# scored the policy against those same noisy values: when the top twenty
-# plans sit within noise of each other, almost any six of them score a
-# low regret. It measured "avoids obviously bad plans", which the policy
-# genuinely does better than `_quick_score`, and could not see "picks
-# the actually best plan", which is what the search needs.
-#
-# The fix is more samples per plan in the teacher, not a bigger network
-# -- 16 to 128 or more, at eight times the generation cost. Off until
-# then.
-USE_POLICY = False
-
 # How many of a toon's candidate actions get a simulated `_greedy_score`
 # during a rollout. The rest are ranked by arithmetic alone -- see
 # `greedy_plan`.
@@ -677,54 +630,20 @@ def plans(state: BattleState, mode: Mode = Mode.PICKUP,
         if _playable(state, combo):
             playable.append(list(combo))
 
-    # Rank with the trained policy when it is available, and with the
-    # arithmetic otherwise. Measured on 375 held-out positions by
-    # regret@6 -- the value given up by searching only the top six --
-    # the policy scores 3.22 against `_quick_score`'s 9.93, with random
-    # at 12.09. The hand-written ranking is barely better than random at
-    # this job, which is also why four of this project's five
-    # silent-deletion bugs lived here.
+    # STRATIFY BY TRACK SIGNATURE, then take each family's own best.
     #
-    # The stratification below is NOT bypassed when the policy loads. A
-    # learned ranker is still a reduction and can still delete the right
-    # answer, more confidently and less legibly than a heuristic; the
-    # per-family floor is what makes a bad policy degrade to today's
-    # behaviour rather than to silence.
-    scores = None
-    # EVERYTHING THIS GUARDS IS UNREACHABLE TODAY, and deliberately kept.
-    # `USE_POLICY` is False above, so Python short-circuits before
-    # `policy.available()` is called, `scores` stays None, and with it
-    # both merge branches below -- the per-ranker union and the merged
-    # ordering -- never run. Nothing in the test suite reaches them
-    # either.
+    # The per-family floor is the point. Any shortlist is a reduction and
+    # can silently delete the right answer -- four of this project's five
+    # silent-deletion bugs lived in this function -- and giving every
+    # combination of tracks its own bucket means a family can only be
+    # lost by being empty, never by being out-scored wholesale.
     #
-    # Not deleted, because this IS the implementation the flag exists to
-    # switch back on; the comment on `USE_POLICY` records what has to be
-    # fixed first. Deleting it would leave a flag that turns nothing on.
-    if USE_POLICY and policy.available():
-
-        try:
-            scores = policy.rank(state, playable,
-                                 features_mod.extract(state))
-        except (NotImplementedError, ValueError):
-            scores = None
-
-    # BOTH rankings, interleaved -- not the policy instead of the
-    # arithmetic.
-    #
-    # Ranking by the policy alone was tried and it deleted the right
-    # answer on the very first position checked: on the maxed board it
-    # dropped 2 Foghorn + 2 Aoogah, the known-best line, off the
-    # shortlist entirely in favour of Sound plans with holds. Per-family
-    # stratification did not save it, because the loss happened WITHIN
-    # the Sound family.
-    #
-    # So a plan survives if EITHER ranker rates it highly. The policy
-    # wins on average (regret@6 3.22 against 9.93) and the arithmetic
-    # covers what the policy has not learned; a plan has to be missed by
-    # both to be lost. That costs a little shortlist room and buys the
-    # property this project has repeatedly wished it had -- no single
-    # reduction can silently delete a correct plan.
+    # `_cheap_score` is a weak ranker for this: measured on 375 held-out
+    # positions by regret@6, it scores 9.93 against 12.09 for choosing at
+    # random. A trained ranker did far better in isolation (3.22) and
+    # still lost in search; see docs/scoring.md, which keeps the numbers
+    # and the label-noise diagnosis. The stratification is what stops the
+    # weak ranker being fatal.
     cheap: Dict[tuple, List] = {}
     arith = [sum(_cheap_score(state, i, a)
                  for i, a in enumerate(combo) if a is not None)
@@ -736,69 +655,20 @@ def plans(state: BattleState, mode: Mode = Mode.PICKUP,
         signature = tuple(sorted(
             {a.track for a in combo if a is not None and not a.is_pass},
             key=lambda t: t.name))
-        cheap.setdefault(signature, []).append(
-            (arith[index], scores[index] if scores is not None else None,
-             combo))
+        cheap.setdefault(signature, []).append((arith[index], combo))
 
     buckets: Dict[tuple, List] = {}
     for signature, rows in cheap.items():
         by_arith = sorted(rows, key=lambda row: -row[0])
-        if rows[0][1] is None:
-            buckets[signature] = [r[2] for r in by_arith[:SCORE_BUDGET]]
-            continue
+        buckets[signature] = [row[1] for row in by_arith[:SCORE_BUDGET]]
 
-        # UNION of each ranker's own top-N, not an interleave of the
-        # two. Interleaving was the obvious version and it is wrong: it
-        # halves each ranker's depth, so the arithmetic lost the slot it
-        # had been giving 2 Foghorn + 2 Aoogah and the plan vanished
-        # again -- the same deletion, now caused by the fix for it.
-        #
-        # A union costs a larger bucket and guarantees what the whole
-        # arrangement is for: a plan has to be missed by BOTH rankers to
-        # be lost.
-        by_policy = sorted(rows, key=lambda row: -row[1])
-        picked, seen = [], set()
-        for row in list(by_policy[:SCORE_BUDGET]) + list(
-                by_arith[:SCORE_BUDGET]):
-            if id(row[2]) not in seen:
-                seen.add(id(row[2]))
-                picked.append(row[2])
-        buckets[signature] = picked
-
-    # Order WITHIN a stratum by both rankers, not by `_quick_score`
-    # alone.
-    #
-    # This is where the policy was being thrown away. It chose which
-    # plans entered the bucket and then this line re-sorted the bucket on
-    # `_quick_score`, so the learned ordering never reached the final
-    # `max_plans` cut. All the policy achieved was to displace plans the
-    # arithmetic would have kept -- which is why turning it on made the
-    # search worse (mean +88.39 against +89.72) despite ranking three
-    # times better in isolation.
-    #
-    # Alternating the two orderings gives each ranker an equal share of
-    # the final list, and keeps the property the union was for: a plan
-    # has to be missed by both to be lost.
-    policy_of = {}
-    if scores is not None:
-        for index, combo in enumerate(playable):
-            policy_of[id(combo)] = scores[index]
-
+    # Order within a stratum by the real scorer. `_cheap_score` chose
+    # which plans got in; `_quick_score` decides what order they leave
+    # in, because it is the one that simulates the round.
     strata: Dict[tuple, List] = {}
     for signature, bucket in buckets.items():
         rows = [(_quick_score(state, combo), combo) for combo in bucket]
-        by_quick = sorted(rows, key=lambda row: -row[0])
-        if not policy_of:
-            strata[signature] = by_quick
-            continue
-        by_pol = sorted(rows, key=lambda row: -policy_of.get(id(row[1]), 0.0))
-        merged, seen = [], set()
-        for a, b in zip(by_pol, by_quick):
-            for row in (a, b):
-                if id(row[1]) not in seen:
-                    seen.add(id(row[1]))
-                    merged.append(row)
-        strata[signature] = merged or by_quick
+        strata[signature] = sorted(rows, key=lambda row: -row[0])
 
     out: List[Sequence[Optional[Action]]] = []
     order = sorted(strata, key=lambda sig: -strata[sig][0][0])
