@@ -314,6 +314,16 @@
    ],
    "legal": 45,
    "quick": 95.5365,
+   "incoming": 32.8975,
+   "survival": 0.0304,
+   "at_risk": 1.0,
+   "prevented": 7.5975,
+   "killed_threat": 7.5975,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "fire"
   },
   {
@@ -627,6 +637,16 @@
    ],
    "legal": 26,
    "quick": 1607.1333,
+   "incoming": 9.0375,
+   "survival": 4.0,
+   "at_risk": 0.0,
+   "prevented": 0.0,
+   "killed_threat": 0.0,
+   "armed": 19.8,
+   "waste": [
+    0.0,
+    0.3333
+   ],
    "pick": "lure/4/None"
   },
   {
@@ -940,6 +960,16 @@
    ],
    "legal": 27,
    "quick": 1063.1934,
+   "incoming": 17.7425,
+   "survival": 2.4799,
+   "at_risk": 0.0,
+   "prevented": 5.025,
+   "killed_threat": 5.025,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "sound/4/None"
   },
   {
@@ -1253,6 +1283,16 @@
    ],
    "legal": 14,
    "quick": 1874.757,
+   "incoming": 3.34,
+   "survival": 4.0,
+   "at_risk": 0.0,
+   "prevented": 3.34,
+   "killed_threat": 11.3775,
+   "armed": 0.0,
+   "waste": [
+    30.0,
+    0.5
+   ],
    "pick": "squirt/4/0"
   },
   {
@@ -1566,6 +1606,16 @@
    ],
    "legal": 5,
    "quick": 1707.1333,
+   "incoming": 0.0,
+   "survival": 4.0,
+   "at_risk": 0.0,
+   "prevented": 0.0,
+   "killed_threat": 2.1375,
+   "armed": 0.0,
+   "waste": [
+    12.0,
+    0.3333
+   ],
    "pick": "pass"
   },
   {
@@ -1879,6 +1929,16 @@
    ],
    "legal": 26,
    "quick": 873.5838,
+   "incoming": 10.59,
+   "survival": 1.6997,
+   "at_risk": 1.0,
+   "prevented": 5.025,
+   "killed_threat": 5.025,
+   "armed": 0.0,
+   "waste": [
+    48.0,
+    0.3333
+   ],
    "pick": "squirt/4/1"
   },
   {
@@ -2192,6 +2252,16 @@
    ],
    "legal": 13,
    "quick": 1610.0,
+   "incoming": 3.34,
+   "survival": 4.0,
+   "at_risk": 0.0,
+   "prevented": 0.0,
+   "killed_threat": 2.5575,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "pass"
   },
   {
@@ -2505,6 +2575,16 @@
    ],
    "legal": 7,
    "quick": 1627.0,
+   "incoming": 0.0,
+   "survival": 4.0,
+   "at_risk": 0.0,
+   "prevented": 0.0,
+   "killed_threat": 2.675,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "pass"
   },
   {
@@ -2818,6 +2898,16 @@
    ],
    "legal": 17,
    "quick": 1199.977,
+   "incoming": 8.9475,
+   "survival": 2.7941,
+   "at_risk": 0.0,
+   "prevented": 11.73,
+   "killed_threat": 0.0,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    0.3333
+   ],
    "pick": "drop/3/2"
   },
   {
@@ -3131,6 +3221,16 @@
    ],
    "legal": 29,
    "quick": 2332.3896,
+   "incoming": 18.8175,
+   "survival": 4.0,
+   "at_risk": 0.0,
+   "prevented": 18.8175,
+   "killed_threat": 23.9025,
+   "armed": 0.0,
+   "waste": [
+    8.0,
+    1.0
+   ],
    "pick": "squirt/7/None"
   },
   {
@@ -3444,6 +3544,16 @@
    ],
    "legal": 12,
    "quick": 851.1675,
+   "incoming": 8.0375,
+   "survival": 2.1151,
+   "at_risk": 0.0,
+   "prevented": 0.0,
+   "killed_threat": 0.0,
+   "armed": 16.8,
+   "waste": [
+    0.0,
+    0.3333
+   ],
    "pick": "sound/3/None"
   },
   {
@@ -3757,6 +3867,16 @@
    ],
    "legal": 32,
    "quick": 960.0077,
+   "incoming": 8.4925,
+   "survival": 2.355,
+   "at_risk": 0.0,
+   "prevented": 0.0,
+   "killed_threat": 3.3825,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "sound/6/None"
   },
   {
@@ -4070,6 +4190,16 @@
    ],
    "legal": 27,
    "quick": 1006.9988,
+   "incoming": 22.145,
+   "survival": 1.3096,
+   "at_risk": 0.0,
+   "prevented": 59.67,
+   "killed_threat": 0.0,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "sound/6/None"
   },
   {
@@ -4383,6 +4513,16 @@
    ],
    "legal": 32,
    "quick": 181.673,
+   "incoming": 18.7275,
+   "survival": 0.0534,
+   "at_risk": 1.0,
+   "prevented": 20.2317,
+   "killed_threat": 0.0,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    0.3333
+   ],
    "pick": "throw/6/2"
   },
   {
@@ -4696,6 +4836,16 @@
    ],
    "legal": 38,
    "quick": 1457.8138,
+   "incoming": 17.455,
+   "survival": 3.552,
+   "at_risk": 0.0,
+   "prevented": 2.5575,
+   "killed_threat": 2.5575,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "drop/6/2"
   },
   {
@@ -5009,6 +5159,16 @@
    ],
    "legal": 15,
    "quick": 522.6697,
+   "incoming": 5.025,
+   "survival": 0.597,
+   "at_risk": 2.0,
+   "prevented": 5.025,
+   "killed_threat": 10.3775,
+   "armed": 0.0,
+   "waste": [
+    98.0,
+    1.0
+   ],
    "pick": "throw/7/None"
   },
   {
@@ -5322,6 +5482,16 @@
    ],
    "legal": 6,
    "quick": 1618.0,
+   "incoming": 0.0,
+   "survival": 4.0,
+   "at_risk": 0.0,
+   "prevented": 0.0,
+   "killed_threat": 2.675,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "squirt/4/0"
   },
   {
@@ -5635,6 +5805,16 @@
    ],
    "legal": 17,
    "quick": 656.9531,
+   "incoming": 22.9525,
+   "survival": 0.1743,
+   "at_risk": 3.0,
+   "prevented": 22.9525,
+   "killed_threat": 22.9525,
+   "armed": 0.0,
+   "waste": [
+    49.0,
+    1.0
+   ],
    "pick": "sound/4/None"
   },
   {
@@ -5948,6 +6128,16 @@
    ],
    "legal": 8,
    "quick": 1705.0,
+   "incoming": 0.0,
+   "survival": 4.0,
+   "at_risk": 0.0,
+   "prevented": 0.0,
+   "killed_threat": 4.5125,
+   "armed": 0.0,
+   "waste": [
+    120.0,
+    1.0
+   ],
    "pick": "pass"
   },
   {
@@ -6261,6 +6451,16 @@
    ],
    "legal": 35,
    "quick": 234.8733,
+   "incoming": 26.345,
+   "survival": 0.3416,
+   "at_risk": 1.0,
+   "prevented": 5.025,
+   "killed_threat": 5.025,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "lure/6/None"
   },
   {
@@ -6574,6 +6774,16 @@
    ],
    "legal": 13,
    "quick": 415.1711,
+   "incoming": 8.0375,
+   "survival": 0.6221,
+   "at_risk": 1.0,
+   "prevented": 8.0375,
+   "killed_threat": 8.0375,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "fire"
   },
   {
@@ -6887,6 +7097,16 @@
    ],
    "legal": 18,
    "quick": 954.1625,
+   "incoming": 4.2175,
+   "survival": 2.3711,
+   "at_risk": 0.0,
+   "prevented": 0.0,
+   "killed_threat": 0.0,
+   "armed": 17.4,
+   "waste": [
+    0.0,
+    0.3333
+   ],
    "pick": "lure/2/None"
   },
   {
@@ -7200,6 +7420,16 @@
    ],
    "legal": 28,
    "quick": 328.6275,
+   "incoming": 8.455,
+   "survival": 0.4731,
+   "at_risk": 3.0,
+   "prevented": 3.34,
+   "killed_threat": 3.34,
+   "armed": 0.0,
+   "waste": [
+    90.0,
+    0.3333
+   ],
    "pick": "sound/2/None"
   },
   {
@@ -7513,6 +7743,16 @@
    ],
    "legal": 23,
    "quick": 529.4805,
+   "incoming": 10.78,
+   "survival": 1.2987,
+   "at_risk": 1.0,
+   "prevented": 0.0,
+   "killed_threat": 3.31,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "throw/7/None"
   },
   {
@@ -7826,6 +8066,16 @@
    ],
    "legal": 17,
    "quick": 1053.8064,
+   "incoming": 11.5875,
+   "survival": 2.2438,
+   "at_risk": 0.0,
+   "prevented": 11.5875,
+   "killed_threat": 11.5875,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "fire"
   },
   {
@@ -8139,6 +8389,16 @@
    ],
    "legal": 24,
    "quick": 1056.7563,
+   "incoming": 8.51,
+   "survival": 1.5276,
+   "at_risk": 1.0,
+   "prevented": 8.51,
+   "killed_threat": 24.5175,
+   "armed": 0.0,
+   "waste": [
+    70.0,
+    1.0
+   ],
    "pick": "squirt/7/None"
   },
   {
@@ -8452,6 +8712,16 @@
    ],
    "legal": 29,
    "quick": 1573.0,
+   "incoming": 9.585,
+   "survival": 4.0,
+   "at_risk": 0.0,
+   "prevented": 0.0,
+   "killed_threat": 0.0,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "squirt/7/None"
   },
   {
@@ -8765,6 +9035,16 @@
    ],
    "legal": 11,
    "quick": 1704.1,
+   "incoming": 0.0,
+   "survival": 4.0,
+   "at_risk": 0.0,
+   "prevented": 0.0,
+   "killed_threat": 2.675,
+   "armed": 0.0,
+   "waste": [
+    72.0,
+    1.0
+   ],
    "pick": "squirt/4/0"
   },
   {
@@ -9078,6 +9358,16 @@
    ],
    "legal": 11,
    "quick": 1645.1192,
+   "incoming": 4.2175,
+   "survival": 4.0,
+   "at_risk": 0.0,
+   "prevented": 8.435,
+   "killed_threat": 0.0,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "drop/4/0"
   },
   {
@@ -9391,6 +9681,16 @@
    ],
    "legal": 9,
    "quick": 1150.2024,
+   "incoming": 13.45,
+   "survival": 2.5279,
+   "at_risk": 0.0,
+   "prevented": 13.45,
+   "killed_threat": 13.45,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "fire"
   },
   {
@@ -9704,6 +10004,16 @@
    ],
    "legal": 34,
    "quick": 1179.4062,
+   "incoming": 22.6725,
+   "survival": 2.911,
+   "at_risk": 0.0,
+   "prevented": 0.0,
+   "killed_threat": 2.5575,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "squirt/5/1"
   },
   {
@@ -10017,6 +10327,16 @@
    ],
    "legal": 41,
    "quick": 763.7685,
+   "incoming": 11.9675,
+   "survival": 1.7548,
+   "at_risk": 0.0,
+   "prevented": 4.2075,
+   "killed_threat": 4.2075,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "throw/7/None"
   },
   {
@@ -10330,6 +10650,16 @@
    ],
    "legal": 11,
    "quick": 1969.0,
+   "incoming": 0.0,
+   "survival": 4.0,
+   "at_risk": 0.0,
+   "prevented": 0.0,
+   "killed_threat": 10.085,
+   "armed": 0.0,
+   "waste": [
+    87.0,
+    1.0
+   ],
    "pick": "squirt/7/None"
   },
   {
@@ -10643,6 +10973,16 @@
    ],
    "legal": 19,
    "quick": 306.4882,
+   "incoming": 5.6025,
+   "survival": 0.714,
+   "at_risk": 1.0,
+   "prevented": 5.6025,
+   "killed_threat": 0.0,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "squirt/6/0"
   },
   {
@@ -10956,6 +11296,16 @@
    ],
    "legal": 8,
    "quick": 220.23,
+   "incoming": 3.435,
+   "survival": 0.5822,
+   "at_risk": 1.0,
+   "prevented": 0.0,
+   "killed_threat": 0.0,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    0.3333
+   ],
    "pick": "throw/2/0"
   },
   {
@@ -11269,6 +11619,16 @@
    ],
    "legal": 12,
    "quick": 430.4581,
+   "incoming": 18.7625,
+   "survival": 0.2665,
+   "at_risk": 1.0,
+   "prevented": 18.7625,
+   "killed_threat": 18.7625,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "fire"
   },
   {
@@ -11582,6 +11942,16 @@
    ],
    "legal": 9,
    "quick": 1710.3333,
+   "incoming": 0.0,
+   "survival": 4.0,
+   "at_risk": 0.0,
+   "prevented": 0.0,
+   "killed_threat": 3.3825,
+   "armed": 0.0,
+   "waste": [
+    97.0,
+    0.3333
+   ],
    "pick": "throw/5/0"
   },
   {
@@ -11895,6 +12265,16 @@
    ],
    "legal": 24,
    "quick": 1533.4515,
+   "incoming": 6.345,
+   "survival": 2.8369,
+   "at_risk": 0.0,
+   "prevented": 6.345,
+   "killed_threat": 10.5625,
+   "armed": 0.0,
+   "waste": [
+    90.0,
+    1.0
+   ],
    "pick": "sound/4/None"
   },
   {
@@ -12208,6 +12588,16 @@
    ],
    "legal": 11,
    "quick": 1587.3333,
+   "incoming": 8.51,
+   "survival": 4.0,
+   "at_risk": 0.0,
+   "prevented": 0.0,
+   "killed_threat": 0.0,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    0.3333
+   ],
    "pick": "pass"
   },
   {
@@ -12521,6 +12911,16 @@
    ],
    "legal": 11,
    "quick": 1731.65,
+   "incoming": 0.0,
+   "survival": 4.0,
+   "at_risk": 0.0,
+   "prevented": 0.0,
+   "killed_threat": 8.51,
+   "armed": 0.0,
+   "waste": [
+    43.0,
+    1.0
+   ],
    "pick": "pass"
   },
   {
@@ -12834,6 +13234,16 @@
    ],
    "legal": 16,
    "quick": 312.0777,
+   "incoming": 9.7725,
+   "survival": 0.614,
+   "at_risk": 1.0,
+   "prevented": 9.7725,
+   "killed_threat": 0.0,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    0.3333
+   ],
    "pick": "lure/4/None"
   },
   {
@@ -13147,6 +13557,16 @@
    ],
    "legal": 25,
    "quick": 1617.0,
+   "incoming": 3.84,
+   "survival": 4.0,
+   "at_risk": 0.0,
+   "prevented": 0.0,
+   "killed_threat": 3.34,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "lure/3/1"
   },
   {
@@ -13460,6 +13880,16 @@
    ],
    "legal": 9,
    "quick": 1708.85,
+   "incoming": 0.0,
+   "survival": 4.0,
+   "at_risk": 0.0,
+   "prevented": 0.0,
+   "killed_threat": 4.5125,
+   "armed": 0.0,
+   "waste": [
+    76.0,
+    1.0
+   ],
    "pick": "pass"
   },
   {
@@ -13773,6 +14203,16 @@
    ],
    "legal": 29,
    "quick": 707.5515,
+   "incoming": 17.7275,
+   "survival": 1.3538,
+   "at_risk": 1.0,
+   "prevented": 10.78,
+   "killed_threat": 10.78,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "sound/4/None"
   },
   {
@@ -14086,6 +14526,16 @@
    ],
    "legal": 27,
    "quick": 117.4292,
+   "incoming": 11.9175,
+   "survival": 0.0839,
+   "at_risk": 1.0,
+   "prevented": 11.9175,
+   "killed_threat": 0.0,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    0.3333
+   ],
    "pick": "lure/4/None"
   },
   {
@@ -14399,6 +14849,16 @@
    ],
    "legal": 16,
    "quick": 586.8452,
+   "incoming": 4.5125,
+   "survival": 1.108,
+   "at_risk": 1.0,
+   "prevented": 4.5125,
+   "killed_threat": 4.5125,
+   "armed": 0.0,
+   "waste": [
+    101.0,
+    1.0
+   ],
    "pick": "squirt/4/0"
   },
   {
@@ -14712,6 +15172,16 @@
    ],
    "legal": 31,
    "quick": 925.3252,
+   "incoming": 17.47,
+   "survival": 0.6869,
+   "at_risk": 2.0,
+   "prevented": 17.47,
+   "killed_threat": 19.6075,
+   "armed": 0.0,
+   "waste": [
+    49.0,
+    1.0
+   ],
    "pick": "squirt/7/None"
   },
   {
@@ -15025,6 +15495,16 @@
    ],
    "legal": 11,
    "quick": 1867.0,
+   "incoming": 0.0,
+   "survival": 4.0,
+   "at_risk": 0.0,
+   "prevented": 0.0,
+   "killed_threat": 16.0075,
+   "armed": 0.0,
+   "waste": [
+    60.0,
+    1.0
+   ],
    "pick": "squirt/6/0"
   },
   {
@@ -15338,6 +15818,16 @@
    ],
    "legal": 19,
    "quick": 483.1347,
+   "incoming": 10.9375,
+   "survival": 1.0057,
+   "at_risk": 1.0,
+   "prevented": 10.9375,
+   "killed_threat": 0.0,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    0.3333
+   ],
    "pick": "throw/5/1"
   },
   {
@@ -15651,6 +16141,16 @@
    ],
    "legal": 43,
    "quick": 1281.4105,
+   "incoming": 7.2025,
+   "survival": 3.0545,
+   "at_risk": 0.0,
+   "prevented": 4.5125,
+   "killed_threat": 4.5125,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "squirt/6/0"
   },
   {
@@ -15964,6 +16464,16 @@
    ],
    "legal": 25,
    "quick": 984.6382,
+   "incoming": 19.6425,
+   "survival": 1.8837,
+   "at_risk": 0.0,
+   "prevented": 15.13,
+   "killed_threat": 15.13,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "throw/6/0"
   },
   {
@@ -16277,6 +16787,16 @@
    ],
    "legal": 14,
    "quick": 318.9305,
+   "incoming": 10.78,
+   "survival": 0.1855,
+   "at_risk": 2.0,
+   "prevented": 10.78,
+   "killed_threat": 10.78,
+   "armed": 0.0,
+   "waste": [
+    51.0,
+    1.0
+   ],
    "pick": "pass"
   },
   {
@@ -16590,6 +17110,16 @@
    ],
    "legal": 40,
    "quick": 832.5948,
+   "incoming": 11.13,
+   "survival": 2.0665,
+   "at_risk": 0.0,
+   "prevented": 0.0,
+   "killed_threat": 2.5575,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "throw/7/None"
   },
   {
@@ -16903,6 +17433,16 @@
    ],
    "legal": 46,
    "quick": 423.8996,
+   "incoming": 26.575,
+   "survival": 0.6397,
+   "at_risk": 1.0,
+   "prevented": 10.78,
+   "killed_threat": 10.78,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "squirt/7/None"
   },
   {
@@ -17216,6 +17756,16 @@
    ],
    "legal": 39,
    "quick": 1508.188,
+   "incoming": 34.755,
+   "survival": 2.4169,
+   "at_risk": 0.0,
+   "prevented": 8.0375,
+   "killed_threat": 13.64,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "throw/7/None"
   },
   {
@@ -17529,6 +18079,16 @@
    ],
    "legal": 10,
    "quick": 1139.5958,
+   "incoming": 15.13,
+   "survival": 2.115,
+   "at_risk": 0.0,
+   "prevented": 15.13,
+   "killed_threat": 15.13,
+   "armed": 0.0,
+   "waste": [
+    11.0,
+    1.0
+   ],
    "pick": "throw/7/None"
   },
   {
@@ -17842,6 +18402,16 @@
    ],
    "legal": 16,
    "quick": 1645.9575,
+   "incoming": 4.2175,
+   "survival": 4.0,
+   "at_risk": 0.0,
+   "prevented": 4.2175,
+   "killed_threat": 4.2175,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "fire"
   },
   {
@@ -18155,6 +18725,16 @@
    ],
    "legal": 13,
    "quick": 1778.2808,
+   "incoming": 5.565,
+   "survival": 4.0,
+   "at_risk": 0.0,
+   "prevented": 5.565,
+   "killed_threat": 5.565,
+   "armed": 0.0,
+   "waste": [
+    59.0,
+    1.0
+   ],
    "pick": "lure/3/0"
   },
   {
@@ -18468,6 +19048,16 @@
    ],
    "legal": 14,
    "quick": 902.8233,
+   "incoming": 3.3825,
+   "survival": 2.3651,
+   "at_risk": 0.0,
+   "prevented": -5.6025,
+   "killed_threat": 0.0,
+   "armed": 34.2,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "lure/3/1"
   },
   {
@@ -18781,6 +19371,16 @@
    ],
    "legal": 40,
    "quick": 719.973,
+   "incoming": 20.55,
+   "survival": 1.6545,
+   "at_risk": 0.0,
+   "prevented": 5.3525,
+   "killed_threat": 5.3525,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "sound/6/None"
   },
   {
@@ -19094,6 +19694,16 @@
    ],
    "legal": 24,
    "quick": 1716.7311,
+   "incoming": 21.4875,
+   "survival": 2.7458,
+   "at_risk": 0.0,
+   "prevented": 21.4875,
+   "killed_threat": 27.0525,
+   "armed": 0.0,
+   "waste": [
+    32.0,
+    1.0
+   ],
    "pick": "sound/6/None"
   },
   {
@@ -19407,6 +20017,16 @@
    ],
    "legal": 19,
    "quick": 2129.6449,
+   "incoming": 39.2275,
+   "survival": 2.9316,
+   "at_risk": 0.0,
+   "prevented": 115.0875,
+   "killed_threat": 0.0,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "lure/7/None"
   },
   {
@@ -19720,6 +20340,16 @@
    ],
    "legal": 14,
    "quick": 1661.9575,
+   "incoming": 4.2175,
+   "survival": 4.0,
+   "at_risk": 0.0,
+   "prevented": 4.2175,
+   "killed_threat": 4.2175,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "fire"
   },
   {
@@ -20033,6 +20663,16 @@
    ],
    "legal": 6,
    "quick": 1777.0,
+   "incoming": 0.0,
+   "survival": 4.0,
+   "at_risk": 0.0,
+   "prevented": 0.0,
+   "killed_threat": 18.7625,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "fire"
   },
   {
@@ -20346,6 +20986,16 @@
    ],
    "legal": 14,
    "quick": 1665.06,
+   "incoming": 3.34,
+   "survival": 4.0,
+   "at_risk": 0.0,
+   "prevented": 3.34,
+   "killed_threat": 3.34,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "drop/4/0"
   },
   {
@@ -20659,6 +21309,16 @@
    ],
    "legal": 26,
    "quick": 443.7709,
+   "incoming": 23.64,
+   "survival": 0.9729,
+   "at_risk": 2.0,
+   "prevented": 0.0,
+   "killed_threat": 0.0,
+   "armed": 81.6,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "drop/7/None"
   },
   {
@@ -20972,6 +21632,16 @@
    ],
    "legal": 40,
    "quick": 1186.3055,
+   "incoming": 19.7025,
+   "survival": 1.8272,
+   "at_risk": 1.0,
+   "prevented": 56.425,
+   "killed_threat": 0.0,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "lure/6/None"
   },
   {
@@ -21285,6 +21955,16 @@
    ],
    "legal": 30,
    "quick": 459.7292,
+   "incoming": 14.2625,
+   "survival": 1.1218,
+   "at_risk": 1.0,
+   "prevented": 0.0,
+   "killed_threat": 3.31,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "throw/4/2"
   },
   {
@@ -21598,6 +22278,16 @@
    ],
    "legal": 14,
    "quick": 1730.0,
+   "incoming": 8.51,
+   "survival": 4.0,
+   "at_risk": 0.0,
+   "prevented": 0.0,
+   "killed_threat": 18.7625,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "fire"
   },
   {
@@ -21911,6 +22601,16 @@
    ],
    "legal": 32,
    "quick": 1399.1501,
+   "incoming": 18.475,
+   "survival": 3.0853,
+   "at_risk": 0.0,
+   "prevented": 13.45,
+   "killed_threat": 13.45,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "throw/7/None"
   },
   {
@@ -22224,6 +22924,16 @@
    ],
    "legal": 14,
    "quick": 1602.0,
+   "incoming": 3.31,
+   "survival": 4.0,
+   "at_risk": 0.0,
+   "prevented": 0.0,
+   "killed_threat": 1.7025,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "fire"
   },
   {
@@ -22537,6 +23247,16 @@
    ],
    "legal": 12,
    "quick": 1703.7852,
+   "incoming": 18.7625,
+   "survival": 4.0,
+   "at_risk": 0.0,
+   "prevented": 18.7625,
+   "killed_threat": 18.7625,
+   "armed": 0.0,
+   "waste": [
+    29.0,
+    0.3333
+   ],
    "pick": "pass"
   },
   {
@@ -22850,6 +23570,16 @@
    ],
    "legal": 18,
    "quick": 1593.9333,
+   "incoming": 5.91,
+   "survival": 4.0,
+   "at_risk": 0.0,
+   "prevented": 0.0,
+   "killed_threat": 0.0,
+   "armed": 6.6,
+   "waste": [
+    0.0,
+    0.3333
+   ],
    "pick": "drop/4/1"
   },
   {
@@ -23163,6 +23893,16 @@
    ],
    "legal": 20,
    "quick": 1243.3984,
+   "incoming": 8.435,
+   "survival": 2.3711,
+   "at_risk": 0.0,
+   "prevented": 8.435,
+   "killed_threat": 8.435,
+   "armed": 0.0,
+   "waste": [
+    108.0,
+    1.0
+   ],
    "pick": "throw/7/None"
   },
   {
@@ -23476,6 +24216,16 @@
    ],
    "legal": 20,
    "quick": 1646.0718,
+   "incoming": 3.435,
+   "survival": 4.0,
+   "at_risk": 0.0,
+   "prevented": 6.87,
+   "killed_threat": 0.0,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    0.3333
+   ],
    "pick": "squirt/4/2"
   },
   {
@@ -23789,6 +24539,16 @@
    ],
    "legal": 26,
    "quick": 65.8127,
+   "incoming": 13.6025,
+   "survival": 0.147,
+   "at_risk": 3.0,
+   "prevented": 0.0,
+   "killed_threat": 1.7025,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "sound/6/None"
   },
   {
@@ -24102,6 +24862,16 @@
    ],
    "legal": 23,
    "quick": 225.6317,
+   "incoming": 16.1075,
+   "survival": 0.5587,
+   "at_risk": 2.0,
+   "prevented": 0.0,
+   "killed_threat": 0.0,
+   "armed": 13.8,
+   "waste": [
+    0.0,
+    0.3333
+   ],
    "pick": "sound/4/None"
   },
   {
@@ -24415,6 +25185,16 @@
    ],
    "legal": 13,
    "quick": 341.4887,
+   "incoming": 13.45,
+   "survival": 0.4461,
+   "at_risk": 1.0,
+   "prevented": 13.45,
+   "killed_threat": 13.45,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "fire"
   },
   {
@@ -24728,6 +25508,16 @@
    ],
    "legal": 9,
    "quick": 1742.3333,
+   "incoming": 0.0,
+   "survival": 4.0,
+   "at_risk": 0.0,
+   "prevented": 0.0,
+   "killed_threat": 8.51,
+   "armed": 0.0,
+   "waste": [
+    57.0,
+    0.3333
+   ],
    "pick": "squirt/6/0"
   },
   {
@@ -25041,6 +25831,16 @@
    ],
    "legal": 31,
    "quick": 520.593,
+   "incoming": 5.0125,
+   "survival": 1.197,
+   "at_risk": 1.0,
+   "prevented": 3.31,
+   "killed_threat": 3.31,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "throw/4/2"
   },
   {
@@ -25354,6 +26154,16 @@
    ],
    "legal": 14,
    "quick": 1678.4225,
+   "incoming": 5.6025,
+   "survival": 4.0,
+   "at_risk": 0.0,
+   "prevented": 5.6025,
+   "killed_threat": 5.6025,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "throw/5/0"
   },
   {
@@ -25667,6 +26477,16 @@
    ],
    "legal": 30,
    "quick": 944.1039,
+   "incoming": 11.1275,
+   "survival": 1.0784,
+   "at_risk": 2.0,
+   "prevented": 11.1275,
+   "killed_threat": 11.1275,
+   "armed": 0.0,
+   "waste": [
+    52.0,
+    1.0
+   ],
    "pick": "drop/4/0"
   },
   {
@@ -25980,6 +26800,16 @@
    ],
    "legal": 29,
    "quick": 507.7687,
+   "incoming": 14.6875,
+   "survival": 1.1574,
+   "at_risk": 1.0,
+   "prevented": 3.31,
+   "killed_threat": 3.31,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "sound/4/None"
   },
   {
@@ -26293,6 +27123,16 @@
    ],
    "legal": 35,
    "quick": 734.0566,
+   "incoming": 26.535,
+   "survival": 0.4899,
+   "at_risk": 1.0,
+   "prevented": 26.535,
+   "killed_threat": 26.535,
+   "armed": 0.0,
+   "waste": [
+    25.0,
+    1.0
+   ],
    "pick": "drop/7/None"
   },
   {
@@ -26606,6 +27446,16 @@
    ],
    "legal": 36,
    "quick": 1475.1077,
+   "incoming": 8.0275,
+   "survival": 3.6126,
+   "at_risk": 0.0,
+   "prevented": 2.675,
+   "killed_threat": 2.675,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "throw/7/None"
   },
   {
@@ -26919,6 +27769,16 @@
    ],
    "legal": 31,
    "quick": 914.8157,
+   "incoming": 17.2675,
+   "survival": 1.969,
+   "at_risk": 0.0,
+   "prevented": 2.1375,
+   "killed_threat": 2.1375,
+   "armed": 0.0,
+   "waste": [
+    72.0,
+    0.3333
+   ],
    "pick": "lure/4/None"
   },
   {
@@ -27232,6 +28092,16 @@
    ],
    "legal": 12,
    "quick": 762.6229,
+   "incoming": 3.34,
+   "survival": 1.7964,
+   "at_risk": 1.0,
+   "prevented": 3.34,
+   "killed_threat": 3.34,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "lure/2/None"
   },
   {
@@ -27545,6 +28415,16 @@
    ],
    "legal": 6,
    "quick": 1688.9526,
+   "incoming": 0.0,
+   "survival": 4.0,
+   "at_risk": 0.0,
+   "prevented": -5.565,
+   "killed_threat": 4.2175,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    0.3333
+   ],
    "pick": "squirt/4/0"
   },
   {
@@ -27858,6 +28738,16 @@
    ],
    "legal": 12,
    "quick": 1650.8675,
+   "incoming": 4.2075,
+   "survival": 4.0,
+   "at_risk": 0.0,
+   "prevented": 4.2075,
+   "killed_threat": 4.2075,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "squirt/4/0"
   },
   {
@@ -28171,6 +29061,16 @@
    ],
    "legal": 26,
    "quick": 1491.2275,
+   "incoming": 5.92,
+   "survival": 4.0,
+   "at_risk": 0.0,
+   "prevented": -15.1525,
+   "killed_threat": 0.0,
+   "armed": 54.6,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "sound/4/None"
   },
   {
@@ -28484,6 +29384,16 @@
    ],
    "legal": 22,
    "quick": 1856.2069,
+   "incoming": 5.0125,
+   "survival": 4.0,
+   "at_risk": 0.0,
+   "prevented": 5.0125,
+   "killed_threat": 5.0125,
+   "armed": 0.0,
+   "waste": [
+    111.0,
+    1.0
+   ],
    "pick": "sound/5/None"
   },
   {
@@ -28797,6 +29707,16 @@
    ],
    "legal": 3,
    "quick": 1740.0,
+   "incoming": 0.0,
+   "survival": 4.0,
+   "at_risk": 0.0,
+   "prevented": 0.0,
+   "killed_threat": 4.2175,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    0.2
+   ],
    "pick": "pass"
   },
   {
@@ -29110,6 +30030,16 @@
    ],
    "legal": 19,
    "quick": 1623.2375,
+   "incoming": 2.1375,
+   "survival": 4.0,
+   "at_risk": 0.0,
+   "prevented": 2.1375,
+   "killed_threat": 2.1375,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "throw/7/None"
   },
   {
@@ -29423,6 +30353,16 @@
    ],
    "legal": 20,
    "quick": 1617.0,
+   "incoming": 2.5575,
+   "survival": 4.0,
+   "at_risk": 0.0,
+   "prevented": 0.0,
+   "killed_threat": 3.3825,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "squirt/6/0"
   },
   {
@@ -29736,6 +30676,16 @@
    ],
    "legal": 9,
    "quick": 607.5323,
+   "incoming": 3.3825,
+   "survival": 1.4782,
+   "at_risk": 2.0,
+   "prevented": 3.3825,
+   "killed_threat": 0.0,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    0.3333
+   ],
    "pick": "pass"
   },
   {
@@ -30049,6 +30999,16 @@
    ],
    "legal": 23,
    "quick": 589.2385,
+   "incoming": 24.3275,
+   "survival": 1.3154,
+   "at_risk": 1.0,
+   "prevented": 5.565,
+   "killed_threat": 5.565,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "fire"
   },
   {
@@ -30362,6 +31322,16 @@
    ],
    "legal": 11,
    "quick": 1634.0,
+   "incoming": 0.0,
+   "survival": 4.0,
+   "at_risk": 0.0,
+   "prevented": 0.0,
+   "killed_threat": 5.3525,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "throw/6/1"
   },
   {
@@ -30675,6 +31645,16 @@
    ],
    "legal": 17,
    "quick": 1162.3406,
+   "incoming": 11.3475,
+   "survival": 2.2031,
+   "at_risk": 0.0,
+   "prevented": 11.3475,
+   "killed_threat": 11.3475,
+   "armed": 0.0,
+   "waste": [
+    127.0,
+    1.0
+   ],
    "pick": "lure/4/None"
   },
   {
@@ -30988,6 +31968,16 @@
    ],
    "legal": 4,
    "quick": 1608.0,
+   "incoming": 0.0,
+   "survival": 4.0,
+   "at_risk": 0.0,
+   "prevented": 0.0,
+   "killed_threat": 3.34,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "sound/3/None"
   },
   {
@@ -31301,6 +32291,16 @@
    ],
    "legal": 32,
    "quick": 611.3209,
+   "incoming": 24.3875,
+   "survival": 1.3532,
+   "at_risk": 1.0,
+   "prevented": 3.34,
+   "killed_threat": 3.34,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "fire"
   },
   {
@@ -31614,6 +32614,16 @@
    ],
    "legal": 33,
    "quick": 881.1481,
+   "incoming": 20.5725,
+   "survival": 1.118,
+   "at_risk": 1.0,
+   "prevented": 20.5725,
+   "killed_threat": 20.5725,
+   "armed": 0.0,
+   "waste": [
+    71.0,
+    1.0
+   ],
    "pick": "drop/7/None"
   },
   {
@@ -31927,6 +32937,16 @@
    ],
    "legal": 24,
    "quick": 593.0477,
+   "incoming": 13.455,
+   "survival": 0.1486,
+   "at_risk": 1.0,
+   "prevented": 13.455,
+   "killed_threat": 21.965,
+   "armed": 0.0,
+   "waste": [
+    74.0,
+    1.0
+   ],
    "pick": "sound/5/None"
   },
   {
@@ -32240,6 +33260,16 @@
    ],
    "legal": 40,
    "quick": 292.3712,
+   "incoming": 11.4625,
+   "survival": 0.6979,
+   "at_risk": 1.0,
+   "prevented": 0.0,
+   "killed_threat": 0.0,
+   "armed": 40.2,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "lure/4/None"
   },
   {
@@ -32553,6 +33583,16 @@
    ],
    "legal": 34,
    "quick": 1628.0,
+   "incoming": 9.085,
+   "survival": 4.0,
+   "at_risk": 0.0,
+   "prevented": 0.0,
+   "killed_threat": 4.2075,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "sound/6/None"
   },
   {
@@ -32866,6 +33906,16 @@
    ],
    "legal": 18,
    "quick": 1871.357,
+   "incoming": 3.34,
+   "survival": 4.0,
+   "at_risk": 0.0,
+   "prevented": 3.34,
+   "killed_threat": 5.4775,
+   "armed": 0.0,
+   "waste": [
+    69.0,
+    1.0
+   ],
    "pick": "squirt/6/0"
   },
   {
@@ -33179,6 +34229,16 @@
    ],
    "legal": 12,
    "quick": 844.4788,
+   "incoming": 18.7625,
+   "survival": 1.439,
+   "at_risk": 0.0,
+   "prevented": 18.7625,
+   "killed_threat": 18.7625,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "fire"
   },
   {
@@ -33492,6 +34552,16 @@
    ],
    "legal": 19,
    "quick": 1615.105,
+   "incoming": 4.78,
+   "survival": 4.0,
+   "at_risk": 0.0,
+   "prevented": 1.345,
+   "killed_threat": 1.345,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "fire"
   },
   {
@@ -33805,6 +34875,16 @@
    ],
    "legal": 32,
    "quick": 886.682,
+   "incoming": 12.8025,
+   "survival": 1.0154,
+   "at_risk": 2.0,
+   "prevented": 12.8025,
+   "killed_threat": 12.8025,
+   "armed": 0.0,
+   "waste": [
+    87.0,
+    1.0
+   ],
    "pick": "sound/6/None"
   },
   {
@@ -34118,6 +35198,16 @@
    ],
    "legal": 37,
    "quick": 506.514,
+   "incoming": 23.6625,
+   "survival": 1.0988,
+   "at_risk": 2.0,
+   "prevented": 0.0,
+   "killed_threat": 11.5875,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "throw/7/None"
   },
   {
@@ -34431,6 +35521,16 @@
    ],
    "legal": 25,
    "quick": 286.8436,
+   "incoming": 28.58,
+   "survival": 0.5948,
+   "at_risk": 2.0,
+   "prevented": -5.565,
+   "killed_threat": 0.0,
+   "armed": 126.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "sound/6/None"
   },
   {
@@ -34744,6 +35844,16 @@
    ],
    "legal": 29,
    "quick": 746.8274,
+   "incoming": 12.7175,
+   "survival": 1.7299,
+   "at_risk": 0.0,
+   "prevented": 4.2075,
+   "killed_threat": 4.2075,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "drop/7/None"
   },
   {
@@ -35057,6 +36167,16 @@
    ],
    "legal": 31,
    "quick": 552.0364,
+   "incoming": 9.7825,
+   "survival": 1.0222,
+   "at_risk": 2.0,
+   "prevented": 4.2175,
+   "killed_threat": 4.2175,
+   "armed": 0.0,
+   "waste": [
+    35.0,
+    0.3333
+   ],
    "pick": "pass"
   },
   {
@@ -35370,6 +36490,16 @@
    ],
    "legal": 35,
    "quick": 1613.6188,
+   "incoming": 7.5975,
+   "survival": 4.0,
+   "at_risk": 0.0,
+   "prevented": 1.0688,
+   "killed_threat": 2.1375,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "squirt/7/None"
   },
   {
@@ -35683,6 +36813,16 @@
    ],
    "legal": 34,
    "quick": 428.1012,
+   "incoming": 29.245,
+   "survival": 0.8207,
+   "at_risk": 1.0,
+   "prevented": 7.76,
+   "killed_threat": 7.76,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "sound/6/None"
   },
   {
@@ -35996,6 +37136,16 @@
    ],
    "legal": 17,
    "quick": 759.7604,
+   "incoming": 10.2125,
+   "survival": 1.5667,
+   "at_risk": 1.0,
+   "prevented": 18.7225,
+   "killed_threat": 0.0,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "sound/6/None"
   },
   {
@@ -36309,6 +37459,16 @@
    ],
    "legal": 35,
    "quick": 1678.1725,
+   "incoming": 10.395,
+   "survival": 4.0,
+   "at_risk": 0.0,
+   "prevented": 5.3525,
+   "killed_threat": 5.3525,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "throw/4/1"
   },
   {
@@ -36622,6 +37782,16 @@
    ],
    "legal": 12,
    "quick": 906.1573,
+   "incoming": 8.51,
+   "survival": 2.1152,
+   "at_risk": 0.0,
+   "prevented": 8.51,
+   "killed_threat": 0.0,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    0.3333
+   ],
    "pick": "throw/5/0"
   },
   {
@@ -36935,6 +38105,16 @@
    ],
    "legal": 19,
    "quick": 1851.1505,
+   "incoming": 3.31,
+   "survival": 4.0,
+   "at_risk": 0.0,
+   "prevented": 3.31,
+   "killed_threat": 7.8225,
+   "armed": 0.0,
+   "waste": [
+    92.0,
+    1.0
+   ],
    "pick": "squirt/4/0"
   },
   {
@@ -37248,6 +38428,16 @@
    ],
    "legal": 17,
    "quick": 1625.0,
+   "incoming": 0.0,
+   "survival": 4.0,
+   "at_risk": 0.0,
+   "prevented": 0.0,
+   "killed_threat": 5.6025,
+   "armed": 0.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "squirt/6/0"
   },
   {
@@ -37561,6 +38751,16 @@
    ],
    "legal": 8,
    "quick": 1563.6775,
+   "incoming": 0.0,
+   "survival": 4.0,
+   "at_risk": 0.0,
+   "prevented": -1.7025,
+   "killed_threat": 0.0,
+   "armed": 6.0,
+   "waste": [
+    0.0,
+    1.0
+   ],
    "pick": "squirt/4/0"
   }
  ]

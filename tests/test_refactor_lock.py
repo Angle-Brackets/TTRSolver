@@ -99,6 +99,38 @@ def _fingerprint():
             entry["quick"] = round(ps._quick_score(state, plan), 4)
         except Exception as exc:            # noqa: BLE001
             entry["quick"] = f"raised {exc.__class__.__name__}"
+
+        # THE SCORER'S PARTS, not just its total. `armed_credit`,
+        # `prevented`, `toons_at_risk` and `killed_threat` have no direct
+        # test anywhere in the repo -- the lock reached them only through
+        # the one number `_quick_score` returns, where an error in one
+        # can be cancelled by an error in another. Pinned individually
+        # before party_search.py is reorganised.
+        after = state.clone()
+        try:
+            from solver import simulator as sim
+            sim.apply_party_round(after, list(plan),
+                                  hits=[True] * len(plan))
+        except Exception:                   # noqa: BLE001
+            after = state
+        for name, call in (
+                ("incoming", lambda: ps.expected_incoming(state)),
+                ("survival", lambda: ps.survival_rounds(state)),
+                ("at_risk", lambda: ps.toons_at_risk(state)),
+                ("prevented", lambda: ps.prevented(state, after)),
+                ("killed_threat", lambda: ps.killed_threat(state, after)),
+                ("armed", lambda: ps.armed_credit(state, after)),
+                ("waste", lambda: ps.plan_waste(state, plan)),
+        ):
+            try:
+                value = call()
+            except Exception as exc:        # noqa: BLE001
+                entry[name] = f"raised {exc.__class__.__name__}"
+                continue
+            if isinstance(value, tuple):
+                entry[name] = [round(float(v), 4) for v in value]
+            else:
+                entry[name] = round(float(value), 4)
         if model is not None:
             plan = hybrid.climb(state, random.Random(seed), budget=8)
             first = plan[0] if plan else None
@@ -130,7 +162,9 @@ class RefactorLockTest(unittest.TestCase):
         self.assertEqual(len(saved["positions"]), len(current["positions"]))
         for i, (was, now) in enumerate(zip(saved["positions"],
                                            current["positions"])):
-            for key in ("legal", "quick", "pick"):
+            for key in ("legal", "quick", "pick", "incoming", "survival",
+                        "at_risk", "prevented", "killed_threat", "armed",
+                        "waste"):
                 if key in was or key in now:
                     self.assertEqual(
                         was.get(key), now.get(key),
