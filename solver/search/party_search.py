@@ -14,7 +14,7 @@ do not have produces advice that assumes an agreement nobody made;
 treating a coordinated team as a distribution throws away the reason
 they coordinated. See `solver/party.py`.
 
-WHY THIS SAMPLES INSTEAD OF ENUMERATING
+WHY THIS PLAYOUTS_PER_PLAN INSTEAD OF ENUMERATING
 ---------------------------------------
 The solo search enumerates its chance nodes exactly, which is what makes
 `solve()` exact. A party round cannot be: the outcome space is the
@@ -89,7 +89,7 @@ from . import weights
 # ---------------------------------------------------------------------
 
 def candidates(state: BattleState, toon_index: int,
-               per_track: int = weights.PER_TRACK) -> List[Action]:
+               per_track: int = weights.CANDIDATES_PER_TRACK) -> List[Action]:
     """A few actions per track for one toon, ranked within each track.
 
     Per *track* rather than overall, so no track is squeezed out by
@@ -143,7 +143,7 @@ def candidates(state: BattleState, toon_index: int,
 
 
 def plans(state: BattleState, mode: Mode = Mode.PICKUP,
-          per_track: int = weights.PER_TRACK,
+          per_track: int = weights.CANDIDATES_PER_TRACK,
           max_plans: int = weights.MAX_PLANS) -> List[Sequence[Optional[Action]]]:
     """The team plans worth considering from this position.
 
@@ -221,7 +221,7 @@ def plans(state: BattleState, mode: Mode = Mode.PICKUP,
     # Stratify the slots by which tracks the plan uses, then fill from
     # the best of each stratum, rather than taking a global top-N.
     #
-    # This is the same lesson as PER_TRACK, learned again one level up.
+    # This is the same lesson as CANDIDATES_PER_TRACK, learned again one level up.
     # `_quick_score` plays one round with everything HITTING, so a
     # Trap+Lure plan is scored as though the lure never misses and is
     # paid nothing for the risk. On a maxed four-toon position it ranked
@@ -245,7 +245,7 @@ def plans(state: BattleState, mode: Mode = Mode.PICKUP,
     # family the enumeration happens to reach first. Within a stratum the
     # order is the prior-ranked candidate order, so the first entries are
     # the plausible ones rather than an arbitrary slice.
-    # Keep the arithmetically best SCORE_BUDGET per stratum, NOT the
+    # Keep the arithmetically best QUICK_SCORED_PER_TRACK per stratum, NOT the
     # first ones enumerated.
     #
     # Taking the first N was a lexicographic prefix, which is the same
@@ -297,7 +297,7 @@ def plans(state: BattleState, mode: Mode = Mode.PICKUP,
     buckets: Dict[tuple, List] = {}
     for signature, rows in cheap.items():
         by_arith = sorted(rows, key=lambda row: -row[0])
-        buckets[signature] = [row[1] for row in by_arith[:weights.SCORE_BUDGET]]
+        buckets[signature] = [row[1] for row in by_arith[:weights.QUICK_SCORED_PER_TRACK]]
 
     # Order within a stratum by the real scorer. `_cheap_score` chose
     # which plans got in; `_quick_score` decides what order they leave
@@ -1659,8 +1659,8 @@ def _cheap_score(state: BattleState, index: int, action: Action) -> float:
             return float("-inf")
         # Laff is worth more than a point of cog damage -- the objective
         # prices it at `laff_weight` -- and this scorer has no objective
-        # to read, so HEAL_VALUE carries the same intent.
-        return weights.HEAL_VALUE * float(min(missing, heal)) - price
+        # to read, so LAFF_POINT_VALUE carries the same intent.
+        return weights.LAFF_POINT_VALUE * float(min(missing, heal)) - price
     if action.track == Track.LURE:
         caught = (len(live) if action.target_index is None
                   else 1) if any(not c.status.lured for c in live) else 0
@@ -1728,7 +1728,7 @@ def _cheap_score(state: BattleState, index: int, action: Action) -> float:
             # lure and understates every other by up to four times.
             rounds = min(mechanics.lure_duration_rounds(level)
                          for level in lure_levels)
-            forgone = weights.HEAL_VALUE * threat * float(rounds)
+            forgone = weights.LAFF_POINT_VALUE * threat * float(rounds)
         return weights.TRAP_DISCOUNT * float(landed) - forgone - price
 
     try:
@@ -1775,9 +1775,9 @@ def _greedy_score(state: BattleState, trial, objective) -> float:
     threw the same track away.
 
     Laff restored is priced at `GREEDY_W["heal"]`. This docstring used
-    to say `HEAL_VALUE`, "shared with the other two scorers so there is
+    to say `LAFF_POINT_VALUE`, "shared with the other two scorers so there is
     one number for what laff is worth rather than three" -- it is not
-    shared. `HEAL_VALUE` is read only by `_cheap_score`; the three
+    shared. `LAFF_POINT_VALUE` is read only by `_cheap_score`; the three
     constants merely hold the same number, and the note above `QUICK_W`
     records that sharing the heal weight WAS tried and refuted (raising
     it to 12 gained the hybrid a point and cost the search two to
@@ -1892,8 +1892,8 @@ def rollout_value(state: BattleState, objective, rng,
 def evaluate(state: BattleState, depth: int = 1,
              mode: Mode = Mode.PICKUP,
              model: Optional[TeammateModel] = None,
-             objective=None, samples: int = weights.SAMPLES,
-             per_track: int = weights.PER_TRACK, max_plans: int = weights.MAX_PLANS,
+             objective=None, samples: int = weights.PLAYOUTS_PER_PLAN,
+             per_track: int = weights.CANDIDATES_PER_TRACK, max_plans: int = weights.MAX_PLANS,
              leaf: str = "rollout",
              rng=random) -> Tuple[float, Optional[Sequence]]:
     """Estimated value of `state`, and the plan that achieves it.

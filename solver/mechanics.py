@@ -254,7 +254,7 @@ def calc_toon_accuracy(track: Track, level: int, toon: ToonState,
     # The 95 cap became a SOFT cap in 4.3.3 (stun/Lure/Trap/Toons Hit can
     # push it higher), but the wiki never quantifies "slightly" or gives a
     # replacement ceiling, so this stays a hard cap -- the closest
-    # defensible approximation. See data.ACCURACY_CAP_IS_SOFT and
+    # defensible approximation. See data.ACCURACY_CAP_IS_SOFT_IN_GAME and
     # docs/mechanics-notes.md#calc_toon_accuracy--the-95-cap-and-the-433-soft-cap.
     return min(acc, data.ACCURACY_CAP)
 

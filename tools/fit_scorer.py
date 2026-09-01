@@ -151,7 +151,16 @@ def finished(seeds, budget: int, sets=None) -> float:
 
 
 def evaluate(vector, seeds, budget: int, sets=None) -> float:
-    ps_weights.QUICK_W = {k: float(v) for k, v in zip(KEYS, vector)}
+    # MERGED, NOT REPLACED. `KEYS` is the seven weights this fits, and
+    # `QUICK_W` has nine -- `waste` and `survive` are not fitted here.
+    # Rebinding the dict to just the seven dropped those two, and
+    # `_score_leaf` reads both, so the next call raised
+    # `KeyError: 'waste'`. Fitting crashed the scorer it was fitting.
+    #
+    # Merging keeps the unfitted weights at their shipped values, which
+    # is what "fit these seven" always meant.
+    fitted = {k: float(v) for k, v in zip(KEYS, vector)}
+    ps_weights.QUICK_W = dict(ps_weights.QUICK_W, **fitted)
     return finished(seeds, budget, sets)
 
 

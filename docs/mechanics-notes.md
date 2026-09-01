@@ -100,7 +100,7 @@ The 95 cap became a SOFT cap in 4.3.3: stun/Lure/Trap bonuses and Toons
 Hit "can slightly push the final accuracy value higher". The wiki never
 quantifies "slightly" or gives a replacement ceiling, so there is
 nothing to model — this stays a hard cap, which is the pre-4.3.3 rule
-and the closest defensible approximation. See `data.ACCURACY_CAP_IS_SOFT`;
+and the closest defensible approximation. See `data.ACCURACY_CAP_IS_SOFT_IN_GAME`;
 revisit if a number ever surfaces.
 
 ### `lure_accuracy_before_bonus` — why the 95 cap is not applied here

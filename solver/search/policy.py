@@ -3,8 +3,8 @@
 `plans()` has to decide which handful of the thousands of legal team
 plans deserve to be searched. That decision is the term search cost is
 exponential in, and it is where this project has repeatedly lost the
-right answer -- `PER_TRACK = 2` hid the best Sound mix, `max_plans` took
-a lexicographic prefix, then a global top-N, then `SCORE_BUDGET`
+right answer -- `CANDIDATES_PER_TRACK = 2` hid the best Sound mix, `max_plans` took
+a lexicographic prefix, then a global top-N, then `QUICK_SCORED_PER_TRACK`
 reintroduced the prefix bug a level down.
 
 Measured on 375 held-out positions, by regret@6 (the value given up by

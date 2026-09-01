@@ -37,7 +37,7 @@ from solver.search import party_search as ps
 from solver.state import BattleState, CogState, ToonState, Track
 
 BASELINE = pathlib.Path(__file__).parent / "data" / "refactor_lock.json"
-SAMPLES = 120
+PLAYOUTS_PER_PLAN = 120
 
 SELLBOTS = ["cold_caller", "telemarketer", "name_dropper", "glad_hander",
             "mr_hollywood"]
@@ -81,7 +81,7 @@ def _fingerprint():
     out = {"obs_dim": env_mod.OBS_DIM, "obs_version": env_mod.OBS_VERSION,
            "n_actions": len(env_mod.ACTIONS), "positions": []}
     model = hybrid._load()
-    for seed in range(SAMPLES):
+    for seed in range(PLAYOUTS_PER_PLAN):
         rng = random.Random(90000 + seed)
         state = _position(rng)
         entry = {

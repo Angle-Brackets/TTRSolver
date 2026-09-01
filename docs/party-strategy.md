@@ -150,7 +150,7 @@ Candidates were capped at two per track, so Sound only ever offered
 levels 7 and 6 and the entire family of mixed-level Sound plans was
 unreachable — including the one that won. The sweep reported "4
 Foghorn" with total confidence and would have gone on doing so. It took
-someone saying "there is a better line" to find it; `PER_TRACK` is 4
+someone saying "there is a better line" to find it; `CANDIDATES_PER_TRACK` is 4
 now.
 
 The same shape as the cog-level reader, where padding two masks to the
@@ -187,7 +187,7 @@ is charged nothing for the risk, so luring four cogs is +100 free and
 Sound's reliability is invisible. The optimism is tolerable; the
 optimism plus a global top-N cut is not.
 
-The fix is the one `PER_TRACK` already encodes one level down: **give
+The fix is the one `CANDIDATES_PER_TRACK` already encodes one level down: **give
 each track family its own slots** rather than taking a global top-N.
 That does not make `_quick_score` honest, it stops the dishonesty being
 fatal — each family's best offering reaches the sampled evaluation and
@@ -212,7 +212,7 @@ This is now the fourth occasion in this work that a *reduction* quietly
 deleted the right answer, and they all look identical in the output —
 a confident, plausible, wrong recommendation:
 
-1. `PER_TRACK = 2` — Sound offered only levels 7 and 6, so every
+1. `CANDIDATES_PER_TRACK = 2` — Sound offered only levels 7 and 6, so every
    mixed-level Sound plan was unreachable.
 2. Mask padding to the top-left instead of centring — a "Level 8" plate
    read as a confident 6.
@@ -538,7 +538,7 @@ only the survivors**:
 * `plans()` was running a simulated `_quick_score` on *every* playable
   combo, ~50k of them, and then throwing almost all of the results away
   in the truncation. It now collects first and scores at most
-  `SCORE_BUDGET` per track family. Per family, not globally, for exactly
+  `QUICK_SCORED_PER_TRACK` per track family. Per family, not globally, for exactly
   the reason the truncation is per family.
 * `greedy_plan` was simulating a full round for every candidate of every
   toon on every round of every rollout, to pick one action. It now
@@ -642,14 +642,14 @@ That flat response is the tell. The premium was working perfectly —
 plan still won, because **2 Foghorn + 2 Aoogah was not on the shortlist
 at all.** No objective term can reach a plan that is not a candidate.
 
-The cause was `SCORE_BUDGET`, added while optimising: it kept the first
+The cause was `QUICK_SCORED_PER_TRACK`, added while optimising: it kept the first
 40 combos per stratum, which is a **lexicographic prefix** — the same
 bug `max_plans` had, reintroduced one level down, deleting the same
 line. `combinations_with_replacement` reaches every combo built from
 Sound 7 before it reaches [Foghorn, Foghorn, Aoogah, Aoogah].
 
 Fixed by ranking each stratum with `_cheap_score` — pure arithmetic, no
-simulations — and scoring only the best `SCORE_BUDGET` of them. With
+simulations — and scoring only the best `QUICK_SCORED_PER_TRACK` of them. With
 that in place:
 
 | premium | level 7 in plan | most common plan |
@@ -665,8 +665,8 @@ and it nudges rather than bans — on a toon at 12 laff where only a level
 
 ### The count is now five
 
-`PER_TRACK = 2`; top-left mask padding; `max_plans` lexicographic prefix;
-`max_plans` global top-N; and now `SCORE_BUDGET` lexicographic prefix.
+`CANDIDATES_PER_TRACK = 2`; top-left mask padding; `max_plans` lexicographic prefix;
+`max_plans` global top-N; and now `QUICK_SCORED_PER_TRACK` lexicographic prefix.
 Every one produced confident, plausible, wrong output. The newest was
 introduced by an optimisation whose own benchmark looked clean, because
 the benchmark measured *time* and the plans it compared happened not to

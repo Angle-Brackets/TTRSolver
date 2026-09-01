@@ -240,7 +240,7 @@ class TestCapAndFloor(unittest.TestCase):
         """4.3.3 made the 95% hard cap a soft cap. The value is still 95;
         what changed is that bonuses may exceed it. The wiki never says by
         how much, so nothing beyond this flag is recorded."""
-        self.assertTrue(acc.ACCURACY_CAP_IS_SOFT)
+        self.assertTrue(acc.ACCURACY_CAP_IS_SOFT_IN_GAME)
 
     def test_floor(self):
         self.assertEqual(acc.ACCURACY_FLOOR, 5)
@@ -313,3 +313,40 @@ class TestFormulaWiring(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SoftCapIsNotModelledTest(unittest.TestCase):
+    """`ACCURACY_CAP_IS_SOFT_IN_GAME` records a fact about TTR that the
+    solver deliberately does NOT model.
+
+    Asserting the constant is True only checks a constant. These pin the
+    behaviour, so the gap between the game and the model is visible from
+    the tests rather than only from a comment.
+    """
+
+    def test_the_flag_states_the_games_rule(self):
+        from solver.data import accuracy as acc
+        self.assertTrue(acc.ACCURACY_CAP_IS_SOFT_IN_GAME)
+
+    def test_but_the_model_applies_a_HARD_cap(self):
+        from solver import data, mechanics
+        from solver.state import ToonState, Track, CogState
+        hp = data.cog_max_hp(1)
+        cogs = [CogState(department="sellbot", cog_type="cold_caller",
+                         level=1, hp=hp, max_hp=hp)]
+        # A maxed track against a level 1 cog sums far past 95.
+        toon = ToonState(100, 137, {t: 7 for t in Track}, {}, frozenset())
+        acc = mechanics.calc_toon_accuracy(Track.THROW, 7, toon, cogs,
+                                           all_cogs=cogs)
+        self.assertEqual(acc, data.ACCURACY_CAP)
+
+    def test_nothing_branches_on_the_flag(self):
+        """If this ever fails, the flag has been wired up and the name
+        should lose its `_IN_GAME` suffix."""
+        import pathlib
+        for name in ("solver/mechanics.py", "solver/simulator.py"):
+            source = pathlib.Path(name).read_text(encoding="utf-8")
+            for line in source.split("\n"):
+                if "ACCURACY_CAP_IS_SOFT_IN_GAME" in line:
+                    self.assertTrue(line.lstrip().startswith("#"),
+                                    "flag is now read at " + name)

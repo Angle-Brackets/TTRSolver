@@ -124,9 +124,9 @@ of 60 makes depth 3 cost what depth 2 costs now.
 ### The part that makes this more than a speedup
 
 `plans()` is where this project keeps losing the right answer. In one
-session: `PER_TRACK = 2` hid the best Sound mix; `max_plans` took a
+session: `CANDIDATES_PER_TRACK = 2` hid the best Sound mix; `max_plans` took a
 lexicographic prefix; then a global top-N over an optimistic score;
-then `SCORE_BUDGET` reintroduced the prefix bug one level down. Four of
+then `QUICK_SCORED_PER_TRACK` reintroduced the prefix bug one level down. Four of
 the five reductions that deleted a correct answer were **hand-written
 guesses about which plans deserve attention**. That is exactly the
 function a policy head learns.
@@ -150,7 +150,7 @@ search, and search only ranks what its shortlist admitted. Train on
 today's shortlist and the policy learns to reproduce today's blind
 spots — including the bug that deleted 2 Foghorn + 2 Aoogah. Generate
 labels with a deliberately **widened** shortlist (higher `max_plans`,
-higher `PER_TRACK`, more samples), offline and slowly. The student is
+higher `CANDIDATES_PER_TRACK`, more samples), offline and slowly. The student is
 allowed to be narrow; the teacher is not.
 
 ---

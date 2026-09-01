@@ -16,7 +16,7 @@ THE TEACHER IS WIDER THAN THE STUDENT, DELIBERATELY
 ---------------------------------------------------
 `docs/ml-design.md` §2b: labels come from search, and search only ranks
 what its shortlist admitted. Training on the shipped shortlist would
-teach the policy today's blind spots -- including the `SCORE_BUDGET`
+teach the policy today's blind spots -- including the `QUICK_SCORED_PER_TRACK`
 prefix bug that hid 2 Foghorn + 2 Aoogah for four commits.
 
 So generation runs at `--teacher-plans` / `--teacher-per-track` well
@@ -184,7 +184,7 @@ def main():
     ap.add_argument("--teacher-plans", type=int, default=120,
                     help="wider than the shipped MAX_PLANS, on purpose")
     ap.add_argument("--teacher-per-track", type=int, default=5,
-                    help="wider than the shipped PER_TRACK, on purpose")
+                    help="wider than the shipped CANDIDATES_PER_TRACK, on purpose")
     ap.add_argument("--samples", type=int, default=16)
     ap.add_argument("--depth", type=int, default=1)
     ap.add_argument("--seed", type=int, default=0)

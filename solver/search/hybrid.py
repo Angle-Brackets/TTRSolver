@@ -117,7 +117,7 @@ LOOKAHEAD_DISCOUNT = 0.7
 # Per-round discount for `rollout_judge`. Near one because a building is
 # long and a gag saved on floor one is spent on floor four; the reward
 # function already prices the horizon through `cogs_remaining`.
-DISCOUNT = 0.95
+ROLLOUT_DISCOUNT = 0.95
 
 _EXPORT = Path(__file__).resolve().parents[1] / "rl" / "ppo_facility.json"
 _MODEL: Optional[dict] = None
@@ -355,7 +355,7 @@ def rollout_judge(state: BattleState, plan, seed: int, depth: int = 3,
                         for b, a in zip(current.toons, nxt.toons))
         went_sad = sum(1 for b, a in zip(current.toons, nxt.toons)
                        if b.laff > 0 and a.laff <= 0)
-        total += (DISCOUNT ** step) * ps.round_reward(
+        total += (ROLLOUT_DISCOUNT ** step) * ps.round_reward(
             objective, laff_lost, ps._spent(current, nxt),
             won=nxt.is_win(),
             lost=nxt.is_terminal() and not nxt.is_win(),
@@ -430,7 +430,7 @@ def _judge(state: BattleState, plan, deep: bool) -> float:
 # one of the same track. Toggleable because the effect is still being
 # measured and the honest state of it is "unproven": see the A/B in
 # `_track_key`.
-GROUP_PROBES = True
+GROUP_GAGS_PROBED_SEPARATELY = True
 
 # MEASURED NEUTRAL, kept as a correctness rule rather than a win. Paired
 # over four cells: 33 up / 31 down, p=0.90. Blocking the move without
@@ -559,7 +559,7 @@ PROBE_CHEAPEST_LURE = True
 # So the ordering stands and `PROBE_CHEAPEST_KILL` really is mostly
 # unreached live. That is a budget problem, not an ordering one, and it
 # is left recorded rather than papered over.
-PROBE_ORDER_EARLY = False
+TARGETED_PROBES_FIRST = False
 
 # The one narrow exception, and it is narrow on purpose: a LURE aimed at
 # a TRAPPED cog. There the lure's level buys nothing -- the trap
@@ -796,7 +796,7 @@ def _track_key(entry):
     gag in a track contributes one entry for it as before.
     """
 
-    if not GROUP_PROBES:
+    if not GROUP_GAGS_PROBED_SEPARATELY:
         return entry.track
 
     try:
@@ -1069,7 +1069,7 @@ def climb(state: BattleState, rng=random, budget: int = 16,
     while `Wedding Cake -> all` scored 1103 and `Railroad -> all` 1159
     and neither was ever put in front of the judge. A gag that hits four
     cogs is not a reordering of one that hits one. `_track_key` now keys
-    on (track, group); `GROUP_PROBES` turns it off.
+    on (track, group); `GROUP_GAGS_PROBED_SEPARATELY` turns it off.
 
     It is ON, on this evidence, paired on identical positions:
 
@@ -1231,7 +1231,7 @@ def climb(state: BattleState, rng=random, budget: int = 16,
                         if index not in order and np.isfinite(values[index]):
                             order.append(index)
 
-            if PROBE_ORDER_EARLY:
+            if TARGETED_PROBES_FIRST:
                 _add_targeted()
             elif PROBE_LURE_ON_TRAP and PROBE_CHEAPEST_LURE and any(
                     c.status.trapped and not c.status.is_dead
@@ -1271,7 +1271,7 @@ def climb(state: BattleState, rng=random, budget: int = 16,
                         and np.isfinite(values[env_mod.PASS_INDEX])
                         and env_mod.PASS_INDEX not in order):
                     order.append(env_mod.PASS_INDEX)
-            if not PROBE_ORDER_EARLY:
+            if not TARGETED_PROBES_FIRST:
                 _add_targeted()
             trials = [env_mod.action_at(int(index)) for index in order
                       if np.isfinite(values[index])]

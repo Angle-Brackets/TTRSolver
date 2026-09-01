@@ -38,7 +38,7 @@ def _one(job):
 
     hybrid._EXPORT = Path(POL)
     hybrid._MODEL, hybrid._TRIED = None, False
-    hybrid.GROUP_PROBES = group_probes
+    hybrid.GROUP_GAGS_PROBED_SEPARATELY = group_probes
     ceo_mod.enable_big_cheese()
 
     if fight == "FAC":

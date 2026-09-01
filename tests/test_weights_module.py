@@ -96,7 +96,7 @@ class EverythingMovedTest(unittest.TestCase):
     def test_they_are_all_in_weights(self):
         for name in ("QUICK_W", "GREEDY_W", "FIRE_PRICE", "FIRE_FLOOR",
                      "SURVIVAL_CAP", "SCARCITY_UNITS", "MAX_PLANS",
-                     "SAMPLES", "PER_TRACK", "ROLLOUT_ROUNDS"):
+                     "PLAYOUTS_PER_PLAN", "CANDIDATES_PER_TRACK", "ROLLOUT_ROUNDS"):
             with self.subTest(name=name):
                 self.assertTrue(hasattr(weights, name))
 
@@ -137,3 +137,74 @@ class OptionalNumpyTest(unittest.TestCase):
             if "import numpy" in line:
                 self.assertTrue(line.startswith((" ", "\t")),
                                 "numpy must stay function-local: " + line)
+
+
+class FitterKeysTest(unittest.TestCase):
+    """`tools/fit_scorer.py` fits SEVEN of `QUICK_W`'s nine weights.
+
+    It used to REBIND the dict to just those seven, dropping `waste` and
+    `survive` -- both of which `_score_leaf` reads. The next scoring call
+    raised `KeyError: 'waste'`, so fitting crashed the scorer it was
+    fitting. It now merges.
+    """
+
+    FIT_KEYS = ("heal", "armed", "kill", "kill_threat", "prevent",
+                "risk", "price")
+
+    def test_every_fitted_key_exists(self):
+        for key in self.FIT_KEYS:
+            with self.subTest(key=key):
+                self.assertIn(key, weights.QUICK_W)
+
+    def test_the_fitter_does_not_drop_the_unfitted_ones(self):
+        import pathlib
+        source = pathlib.Path("tools/fit_scorer.py").read_text(
+            encoding="utf-8")
+        self.assertIn("dict(ps_weights.QUICK_W", source,
+                      "fit_scorer must MERGE, not replace")
+
+    def test_a_merged_rebind_still_scores(self):
+        """The shape fit_scorer uses, exercised end to end."""
+        import random
+        from solver import simulator
+        from solver.search import party_search as ps
+        state = self._board()
+        action = next(a for a in simulator.legal_actions(state)
+                      if not a.is_pass)
+        original = weights.QUICK_W
+        try:
+            fitted = {k: 1.0 for k in self.FIT_KEYS}
+            weights.QUICK_W = dict(original, **fitted)
+            ps._quick_score(state, [action])
+        finally:
+            weights.QUICK_W = original
+
+    def test_a_replacing_rebind_would_have_raised(self):
+        """Pins WHY the merge is needed, so removing it fails loudly."""
+        import random
+        from solver import simulator
+        from solver.search import party_search as ps
+        state = self._board()
+        action = next(a for a in simulator.legal_actions(state)
+                      if not a.is_pass)
+        original = weights.QUICK_W
+        try:
+            weights.QUICK_W = {k: 1.0 for k in self.FIT_KEYS}
+            with self.assertRaises(KeyError):
+                ps._quick_score(state, [action])
+        finally:
+            weights.QUICK_W = original
+
+    def _board(self):
+        import random
+        from solver.rl import env as env_mod, harness
+
+        def sampler(rng):
+            state = env_mod.facility_position(rng)
+            state.toons = [harness.solo_loadout(rng)]
+            return state
+
+        e = env_mod.BattleEnv(rng=random.Random(3), sampler=sampler,
+                              coordinated=True)
+        e.reset()
+        return e.state

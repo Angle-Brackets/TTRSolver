@@ -312,7 +312,7 @@ class TrappedLureTest(unittest.TestCase):
         track sweep at the panel's budget of 8: measured, difficulty 9
         fell 60% to 42% and the VP 94% to 81%."""
         from solver.search import hybrid
-        self.assertFalse(hybrid.PROBE_ORDER_EARLY)
+        self.assertFalse(hybrid.TARGETED_PROBES_FIRST)
         self.assertEqual(hybrid._cheapest_lures(self._board(False), 0, None),
                          hybrid._cheapest_lures(self._board(False), 0, None))
         untrapped = hybrid.climb(self._board(False), random.Random(0),

@@ -144,7 +144,7 @@ the solver's move recommendations; caveat its absolute win rates.
 5. **The 95% cap is soft since 4.3.3** — bonuses "can slightly push the
    final accuracy value higher" — but the wiki never quantifies it or gives
    a replacement ceiling. Modeled as the pre-4.3.3 hard cap, flagged by
-   `data.ACCURACY_CAP_IS_SOFT`.
+   `data.ACCURACY_CAP_IS_SOFT_IN_GAME`.
 6. **`calc_toon_damage` interpolates min/max** rather than using the real
    experience-based formula. `mechanics.gag_damage_from_exp` is transcribed
    and correct but needs per-gag `minE`/`maxE` thresholds; the gag

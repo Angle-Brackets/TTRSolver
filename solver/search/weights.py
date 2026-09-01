@@ -40,7 +40,7 @@ from ..state import Track
 # only levels 7 and 6, so every mixed-level Sound plan -- including the
 # best one available -- was unreachable, and the search reported the
 # wrong answer with total confidence.
-PER_TRACK = 4
+CANDIDATES_PER_TRACK = 4
 
 
 # Plans considered at a MAX node, after ranking them cheaply. The joint
@@ -50,14 +50,14 @@ MAX_PLANS = 60
 
 
 # Playouts per plan at a chance node.
-SAMPLES = 8
+PLAYOUTS_PER_PLAN = 8
 
 
 # How many candidate plans in each track family get a simulated
 # `_quick_score`. Everything past this is dropped unscored -- see
 # `plans`. Scoring every playable combo was 28% of the search and its
 # results were almost entirely discarded by the truncation.
-SCORE_BUDGET = 40
+QUICK_SCORED_PER_TRACK = 40
 
 
 # WEIGHTS FOR THE TWO PLAN SCORERS, kept apart on purpose.
@@ -332,14 +332,14 @@ GREEDY_W = {
 #
 # READ BY ONE SCORER, `_cheap_score`, and there for two different
 # things: the Toon-Up branch uses it as a heal weight, and the Trap
-# branch uses it as a PREVENTION weight (`forgone = HEAL_VALUE * threat
+# branch uses it as a PREVENTION weight (`forgone = LAFF_POINT_VALUE * threat
 # * rounds`). The other two scorers price laff restored through
 # `QUICK_W["heal"]` and `GREEDY_W["heal"]`, which both happen to equal
 # this. Three constants, one number, no link between them --
 # docs/scoring.md.
 # Swept over 45 identical buildings, AFTER the reinforcement-slot fix:
 #
-#     HEAL_VALUE   floors   finished
+#     LAFF_POINT_VALUE   floors   finished
 #     0.0 (blind)    2.44      62.2%
 #     0.5            2.51      64.4%
 #     1.0            2.62      66.7%
@@ -355,7 +355,7 @@ GREEDY_W = {
 #
 # Differences of a few points across 45 seeds are noise; what the sweep
 # supports is that healing is worth something and that 3.0 overcorrects.
-HEAL_VALUE = 2.0
+LAFF_POINT_VALUE = 2.0
 
 
 # How much of a trap's damage to credit before it has been sprung. Less
@@ -374,7 +374,7 @@ TRACK_PROBES = 3
 # How many of a toon's candidate actions `greedy_plan` simulates. The
 # sweep that settled it at 2 -- and the four-position table showing k=1
 # losing 1.54 on the mixed-hp board -- is the comment block above
-# `HEAL_VALUE`, where it ran together with that constant's own note.
+# `LAFF_POINT_VALUE`, where it ran together with that constant's own note.
 GREEDY_SHORTLIST = 2
 
 

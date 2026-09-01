@@ -40,7 +40,7 @@ TTR REBALANCING HISTORY captured here (from the Accuracy page's own
            10% Lure accuracy bonus became stackable, +5% per extra Trap.
   4.3.3 -- The 95% hard cap became a *soft* cap: stun bonus, Lure bonus,
            Trap placements and Toons Hit can now push the final accuracy
-           past 95. See ACCURACY_CAP_IS_SOFT below.
+           past 95. See ACCURACY_CAP_IS_SOFT_IN_GAME below.
 """
 from ..state import Track
 from .gags import gag
@@ -174,7 +174,17 @@ ACCURACY_CAP = 95
 # whether propAcc/trackExp/tgtDef alone can still exceed 95 -- so the exact
 # replacement rule is not derivable from this source and no number for it
 # is recorded here.
-ACCURACY_CAP_IS_SOFT = True
+# NAMED "_IN_GAME" BECAUSE NOTHING READS IT. It records a fact about
+# TTR, and `mechanics.calc_toon_accuracy` applies `min(acc,
+# ACCURACY_CAP)` unconditionally regardless of its value -- so the
+# solver models a HARD cap while this says the game's is soft.
+#
+# It was `ACCURACY_CAP_IS_SOFT`, which read as a claim about our own
+# behaviour: a reader who trusted it would believe the soft cap was
+# modelled, and a test asserting it is True looked like it checked
+# that. The suffix keeps the fact and drops the implication.
+# `tests/test_accuracy_data.py` now also pins the modelled behaviour.
+ACCURACY_CAP_IS_SOFT_IN_GAME = True
 
 # [CONFIRMED] -- Accuracy#Special rules: "Except when using a Drop gag on
 # lured Cogs, if atkAcc falls below 5%, it is automatically increased to
