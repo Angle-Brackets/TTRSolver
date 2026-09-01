@@ -524,60 +524,63 @@ a bigger network.
 `policy` and `search.features` are still imported by `party_search`:
 `evaluate`'s `leaf="learned"` path uses them, and that is unaffected.
 
-## How good a ranker is `_quick_score`? Barely better than chance
+## How good a ranker is `_quick_score`? Good -- and I got this wrong first
 
 It is what `hybrid.climb` judges with, what `tools/fit_scorer.py` tunes,
-and what `train_heads.py` was fit against -- so most of this file rests
-on it ordering moves well. It was never measured against outcomes.
+and what `train_heads.py` was fit against, so most of this file rests on
+it ordering moves well. It had never been measured against outcomes.
 
 **Method.** For each sampled position take the best candidate of each
-track, so the candidate set is not chosen by the thing under test.
-Evaluate each by Monte Carlo -- play it, finish the battle with `climb`,
-16 times on paired seeds -- and compare that ordering with
-`_quick_score`'s.
+track, so the candidate set is not chosen by the thing under test. Play
+the candidate, finish the battle, repeat K=16 times on the SAME board
+with INDEPENDENT dice, and score the candidate by how often it won. Then
+compare that ordering with `_quick_score`'s.
 
-Solo, difficulty 7, 60 positions:
+| difficulty | positions | rho | picked the best | best | scorer | random | worst |
+|---|---|---|---|---|---|---|---|
+| 5 | 3 | +0.696 | 3/3 | 1.000 | 1.000 | 0.990 | 0.938 |
+| 7 | 13 | +0.701 | 13/13 | 1.000 | 1.000 | 0.977 | 0.923 |
+| 9 | 94 | +0.545 | 88/94 | 0.991 | 0.987 | 0.887 | 0.755 |
 
-| | win rate |
-|---|---|
-| best candidate | 1.000 |
-| **`_quick_score`'s pick** | **0.625** |
-| uniformly at random | 0.507 |
-| worst candidate | 0.000 |
+**It captures 96-100% of the gap between chance and best**, with rank
+correlations of +0.55 to +0.70. On the largest sample it picks the best
+candidate in 94% of positions and gives up 0.004 of win rate.
 
-**It captures 24% of the gap between chance and best**, and the mean
-Spearman rho between its scores and the outcomes is **+0.013** -- no
-ordering signal at all. It picks the best candidate 62% of the time, and
-when it is wrong the move it takes wins essentially never.
+### THE FIRST VERSION OF THIS SECTION SAID THE OPPOSITE, AND IT WAS A BUG
 
-### Two things that soften it, and one that does not
+It reported rho +0.013 and "captures 24% of the gap", concluding the
+scorer was barely better than chance. That was wrong, and the cause was
+in the harness, not the scorer:
 
-* **Most positions are flat.** Only 24 of 60 at difficulty 7 had any
-  spread between candidates; at difficulty 5 it was 7 of 100, and at
-  difficulty 9, 0 of 100 (a solo toon loses regardless). Where the first
-  move cannot change the outcome, a bad ranker costs nothing -- which is
-  why this does not show up as a large win-rate deficit in aggregate.
-* **The sample is small.** 24 and 7 discriminating positions. This is a
-  signal to act on, not a settled number.
-* **The continuation policy is `climb`, which uses `_quick_score`.** So
-  "best" means best under how we actually play, not ground truth. That
-  is the right question for improving play, but it is not a claim about
-  the game.
+    g = BattleEnv(rng=random.Random(seed), ...)   # inside the K loop
 
-### What it explains
+The environment was re-seeded IDENTICALLY on every rollout, so all
+sixteen playouts of a candidate shared one set of accuracy rolls and cog
+attacks. Only `climb`'s internal rng varied, and `climb` is
+near-deterministic given a state. K=16 was one sample repeated sixteen
+times, which is why every value came out as an exact 1.000 or 0.000 and
+why the regret looked catastrophic: it was measuring whether a single
+dice roll happened to favour one move.
 
-**The flat sweeps may be flat because the ranker cannot discriminate,
-not because the weights do not matter.** `QUICK_W["risk"]`,
-`["waste"]` and `["kill_threat"]` all swept to zero on evidence;
-`SCARCITY_UNITS` came out a wash. A ranker with rho +0.013 on the
-positions that matter would produce exactly that pattern whatever the
-weights were worth.
+Fixed by rolling the round directly off the captured root state with a
+fresh `rng` per playout, which keeps the position fixed and makes the
+dice independent.
 
-It also explains the null result recorded above: giving solo the track
-probe cut "the scorer's argmax was missed" from 61% to 7% and moved win
-rate not at all. Agreeing more closely with a ranker that carries little
-signal buys nothing.
+**The conclusion drawn from it was also wrong and is withdrawn.** That
+version claimed the flat weight sweeps -- `risk`, `waste`,
+`kill_threat`, `SCARCITY_UNITS` -- might be flat because the ranker
+could not discriminate. It can. Those sweeps are flat for their own
+reasons, which their own comments record.
 
-**This does not mean the weights are wrong.** It means the evidence for
-them is weaker than the tables above suggest, and that a better ranker
-is worth more than better weights for the current one.
+### What still stands
+
+**The stakes are usually small.** Only 13 of 60 positions at difficulty
+7 had any spread between candidates at all, and 3 of 120 at difficulty
+5. Where the choice does matter, even the WORST candidate of each track
+wins 76-94% of the time. That is the honest reason the solo track-probe
+experiment moved win rate not at all: it was already choosing well, and
+the remaining headroom is thin.
+
+Difficulty 9 is where it matters most -- worst 0.755 against best 0.991
+-- and where the scorer is least sharp (rho +0.545, 6 of 94 positions
+wrong). If effort goes anywhere, it goes there.
