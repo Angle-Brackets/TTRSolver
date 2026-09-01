@@ -719,7 +719,7 @@ the state is: the default is unproven, the shipped policy does not use
 it, and `--obs-version 2` is available to anyone who wants the older
 one.
 
-## `PER_COG_REACH`: the extrapolation is settled, and it was right
+## `SLEEPERS_WAKE_IN_TURN`: the extrapolation is settled, and it was right
 
 It shipped on a judgement call -- it helped at 12 cogs a round and HURT
 at 8 -- and the note has said so ever since. Re-measured now that the

@@ -437,14 +437,22 @@ CHEAP_LURE_VALUE = 25.0
 WAKE_COSTS_PREVENTED = True
 
 
-# How far ahead a lure's quiet is credited, per cog
-# rather than as a mean over them.
+# A lured cog is credited for the quiet it will ACTUALLY provide,
+# which depends on when the party gets round to waking it. Four
+# sleepers are worth 1 + 2 + 3 + 4 rounds of silence, not
+# 4 + 4 + 4 + 4 -- the one you are about to kill was never going
+# to stay asleep, and the one at the back was. Ordered by
+# remaining health, because that is the order a player clears
+# them: finish the cheap ones, leave the Mr. Hollywood napping.
+#
+# Was `PER_COG_REACH`, which named the local variable rather than
+# the behaviour and meant nothing until you had read the function.
 #
 # THE REASONING IS IN `party_search.prevented`, not here. These four
 # flags are read inside that one function and its docstring argues
 # each of them with its measurement; splitting the prose from the
 # code that acts on it would help nobody. Follow the pointer.
-PER_COG_REACH = True
+SLEEPERS_WAKE_IN_TURN = True
 
 
 # Whether an already-lured cog buys

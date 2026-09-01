@@ -513,9 +513,9 @@ def prevented(before: BattleState, after: BattleState) -> float:
     #
     # Ordered by remaining health, because that is the order a player
     # works through them: finish the cheap ones, leave the Mr.
-    # Hollywood asleep. `PER_COG_REACH` turns it off.
+    # Hollywood asleep. `SLEEPERS_WAKE_IN_TURN` turns it off.
     order = {}
-    if weights.PER_COG_REACH:
+    if weights.SLEEPERS_WAKE_IN_TURN:
         sleepers = sorted(
             (c for c in after.active_cogs() if c.status.lured),
             key=lambda c: c.hp + (c.max_hp if c.status.suited else 0))
