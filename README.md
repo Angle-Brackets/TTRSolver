@@ -234,16 +234,60 @@ on it. `build_state` returns a state **or** the reasons there isn't one —
 never a guess, because advice computed from an invented state is worse than
 no advice.
 
+### Naming the cog is harder than reading the plate
+
+The plate gives a department and a level. That is not enough to say
+*which* cog it is: of the 48 (department, level) pairs, **only 8 name
+exactly one cog**, and the worst allow five. Every one of these is a
+Lawbot level 5:
+
+<p align="left">
+  <img src="overlay_ui/src/assets/cogs/cog-lawbot-ambulance_chaser.png" width="72" title="Ambulance Chaser">
+  <img src="overlay_ui/src/assets/cogs/cog-lawbot-backstabber.png" width="72" title="Back Stabber">
+  <img src="overlay_ui/src/assets/cogs/cog-lawbot-bloodsucker.png" width="72" title="Bloodsucker">
+  <img src="overlay_ui/src/assets/cogs/cog-lawbot-bottom_feeder.png" width="72" title="Bottom Feeder">
+  <img src="overlay_ui/src/assets/cogs/cog-lawbot-double_talker.png" width="72" title="Double Talker">
+</p>
+
+It matters because attack sets differ: which cog it is decides how hard
+the round hits back. The remaining evidence is the head rendered in the
+plate, matched against a collected library
+(`solver/live/catalogue.py`).
+
+**The art above is not what it matches against**, and that was measured
+rather than assumed. Ranking a plate against this artwork put the right
+cog first for 3 of 4 known plates, which sounds fine until you read the
+margins — 0.001 to 0.004, against the collected library's 0.028 correct
+versus 0.132 wrong. Every candidate scores 0.12–0.15, so the art carries
+essentially no signal and the hits are coin flips; one of the four
+ranked its true cog *last*. Different pose, light and background from
+the fixed-camera plate render. It stays useful for showing a human the
+candidates, which is exactly its job here.
+
+**The library never has to be finished.** `HeadCatalogue.eliminate`
+deduces a cog it has never seen: when every known candidate in the pool
+is ruled out and exactly one is left, that is the cog — by deduction
+rather than resemblance. So the last cog in each group needs no label,
+and one unknown at level 5 is often deducible at level 6. It
+deliberately does not record what it deduces: a signature is written
+once and consulted forever, so a wrong entry poisons every later match,
+while a wrong deduction costs one battle.
+
 ## Consumables: slips, unites and SOS cards
 
 Three resources sit outside the gag pouch, and each is modelled
 differently because each behaves differently.
 
-| | costs a turn | how it is priced | who can see it |
-| --- | --- | --- | --- |
-| **Pink slip** | yes | `FIRE_PRICE` per cog still to come, plus `FIRE_FLOOR` | Realms (`setPinkSlips`) |
-| **Unite** | **no** — SpeedChat, alongside a gag | `UNITE_PRICE`, flat | Realms (`setResistanceMessages`) |
-| **SOS card** | yes | `SOS_PRICE`, flat | Realms (`setNPCFriendsDict`) |
+| | | costs a turn | how it is priced | who can see it |
+| :-: | --- | --- | --- | --- |
+| <img src="overlay_ui/src/assets/pink-slip.png" width="34"> | **Pink slip** | yes | `FIRE_PRICE` per cog still to come, plus `FIRE_FLOOR` | Realms (`setPinkSlips`) |
+| <img src="overlay_ui/src/assets/unite-fist.png" width="34"> | **Unite** | **no** — SpeedChat, alongside a gag | `UNITE_PRICE`, flat | Realms (`setResistanceMessages`) |
+| <img src="overlay_ui/src/assets/sos-card.png" width="34"> | **SOS card** | yes | `SOS_PRICE`, flat | Realms (`setNPCFriendsDict`) |
+
+The icons are the overlay's own: a slip, the Toon Resistance fist, and
+the SOS card. The advice line uses them to say *what kind* of move it is
+before you have read a word of it — and a unite gets its own line above
+the gag, because it is not an alternative to one.
 
 A unite costing no turn is the fact the whole model turns on: it makes a
 round *two* decisions, so `unites.best_with_unite` transforms the state
