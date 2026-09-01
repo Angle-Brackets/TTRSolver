@@ -10,6 +10,28 @@ tree is finite and `expectimax.solve` plays a position to the end with no
 heuristic at all. Party battles are searched approximately, because their
 outcome space cannot be enumerated.
 
+![The overlay advising a live Toontown Realms battle](docs/img/overlay-in-battle.png)
+
+*A live fight, read and answered.* The panel knows it is `IN BATTLE` and
+says what it can see (`1 cog plate, gag menu`) rather than assuming.
+The advice carries its track's colour and level — **Big Magnet on all
+cogs** — and the cog row shows what the reader actually established:
+a level 8 Mover & Shaker, `AWAKE`, `TRAPPED`, at full health. `RL` is
+the engine badge; clicking it swaps to the exact search, which has been
+running in the background the whole time so the swap is free.
+
+The inventory boxes are **permissions, not counts**. All three read 0
+here, so the solver will not advise spending a slip, a unite or a card
+however many the toon is carrying — which is why the advice above is a
+gag. Raise one and it becomes willing to spend that many.
+
+Worth noticing in the gag menu: the Lure row is empty below Big Magnet.
+That is exactly the case where a **group** lure on a **single** cog is
+the right call rather than a bug — a toon carries 15 Big Magnets against
+7 $10 Bills, so at 5.33 price units against 7.86 the group gag is the
+cheaper way to spring that trap. With a $1 Bill in the bag it would
+advise the bill instead.
+
 > **The [TTR wiki](https://toontownrewritten.wiki) is the source of truth.**
 > The strategy guide this project started from describes *Toontown Online*
 > and predates TTR's rebalancing passes; it has been caught wrong on Lure
@@ -220,6 +242,12 @@ documentation:
 - **Screen reading** (`solver/live/vision.py`) — needs `"show-cog-levels"`
   on. Cog level, department and health come off the plate above each cog.
   This is the only route to the cogs.
+
+> The screenshot at the top of this file is a **Realms** session, which
+> is why its inventory boxes could be filled from the wire at all. On
+> TTR nothing populates them: `session.build_state` sets no slips, no
+> unites and no cards, so those three controls are inert on that client
+> and the solver will not advise a consumable there.
 
 A third reader exists for a different client. **Toontown Realms**
 (`solver/live/realms.py`) is read off its Astron cluster rather than the
