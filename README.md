@@ -22,7 +22,7 @@ outcome space cannot be enumerated.
 Standard library only — no install step.
 
 ```bash
-python -m unittest discover tests      # ~700 tests
+python -m unittest discover tests      # 1343 tests
 python -m solver.search.demo           # narrated solo fight
 python -m solver.live.advise           # advise on a running game
 ```
@@ -44,15 +44,23 @@ solver/
   outcomes.py       action_outcomes() -- enumerates, exactly
   party.py          party rules: pickup vs coordinated modes
   data/             game tables, one module per table, wiki-audited
+  unites.py         Toon-Up and Gag-Up unites: free, but priced
+  sos.py            the 29 renewable SOS cards, as eight effect shapes
   search/
     expectimax.py   exact solo search, star1/star2 pruning
-    party_search.py sampled party search
+    party_search.py sampled party search, and the three scorers
+    weights.py      EVERY tuned number, with its measurement
+    hybrid.py       the climb: policy proposes, quick_score disposes
     fitted.py       learned leaf evaluator (plain floats, stdlib)
     policy.py       trained policy head (needs numpy, optional)
     objective.py    what a round is worth -- the tunable weights
+  rl/
+    env.py          BattleEnv, the observation, the action table
+    harness.py      running a chosen action through the env, safely
   live/             reading a running game (see below)
 tools/              offline: label generation, fitting, training
 docs/               findings, and what is not yet trustworthy
+overlay_ui/         the advice overlay (React; dist/ is committed)
 visualizer/         browser front end
 ```
 
@@ -91,6 +99,16 @@ flowchart TD
     A2 --> E[CHANCE: cog phase]
     D -->|Bite p=0.50| D1[MAX: minus 8 laff]
     D -->|Chomp p=0.50| D2[MAX: minus 11 laff]
+
+    classDef pos fill:#1e3a5f,stroke:#5aa0e0,stroke-width:2px,color:#eaf3fc
+    classDef search fill:#3b2d58,stroke:#a394ee,stroke-width:2px,color:#f1ecfd
+    classDef policy fill:#0e4a43,stroke:#33c4b2,stroke-width:2px,color:#e4fbf8
+    classDef score fill:#59401d,stroke:#eaa94d,stroke-width:2px,color:#fdf2e2
+    classDef result fill:#1d4a29,stroke:#4fc36d,stroke-width:2px,color:#e8faed
+    classDef chance fill:#4a3550,stroke:#c07ad6,stroke-width:2px,color:#f9ecfc
+    class S,D1,D2 pos
+    class A,B,D,E chance
+    class A1,A2 result
 ```
 
 Green is a choice, purple is a roll. The value of a CHANCE node is the
@@ -203,10 +221,76 @@ documentation:
   on. Cog level, department and health come off the plate above each cog.
   This is the only route to the cogs.
 
+A third reader exists for a different client. **Toontown Realms**
+(`solver/live/realms.py`) is read off its Astron cluster rather than the
+screen, which gives the battle directly — and, unlike TTR, gives what the
+player is *carrying*: `setPinkSlips`, `setResistanceMessages` (unites) and
+`setNPCFriendsDict` (SOS cards). It is kept strictly separate, because
+Realms is Toontown Online lineage and nothing read from it may become
+solver truth. See `docs/realms.md`.
+
 `session.py` joins them into a `BattleState` and `advise.py` runs the solver
 on it. `build_state` returns a state **or** the reasons there isn't one —
 never a guess, because advice computed from an invented state is worse than
 no advice.
+
+## Consumables: slips, unites and SOS cards
+
+Three resources sit outside the gag pouch, and each is modelled
+differently because each behaves differently.
+
+| | costs a turn | how it is priced | who can see it |
+| --- | --- | --- | --- |
+| **Pink slip** | yes | `FIRE_PRICE` per cog still to come, plus `FIRE_FLOOR` | Realms (`setPinkSlips`) |
+| **Unite** | **no** — SpeedChat, alongside a gag | `UNITE_PRICE`, flat | Realms (`setResistanceMessages`) |
+| **SOS card** | yes | `SOS_PRICE`, flat | Realms (`setNPCFriendsDict`) |
+
+A unite costing no turn is the fact the whole model turns on: it makes a
+round *two* decisions, so `unites.best_with_unite` transforms the state
+and re-plans on it rather than adding an entry to the action table.
+Both engines share that helper — the exact search had no unites at all
+until it did.
+
+An SOS is the opposite: it *is* the move. That turn cost is already paid
+in the mechanics, since the plan then holds no gag for that toon, which
+is why `SOS_PRICE` only carries the residual scarcity and not the turn.
+
+```mermaid
+flowchart TD
+    ST[battle position] --> U{unite worth it}
+    U -->|yes| UA[apply to a probe state]
+    U -->|no| PL[plan as-is]
+    UA --> PL
+    PL --> M[menu: policy top-k plus probes]
+    M --> SOSC[SOS cards, no action index]
+    M --> GAG[gags and slips]
+    SOSC --> JQ[quick_score judges]
+    GAG --> JQ
+    JQ --> OUT[advice: unite line, then the move]
+    classDef pos fill:#1e3a5f,stroke:#5aa0e0,stroke-width:2px,color:#eaf3fc
+    classDef search fill:#3b2d58,stroke:#a394ee,stroke-width:2px,color:#f1ecfd
+    classDef policy fill:#0e4a43,stroke:#33c4b2,stroke-width:2px,color:#e4fbf8
+    classDef score fill:#59401d,stroke:#eaa94d,stroke-width:2px,color:#fdf2e2
+    classDef result fill:#1d4a29,stroke:#4fc36d,stroke-width:2px,color:#e8faed
+    class ST,PL pos
+    class U,UA policy
+    class M,SOSC,GAG search
+    class JQ score
+    class OUT result
+```
+
+
+**Nothing is offered without evidence.** `unites_held` defaults to 0 and
+`sos_cards` to empty, so a reader that cannot see a pouch offers
+nothing — and the TTR readers cannot. The overlay's three cap boxes are
+a *permission*, not a count: the wire says what is held, the cap says
+what you are willing to spend, and neither alone grants anything.
+
+Measured across the difficulty range, the prices do the job on their
+own: at difficulty 3 the solver spends **0.00 unites and 0.00 cards**
+per battle, at difficulty 9 it spends 4.88 and 1.16. Standard play does
+not need them, which is the intent, and it falls out of the pricing
+rather than a rule about buildings.
 
 ## What the solver has found
 
@@ -244,10 +328,32 @@ flowchart TD
     B1 --> B2[coordinate ascent, the climb]
     B2 --> B3[candidates scored by quick_score]
     B3 --> M
+
+    classDef pos fill:#1e3a5f,stroke:#5aa0e0,stroke-width:2px,color:#eaf3fc
+    classDef search fill:#3b2d58,stroke:#a394ee,stroke-width:2px,color:#f1ecfd
+    classDef policy fill:#0e4a43,stroke:#33c4b2,stroke-width:2px,color:#e4fbf8
+    classDef score fill:#59401d,stroke:#eaa94d,stroke-width:2px,color:#fdf2e2
+    classDef result fill:#1d4a29,stroke:#4fc36d,stroke-width:2px,color:#e8faed
+    classDef chance fill:#4a3550,stroke:#c07ad6,stroke-width:2px,color:#f9ecfc
+    class P pos
+    class A,A1,A2,A3,A4 search
+    class B,B1,B2 policy
+    class B3 score
+    class M result
 ```
 
 Shipped agent: **PPO + climb**. The search is kept because it is exact
 for solo and because a second opinion catches bugs.
+
+The climb's evaluation budget is **24**, not `climb`'s own default of
+16 and emphatically not the 8 the panel used to pass. Eight starved
+the targeted probes — they are appended after the track sweep, so at
+8 they were never reached and `PROBE_CHEAPEST_KILL` was dead in live
+play. Raising it was worth **fourteen points of win rate** across two
+seed blocks (88.8%→98.4% and 85.2%→99.2%, p<0.001), *and* it spends
+fewer pink slips, because the cheap-kill probe finally gets to offer
+the gag that does the job instead of a level 7 group gag. It costs
+five milliseconds.
 
 ### Classical search
 
@@ -267,13 +373,24 @@ flowchart TD
     S --> Q[quick_score ranks plans]
     Q --> R[rollout_value, 12 rounds forward]
     R --> G[greedy_score picks each round]
+
+    classDef pos fill:#1e3a5f,stroke:#5aa0e0,stroke-width:2px,color:#eaf3fc
+    classDef search fill:#3b2d58,stroke:#a394ee,stroke-width:2px,color:#f1ecfd
+    classDef policy fill:#0e4a43,stroke:#33c4b2,stroke-width:2px,color:#e4fbf8
+    classDef score fill:#59401d,stroke:#eaa94d,stroke-width:2px,color:#fdf2e2
+    classDef result fill:#1d4a29,stroke:#4fc36d,stroke-width:2px,color:#e8faed
+    classDef chance fill:#4a3550,stroke:#c07ad6,stroke-width:2px,color:#f9ecfc
+    class L pos
+    class C,Q,G score
+    class S search
+    class R chance
 ```
 
 Three scorers, three weight sets, three jobs:
 
 | scorer | job | weights |
 | --- | --- | --- |
-| `_cheap_score` | shortlist one action, no simulation | `HEAL_VALUE`, `TRAP_DISCOUNT` |
+| `_cheap_score` | shortlist one action, no simulation | `LAFF_POINT_VALUE`, `TRAP_DISCOUNT` |
 | `_quick_score` | rank joint plans | `QUICK_W` |
 | `_greedy_score` | choose each rollout round | `GREEDY_W` |
 
@@ -313,6 +430,17 @@ flowchart TD
     T2 --> V[critic head 256 to 1]
     A --> MK[legality mask, illegal to -inf]
     MK --> D[categorical over legal moves]
+
+    classDef pos fill:#1e3a5f,stroke:#5aa0e0,stroke-width:2px,color:#eaf3fc
+    classDef search fill:#3b2d58,stroke:#a394ee,stroke-width:2px,color:#f1ecfd
+    classDef policy fill:#0e4a43,stroke:#33c4b2,stroke-width:2px,color:#e4fbf8
+    classDef score fill:#59401d,stroke:#eaa94d,stroke-width:2px,color:#fdf2e2
+    classDef result fill:#1d4a29,stroke:#4fc36d,stroke-width:2px,color:#e8faed
+    classDef chance fill:#4a3550,stroke:#c07ad6,stroke-width:2px,color:#f9ecfc
+    class O pos
+    class T1,T2,A,V policy
+    class MK score
+    class D result
 ```
 
 A shared trunk trained backwards: eval return fell +47.9 to +22.5 while
@@ -376,6 +504,17 @@ flowchart TD
     Q -->|floor cleared| NF[next floor, pouch and laff carry over]
     NF --> S
     Q -->|yes| R
+
+    classDef pos fill:#1e3a5f,stroke:#5aa0e0,stroke-width:2px,color:#eaf3fc
+    classDef search fill:#3b2d58,stroke:#a394ee,stroke-width:2px,color:#f1ecfd
+    classDef policy fill:#0e4a43,stroke:#33c4b2,stroke-width:2px,color:#e4fbf8
+    classDef score fill:#59401d,stroke:#eaa94d,stroke-width:2px,color:#fdf2e2
+    classDef result fill:#1d4a29,stroke:#4fc36d,stroke-width:2px,color:#e8faed
+    classDef chance fill:#4a3550,stroke:#c07ad6,stroke-width:2px,color:#f9ecfc
+    class R,S,S2,S3 pos
+    class RES chance
+    class RW score
+    class Q,NF search
 ```
 
 One step is **one seat's decision**, not one round. Intermediate seats
@@ -420,6 +559,18 @@ flowchart TD
     J --> Z2{nothing left or budget spent}
     Z2 -->|no| L
     Z2 -->|yes| OUT[chosen plan]
+
+    classDef pos fill:#1e3a5f,stroke:#5aa0e0,stroke-width:2px,color:#eaf3fc
+    classDef search fill:#3b2d58,stroke:#a394ee,stroke-width:2px,color:#f1ecfd
+    classDef policy fill:#0e4a43,stroke:#33c4b2,stroke-width:2px,color:#e4fbf8
+    classDef score fill:#59401d,stroke:#eaa94d,stroke-width:2px,color:#fdf2e2
+    classDef result fill:#1d4a29,stroke:#4fc36d,stroke-width:2px,color:#e8faed
+    classDef chance fill:#4a3550,stroke:#c07ad6,stroke-width:2px,color:#f9ecfc
+    class S policy
+    class L,W,J search
+    class K score
+    class Z,Z2 chance
+    class OUT result
 ```
 
 The joint step exists because coordinate ascent cannot cross a valley.
@@ -502,6 +653,25 @@ the climb's 90% on a CEO waiter battle.
   learned ranker. Each produced confident, plausible, wrong output. The
   habit that catches them is an invariant a truncation cannot satisfy by
   accident.
+- **A measurement harness will lie to you before the solver does.** Four
+  results in one sitting were harness bugs: an action the table could
+  not express silently became a *pass*, a solo toon was given Toon-Up it
+  can never use, and a Monte Carlo loop re-seeded the environment
+  identically every rollout — so sixteen samples were one sample
+  sixteen times, and reported that `_quick_score` was barely better than
+  chance. It isn't; corrected, it captures 96–100% of the gap between
+  chance and best. `solver/rl/harness.py` exists because of this and
+  **raises** rather than falling back.
+- **Almost every weight was swept on a maxed toon**, which is 13% of
+  what the sampler actually builds and the one regime where the 95%
+  accuracy cap flattens gag choice. `FIRE_FLOOR`, `SOS_PRICE` and
+  `survive` have since been re-run on realistic toons and all three
+  held; the bias was real as a limitation of method and changed none of
+  the values.
+- **The shipped policy is a selected outlier**, 3.8 standard deviations
+  above ten fresh runs. Comparing anything against it makes an honest
+  result look like a regression. Compare like against like, on paired
+  seeds.
 
 ## Documentation
 
