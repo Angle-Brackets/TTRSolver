@@ -59,9 +59,9 @@ class ConstantAcrossTheMenuTest(unittest.TestCase):
 
     def _contribution(self, state, plan):
         ps.QUICK_W["survive"] = 0.0
-        lo = ps._quick_score(state, plan, random.Random(0))
+        lo = ps._quick_score(state, plan)
         ps.QUICK_W["survive"] = 800.0
-        hi = ps._quick_score(state, plan, random.Random(0))
+        hi = ps._quick_score(state, plan)
         return round(hi - lo, 6)
 
     def test_every_candidate_gets_the_same_contribution(self):

@@ -691,6 +691,16 @@ def plans(state: BattleState, mode: Mode = Mode.PICKUP,
     # per-family floor is what makes a bad policy degrade to today's
     # behaviour rather than to silence.
     scores = None
+    # EVERYTHING THIS GUARDS IS UNREACHABLE TODAY, and deliberately kept.
+    # `USE_POLICY` is False above, so Python short-circuits before
+    # `policy.available()` is called, `scores` stays None, and with it
+    # both merge branches below -- the per-ranker union and the merged
+    # ordering -- never run. Nothing in the test suite reaches them
+    # either.
+    #
+    # Not deleted, because this IS the implementation the flag exists to
+    # switch back on; the comment on `USE_POLICY` records what has to be
+    # fixed first. Deleting it would leave a flag that turns nothing on.
     if USE_POLICY and policy.available():
 
         try:
@@ -2562,7 +2572,3 @@ def best_plan(state: BattleState, **kwargs) -> Optional[Sequence]:
     return evaluate(state, **kwargs)[1]
 
 
-def describe(plan) -> str:
-    if not plan:
-        return "(no plan)"
-    return ", ".join("sit out" if a is None else a.describe() for a in plan)

@@ -140,9 +140,9 @@ class HealIsInvisibleTest(unittest.TestCase):
         state = _board(3)
         card = [Action(track=None, sos="Flippy")]
         ps.QUICK_W["survive"] = 0.0
-        flat = ps._quick_score(state, card, random.Random(0))
+        flat = ps._quick_score(state, card)
         ps.QUICK_W["survive"] = 200.0
-        lifted = ps._quick_score(state, card, random.Random(0))
+        lifted = ps._quick_score(state, card)
         self.assertGreater(lifted, flat)
 
 
@@ -298,8 +298,8 @@ class PriceTest(unittest.TestCase):
         try:
             ps.QUICK_W["price"] = 0.0
             gag = max(actions,
-                      key=lambda a: ps._quick_score(state, [a], random.Random(0)))
-            best = ps._quick_score(state, [gag], random.Random(0))
+                      key=lambda a: ps._quick_score(state, [a]))
+            best = ps._quick_score(state, [gag])
             card = ps._quick_score(state, [Action(track=None, sos="Flippy")],
                                    random.Random(0))
             self.assertGreater(best, card)
