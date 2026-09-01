@@ -66,6 +66,19 @@ from . import features as features_mod
 from . import objective as objective_mod
 from . import policy
 
+# ---------------------------------------------------------------------
+# Tunables
+# ---------------------------------------------------------------------
+#
+# Every number below was MEASURED, and most carry the measurement in
+# their own comment. docs/scoring.md is the inventory and records
+# where the three scorers disagree. Read it before changing one.
+# 
+# They stay module-level and next to the code they govern rather
+# than collected at the top: `_fire_price` reads them at call time
+# so a test can patch `party_search.FIRE_FLOOR`, and tests and
+# tools/fit_scorer.py do exactly that.
+
 # Candidate actions kept per track per toon. Two was not enough and the
 # mistake is recorded in docs/party-strategy.md: at two, Sound offered
 # only levels 7 and 6, so every mixed-level Sound plan -- including the
@@ -481,6 +494,10 @@ CHEAP_KILL_BONUS = 60.0
 CHEAP_LURE_VALUE = 25.0
 
 
+# ---------------------------------------------------------------------
+# Enumerating candidate plans
+# ---------------------------------------------------------------------
+
 def candidates(state: BattleState, toon_index: int,
                per_track: int = PER_TRACK) -> List[Action]:
     """A few actions per track for one toon, ranked within each track.
@@ -809,6 +826,10 @@ def plans(state: BattleState, mode: Mode = Mode.PICKUP,
     # not be strengthened either. Left out rather than left in.
     return out
 
+
+# ---------------------------------------------------------------------
+# Reading a board
+# ---------------------------------------------------------------------
 
 def remaining_hp(cog) -> int:
     """Health this cog still has to lose, BOTH layers of a Version 2.0.
@@ -1368,6 +1389,13 @@ FIRE_FLOOR = 120.0
 MIN_LEAF_PROB = 1e-3
 
 
+# ---------------------------------------------------------------------
+# The fast scorer
+# ---------------------------------------------------------------------
+#
+# `_quick_score` is what `hybrid.climb` judges a plan with, and what
+# every offline evaluation in this project actually runs.
+
 def _restored(healed, toons) -> float:
     """Laff a round actually put back, capped at each toon's headroom.
 
@@ -1670,6 +1698,10 @@ def _quick_score(state: BattleState, plan, objective=None) -> float:
         lambda hits, record: _score_leaf(state, plan, hits, record,
                                          objective))
 
+
+# ---------------------------------------------------------------------
+# Legality, waste and reward
+# ---------------------------------------------------------------------
 
 def _playable(state: BattleState, plan) -> bool:
     """Can each toon actually throw what the plan gives them?
@@ -2030,6 +2062,14 @@ def _fires_spent(before: BattleState, after: BattleState) -> int:
 # Rounds a rollout will play before giving up and calling the position
 # unresolved. A real battle ends well inside this; the cap only stops a
 # pathological position (mutual inability to finish) spinning forever.
+# ---------------------------------------------------------------------
+# The greedy scorer and rollouts
+# ---------------------------------------------------------------------
+#
+# A THIRD scorer, ranking single actions by arithmetic alone. It
+# does not share `QUICK_W`; `_gag_units` is the one price both
+# agree on.
+
 ROLLOUT_ROUNDS = 12
 
 
@@ -2442,6 +2482,10 @@ def rollout_value(state: BattleState, objective, rng,
         current = nxt
     return total
 
+
+# ---------------------------------------------------------------------
+# Entry points
+# ---------------------------------------------------------------------
 
 def evaluate(state: BattleState, depth: int = 1,
              mode: Mode = Mode.PICKUP,
