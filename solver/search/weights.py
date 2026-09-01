@@ -437,15 +437,38 @@ CHEAP_LURE_VALUE = 25.0
 WAKE_COSTS_PREVENTED = True
 
 
+# How far ahead a lure's quiet is credited, per cog
+# rather than as a mean over them.
+#
+# THE REASONING IS IN `party_search.prevented`, not here. These four
+# flags are read inside that one function and its docstring argues
+# each of them with its measurement; splitting the prose from the
+# code that acts on it would help nobody. Follow the pointer.
 PER_COG_REACH = True
 
 
+# Whether an already-lured cog buys
+# anything more. It does not: it was paid for when the lure landed.
+#
+# THE REASONING IS IN `party_search.prevented`, not here. These four
+# flags are read inside that one function and its docstring argues
+# each of them with its measurement; splitting the prose from the
+# code that acts on it would help nobody. Follow the pointer.
 LURE_IS_SPENT_ON_SLEEPERS = True
 
 
+# Whether killing a sleeping cog counts
+# as silencing it. It does not -- it was already quiet.
+#
+# THE REASONING IS IN `party_search.prevented`, not here. These four
+# flags are read inside that one function and its docstring argues
+# each of them with its measurement; splitting the prose from the
+# code that acts on it would help nobody. Follow the pointer.
 LURED_KILL_SILENCES_NOTHING = True
 
 
+# The ceiling on `survival_rounds`, in rounds. Argued in `party_search.survival_rounds`,
+# which is the only reader.
 SURVIVAL_CAP = 4.0
 
 

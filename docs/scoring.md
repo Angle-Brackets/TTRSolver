@@ -718,3 +718,38 @@ retrains used. What it needs is more seeds, not a decision. Until then
 the state is: the default is unproven, the shipped policy does not use
 it, and `--obs-version 2` is available to anyone who wants the older
 one.
+
+## `PER_COG_REACH`: the extrapolation is settled, and it was right
+
+It shipped on a judgement call -- it helped at 12 cogs a round and HURT
+at 8 -- and the note has said so ever since. Re-measured now that the
+landscape has moved (budget 24, consumables on, `survive` at 400):
+
+**Ordinary facility play: outcome-neutral.** 500 paired games across two
+seed blocks, with and without consumables, +0/-0 every time. Not because
+the flag is inert -- it moves `prevented` from 110.54 to 174.87 and the
+score by 550 points on a sampled board -- but because it changes the
+lure's MARGIN without flipping the argmax.
+
+**Solo VP, where it was actually argued over, 200 runs a cell, paired:**
+
+| cogs a round | reach ON | reach OFF | paired |
+|---|---|---|---|
+| 8 | 99.0% | 99.0% | +0/-0 |
+| 12 | 100.0% | 99.5% | +1/-0 |
+| 16 | 93.0% | 66.5% | +58/-5, p<0.001 |
+| 16 (held out) | 85.0% | 67.5% | +47/-12, p<0.001 |
+| 20 (held out) | 26.5% | 15.0% | +40/-17, p=0.003 |
+
+**The old worry is gone and the flag is strongly justified.** At 8 cogs
+it no longer hurts -- it is exactly neutral -- and at 16 and 20 it is
+worth 17 to 27 points. The original reading was taken before the search
+budget was raised, before consumables existed and with `survive` at
+zero; the conditions it was extrapolating from are not the ones that
+ship.
+
+Four flags -- this one, `LURE_IS_SPENT_ON_SLEEPERS`,
+`LURED_KILL_SILENCES_NOTHING` and `SURVIVAL_CAP` -- now carry a pointer
+in `weights.py` to `party_search.prevented`, where their reasoning
+actually lives. Moving the constants out separated them from the
+docstring that argues them.
