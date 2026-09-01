@@ -296,6 +296,15 @@ class CogStatus:
             trapped=self.trapped,
             trap_track=self.trap_track,
             trap_level=self.trap_level,
+            # AN SOS TRAP CARRIES ITS DAMAGE HERE AND NOWHERE ELSE.
+            # `Clerk Will` and friends set `trap_damage` and leave
+            # `trap_level` None, because a card's 60/120/180 is not a
+            # gag level. Dropping it left a cog still marked `trapped`
+            # with BOTH fields None, and `_apply_trap_trigger` then
+            # raised `no gag at trap level None` the first time a lure
+            # sprang it. Third instance of this omission, after `fires`
+            # and `suited` below.
+            trap_damage=self.trap_damage,
             trap_organic=self.trap_organic,
             is_dead=self.is_dead,
             # The outer suit. Omitting it silently un-2.0'd every Version

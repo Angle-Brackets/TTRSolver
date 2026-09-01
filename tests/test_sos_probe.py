@@ -410,3 +410,64 @@ class TrackSlugTest(unittest.TestCase):
                     Action(track=Track.DROP, level=5)):
             with self.subTest(action=act):
                 self.assertEqual(rp._track_of(act), advise.track_of(act))
+
+
+class SosTrapSurvivesACloneTest(unittest.TestCase):
+    """`CogStatus.copy` dropped `trap_damage`.
+
+    An SOS trap sets `trap_damage` and leaves `trap_level` None, because
+    a card's 60/120/180 is not a gag level. The copy carried `trapped`
+    but not the damage, so a cloned cog was still marked trapped with
+    BOTH fields None and `_apply_trap_trigger` raised `no gag at trap
+    level None` the first time a lure sprang it.
+
+    Every search clones, so this fired in play and not in any test --
+    the third instance of this omission after `fires` and `suited`.
+    """
+
+    def _trapped(self):
+        from solver import data
+        from solver.state import BattleState, CogState
+        hp = data.cog_max_hp(5)
+        cog = CogState(department="lawbot", cog_type="ambulance_chaser",
+                       level=5, hp=hp, max_hp=hp)
+        toon = ToonState(80, 137, {t: 7 for t in Track},
+                         {(Track.LURE, 1): 5}, frozenset(),
+                         pouch_capacity=80)
+        toon.sos_cards = {"Clerk Clara": 1}
+        state = BattleState(toon=toon, cogs=[cog])
+        simulator.apply_party_round(
+            state, [Action(track=None, sos="Clerk Clara")], hits=[True])
+        return state
+
+    def test_the_card_sets_damage_and_no_level(self):
+        status = self._trapped().cogs[0].status
+        self.assertTrue(status.trapped)
+        self.assertEqual(status.trap_damage, 180)
+        self.assertIsNone(status.trap_level)
+
+    def test_a_clone_keeps_the_damage(self):
+        clone = self._trapped().clone()
+        self.assertEqual(clone.cogs[0].status.trap_damage, 180)
+
+    def test_a_lure_springs_it_on_a_clone(self):
+        clone = self._trapped().clone()
+        before = clone.cogs[0].hp
+        simulator.apply_party_round(
+            clone, [Action(track=Track.LURE, level=1, target_index=0)],
+            hits=[True])
+        self.assertLess(clone.cogs[0].hp, before)
+
+    def test_every_trap_card_survives_a_clone(self):
+        for name in ("Clerk Will", "Clerk Penny", "Clerk Clara"):
+            with self.subTest(card=name):
+                state = self._trapped()
+                state.toons[0].sos_cards = {name: 1}
+                for cog in state.cogs:
+                    cog.status.trapped = False
+                    cog.status.trap_damage = None
+                simulator.apply_party_round(
+                    state, [Action(track=None, sos=name)], hits=[True])
+                clone = state.clone()
+                self.assertEqual(clone.cogs[0].status.trap_damage,
+                                 sos_mod.BY_NAME[name].amount)
