@@ -471,3 +471,55 @@ ships rather than one nobody runs. **Every number recorded above this
 section was measured at budget 8** and is a lower bound on what the
 panel now does; the weights were compared against each other at a fixed
 budget, so their ORDERING stands, but the absolute win rates do not.
+
+## The learned plan-ranker, removed from `plans`
+
+`USE_POLICY` gated a second ranker inside `party_search.plans`: a
+trained model scored candidate plans alongside `_cheap_score`, the two
+top-Ns were unioned into each stratum, and the stratum was then ordered
+by alternating the two rankings. It was False, so none of it ran, and
+the code is now deleted. **The measurements are kept here because they
+are the reason, and they cost real work.**
+
+It lost at every shortlist width tried, after the wiring bug was fixed:
+
+| width | policy OFF | policy ON |
+|---|---|---|
+| 8 | +88.06 | +87.29 |
+| 16 | +89.34 | +87.29 |
+| 30 | +89.34 | +87.29 |
+| 60 | +89.72 | +88.29 |
+
+**The cause is the LABELS, not the plumbing or the network.** The
+teacher estimated each plan from 16 samples of a per-round spread of
+about 31, a standard error near 7.8 -- while the median value gap
+between the best plan and the sixth is 3.54. The labels are noisier than
+the distinctions they are meant to teach, so the teacher's ordering
+among good plans is mostly noise, and the policy learned it faithfully.
+
+That also explains why the offline metric looked good. `regret@6` scored
+the policy against those same noisy values: when the top twenty plans
+sit within noise of each other, almost any six score a low regret. It
+measured "avoids obviously bad plans", which the policy does better than
+`_quick_score`, and could not see "picks the actually best plan", which
+is what the search needs.
+
+Two design findings worth keeping if it is ever rebuilt:
+
+* **Ranking by the policy ALONE deletes correct plans.** On the maxed
+  board it dropped 2 Foghorn + 2 Aoogah, the known-best line, off the
+  shortlist entirely. Per-family stratification did not save it, because
+  the loss happened *within* the Sound family.
+* **Interleaving the two rankings is worse than unioning them.**
+  Interleaving halves each ranker's depth, so the arithmetic lost the
+  slot that had been keeping that same plan and it vanished again --
+  the same deletion, caused by the fix for it. A union costs a larger
+  bucket and guarantees the property the arrangement is for: a plan has
+  to be missed by BOTH rankers to be lost.
+
+**The prerequisite for trying again is more samples per plan in the
+teacher -- 16 to 128 or more, at eight times the generation cost.** Not
+a bigger network.
+
+`policy` and `search.features` are still imported by `party_search`:
+`evaluate`'s `leaf="learned"` path uses them, and that is unaffected.
