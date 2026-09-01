@@ -14,6 +14,7 @@ import unittest
 
 from solver import simulator
 from solver.search import party_search as ps
+from solver.search import weights as ps_weights
 from solver.state import Action, BattleState, CogState, Track, ToonState
 
 
@@ -144,14 +145,14 @@ class SlipsAreFinite(unittest.TestCase):
         price must fall away entirely rather than to some floor."""
         fire = Action(track=None, level=0, target_index=0, fire=True)
         state = self.position(0)
-        original = ps.FIRE_PRICE
+        original = ps_weights.FIRE_PRICE
         try:
-            ps.FIRE_PRICE = 0.0
+            ps_weights.FIRE_PRICE = 0.0
             free = ps._cheap_score(state, 0, fire)
-            ps.FIRE_PRICE = 1000.0
+            ps_weights.FIRE_PRICE = 1000.0
             priced = ps._cheap_score(state, 0, fire)
         finally:
-            ps.FIRE_PRICE = original
+            ps_weights.FIRE_PRICE = original
         self.assertEqual(free, priced)
 
 
@@ -345,14 +346,14 @@ class FireFloorTest(unittest.TestCase):
         state = self._board(6)
         self.assertEqual(state.cogs_remaining, 0,
                          "the premise: a panel board knows of no more cogs")
-        original = ps.FIRE_FLOOR
+        original = ps_weights.FIRE_FLOOR
         try:
-            ps.FIRE_FLOOR = 0.0
+            ps_weights.FIRE_FLOOR = 0.0
             free = ps._quick_score(state, [fire])
-            ps.FIRE_FLOOR = 50.0
+            ps_weights.FIRE_FLOOR = 50.0
             priced = ps._quick_score(state, [fire])
         finally:
-            ps.FIRE_FLOOR = original
+            ps_weights.FIRE_FLOOR = original
         self.assertLess(priced, free,
                         "the floor must cost something at horizon 0")
 
@@ -361,4 +362,4 @@ class FireFloorTest(unittest.TestCase):
         solo VP, and eight tenths of a slip cheaper. If this is ever
         turned off, the panel starts firing 6hp cogs again."""
         from solver.search import party_search as ps
-        self.assertGreater(ps.FIRE_FLOOR, 0.0)
+        self.assertGreater(ps_weights.FIRE_FLOOR, 0.0)

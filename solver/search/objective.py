@@ -26,7 +26,7 @@ rather than from a guess about levels.
 
 THIS IS ONE OF THREE WEIGHT SYSTEMS
 -----------------------------------
-`party_search.QUICK_W` and `party_search.GREEDY_W` price several of the
+`weights.QUICK_W` and `weights.GREEDY_W` price several of the
 same concepts -- laff, gags spent, overkill, kills -- on their own
 scales, because the two fast scorers take no objective and cannot read
 these fields. `docs/scoring.md` is the inventory: every term, which

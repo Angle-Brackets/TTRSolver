@@ -14,6 +14,7 @@ from solver import simulator, sos as sos_mod
 from solver.rl import env as env_mod
 from solver.search import hybrid, party_search as ps
 from solver.state import Action, ToonState, Track
+from solver.search import weights as ps_weights
 
 CARDS = {"Flippy": 1, "Lil Oldman": 1, "Clerk Clara": 1}
 
@@ -81,18 +82,18 @@ class ReachesTheJudgeTest(unittest.TestCase):
 
     def setUp(self):
         self._offer = hybrid.OFFER_SOS
-        self._survive = ps.QUICK_W["survive"]
+        self._survive = ps_weights.QUICK_W["survive"]
 
     def tearDown(self):
         hybrid.OFFER_SOS = self._offer
-        ps.QUICK_W["survive"] = self._survive
+        ps_weights.QUICK_W["survive"] = self._survive
 
     def test_climb_can_return_an_sos(self):
         # `survive` is weighted far above its shipped 0.0 on purpose:
         # this asserts the PATH is live, not that the card is a good
         # move at the shipped weights. See `test_a_heal_is_invisible`
         # for why the shipped weights can never pick one.
-        ps.QUICK_W["survive"] = 1000.0
+        ps_weights.QUICK_W["survive"] = 1000.0
         hybrid.OFFER_SOS = True
         plan = hybrid.climb(_board(19), random.Random(19), budget=10)
         # Flippy, and it used to be Lil Oldman. Pinning `incoming` in
@@ -103,7 +104,7 @@ class ReachesTheJudgeTest(unittest.TestCase):
         self.assertEqual(getattr(plan[0], "sos", None), "Flippy")
 
     def test_the_flag_off_means_never(self):
-        ps.QUICK_W["survive"] = 1000.0
+        ps_weights.QUICK_W["survive"] = 1000.0
         hybrid.OFFER_SOS = False
         plan = hybrid.climb(_board(19), random.Random(19), budget=10)
         self.assertIsNone(getattr(plan[0], "sos", None))
@@ -120,13 +121,13 @@ class HealIsInvisibleTest(unittest.TestCase):
     """
 
     def setUp(self):
-        self._survive = ps.QUICK_W["survive"]
+        self._survive = ps_weights.QUICK_W["survive"]
 
     def tearDown(self):
-        ps.QUICK_W["survive"] = self._survive
+        ps_weights.QUICK_W["survive"] = self._survive
 
     def test_a_heal_is_worth_exactly_its_price_and_nothing_else(self):
-        ps.QUICK_W["survive"] = 0.0
+        ps_weights.QUICK_W["survive"] = 0.0
         state = _board(3)
         score = ps._quick_score(state, [Action(track=None, sos="Flippy")],
                                 random.Random(0))
@@ -139,9 +140,9 @@ class HealIsInvisibleTest(unittest.TestCase):
     def test_the_survive_term_is_what_reveals_it(self):
         state = _board(3)
         card = [Action(track=None, sos="Flippy")]
-        ps.QUICK_W["survive"] = 0.0
+        ps_weights.QUICK_W["survive"] = 0.0
         flat = ps._quick_score(state, card)
-        ps.QUICK_W["survive"] = 200.0
+        ps_weights.QUICK_W["survive"] = 200.0
         lifted = ps._quick_score(state, card)
         self.assertGreater(lifted, flat)
 
@@ -294,9 +295,9 @@ class PriceTest(unittest.TestCase):
         state.toons[0].laff = state.toons[0].max_laff
         actions = [a for a in simulator.legal_actions(state)
                    if a.track is not None]
-        old_w = ps.QUICK_W["price"]
+        old_w = ps_weights.QUICK_W["price"]
         try:
-            ps.QUICK_W["price"] = 0.0
+            ps_weights.QUICK_W["price"] = 0.0
             gag = max(actions,
                       key=lambda a: ps._quick_score(state, [a]))
             best = ps._quick_score(state, [gag])
@@ -304,7 +305,7 @@ class PriceTest(unittest.TestCase):
                                    random.Random(0))
             self.assertGreater(best, card)
         finally:
-            ps.QUICK_W["price"] = old_w
+            ps_weights.QUICK_W["price"] = old_w
 
 
 class RenderTest(unittest.TestCase):

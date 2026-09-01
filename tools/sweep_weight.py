@@ -23,6 +23,7 @@ sys.path.insert(0, ROOT)
 
 from solver.rl import env as env_mod                          # noqa: E402
 from solver.search import hybrid, party_search as ps          # noqa: E402
+from solver.search import weights as ps_weights
 
 SETS = (71000, 73000, 77000)
 N = 300
@@ -61,13 +62,13 @@ def main(values):
     print(f"  sweeping QUICK_W['risk'] on the corrected rules\n")
     rows = {}
     for v in values:
-        ps.QUICK_W["risk"] = v
+        ps_weights.QUICK_W["risk"] = v
         res = [play(s) for s in seeds]
         rows[v] = res
         per = [sum(res[j*N:(j+1)*N])/N for j in range(len(SETS))]
         print(f"    risk={v:<5} {sum(res)/len(res):6.1%}   "
               + "  ".join(f"{p:5.1%}" for p in per), flush=True)
-    ps.QUICK_W["risk"] = 0.0
+    ps_weights.QUICK_W["risk"] = 0.0
 
     base = rows[values[0]]
     print(f"\n  vs risk={values[0]}:")

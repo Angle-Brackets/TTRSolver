@@ -19,6 +19,7 @@ import unittest
 from solver import simulator, vp as vp_mod
 from solver.rl import env as env_mod
 from solver.search import party_search as ps
+from solver.search import weights as ps_weights
 from solver.state import ToonState, Track
 
 
@@ -52,15 +53,15 @@ def _party_board(seed=990000, laff=60, size=12):
 class ConstantAcrossTheMenuTest(unittest.TestCase):
 
     def setUp(self):
-        self._w = ps.QUICK_W["survive"]
+        self._w = ps_weights.QUICK_W["survive"]
 
     def tearDown(self):
-        ps.QUICK_W["survive"] = self._w
+        ps_weights.QUICK_W["survive"] = self._w
 
     def _contribution(self, state, plan):
-        ps.QUICK_W["survive"] = 0.0
+        ps_weights.QUICK_W["survive"] = 0.0
         lo = ps._quick_score(state, plan)
-        ps.QUICK_W["survive"] = 800.0
+        ps_weights.QUICK_W["survive"] = 800.0
         hi = ps._quick_score(state, plan)
         return round(hi - lo, 6)
 
@@ -116,18 +117,18 @@ class IncomingOverrideTest(unittest.TestCase):
     def test_nothing_swinging_reads_the_cap(self):
         state = _party_board()
         self.assertEqual(ps.survival_rounds(state, incoming=0.0),
-                         ps.SURVIVAL_CAP)
+                         ps_weights.SURVIVAL_CAP)
 
     def test_it_is_capped(self):
         state = _party_board()
         self.assertEqual(ps.survival_rounds(state, incoming=0.001),
-                         ps.SURVIVAL_CAP)
+                         ps_weights.SURVIVAL_CAP)
 
 
 class ShippedValueTest(unittest.TestCase):
 
     def test_the_swept_weight_is_what_shipped(self):
-        self.assertEqual(ps.QUICK_W["survive"], 400.0)
+        self.assertEqual(ps_weights.QUICK_W["survive"], 400.0)
 
 
 if __name__ == "__main__":

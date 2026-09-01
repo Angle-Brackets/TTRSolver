@@ -137,8 +137,9 @@ class TheRulesThatAreNotInTheWikiTest(unittest.TestCase):
         about its cost outside one -- they come only from beating the
         CFO."""
         from solver.search import party_search as ps
-        self.assertGreater(unites.UNITE_PRICE, ps.FIRE_PRICE)
-        self.assertGreater(unites.UNITE_PRICE, ps.FIRE_FLOOR)
+        from solver.search import weights as ps_weights
+        self.assertGreater(unites.UNITE_PRICE, ps_weights.FIRE_PRICE)
+        self.assertGreater(unites.UNITE_PRICE, ps_weights.FIRE_FLOOR)
 
 
 class PouchCapacityTest(unittest.TestCase):

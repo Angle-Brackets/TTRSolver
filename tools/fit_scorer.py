@@ -37,7 +37,7 @@ a candidate is only worth reporting if it holds on both.
 
 WHICH WEIGHTS
 -------------
-`party_search.QUICK_W`, which `_quick_score` uses and therefore the
+`ps_weights.QUICK_W`, which `_quick_score` uses and therefore the
 hybrid climb uses. `GREEDY_W` is deliberately NOT fitted here: it plays
 the rollouts the SEARCH grades plans against, so it wants its own
 objective (the search's finish rate) and its own run, at about a
@@ -65,7 +65,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from solver.rl import env as env_mod                          # noqa: E402
 from solver.search import hybrid                              # noqa: E402
-from solver.search import party_search as ps                  # noqa: E402
+from solver.search import party_search as ps
+from solver.search import weights as ps_weights                  # noqa: E402
 
 KEYS = ("heal", "armed", "kill", "kill_threat", "prevent", "risk", "price")
 
@@ -150,7 +151,7 @@ def finished(seeds, budget: int, sets=None) -> float:
 
 
 def evaluate(vector, seeds, budget: int, sets=None) -> float:
-    ps.QUICK_W = {k: float(v) for k, v in zip(KEYS, vector)}
+    ps_weights.QUICK_W = {k: float(v) for k, v in zip(KEYS, vector)}
     return finished(seeds, budget, sets)
 
 
@@ -200,7 +201,7 @@ def main():
               f"({args.ceo_leftovers} leftovers)")
 
     rng = np.random.default_rng(args.seed)
-    start = np.array([ps.QUICK_W[k] for k in KEYS], dtype=float)
+    start = np.array([ps_weights.QUICK_W[k] for k in KEYS], dtype=float)
     scale = np.array([SCALE[k] for k in KEYS], dtype=float)
 
     best = start.copy()

@@ -9,6 +9,7 @@ import unittest
 
 from solver import sos
 from solver.state import Track
+from solver.search import weights as ps_weights
 
 
 class TableTest(unittest.TestCase):
@@ -385,12 +386,12 @@ class PricingTest(unittest.TestCase):
 
     def _score(self, laff, action):
         from solver.search import party_search as ps
-        saved = ps.QUICK_W["survive"]
+        saved = ps_weights.QUICK_W["survive"]
         try:
-            ps.QUICK_W["survive"] = 800.0
+            ps_weights.QUICK_W["survive"] = 800.0
             return ps._quick_score(self._board(laff), [action])
         finally:
-            ps.QUICK_W["survive"] = saved
+            ps_weights.QUICK_W["survive"] = saved
 
     def test_it_is_dearer_than_a_unite(self):
         from solver import sos as sos_mod, unites

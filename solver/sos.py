@@ -149,7 +149,7 @@ ACCURACY_UPDATE = "2.6.7, 12 December 2019"
 ACCURACY_SWING = 75
 
 # What calling an SOS costs the SEARCH, in the units
-# `party_search.FIRE_PRICE` (20) and `unites.UNITE_PRICE` (200) use.
+# `weights.FIRE_PRICE` (20) and `unites.UNITE_PRICE` (200) use.
 #
 # [OWNER] "extremely costly to use, again last resort or to have a very
 # good move." Set above a unite because the cards are stronger -- a
