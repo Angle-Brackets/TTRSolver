@@ -675,3 +675,46 @@ seeds, taking the CEO from 9.0% to 54.0% at zero leftovers
 
 **Nothing changed.** The lead is closed: the residual is worth 0.004 of
 win rate and every way of chasing it costs more.
+
+## Observation v3 is unproven, and the training metric disagrees with play
+
+`env.OBS_VERSION` is 3, so every policy trained today uses it. **Nothing
+trained at 3 has ever shipped.** The shipped policy carries no
+`obs_version` key at all -- it predates the field -- and
+`hybrid._load` defaults it to 1, which matches its 302 dims, so it
+works by default rather than by record.
+
+v3 adds ABSOLUTE remaining laff to each toon block (four per-toon
+scalars to five, 302 -> 306). Three training seeds at v3 against the
+same three at v2, judged on the toons `facility_position` builds:
+
+**With consumables, near the ceiling -- no signal:**
+
+| seed | obs2 | obs3 | paired |
+|---|---|---|---|
+| 51 | 97.2% | 97.6% | +3/-2 |
+| 52 | 97.2% | 97.6% | +4/-3 |
+| 53 | 97.2% | 96.8% | +2/-3 |
+
+**Without them, where the cell discriminates -- v3 loses every pair:**
+
+| seed | obs2 | obs3 | paired |
+|---|---|---|---|
+| 51 | 74.8% | 73.2% | +7/-11 |
+| 52 | 73.6% | 71.6% | +9/-14 |
+| 53 | 76.0% | 74.8% | +8/-11 |
+
+Pooled +24/-36, sign test p=0.155; losing 3 of 3 pairs is itself only
+p=0.25. Not significant, and certainly not evidence that v3 helps.
+
+**The training-time metric says the opposite.** `eval_return` at export:
+obs2 averaged 35.90, obs3 averaged 40.51, and v3 won all three pairs.
+The same disagreement that sank the learned plan-ranker -- an offline
+number flattering a model that then loses in play.
+
+**Left at 3 anyway**, because moving a shipped default on p=0.155 is the
+thing this file keeps warning against, and 3 is what the last two
+retrains used. What it needs is more seeds, not a decision. Until then
+the state is: the default is unproven, the shipped policy does not use
+it, and `--obs-version 2` is available to anyone who wants the older
+one.
