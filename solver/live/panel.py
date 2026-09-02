@@ -174,7 +174,18 @@ class Api:
         self._set_cap("max_fires", count)
 
     def set_max_unites(self, count) -> None:
-        self._set_cap("max_unites", count)
+        """INERT here, for the same reason as `set_max_sos`.
+
+        [OWNER] not really knowable on this client -- and a count would
+        not be enough anyway. A unite is five Toon-Up values and eight
+        Gag-Up variants, so a total says nothing about which, and
+        supplying one leaves `unite_stock` empty, which reads as
+        "unknown, permit everything". The solver would offer a Gag-Up
+        Lure to a toon holding only Toon-Ups.
+
+        A pink slip is the only consumable a number can describe,
+        because one slip is every slip.
+        """
 
     def set_max_sos(self, count) -> None:
         """STILL INERT, and this one cannot be fixed with a number.

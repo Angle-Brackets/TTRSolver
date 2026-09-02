@@ -246,38 +246,38 @@ class PlayerSuppliedHoldingsTest(unittest.TestCase):
                                             (Track.THROW, 7): 1}),
                            readings=[reading()], **kw)
 
-    def test_they_default_to_none_held(self):
+    def test_it_defaults_to_none_held(self):
         result = self._built()
-        if not result:
-            self.skipTest("fixtures do not build a state here")
+        self.assertTrue(result)
         self.assertEqual(result.state.toon.fires, 0)
-        self.assertEqual(result.state.toon.unites_held, 0)
 
-    def test_the_player_can_supply_them(self):
-        result = self._built(fires=3, unites=2)
-        if not result:
-            self.skipTest("fixtures do not build a state here")
+    def test_the_player_can_supply_it(self):
+        result = self._built(fires=3)
+        self.assertTrue(result)
         self.assertEqual(result.state.toon.fires, 3)
-        self.assertEqual(result.state.toon.unites_held, 2)
 
-    def test_negative_counts_are_floored(self):
-        result = self._built(fires=-5, unites=-5)
-        if not result:
-            self.skipTest("fixtures do not build a state here")
+    def test_a_negative_count_is_floored(self):
+        result = self._built(fires=-5)
+        self.assertTrue(result)
         self.assertEqual(result.state.toon.fires, 0)
+
+    def test_unites_are_never_supplied_here(self):
+        """A count cannot name a unite either: five Toon-Up values and
+        eight Gag-Up variants. Supplying a total would leave
+        `unite_stock` empty, which permits everything."""
+        result = self._built(fires=3)
         self.assertEqual(result.state.toon.unites_held, 0)
+        self.assertEqual(dict(result.state.toon.unite_stock), {})
 
     def test_no_sos_parameter_exists(self):
         """A count cannot name a card, so there is nothing to pass."""
         import inspect
         params = inspect.signature(build_state).parameters
         self.assertIn("fires", params)
-        self.assertIn("unites", params)
+        self.assertNotIn("unites", params)
         self.assertNotIn("sos", params)
         self.assertNotIn("sos_cards", params)
 
     def test_a_supplied_state_never_holds_cards(self):
-        result = self._built(fires=3, unites=2)
-        if not result:
-            self.skipTest("fixtures do not build a state here")
+        result = self._built(fires=3)
         self.assertEqual(dict(result.state.toon.sos_cards), {})

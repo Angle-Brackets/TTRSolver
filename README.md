@@ -244,13 +244,16 @@ documentation:
   This is the only route to the cogs.
 
 > The screenshot at the top of this file is a **Realms** session, where
-> the inventory boxes are a CAP on a holding the wire reports. On TTR
-> nothing reports one, so two of the three boxes are the count itself —
-> a player typing "I have three" is an assertion, the same footing
-> `allies` has always been on. **SOS cards are the exception and stay
-> inert there**: a slip is a slip, but there are 29 distinct cards and a
-> number says nothing about which, so accepting one would let the solver
-> advise a card you may not hold.
+> the inventory boxes CAP a holding the wire reports. On TTR nothing
+> reports one, so the slips box is the count itself — a player typing "I
+> have three" is an assertion, the same footing `allies` has always been
+> on.
+>
+> **A pink slip is the only consumable a number can describe**, because
+> one slip is every slip. A unite is five Toon-Up values and eight
+> Gag-Up variants; a card is one of 29. A total says nothing about
+> WHICH, so both boxes stay inert on TTR rather than letting the solver
+> advise something you may not hold.
 
 A third reader exists for a different client. **Toontown Realms**
 (`solver/live/realms.py`) is read off its Astron cluster rather than the

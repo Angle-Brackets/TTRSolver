@@ -195,24 +195,23 @@ class Thinker:
 
     def submit(self, frame, readings, snapshot, objective, depth,
                budget=DEFAULT_BUDGET, ignore_checksum=False,
-               allies=0, fires=0, unites=0) -> None:
+               allies=0, fires=0) -> None:
         with self._lock:
             token = next(self._generation)
             self._current = token
         threading.Thread(target=self._run, daemon=True,
                          args=(token, frame, readings, snapshot, objective,
                                depth, budget, ignore_checksum,
-                               allies, fires, unites)).start()
+                               allies, fires)).start()
 
     def _run(self, token, frame, readings, snapshot, objective, depth,
-             budget, ignore_checksum=False, allies=0, fires=0, unites=0):
+             budget, ignore_checksum=False, allies=0, fires=0):
         try:
             lines, state, action = advise(frame, readings, snapshot=snapshot,
                                   objective=objective, depth=depth,
                                   budget=budget,
                                   ignore_checksum=ignore_checksum,
-                                  allies=allies, fires=fires,
-                                  unites=unites)
+                                  allies=allies, fires=fires)
         except Exception as exc:            # noqa: BLE001 -- see below
             # A search that dies takes its thread with it and nothing
             # else notices: no advice appears, which looks exactly like
@@ -335,7 +334,7 @@ LAST_UNITE = None
 def advise(frame, readings, snapshot=None, objective=None,
            depth: int = DEFAULT_DEPTH, budget: float = DEFAULT_BUDGET,
            ignore_checksum: bool = False, allies: int = 0,
-           fires: int = 0, unites: int = 0):
+           fires: int = 0):
     """(text, state) for what to do now, or (reasons, None).
 
     A unite chosen alongside the gag is left in `LAST_UNITE`, the way
@@ -353,7 +352,7 @@ def advise(frame, readings, snapshot=None, objective=None,
 
     result = build_state(snapshot=snapshot, panel=panel, readings=readings,
                          ignore_checksum=ignore_checksum, allies=allies,
-                         fires=fires, unites=unites)
+                         fires=fires)
     if not result:
         return result.problems, None, None
 
