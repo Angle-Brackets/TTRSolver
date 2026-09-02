@@ -396,6 +396,21 @@ GREEDY_SHORTLIST = 2
 SCARCITY_UNITS = 20.0
 
 
+# EXPERIMENT, off. Price a gag's scarcity by how many the toon actually
+# HOLDS rather than by its carry limit. [OWNER] "shouldn't it be scaled
+# by 9 not 15 for magnets, since that's how many magnets I actually
+# have in the pouch."
+#
+# The two answer different questions. `carry_limit` prices how
+# replaceable the gag TYPE is and does not move as the pouch drains;
+# the held count prices what you would miss right now, and rises as you
+# spend. Held is never above the limit, so this only ever makes gags
+# dearer, and dearest exactly when you are down to your last one --
+# which is the failure `FIRE_PRICE` already carries a warning about:
+# a resource carried out of the fight unspent is worth nothing.
+SCARCITY_USES_HELD_COUNT = False
+
+
 # Credit for an action that finishes a cog. Note this is the GREEDY
 # table's kill price (60.0) and not the QUICK table's (120.0), while the
 # fire branch of this same function charges `QUICK_W["kill"]` -- so one

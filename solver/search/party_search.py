@@ -841,7 +841,7 @@ def _killed(before_cogs, after_cogs) -> int:
                if not before.status.is_dead and after.status.is_dead)
 
 
-def _gag_units(track, level: int, unlocked: int) -> float:
+def _gag_units(track, level: int, unlocked: int, held=None) -> float:
     """What one gag costs the two fast scorers, in their own units.
 
     `level + weights.SCARCITY_UNITS / carry_limit` -- a level term plus a
@@ -858,6 +858,8 @@ def _gag_units(track, level: int, unlocked: int) -> float:
         limit = gags_mod.carry_limit(track, level, unlocked) or 1
     except (NotImplementedError, ValueError):
         limit = 1
+    if weights.SCARCITY_USES_HELD_COUNT and held:
+        limit = max(1, min(int(held), limit))
     return float(level) + weights.SCARCITY_UNITS / limit
 
 
@@ -924,7 +926,8 @@ def _score_leaf(state: BattleState, plan, hits, record=None,
     killed = _killed(state.cogs, probe.cogs)
     price = 0.0
     for track, level, count, unlocked in _spent(state, probe):
-        price += count * _gag_units(track, level, unlocked)
+        held = sum(t.gag_counts.get((track, level), 0) for t in state.toons)
+        price += count * _gag_units(track, level, unlocked, held=held)
     # Same horizon scaling the real reward applies. This decides which
     # plans are ever sampled, so ranking here at horizon 0 would drop
     # the conserving plan before anything could evaluate it -- the
@@ -1641,7 +1644,9 @@ def _cheap_score(state: BattleState, index: int, action: Action) -> float:
     toon = state.toons[index]
 
     price = _gag_units(action.track, action.level,
-                       toon.track_exp.get(action.track, 0))
+                       toon.track_exp.get(action.track, 0),
+                       held=toon.gag_counts.get(
+                           (action.track, action.level), 0))
 
     if action.track == Track.TOON_UP:
         # What this gag can actually restore, not the party's whole

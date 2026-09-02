@@ -753,3 +753,48 @@ Four flags -- this one, `LURE_IS_SPENT_ON_SLEEPERS`,
 in `weights.py` to `party_search.prevented`, where their reasoning
 actually lives. Moving the constants out separated them from the
 docstring that argues them.
+
+## Should scarcity price the carry limit or what the toon holds?
+
+[OWNER], looking at a pouch with nine Big Magnets: "shouldn't it be
+scaled by 9 not 15, since that's how many magnets I actually have."
+
+The two answer different questions. `carry_limit` prices how replaceable
+the gag TYPE is and does not move as the pouch drains. The held count
+prices what you would miss right now, and rises as you spend. Held is
+never above the limit, so switching only ever makes gags dearer, and
+dearest exactly when you are down to the last one.
+
+**On that pouch it changes no ordering**, which is worth saying first:
+
+| gag | carry | held | by carry limit | by held count |
+|---|---|---|---|---|
+| Big Magnet | 15 | 9 | 5.33 | 6.22 |
+| $10 Bill | 7 | 6 | 7.86 | 8.33 |
+| Hypno-goggles | 3 | 3 | 12.67 | 12.67 |
+| Presentation | 1 | 1 | 27.00 | 27.00 |
+
+Implemented behind `SCARCITY_USES_HELD_COUNT` and measured, paired on
+seeds: facility play with and without consumables, two seed blocks, and
+solo VP at 12, 16 and 20 cogs where pouches actually drain. **+0/-0
+every cell.**
+
+### Why it changes nothing, which is the real finding
+
+**The entire price term is a median 4.79% of `_quick_score`** (mean
+5.53%, max 13.24% across 120 boards). The scarcity half of it, at its
+most extreme — a last Big Magnet going from 5.33 to 24.00 — moves
+18.67 points on a score around 1500, or **1.24%**. Damage and prevention
+dominate by two orders of magnitude, so no scarcity rule at this weight
+can flip an argmax.
+
+That also explains the earlier `SCARCITY_UNITS` sweep coming out a wash
+from 0 to 150. It is not that the scarcity *rule* is wrong; it is that
+the scarcity *lever* is far too short to steer with.
+
+**Left off.** No measured benefit, and it carries the hazard
+`FIRE_PRICE` already warns about: pricing by what remains makes your
+last gag of a kind nearly as expensive as a Presentation, and a gag
+carried out of a fight unspent is worth exactly nothing. If scarcity is
+ever meant to matter, the thing to change is `QUICK_W["price"]`, not
+which denominator feeds it.
