@@ -151,29 +151,39 @@ class Api:
         # Delegate to the worker handling engine preference.
         self._worker.prefer_engine(name)
 
-    def set_max_fires(self, count) -> None:
-        """INERT here. Nothing on this side reads a pink slip count.
+    def _set_cap(self, name, count) -> None:
+        """A player-supplied holding. See `session.build_state`.
 
-        Present because THE PAGE IS SHARED, the same reason
-        `prefer_engine` is. See that method.
+        On TTR these boxes are the COUNT, not a cap on a count: nothing
+        the client exposes can say how many slips or unites a toon
+        holds, so the number typed here is the whole story. That is the
+        same footing `allies` has always been on, and it is an assertion
+        rather than a guess.
+
+        A client that CAN report the holding treats the box as a cap on
+        it instead. This panel is not that client, and does not name it.
         """
+        try:
+            value = max(0, min(99, int(count)))
+        except (TypeError, ValueError):
+            return
+        setattr(self._worker.model, name, value)
+        self._worker.ask_now()
+
+    def set_max_fires(self, count) -> None:
+        self._set_cap("max_fires", count)
 
     def set_max_unites(self, count) -> None:
-        """INERT here. Present because THE PAGE IS SHARED.
-
-        The TTR overlay CAN advise a unite -- `advise` runs the same
-        `unites.best_with_unite` the policy does -- but nothing on this
-        side reads a unite pouch, so `unites_held` stays 0 and no
-        candidate is offered. Wiring this needs a source for the count,
-        not a setter.
-        """
+        self._set_cap("max_unites", count)
 
     def set_max_sos(self, count) -> None:
-        """INERT here. Present because THE PAGE IS SHARED.
+        """STILL INERT, and this one cannot be fixed with a number.
 
-        Same as `set_max_unites`, and worse: a card budget alone does
-        not say WHICH cards are held, and a card the reader cannot see
-        must not become one it can.
+        A slip is a slip and a unite is a unite, so a count is the whole
+        story and `set_max_fires` and `set_max_unites` now work. There
+        are 29 distinct SOS cards, and a count says nothing about WHICH
+        -- accepting one here would let the solver advise a card the
+        player may not hold. Naming them needs a picker or a reader.
         """
 
     def reconsider(self) -> None:

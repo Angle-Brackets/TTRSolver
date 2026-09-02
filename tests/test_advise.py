@@ -23,7 +23,8 @@ class SlowThinker(A.Thinker):
         self.started = threading.Event()
 
     def _run(self, token, frame, readings, snapshot, objective, depth,
-             budget=None, ignore_checksum=False, allies=0):
+             budget=None, ignore_checksum=False, allies=0,
+             fires=0, unites=0):
         # The signature MIRRORS `Thinker._run` and has to keep doing so.
         # `submit` starts a thread with these as positional args, so an
         # arity that has drifted raises at call time -- outside `_run`'s

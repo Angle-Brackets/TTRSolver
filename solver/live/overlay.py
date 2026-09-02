@@ -452,7 +452,9 @@ class Worker(threading.Thread):
                     thinker.submit(frame, list(watcher.view.cogs), None,
                                    self.objective, self.depth, self.budget,
                                    self.ignore_checksum,
-                                   allies=max(0, self.toon_count - 1))
+                                   allies=max(0, self.toon_count - 1),
+                                   fires=self.model.max_fires,
+                                   unites=self.model.max_unites)
                 self._post()
                 time.sleep(max(0.0, POLL_INTERVAL - (time.time() - cycle)))
         finally:

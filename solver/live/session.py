@@ -126,7 +126,8 @@ def cog_from_reading(reading) -> Tuple[Optional[CogState], List[str]]:
 def build_state(snapshot=None, panel=None, readings: Sequence = (),
                 round_num: int = 0,
                 ignore_checksum: bool = False,
-                allies: int = 0) -> BuildResult:
+                allies: int = 0, fires: int = 0,
+                unites: int = 0) -> BuildResult:
     """Assemble a BattleState from whatever the readers have produced.
 
     `snapshot` is a `ttr_local.Snapshot`, `panel` a `gagpanel.GagPanel`,
@@ -139,6 +140,23 @@ def build_state(snapshot=None, panel=None, readings: Sequence = (),
     default and solo is what you get if nobody says otherwise -- which
     is also the safe direction, because it is the one that assumes
     every cog attack is coming at you.
+
+    `fires` and `unites` are SET BY THE PLAYER, on the same footing as
+    `allies` and for the same reason: nothing TTR exposes counts them.
+    The Local API reports laff, tracks, organic, location and invasion
+    and no inventory; the screen shows the gag menu and not the slip or
+    unite pouch. A player typing "I have three" is an assertion, not a
+    guess -- which is the distinction this module actually cares about.
+
+    Both default to 0, so an unanswered box advises neither, and that is
+    the safe direction.
+
+    SOS CARDS ARE DELIBERATELY ABSENT. A slip is a slip and a unite is a
+    unite, so a count is the whole story; there are 29 distinct cards
+    and a count says nothing about WHICH. Accepting a number here would
+    let the solver advise a card the player may not hold, which is the
+    invented state this module exists to refuse. Naming them needs a
+    picker or a reader, not another integer.
 
     `ignore_checksum` builds a state from gag counts that do not match
     the menu's own total. It exists to exercise the rest of the pipeline
@@ -190,7 +208,9 @@ def build_state(snapshot=None, panel=None, readings: Sequence = (),
 
     toon = ToonState(laff=snapshot.laff, max_laff=snapshot.max_laff,
                      track_exp=track_exp, gag_counts=gag_counts,
-                     organic_tracks=frozenset(snapshot.organic_tracks()))
+                     organic_tracks=frozenset(snapshot.organic_tracks()),
+                     fires=max(0, int(fires)),
+                     unites_held=max(0, int(unites)))
     return BuildResult(BattleState(toon=toon, cogs=cogs,
                                    round_num=round_num,
                                    allies_standing=max(0, min(3, int(allies)))),

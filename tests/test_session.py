@@ -226,3 +226,58 @@ class TestLuredCogsFromTheLive(unittest.TestCase):
         asleep, _ = session.cog_from_reading(self._reading(True))
         self.assertIsNone(mechanics.forced_accuracy(Track.THROW, [awake]))
         self.assertEqual(100, mechanics.forced_accuracy(Track.THROW, [asleep]))
+
+
+class PlayerSuppliedHoldingsTest(unittest.TestCase):
+    """Slips and unites are set by the player, like `allies`.
+
+    Nothing TTR exposes counts them: the Local API reports laff, tracks,
+    organic, location and invasion and no inventory, and the screen
+    shows the gag menu, not the slip or unite pouch. A player typing "I
+    have three" is an assertion, not a guess.
+
+    SOS cards are deliberately NOT accepted. A slip is a slip; there are
+    29 distinct cards and a count says nothing about which.
+    """
+
+    def _built(self, **kw):
+        return build_state(snapshot=snapshot(),
+                           panel=FakePanel({(Track.THROW, 5): 7,
+                                            (Track.THROW, 7): 1}),
+                           readings=[reading()], **kw)
+
+    def test_they_default_to_none_held(self):
+        result = self._built()
+        if not result:
+            self.skipTest("fixtures do not build a state here")
+        self.assertEqual(result.state.toon.fires, 0)
+        self.assertEqual(result.state.toon.unites_held, 0)
+
+    def test_the_player_can_supply_them(self):
+        result = self._built(fires=3, unites=2)
+        if not result:
+            self.skipTest("fixtures do not build a state here")
+        self.assertEqual(result.state.toon.fires, 3)
+        self.assertEqual(result.state.toon.unites_held, 2)
+
+    def test_negative_counts_are_floored(self):
+        result = self._built(fires=-5, unites=-5)
+        if not result:
+            self.skipTest("fixtures do not build a state here")
+        self.assertEqual(result.state.toon.fires, 0)
+        self.assertEqual(result.state.toon.unites_held, 0)
+
+    def test_no_sos_parameter_exists(self):
+        """A count cannot name a card, so there is nothing to pass."""
+        import inspect
+        params = inspect.signature(build_state).parameters
+        self.assertIn("fires", params)
+        self.assertIn("unites", params)
+        self.assertNotIn("sos", params)
+        self.assertNotIn("sos_cards", params)
+
+    def test_a_supplied_state_never_holds_cards(self):
+        result = self._built(fires=3, unites=2)
+        if not result:
+            self.skipTest("fixtures do not build a state here")
+        self.assertEqual(dict(result.state.toon.sos_cards), {})

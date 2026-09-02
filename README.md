@@ -243,11 +243,14 @@ documentation:
   on. Cog level, department and health come off the plate above each cog.
   This is the only route to the cogs.
 
-> The screenshot at the top of this file is a **Realms** session, which
-> is why its inventory boxes could be filled from the wire at all. On
-> TTR nothing populates them: `session.build_state` sets no slips, no
-> unites and no cards, so those three controls are inert on that client
-> and the solver will not advise a consumable there.
+> The screenshot at the top of this file is a **Realms** session, where
+> the inventory boxes are a CAP on a holding the wire reports. On TTR
+> nothing reports one, so two of the three boxes are the count itself —
+> a player typing "I have three" is an assertion, the same footing
+> `allies` has always been on. **SOS cards are the exception and stay
+> inert there**: a slip is a slip, but there are 29 distinct cards and a
+> number says nothing about which, so accepting one would let the solver
+> advise a card you may not hold.
 
 A third reader exists for a different client. **Toontown Realms**
 (`solver/live/realms.py`) is read off its Astron cluster rather than the
