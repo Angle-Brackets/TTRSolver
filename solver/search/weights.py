@@ -396,19 +396,36 @@ GREEDY_SHORTLIST = 2
 SCARCITY_UNITS = 20.0
 
 
-# EXPERIMENT, off. Price a gag's scarcity by how many the toon actually
-# HOLDS rather than by its carry limit. [OWNER] "shouldn't it be scaled
-# by 9 not 15 for magnets, since that's how many magnets I actually
-# have in the pouch."
+# ON, for a reason that is not a measurement. Price a gag's scarcity by
+# how many the toon actually HOLDS rather than by its carry limit.
+# [OWNER] "shouldn't it be scaled by 9 not 15 for magnets, since that's
+# how many magnets I actually have in the pouch."
 #
-# The two answer different questions. `carry_limit` prices how
-# replaceable the gag TYPE is and does not move as the pouch drains;
-# the held count prices what you would miss right now, and rises as you
-# spend. Held is never above the limit, so this only ever makes gags
-# dearer, and dearest exactly when you are down to your last one --
-# which is the failure `FIRE_PRICE` already carries a warning about:
-# a resource carried out of the fight unspent is worth nothing.
-SCARCITY_USES_HELD_COUNT = False
+# `carry_limit` prices how replaceable the gag TYPE is and never moves
+# as the pouch drains. The held count prices what you would miss right
+# now. NOTHING RESTOCKS MID-RUN, so opportunity cost within the run is
+# the notion that matches what the solver is actually optimising, and it
+# is the one `carry_limit` cannot express.
+#
+# The two halves of the price then compose properly. Scarcity says "few
+# left"; the `horizon_cost * cogs_remaining` scaling below says "and
+# much still to fight". Together: dear when scarce and early, cheap when
+# scarce but last -- which is the rule `FIRE_PRICE` had to be reshaped
+# to get, and the reason its flat version was wrong.
+#
+# MEASURED NEUTRAL, and shipped anyway. Paired on seeds across facility
+# play with and without consumables, two seed blocks, and solo VP at 12,
+# 16 and 20 cogs: +0/-0 in every cell. Not because the flag is inert --
+# a last Big Magnet prices 24.00 against 5.33 -- but because the whole
+# price term is a median 4.79% of `_quick_score` and this moves about
+# 1.24% of it. The lever is too short to steer with either way, so the
+# tie-break is which model is true.
+#
+# WATCH THIS IF `QUICK_W["price"]` IS EVER RAISED. At a longer lever the
+# hazard becomes real: your last gag of a kind costs nearly what a
+# Presentation costs, and a gag carried out of a fight unspent is worth
+# exactly nothing.
+SCARCITY_USES_HELD_COUNT = True
 
 
 # Credit for an action that finishes a cog. Note this is the GREEDY

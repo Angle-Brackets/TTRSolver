@@ -208,3 +208,44 @@ class FitterKeysTest(unittest.TestCase):
                               coordinated=True)
         e.reset()
         return e.state
+
+
+class HeldCountScarcityTest(unittest.TestCase):
+    """Scarcity is priced by what the toon HOLDS, not the carry limit.
+
+    Nothing restocks mid-run, so opportunity cost within the run is what
+    the solver is optimising, and `carry_limit` cannot express it -- it
+    never moves as the pouch drains.
+    """
+
+    def test_it_is_on(self):
+        self.assertTrue(weights.SCARCITY_USES_HELD_COUNT)
+
+    def test_a_drained_gag_costs_more_than_a_full_one(self):
+        from solver.search import party_search as ps
+        from solver.state import Track
+        full = ps._gag_units(Track.LURE, 4, 7, held=15)
+        few = ps._gag_units(Track.LURE, 4, 7, held=1)
+        self.assertGreater(few, full)
+
+    def test_held_above_the_limit_cannot_make_a_gag_cheaper(self):
+        """`min(held, limit)`: a miscounted pouch must not undercut the
+        type's own scarcity."""
+        from solver.search import party_search as ps
+        from solver.state import Track
+        at_limit = ps._gag_units(Track.LURE, 4, 7, held=15)
+        absurd = ps._gag_units(Track.LURE, 4, 7, held=9999)
+        self.assertEqual(at_limit, absurd)
+
+    def test_unknown_holdings_fall_back_to_the_limit(self):
+        """`held=None` is "not supplied", not "holds none" -- otherwise
+        a caller that omits it would price every gag as the last one."""
+        from solver.search import party_search as ps
+        from solver.state import Track
+        self.assertEqual(ps._gag_units(Track.LURE, 4, 7, held=None),
+                         ps._gag_units(Track.LURE, 4, 7, held=15))
+
+    def test_holding_none_does_not_divide_by_zero(self):
+        from solver.search import party_search as ps
+        from solver.state import Track
+        self.assertGreater(ps._gag_units(Track.LURE, 4, 7, held=0), 0)

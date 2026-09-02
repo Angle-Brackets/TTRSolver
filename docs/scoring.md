@@ -792,9 +792,29 @@ That also explains the earlier `SCARCITY_UNITS` sweep coming out a wash
 from 0 to 150. It is not that the scarcity *rule* is wrong; it is that
 the scarcity *lever* is far too short to steer with.
 
-**Left off.** No measured benefit, and it carries the hazard
-`FIRE_PRICE` already warns about: pricing by what remains makes your
-last gag of a kind nearly as expensive as a Presentation, and a gag
-carried out of a fight unspent is worth exactly nothing. If scarcity is
-ever meant to matter, the thing to change is `QUICK_W["price"]`, not
-which denominator feeds it.
+### Turned ON anyway, on principle rather than measurement
+
+[OWNER] "Sure, but logically we should use the held count anyway."
+
+Correct, and the argument is stronger than the neutrality: **nothing
+restocks mid-run**, so opportunity cost within the run is the notion the
+solver is actually optimising, and `carry_limit` cannot express it
+because it never moves as the pouch drains.
+
+The two halves of the price then compose properly. Scarcity says "few
+left"; the `horizon_cost * cogs_remaining` scaling says "and much still
+to fight". Together they give dear-when-scarce-and-early and
+cheap-when-scarce-but-last -- which is exactly the shape `FIRE_PRICE`
+had to be rebuilt to get, and the reason its flat version failed.
+
+Since the lever is too short for either model to win on evidence, the
+tie-break is which model is true.
+
+Cost of the switch, from the refactor lock: **1 pick of 120 moved**
+(`lure/3/0` to `lure/4/None`) and no scored value changed at all, since
+`min(held, limit)` is a no-op wherever the pouch is full.
+
+**Watch it if `QUICK_W["price"]` is ever raised.** At a longer lever the
+hazard becomes real: your last gag of a kind costs nearly what a
+Presentation costs, and a gag carried out of a fight unspent is worth
+exactly nothing.
