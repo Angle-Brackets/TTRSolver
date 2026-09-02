@@ -924,16 +924,26 @@ def _score_leaf(state: BattleState, plan, hits, record=None,
     restored = _restored(healed, state.toons)
     landed = _landed(state.cogs, probe.cogs)
     killed = _killed(state.cogs, probe.cogs)
-    price = 0.0
+    # TWO PRICES, NOT ONE. `gag_price` is the pouch; `spend_price` is the
+    # consumables. They used to share a running total and therefore a
+    # single multiplier, so turning `QUICK_W["price"]` down to make the
+    # solver freer with gags also made pink slips and SOS cards free and
+    # nullified FIRE_PRICE, FIRE_FLOOR and SOS_PRICE in one move. That
+    # is not a tuning knob, it is a trapdoor -- see docs/scoring.md.
+    gag_price = 0.0
     for track, level, count, unlocked in _spent(state, probe):
         held = sum(t.gag_counts.get((track, level), 0) for t in state.toons)
-        price += count * _gag_units(track, level, unlocked, held=held)
+        gag_price += count * _gag_units(track, level, unlocked, held=held)
     # Same horizon scaling the real reward applies. This decides which
     # plans are ever sampled, so ranking here at horizon 0 would drop
     # the conserving plan before anything could evaluate it -- the
     # shortlist-truncation bug this file has had three times already.
-    price *= 1.0 + objective_mod.Objective().horizon_cost * float(
+    gag_price *= 1.0 + objective_mod.Objective().horizon_cost * float(
         state.cogs_remaining)
+    # The horizon scales the POUCH only, and always did: slips and cards
+    # are added after it. Kept that way by splitting here rather than
+    # earlier.
+    spend_price = 0.0
     # A slip spent now is one not held for the cogs still to come, so it
     # costs what is still coming -- plus a floor, because "nothing is
     # coming" and "nobody told us what is coming" are different states
@@ -950,8 +960,8 @@ def _score_leaf(state: BattleState, plan, hits, record=None,
     # been saved for, rather than against the fight's remaining length,
     # so it applies even in a genuine last battle. `FIRE_FLOOR` at zero
     # restores the old behaviour exactly.
-    price += _fire_price(state.cogs_remaining,
-                         floor=True) * _fires_spent(state, probe)
+    spend_price += _fire_price(state.cogs_remaining,
+                               floor=True) * _fires_spent(state, probe)
     # An SOS is charged the same way and far more dearly. [OWNER] a
     # last resort, or for a very good move -- which is what a price
     # says: the card has to beat the alternative BY MORE than this.
@@ -962,7 +972,7 @@ def _score_leaf(state: BattleState, plan, hits, record=None,
     sos_calls = sum(1 for a in plan
                     if a is not None and getattr(a, "sos", None))
     if sos_calls:
-        price += sos_mod.SOS_PRICE * sos_calls
+        spend_price += sos_mod.SOS_PRICE * sos_calls
     return (landed
             + weights.QUICK_W["heal"] * restored
             + weights.QUICK_W["armed"] * armed_credit(state, probe)
@@ -982,7 +992,8 @@ def _score_leaf(state: BattleState, plan, hits, record=None,
             + (weights.QUICK_W["survive"] * survival_rounds(
                 probe, incoming=expected_incoming(state))
                if weights.QUICK_W["survive"] else 0.0)
-            - weights.QUICK_W["price"] * price)
+            - weights.QUICK_W["price"] * gag_price
+            - weights.QUICK_W["spend"] * spend_price)
 
 
 def _expected_over_rolls(state: BattleState, plan, leaf) -> float:

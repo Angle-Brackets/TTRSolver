@@ -903,3 +903,53 @@ Three claims in this file were re-measured and corrected above.
 `FIRE_FLOOR`, `SOS_PRICE`, `survive` and the search budget were never
 affected — those knobs had real branches, or were handled at the call
 site.
+
+## The price multiplier is split: `price` for gags, `spend` for consumables
+
+They shared one, which made `QUICK_W["price"]` a trapdoor rather than a
+knob: lowering it to loosen gag thrift also zeroed `FIRE_PRICE`,
+`FIRE_FLOOR` and `SOS_PRICE`. `_score_leaf` now builds `gag_price` and
+`spend_price` separately and scales each by its own weight. The horizon
+still multiplies the pouch only, which is what it always did.
+
+**1.0 and 1.0 reproduce the old arithmetic exactly** — the refactor lock
+is clean across all eleven pinned values, which is the point of doing it
+this way.
+
+The split immediately corrects a false reading. With consumables on:
+
+| price | win | gags | before the split |
+|---|---|---|---|
+| 0.0 | 86.8% (+6/-9, ns) | 15.5 | 91.6% (+11/-2, p=0.022) |
+| **1.0** | **88.0%** | **14.0** | 88.0% |
+| 2.0 | 87.2% (+5/-7, ns) | 11.9 | 83.6% |
+| 4.0 | 82.0% (+4/-19, p=0.003) | 10.4 | 76.4% |
+
+`price=0` looked like a win and was unpriced consumables. It is now
+indistinguishable from 1.0, which is the truth, and matches what the
+consumables-off isolation already said.
+
+**A usable conservation knob appears.** `price=2.0` spends 11.9 gags
+against 14.0 at no significant win cost — about 15% of the pouch, for
+0.8 points that do not survive a sign test. That trade was invisible
+before, because raising `price` also made the solver hoard slips and
+cards it should have been spending.
+
+### `spend`: kept at 1.0, and NOT to be swept for win rate
+
+| spend | win | gags |
+|---|---|---|
+| 0.0 | 92.4% (+12/-1, p=0.003) | 10.1 |
+| **1.0** | **88.0%** | **14.0** |
+| 2.0 | 83.2% (+2/-14, p=0.004) | 15.4 |
+| 4.0 | 80.4% (+2/-21, p<0.001) | 15.9 |
+
+Free consumables win by four points, significantly. **That is the
+expected answer and not a reason to change anything**, for the reason
+`solver/sos.py` already states: cheaper cards always clear more, and the
+search would be right about the number while spending a currency farmed
+from whole boss runs. [OWNER] slips are for bosses; cards are a last
+resort. The price encodes reluctance, not win-maximisation.
+
+What the split buys is that this preference is now expressible on its
+own axis, instead of riding on the knob that also governs the pouch.

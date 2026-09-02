@@ -249,3 +249,79 @@ class HeldCountScarcityTest(unittest.TestCase):
         from solver.search import party_search as ps
         from solver.state import Track
         self.assertGreater(ps._gag_units(Track.LURE, 4, 7, held=0), 0)
+
+
+class PriceIsSplitTest(unittest.TestCase):
+    """Gags and consumables are priced by separate multipliers.
+
+    They shared one, so lowering `price` to loosen gag thrift also made
+    pink slips and SOS cards free, cancelling FIRE_PRICE, FIRE_FLOOR and
+    SOS_PRICE at a stroke. Measured before the split: `price=0` read
+    91.6%, which looked like a conservation finding and was unpriced
+    consumables. After it, `price=0` reads 86.8% -- indistinguishable
+    from 1.0, which is the truth.
+    """
+
+    def test_both_weights_exist(self):
+        self.assertIn("price", weights.QUICK_W)
+        self.assertIn("spend", weights.QUICK_W)
+
+    def test_the_gag_price_does_not_touch_consumables(self):
+        """Zero the gag weight; a slip must still cost something."""
+        import random
+        from solver import simulator
+        from solver.rl import env as env_mod, harness
+        from solver.search import party_search as ps
+        from solver.state import Action
+
+        def sampler(rng):
+            state = env_mod.facility_position(rng)
+            state.toons = [harness.solo_loadout(rng, fires=5)]
+            return state
+
+        e = env_mod.BattleEnv(rng=random.Random(5), sampler=sampler,
+                              coordinated=True)
+        e.reset()
+        fire = Action(track=None, fire=True, target_index=0)
+        original = dict(weights.QUICK_W)
+        try:
+            weights.QUICK_W["price"] = 0.0
+            weights.QUICK_W["spend"] = 1.0
+            charged = ps._quick_score(e.state, [fire])
+            weights.QUICK_W["spend"] = 0.0
+            free = ps._quick_score(e.state, [fire])
+        finally:
+            weights.QUICK_W.clear()
+            weights.QUICK_W.update(original)
+        self.assertGreater(free, charged,
+                           "the slip was free even with `spend` on")
+
+    def test_the_consumable_price_does_not_touch_gags(self):
+        """Zero the consumable weight; a gag must still cost something."""
+        import random
+        from solver import simulator
+        from solver.rl import env as env_mod, harness
+        from solver.search import party_search as ps
+
+        def sampler(rng):
+            state = env_mod.facility_position(rng)
+            state.toons = [harness.solo_loadout(rng)]
+            return state
+
+        e = env_mod.BattleEnv(rng=random.Random(5), sampler=sampler,
+                              coordinated=True)
+        e.reset()
+        gag = next(a for a in simulator.legal_actions(e.state)
+                   if not a.is_pass)
+        original = dict(weights.QUICK_W)
+        try:
+            weights.QUICK_W["spend"] = 0.0
+            weights.QUICK_W["price"] = 1.0
+            charged = ps._quick_score(e.state, [gag])
+            weights.QUICK_W["price"] = 0.0
+            free = ps._quick_score(e.state, [gag])
+        finally:
+            weights.QUICK_W.clear()
+            weights.QUICK_W.update(original)
+        self.assertGreater(free, charged,
+                           "the gag was free even with `price` on")

@@ -214,7 +214,13 @@ QUICK_W = {
     # neither, nothing can change a toon's laff mid-plan, so this
     # contributes the same constant to every candidate.
     "survive": 400.0,      # CHARGED, per standing toon a round could sink
-    "price": 1.0,       # gags spent
+    "price": 1.0,       # gags spent, from the pouch
+    # CONSUMABLES, priced separately from the pouch. Slips and cards used
+    # to ride on `price`, so lowering that to loosen gag thrift also made
+    # them free and cancelled FIRE_PRICE, FIRE_FLOOR and SOS_PRICE.
+    # Split so each can be tuned without the other; 1.0 reproduces the
+    # old arithmetic exactly, which the refactor lock confirms.
+    "spend": 1.0,
 }
 
 
