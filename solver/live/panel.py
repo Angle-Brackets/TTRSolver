@@ -103,8 +103,15 @@ def model_json(model: Model) -> str:
                   else "",
         "track": model.track,
         "gag_level": model.gag_level,
+        # WHY, alongside what. All four may be None: an explanation
+        # that could not be computed must not cost the advice.
+        "incoming": model.incoming,
+        "survive": model.survive,
+        "accuracy": model.accuracy,
+        "reason": model.reason,
         "rows": [{"name": r.name, "level": r.level,
-                  "health": r.health, "identified": r.identified,
+                  "health": r.health, "hp": r.hp, "max_hp": r.max_hp,
+                  "identified": r.identified,
                   "art": r.art_key, "department": r.department,
                   "index": r.index, "choices": r.choices, "lured": r.lured,
                   "trapped": getattr(r, "trapped", False)}
@@ -293,7 +300,7 @@ def _geometry() -> tuple[int, int, int, int]:
     """Sit against the game rather than in the middle of it."""
     from .window import game_rect
 
-    width, height = 430, 330
+    width, height = 460, 520
     rect = game_rect()
     if rect is None:
         return width, height, 60, 60

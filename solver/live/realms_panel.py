@@ -645,6 +645,18 @@ class RealmsWorker(threading.Thread):
             else:
                 from .. import unites as unites_mod
                 self.model.unite = unites_mod.describe(chosen)
+
+            # The same numbers the screen-reading panel shows, from the
+            # same helper: the two front ends must not explain a move
+            # differently.
+            from . import explain as explain_mod
+
+            first = plan[0] if plan else None
+            detail = explain_mod.describe(state, first)
+            self.model.incoming = detail.get("incoming")
+            self.model.survive = detail.get("survive")
+            self.model.accuracy = detail.get("accuracy")
+            self.model.reason = explain_mod.reason(detail)
         except Exception:               # pragma: no cover - optional path
             return None
         return plan[0] if plan else None
@@ -1243,7 +1255,7 @@ def main(argv: Optional[list] = None) -> int:   # pragma: no cover
 
     window = webview.create_window(
         "TTR Solver - Realms", str(index), js_api=api,
-        width=430, height=330, x=60, y=60,
+        width=460, height=520, x=60, y=60,
         frameless=True, on_top=True, resizable=False,
         background_color="#0d1117")
     state.window = window

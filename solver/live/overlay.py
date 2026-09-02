@@ -112,6 +112,12 @@ class CogRow:
     name: str
     level: Optional[int]
     health: float
+    # Absolute hit points, so a view can say "needs 90" rather than
+    # drawing a bar. Only set when the LEVEL is known, because that is
+    # what `cog_max_hp` needs -- an unread plate leaves both None rather
+    # than guessing a maximum.
+    hp: Optional[int] = None
+    max_hp: Optional[int] = None
     # `<department>-<key>`, matching visualizer/assets/cog-*.png, or None
     # when the plate was not identified to a single cog. The view falls
     # back to the department emblem, which is the honest picture: the
@@ -242,6 +248,20 @@ class Model:
     # would read as a choice between them. An SOS is the opposite: it
     # costs the turn, so it IS the move and goes in `gag` like any gag.
     unite: str = ""
+
+    # WHY, not just what. The solver computes all of these on every
+    # score and the panel used to discard them, so the advice arrived
+    # as an instruction with no argument attached.
+    #
+    # `incoming` and `survive` describe the BOARD -- expected damage
+    # this round, and how many rounds the party's laff covers, capped
+    # at 4. The rest describe the recommended move. All are optional:
+    # an explanation that cannot be computed must never cost you the
+    # advice it was explaining, so they stay at their defaults.
+    incoming: Optional[float] = None
+    survive: Optional[float] = None
+    accuracy: Optional[int] = None
+    reason: str = ""
     # Where the toon is, from the Local API. The solver does not use it
     # -- a street does not change a round -- but it tells the player at a
     # glance whether the panel is talking to the game at all, which the
@@ -566,9 +586,23 @@ class Worker(threading.Thread):
                     model.search_gag_level = level or 0
                     model.search_ready = True
 
+                    # CLEARED WHEN THERE IS NONE, not only set when
+                    # there is. Assigning only on the `is not None` side
+                    # left the previous round's unite on screen beside a
+                    # move that does not use one.
                     chosen = getattr(advise_mod, "LAST_UNITE", None)
-                    if chosen is not None:
-                        model.unite = unites_mod.describe(chosen)
+                    model.unite = ("" if chosen is None
+                                   else unites_mod.describe(chosen))
+
+                    # The reasons behind the move, read off the same
+                    # functions the scorer used rather than re-derived.
+                    from . import explain as explain_mod
+
+                    detail = explain_mod.describe(state, action)
+                    model.incoming = detail.get("incoming")
+                    model.survive = detail.get("survive")
+                    model.accuracy = detail.get("accuracy")
+                    model.reason = explain_mod.reason(detail)
 
                     if model.preferred_engine == "search" or not model.rl_gag:
                         model.gag = text
@@ -789,8 +823,18 @@ def _row(reading) -> "CogRow":
     shown = max(0.0, min(1.0, float(reading.health)))
     if shown >= FULL_HEALTH:
         shown = 1.0
+    # Absolute HP, from the level and the snapped fraction. Only when
+    # the level was read: `cog_max_hp` needs it, and an unread plate
+    # gets None rather than a guessed maximum.
+    hp = max_hp = None
+    if reading.level is not None:
+        try:
+            max_hp = int(data.cog_max_hp(reading.level))
+            hp = max(0, min(max_hp, int(round(shown * max_hp))))
+        except (KeyError, ValueError, TypeError):
+            hp = max_hp = None
     return CogRow(name=name, level=reading.level,
-                  health=shown,
+                  health=shown, hp=hp, max_hp=max_hp,
                   identified=identified, art_key=art_key,
                   department=reading.department,
                   index=getattr(reading, "index", None), choices=choices,
