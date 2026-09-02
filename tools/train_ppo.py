@@ -145,8 +145,8 @@ def main():
                     help="charge the REWARD per pink slip spent. A slip "
                          "is an unmissable kill and the reward has never "
                          "priced one, so the fire logits learn it is free "
-                         "-- a solo VP with ten slips drops from 49.5% "
-                         "to 0.0%, with the policy's entire top four "
+                         "-- a solo VP with ten slips drops from 49.5%% "
+                         "to 0.0%%, with the policy's entire top four "
                          "being fires. The real cost is the round's "
                          "action: a fire removes one cog where a group "
                          "Lure neutralises four")
