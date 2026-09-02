@@ -44,9 +44,19 @@ advise the bill instead.
 Standard library only — no install step.
 
 ```bash
-python -m unittest discover tests      # 1343 tests
-python -m solver.search.demo           # narrated solo fight
-python -m solver.live.advise           # advise on a running game
+python run.py                          # pick a front end from a menu
+python -m unittest discover tests      # 1368 tests
+```
+
+`run.py` lists every UI in the repo, marks the ones whose optional
+dependency is missing, and starts the one you pick. It is standard
+library only, so it runs before you have installed anything — which is
+the point, since part of its job is telling you what to install.
+
+```bash
+python run.py --list                   # just show the menu
+python run.py 4                        # start entry 4 directly
+python -m solver.search.demo           # or run any of them by hand
 ```
 
 Optional extras, each isolated so the core never depends on them:
