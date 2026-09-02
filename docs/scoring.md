@@ -696,28 +696,48 @@ same three at v2, judged on the toons `facility_position` builds:
 | 52 | 97.2% | 97.6% | +4/-3 |
 | 53 | 97.2% | 96.8% | +2/-3 |
 
-**Without them, where the cell discriminates -- v3 loses every pair:**
+**Without them, where the cell discriminates.** The first block read as
+v3 losing every pair, and at three more blocks that does not hold:
 
-| seed | obs2 | obs3 | paired |
-|---|---|---|---|
-| 51 | 74.8% | 73.2% | +7/-11 |
-| 52 | 73.6% | 71.6% | +9/-14 |
-| 53 | 76.0% | 74.8% | +8/-11 |
+| block | seed | obs2 | obs3 | paired |
+|---|---|---|---|---|
+| 770000 | 51 | 74.8% | 73.2% | +7/-11 |
+| 770000 | 52 | 73.6% | 71.6% | +9/-14 |
+| 770000 | 53 | 76.0% | 74.8% | +8/-11 |
+| 660000 | 51 | 75.6% | 74.4% | +8/-11 |
+| 660000 | 52 | 73.6% | 73.6% | +12/-12 |
+| 660000 | 53 | 74.0% | 74.4% | +13/-12 |
+| 880000 | 51 | 74.4% | 73.6% | +9/-11 |
+| 880000 | 52 | 71.6% | 73.2% | +14/-10 |
+| 880000 | 53 | 74.0% | 74.4% | +14/-13 |
 
-Pooled +24/-36, sign test p=0.155; losing 3 of 3 pairs is itself only
-p=0.25. Not significant, and certainly not evidence that v3 helps.
+Pooled over all nine: **+94/-105, p=0.478**, mean **-0.49 points**, and
+v3 loses 5 of 9. **Indistinguishable.**
+
+The first block alone read -1.60 and 3 losses from 3, which is what was
+reported here before. That was one block of noise presented as a result,
+and it is the same mistake this file warns about elsewhere: three paired
+runs is not a sample.
 
 **The training-time metric says the opposite.** `eval_return` at export:
 obs2 averaged 35.90, obs3 averaged 40.51, and v3 won all three pairs.
 The same disagreement that sank the learned plan-ranker -- an offline
 number flattering a model that then loses in play.
 
-**Left at 3 anyway**, because moving a shipped default on p=0.155 is the
-thing this file keeps warning against, and 3 is what the last two
-retrains used. What it needs is more seeds, not a decision. Until then
-the state is: the default is unproven, the shipped policy does not use
-it, and `--obs-version 2` is available to anyone who wants the older
-one.
+**Left at 3**, now on better grounds than before. It is not worse; it is
+the same, and the argument for it is one the measurement cannot see:
+the two features it replaces are a RATIO and a CEILING, and what decides
+a fight is their product — 0.5 of 137 survives a Legal Eagle, 0.5 of 40
+does not. A linear layer cannot multiply, so handing it the product is
+strictly more information for four more dimensions.
+
+Same shape as `SCARCITY_USES_HELD_COUNT`: neutral on measurement, kept
+on the argument, labelled as such.
+
+The shipped policy still does not use it — it predates the field
+entirely and carries no `obs_version` key — so anything trained from
+here diverges from what ships until a v3 policy is trained and
+promoted. That, not the observation, is the open item.
 
 ## `SLEEPERS_WAKE_IN_TURN`: the extrapolation is settled, and it was right
 
