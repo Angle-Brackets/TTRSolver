@@ -749,6 +749,7 @@ the climb's 90% on a CEO waiter battle.
 
 | | |
 | --- | --- |
+| [docs/ppo-math.md](docs/ppo-math.md) | the maths as implemented, with the three places it departs from textbook PPO |
 | [docs/data-confidence.md](docs/data-confidence.md) | every data gap, and why it is open |
 | [docs/party-strategy.md](docs/party-strategy.md) | party findings, and their limits |
 | [docs/ml-design.md](docs/ml-design.md) | the learning plan and its results |
