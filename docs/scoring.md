@@ -785,11 +785,30 @@ seeds. Solo VP at 12, 16 and 20 cogs, where pouches actually drain:
 **+0/-0 every cell.** Facility play, 250 runs a cell on two blocks:
 88.8% -> 88.0% (+1/-3) and 85.2% -> 84.4% (+1/-3), p=0.625 both.
 
-**Directionally negative on both blocks, and not significant.** That is
-weaker support than the +0/-0 first reported here, which came from a
-broken harness -- see the end of this file. The change is still shipped,
-because the case for it was never the measurement; but "measured
-neutral" was too generous and this is the honest version.
+**Directionally negative, and not significant.** Re-measured at four
+times the sample -- four seed blocks, 1000 runs a cell:
+
+| block | carry limit | held count | paired | gags spent |
+|---|---|---|---|---|
+| 440000 | 88.8% | 88.0% | +1/-3 | 14.2 -> 14.0 |
+| 990000 | 85.2% | 84.4% | +1/-3 | 16.1 -> 15.5 |
+| 660000 | 88.4% | 88.0% | +2/-3 | 15.1 -> 14.7 |
+| 770000 | 87.6% | 88.0% | +2/-1 | 13.7 -> 13.5 |
+
+Pooled **+6/-10, p=0.454**; mean **-0.40 points**; negative in 3 of 4
+blocks. So it is not the +0/-0 first reported here (that came from a
+broken harness, see the end of this file), and it is not significant
+either — it is a small negative that a larger sample has not resolved
+into anything.
+
+**It does do its job**, which is the part worth keeping: 2.4% fewer gags
+spent, consistently, in every block. That is conservation working as
+designed and simply not converting into wins at this price weight —
+consistent with everything else here, since the whole price term is
+under 5% of the score.
+
+Shipped, on the argument rather than the number. Recorded so nobody
+later reads it as evidence-backed.
 
 ### Why it changes nothing, which is the real finding
 
