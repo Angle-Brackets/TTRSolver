@@ -725,11 +725,17 @@ It shipped on a judgement call -- it helped at 12 cogs a round and HURT
 at 8 -- and the note has said so ever since. Re-measured now that the
 landscape has moved (budget 24, consumables on, `survive` at 400):
 
-**Ordinary facility play: outcome-neutral.** 500 paired games across two
-seed blocks, with and without consumables, +0/-0 every time. Not because
-the flag is inert -- it moves `prevented` from 110.54 to 174.87 and the
-score by 550 points on a sampled board -- but because it changes the
-lure's MARGIN without flipping the argmax.
+**Ordinary facility play: statistically neutral.** 250 runs a cell on
+two seed blocks: 88.0% against 86.8% (+1/-4, p=0.375) and 84.4% against
+84.8% (+1/-0, p=1.000). Only a handful of seeds move either way, which
+is what you expect from a flag that changes the lure's MARGIN without
+flipping the argmax -- it moves `prevented` from 110.54 to 174.87 and
+the score by 550 points on a sampled board, and still decides almost
+nothing outside the VP.
+
+> An earlier version of this paragraph claimed +0/-0 across 500 games.
+> That was a broken harness sweeping `SOS_PRICE` instead of this flag;
+> see the note at the end of this file.
 
 **Solo VP, where it was actually argued over, 200 runs a cell, paired:**
 
@@ -775,9 +781,15 @@ dearest exactly when you are down to the last one.
 | Presentation | 1 | 1 | 27.00 | 27.00 |
 
 Implemented behind `SCARCITY_USES_HELD_COUNT` and measured, paired on
-seeds: facility play with and without consumables, two seed blocks, and
-solo VP at 12, 16 and 20 cogs where pouches actually drain. **+0/-0
-every cell.**
+seeds. Solo VP at 12, 16 and 20 cogs, where pouches actually drain:
+**+0/-0 every cell.** Facility play, 250 runs a cell on two blocks:
+88.8% -> 88.0% (+1/-3) and 85.2% -> 84.4% (+1/-3), p=0.625 both.
+
+**Directionally negative on both blocks, and not significant.** That is
+weaker support than the +0/-0 first reported here, which came from a
+broken harness -- see the end of this file. The change is still shipped,
+because the case for it was never the measurement; but "measured
+neutral" was too generous and this is the honest version.
 
 ### Why it changes nothing, which is the real finding
 
@@ -818,3 +830,76 @@ Cost of the switch, from the refactor lock: **1 pick of 120 moved**
 hazard becomes real: your last gag of a kind costs nearly what a
 Presentation costs, and a gag carried out of a fight unspent is worth
 exactly nothing.
+
+## `QUICK_W["price"]` swept — and it cannot be tuned on its own
+
+Asked to sweep it after establishing that scarcity is too short a lever
+to steer with. It stays at **1.0**, and the reason is structural.
+
+**`QUICK_W["price"]` does not price gags. It prices everything.** The
+`price` it multiplies is assembled from three sources in `_score_leaf`:
+
+    price  = sum of _gag_units over the gags spent   (line ~930)
+    price *= 1 + horizon_cost * cogs_remaining
+    price += _fire_price(...) * fires spent          (line ~953)
+    price += SOS_PRICE * sos calls                   (line ~965)
+    ... - QUICK_W["price"] * price
+
+So turning it down does not make the solver freer with gags; it makes
+gags, pink slips and SOS cards free together, nullifying `FIRE_PRICE`,
+`FIRE_FLOOR` and `SOS_PRICE` in one move.
+
+That is exactly what the first sweep measured, and it looked like a win:
+
+| price | win | gags | slips |
+|---|---|---|---|
+| 0.0 | 91.6% / 89.6% | 10.2 | 16.5 |
+| **1.0** | 88.0% / 84.4% | 14.0 | 17.1 |
+| 2.0 | 83.6% | 12.4 | 18.6 |
+| 4.0 | 76.4% | 10.0 | 19.9 |
+| 16.0 | 60.0% | 6.8 | 20.5 |
+
+Zero beating one on both blocks (p=0.022, p=0.015) is not a finding
+about gag conservation. It is unpriced consumables.
+
+**Isolated** — same sweep with no slips, unites or cards, so the
+multiplier only reaches gags:
+
+| price | block A | block B | gags |
+|---|---|---|---|
+| 0.0 | 68.8% | 62.8% | 28.6 / 30.9 |
+| **1.0** | **68.4%** | **62.0%** | **27.7 / 28.1** |
+| 0.5 | 67.2% | 61.2% | 27.6 / 29.2 |
+| 2.0 | 68.0% | 60.8% | 26.7 / 27.1 |
+| 4.0 | 64.4% (p=0.052) | 54.8% (p<0.001) | 24.6 / 25.8 |
+
+Anything from 0 to 2 is indistinguishable; 4 clearly hurts. Higher does
+conserve — about 15% fewer gags at 4.0 — but buys nothing with it.
+
+**1.0 stands.** And the real finding is the coupling: conservation
+cannot be tuned without unpricing consumables, so if gag thrift is ever
+wanted, the fix is to split the multiplier rather than to move it.
+
+## The harness bug behind three corrected claims
+
+`scratch/realistic.py` dispatched its sweep knob like this:
+
+    if KNOB == "fire":   psw.FIRE_FLOOR = value
+    elif KNOB == "budget": pass
+    else:                sos_mod.SOS_PRICE = value
+
+Every knob I believed I had added later — `prevent`, `reach`,
+`heldscarcity`, `price` — fell through that `else` and **swept
+`SOS_PRICE` instead**. The inserts never landed, because they were
+`str.replace` calls written without an assert, so a pattern that did not
+match failed silently.
+
+A catch-all in a measurement harness is the same defect as the
+`PASS_INDEX` fallback in a play harness: it turns "I cannot do what you
+asked" into a plausible number. The dispatch now names every knob and
+raises on an unknown one.
+
+Three claims in this file were re-measured and corrected above.
+`FIRE_FLOOR`, `SOS_PRICE`, `survive` and the search budget were never
+affected — those knobs had real branches, or were handled at the call
+site.
