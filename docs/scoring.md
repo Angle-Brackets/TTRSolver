@@ -992,3 +992,65 @@ resort. The price encodes reluctance, not win-maximisation.
 
 What the split buys is that this preference is now expressible on its
 own axis, instead of riding on the knob that also governs the pouch.
+
+## Six fresh policies: nothing to promote, and v3 buys nothing
+
+Three training seeds at observation v3 and the same three at v1, 6M
+steps each, paired by seed. The question was whether a v3 policy should
+be trained and promoted, since `env.OBS_VERSION` is 3 and the shipped
+policy predates the field entirely.
+
+**Training-time `eval_return` favours v1, 3 of 3:**
+
+| seed | v3 | v1 | v1 − v3 |
+|---|---|---|---|
+| 71 | 35.47 | 44.58 | +9.11 |
+| 72 | 41.05 | 43.46 | +2.41 |
+| 73 | 37.24 | 41.35 | +4.11 |
+| mean | 37.92 | **43.13** | **+5.21** |
+
+**Held-out play says they are the same.** 250 runs a cell, paired:
+
+| cell | v3 | v1 | paired |
+|---|---|---|---|
+| with consumables | 96.4% | 96.4% | +10/-10, p=1.000 |
+| without (discriminating) | 70.1% | 71.2% | +26/-34, p=0.366 |
+
+That is the THIRD time `eval_return` and play have disagreed in this
+project, and the second time in opposite directions — it preferred v3 in
+the earlier comparison and v1 here, while play called both even.
+**Stop reading `eval_return` as a ranking.** It is a training-progress
+signal.
+
+### Nothing is promoted
+
+Every fresh policy beats the shipped one in the discriminating cell, by
+1.2 to 4.0 points — and not one of them significantly:
+
+| policy | win | vs shipped |
+|---|---|---|
+| SHIPPED | 68.8% | — |
+| fresh obs3_s71 | 70.4% | +12/-8, p=0.503 |
+| fresh obs3_s72 | 70.0% | +12/-9, p=0.664 |
+| fresh obs3_s73 | 70.0% | +10/-7, p=0.629 |
+| fresh obs1_s71 | 70.4% | +12/-8, p=0.503 |
+| fresh obs1_s72 | 70.4% | +13/-9, p=0.523 |
+| fresh obs1_s73 | **72.8%** | +18/-8, **p=0.076** |
+
+All six landing above shipped is suggestive, but they share eval seeds
+and conditions, so a sign test across policies is not valid — the paired
+tests are, and the best reads p=0.076.
+
+**Promoting that one would be exactly the selection that produced the
+outlier we already have.** Best-of-six at p=0.076 is a lottery ticket,
+not a result. The shipped policy stays.
+
+What this does settle: the shipped policy is **not** the 3.8 sd monster
+it is described as, at least in this cell, where it is the worst of
+seven. That reputation came from a different measurement and should not
+be carried into new comparisons unexamined.
+
+`OBS_VERSION` stays at 3 — there is no evidence to move it either way,
+and this file's own rule is that a shipped value does not move on a
+wash. But there is now no positive case for v3 beyond the argument that
+a linear layer cannot multiply a ratio by a ceiling.
