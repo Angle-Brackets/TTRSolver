@@ -177,6 +177,68 @@ DEFAULT_EPSILON = 0.03
 DEFAULT_EXACT_PLIES = 0
 
 
+def first_answer(state, reject=None):
+    """The trained policy's move, evaluated in milliseconds."""
+    try:
+        import random
+        from ..search import hybrid
+
+        hybrid.LAST_UNITE = None
+        plan = hybrid.climb(state, random.Random(0), budget=24,
+                            reject=frozenset(reject or ()))
+        chosen = hybrid.LAST_UNITE
+        unite_str = ""
+        if chosen is not None:
+            from .. import unites as unites_mod
+            unite_str = unites_mod.describe(chosen)
+    except Exception:
+        return None, ""
+    action = plan[0] if plan else None
+    return action, unite_str
+
+
+_EXECUTOR = None
+
+
+def _pool():
+    global _EXECUTOR
+    if _EXECUTOR is None:
+        from concurrent.futures import ProcessPoolExecutor
+        _EXECUTOR = ProcessPoolExecutor(max_workers=1)
+    return _EXECUTOR
+
+
+def search_in_child(state, objective_name: str, depth: int,
+                    budget: float, allow_level_7: bool):
+    """Run search in a separate process to avoid holding GIL on the UI thread."""
+    from .. import state as state_mod
+    from ..search import expectimax, objective as objectives
+    from .. import unites as unites_mod
+
+    state_mod.ALLOW_LEVEL_7 = bool(allow_level_7)
+    objective = objectives.PRESETS.get(objective_name, objectives.DEFAULT)
+
+    def _value_of(st):
+        value, act = expectimax.best_action_iterative(
+            st, depth=depth, objective=objective,
+            epsilon=DEFAULT_EPSILON, time_budget=budget,
+            exact_plies=DEFAULT_EXACT_PLIES)
+        return act, (float("-inf") if act is None else value)
+
+    global LAST_UNITE
+    LAST_UNITE = None
+    if unites_mod.OFFER_UNITES_IN_SEARCH:
+        LAST_UNITE, action = unites_mod.best_with_unite(state, _value_of)
+        if LAST_UNITE is not None:
+            unites_mod.apply(state.toons[0], LAST_UNITE)
+    else:
+        action, _value = _value_of(state)
+
+    if action is None:
+        return ["no legal move -- nothing left to throw"], state, None
+    return [_render(action, state)], state, action
+
+
 class Thinker:
     """Runs searches off the polling thread, newest request wins.
 
@@ -187,36 +249,60 @@ class Thinker:
     already about a position that no longer exists.
     """
 
-    def __init__(self, on_result: Callable[[list, object, object], None]):
+    def __init__(self, on_result: Callable[[list, object, object], None],
+                 on_first_answer: Optional[Callable[[object, str, object], None]] = None):
         self.on_result = on_result
+        self.on_first_answer = on_first_answer
         self._generation = itertools.count()
         self._current = -1
         self._lock = threading.Lock()
 
     def submit(self, frame, readings, snapshot, objective, depth,
                budget=DEFAULT_BUDGET, ignore_checksum=False,
-               allies=0, fires=0) -> None:
+               allies=0, fires=0, reject=None) -> None:
         with self._lock:
             token = next(self._generation)
             self._current = token
         threading.Thread(target=self._run, daemon=True,
                          args=(token, frame, readings, snapshot, objective,
                                depth, budget, ignore_checksum,
-                               allies, fires)).start()
+                               allies, fires, reject)).start()
 
     def _run(self, token, frame, readings, snapshot, objective, depth,
-             budget, ignore_checksum=False, allies=0, fires=0):
+             budget, ignore_checksum=False, allies=0, fires=0, reject=None):
         try:
-            lines, state, action = advise(frame, readings, snapshot=snapshot,
-                                  objective=objective, depth=depth,
-                                  budget=budget,
-                                  ignore_checksum=ignore_checksum,
-                                  allies=allies, fires=fires)
+            snap = snapshot or _snapshot()
+            pnl = _panel(frame)
+            if snap is not None and pnl is not None:
+                pnl = _panel_with_training(frame, snap)
+            res = build_state(snapshot=snap, panel=pnl, readings=readings,
+                              ignore_checksum=ignore_checksum, allies=allies,
+                              fires=fires)
+            if not res or not res.state:
+                with self._lock:
+                    superseded = token != self._current
+                if not superseded:
+                    self.on_result(res.problems if res else ["no battle detected"], None, None)
+                return
+
+            state = res.state
+
+            if self.on_first_answer:
+                try:
+                    quick_act, quick_unite = first_answer(state, reject=reject)
+                    with self._lock:
+                        superseded = token != self._current
+                    if not superseded and quick_act:
+                        self.on_first_answer(quick_act, quick_unite, state)
+                except Exception:
+                    pass
+
+            objective_name = getattr(objective, "name", "balanced")
+            allow_level_7 = getattr(state, "allow_level_7", True)
+
+            future = _pool().submit(search_in_child, state, objective_name, depth, budget, allow_level_7)
+            lines, state, action = future.result(timeout=budget + 15.0)
         except Exception as exc:            # noqa: BLE001 -- see below
-            # A search that dies takes its thread with it and nothing
-            # else notices: no advice appears, which looks exactly like
-            # a search still running. Report it as the reason there is
-            # no state, which is the channel the caller already reads.
             import traceback
 
             lines = [f"the search failed: {exc.__class__.__name__}: {exc}",

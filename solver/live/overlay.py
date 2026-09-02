@@ -365,6 +365,10 @@ class Worker(threading.Thread):
         from .. import state as state_mod
         self.allow_level_7 = state_mod.ALLOW_LEVEL_7
         self.toon_count = 1
+        self.max_fires = 0
+        self.max_unites = 0
+        self.max_sos = 0
+        self._rejected = set()
         self._forced: Optional[bool] = None
         self._lock = threading.Lock()
         self._stop = threading.Event()
@@ -393,6 +397,66 @@ class Worker(threading.Thread):
     def stop(self) -> None:
         self._stop.set()
 
+    def prefer_engine(self, name) -> None:
+        """Swap which engine's answer is on screen."""
+        choice = "search" if str(name).lower() == "search" else "rl"
+        with self._lock:
+            self.model.preferred_engine = choice
+            if choice == "search":
+                if not self.model.search_ready:
+                    self._post()
+                    return
+                self.model.gag = self.model.search_gag
+                self.model.track = self.model.search_track or None
+                self.model.gag_level = self.model.search_gag_level or None
+                self.model.engine = "search"
+            else:
+                if not self.model.rl_gag:
+                    self._post()
+                    return
+                self.model.gag = self.model.rl_gag
+                self.model.track = self.model.rl_track or None
+                self.model.gag_level = self.model.rl_gag_level or None
+                self.model.engine = "rl"
+            self.model.gag_at = time.time()
+        self._post()
+
+    def set_max_fires(self, count) -> None:
+        try:
+            value = int(count)
+        except (TypeError, ValueError):
+            return
+        with self._lock:
+            self.max_fires = max(0, min(99, value))
+            self.model.max_fires = self.max_fires
+        self.ask_now()
+
+    def set_max_unites(self, count) -> None:
+        try:
+            value = int(count)
+        except (TypeError, ValueError):
+            return
+        with self._lock:
+            self.max_unites = max(0, min(99, value))
+            self.model.max_unites = self.max_unites
+        self.ask_now()
+
+    def set_max_sos(self, count) -> None:
+        try:
+            value = int(count)
+        except (TypeError, ValueError):
+            return
+        with self._lock:
+            self.max_sos = max(0, min(99, value))
+            self.model.max_sos = self.max_sos
+        self.ask_now()
+
+    def reconsider(self) -> None:
+        with self._lock:
+            if self.model.gag:
+                self._rejected.add(self.model.gag)
+        self.ask_now()
+
     # -- the worker thread ----------------------------------------------
 
     def run(self) -> None:
@@ -406,7 +470,7 @@ class Worker(threading.Thread):
         # Held so `name_cog` can reach it: the panel names a plate
         # the readers could not, and the watcher applies it per frame.
         self._watcher = watcher
-        thinker = advise_mod.Thinker(self._on_advice)
+        thinker = advise_mod.Thinker(self._on_advice, on_first_answer=self._on_first_answer)
         try:
             while not self._stop.is_set():
                 cycle = time.time()
@@ -453,34 +517,65 @@ class Worker(threading.Thread):
                                    self.objective, self.depth, self.budget,
                                    self.ignore_checksum,
                                    allies=max(0, self.toon_count - 1),
-                                   fires=self.model.max_fires)
+                                   fires=self.model.max_fires,
+                                   reject=self._rejected)
                 self._post()
                 time.sleep(max(0.0, POLL_INTERVAL - (time.time() - cycle)))
         finally:
             watcher.close()
+
+    def _on_first_answer(self, action, unite_str, state) -> None:
+        from . import advise as advise_mod
+        model = self.model
+        if action is not None:
+            text = advise_mod._render(action, state)
+            track = advise_mod.track_of(action)
+            level = action.level if (track and track not in ("fire", "sos")) else (7 if track in ("fire", "sos") else None)
+            with self._lock:
+                model.rl_gag = text
+                model.rl_track = track or ""
+                model.rl_gag_level = level or 0
+                if unite_str:
+                    model.unite = unite_str
+                if model.preferred_engine == "rl" or not model.search_ready:
+                    model.gag = text
+                    model.gag_at = time.time()
+                    model.track = track
+                    model.gag_level = level
+                    model.engine = "rl"
+                model.thinking = True
+            self._post()
 
     def _on_advice(self, lines, state, action=None) -> None:
         from . import advise as advise_mod
         from .. import unites as unites_mod
 
         model = self.model
-        model.thinking = False
-        if state is None:
-            model.problems = list(lines)
-        else:
-            model.problems = []
-            if lines:
-                model.gag, model.gag_at = lines[0], time.time()
-                model.track = advise_mod.track_of(action)
-                model.gag_level = (action.level if model.track else None)
-                # The unite chosen ALONGSIDE the gag, if any. Read from
-                # the module global rather than the action because a
-                # unite costs no turn and so is not the move -- the
-                # round is "use this, then throw that". Cleared every
-                # time, or a stale one lingers over a later round.
-                chosen = getattr(advise_mod, "LAST_UNITE", None)
-                model.unite = ("" if chosen is None
-                               else unites_mod.describe(chosen))
+        with self._lock:
+            model.thinking = False
+            if state is None:
+                model.problems = list(lines)
+            else:
+                model.problems = []
+                if lines:
+                    text = lines[0]
+                    track = advise_mod.track_of(action)
+                    level = action.level if (track and track not in ("fire", "sos")) else (7 if track in ("fire", "sos") else None)
+                    model.search_gag = text
+                    model.search_track = track or ""
+                    model.search_gag_level = level or 0
+                    model.search_ready = True
+
+                    chosen = getattr(advise_mod, "LAST_UNITE", None)
+                    if chosen is not None:
+                        model.unite = unites_mod.describe(chosen)
+
+                    if model.preferred_engine == "search" or not model.rl_gag:
+                        model.gag = text
+                        model.gag_at = time.time()
+                        model.track = track
+                        model.gag_level = level
+                        model.engine = "search"
         self._post()
 
     def mark_lured(self, index, lured) -> None:

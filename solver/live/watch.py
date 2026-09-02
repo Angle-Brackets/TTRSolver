@@ -502,6 +502,19 @@ class BattleWatcher:
             self._levels.clear()
             self._low_frames = 0
             return
+        # NO PLATES AT ALL IS "CANNOT SEE", NOT "COGS GONE", and it must
+        # never forget anything. Between rounds the attack animation
+        # plays for several seconds with no plate on screen, and the
+        # debounce below is five frames at a 0.5s poll -- 2.5s. So every
+        # hand-named cog was dropped on the FIRST round transition after
+        # naming it, which is exactly the reported bug: the selection is
+        # overwritten when the next round comes about.
+        #
+        # A zero count is the reader saying it has no evidence. Acting on
+        # it is the same error as building a state from an empty read.
+        if count == 0:
+            self._low_frames = 0
+            return
         # DEBOUNCED. A plate that vanishes for one frame has not gone --
         # it is mid-animation, or something walked in front of it. Acting
         # on the first frame meant one dropout threw the pick away, which

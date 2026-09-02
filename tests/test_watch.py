@@ -457,3 +457,61 @@ class TestNamingFromThePanel(unittest.TestCase):
             self.assertEqual(plates, _outside_the_menu(Frame(), plates))
         finally:
             gp.find_panel = saved
+
+
+class NamesSurviveARoundTest(unittest.TestCase):
+    """A hand-named cog must survive the between-round animation.
+
+    `_forget_names` runs every frame on the plate count. Between rounds
+    the animation plays for seconds with NO plate on screen, and the
+    debounce is five frames at a 0.5s poll -- 2.5s -- so every pick was
+    dropped on the first round transition after it was made. Reported
+    from live play as "it overwrites my selection whenever the next
+    round comes about".
+
+    A zero count is the reader saying it cannot see, not that the cogs
+    are gone.
+    """
+
+    def _watcher(self):
+        from solver.live import watch
+        w = watch.BattleWatcher.__new__(watch.BattleWatcher)
+        w._named = {}
+        w._learn = {}
+        w._lured = set()
+        w._levels = {}
+        w._low_frames = 0
+        return w
+
+    def test_a_name_survives_the_plates_vanishing(self):
+        from solver.live import watch
+        w = self._watcher()
+        w.name_plate(1, "ambulance_chaser", learn=False)
+        for _ in range(watch.FORGET_AFTER_FRAMES * 4):
+            w._forget_names(0)          # mid-animation: nothing on screen
+        self.assertEqual(w._named.get(1), "ambulance_chaser")
+
+    def test_a_name_still_goes_when_its_plate_really_leaves(self):
+        """One cog dies, two become one: the name on the missing slot is
+        stale and should still be dropped."""
+        from solver.live import watch
+        w = self._watcher()
+        w.name_plate(1, "ambulance_chaser", learn=False)
+        for _ in range(watch.FORGET_AFTER_FRAMES + 1):
+            w._forget_names(1)
+        self.assertNotIn(1, w._named)
+
+    def test_an_explicit_reset_still_clears(self):
+        w = self._watcher()
+        w.name_plate(0, "ambulance_chaser", learn=False)
+        w._forget_names(-1)
+        self.assertEqual(w._named, {})
+
+    def test_a_brief_dropout_is_still_debounced(self):
+        """The original protection: a single missing frame at a real
+        count must not drop anything."""
+        from solver.live import watch
+        w = self._watcher()
+        w.name_plate(1, "ambulance_chaser", learn=False)
+        w._forget_names(1)
+        self.assertEqual(w._named.get(1), "ambulance_chaser")

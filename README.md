@@ -253,11 +253,13 @@ documentation:
   on. Cog level, department and health come off the plate above each cog.
   This is the only route to the cogs.
 
-> The screenshot at the top of this file is a **Realms** session, where
-> the inventory boxes CAP a holding the wire reports. On TTR nothing
-> reports one, so the slips box is the count itself — a player typing "I
-> have three" is an assertion, the same footing `allies` has always been
-> on.
+> The screenshot at the top of this file is the **screen reader** — its
+> evidence line says "cog plates", which only vision produces — pointed
+> at a Toontown Realms window. So its inventory boxes are the
+> player-supplied kind: the slips box IS the count, on the same footing
+> `allies` has always been on. The wire-driven Realms panel is a
+> different front end, and there the box caps a holding the cluster
+> reports.
 >
 > **A pink slip is the only consumable a number can describe**, because
 > one slip is every slip. A unite is five Toon-Up values and eight

@@ -171,38 +171,16 @@ class Api:
         self._worker.ask_now()
 
     def set_max_fires(self, count) -> None:
-        self._set_cap("max_fires", count)
+        self._worker.set_max_fires(count)
 
     def set_max_unites(self, count) -> None:
-        """INERT here, for the same reason as `set_max_sos`.
-
-        [OWNER] not really knowable on this client -- and a count would
-        not be enough anyway. A unite is five Toon-Up values and eight
-        Gag-Up variants, so a total says nothing about which, and
-        supplying one leaves `unite_stock` empty, which reads as
-        "unknown, permit everything". The solver would offer a Gag-Up
-        Lure to a toon holding only Toon-Ups.
-
-        A pink slip is the only consumable a number can describe,
-        because one slip is every slip.
-        """
+        self._worker.set_max_unites(count)
 
     def set_max_sos(self, count) -> None:
-        """STILL INERT, and this one cannot be fixed with a number.
-
-        A slip is a slip and a unite is a unite, so a count is the whole
-        story and `set_max_fires` and `set_max_unites` now work. There
-        are 29 distinct SOS cards, and a count says nothing about WHICH
-        -- accepting one here would let the solver advise a card the
-        player may not hold. Naming them needs a picker or a reader.
-        """
+        self._worker.set_max_sos(count)
 
     def reconsider(self) -> None:
-        """INERT here. Present because THE PAGE IS SHARED.
-
-        Same reason as `prefer_engine` and `set_max_fires`; see the
-        first of those.
-        """
+        self._worker.reconsider()
 
     def toggle_fight(self) -> None:
         """Confirm a fight, or end one and reset.
