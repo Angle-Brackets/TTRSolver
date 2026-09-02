@@ -911,3 +911,66 @@ class TestSimultaneousLures(unittest.TestCase):
         self._round(state, [Action(Track.LURE, 6, None),
                             Action(Track.LURE, 4, None), None, None])
         self.assertTrue(all(c.status.lured for c in state.cogs))
+
+
+class RevengeMemoryTest(unittest.TestCase):
+    """A cog remembers who has been hitting it for the WHOLE FIGHT.
+
+    Open Toontown wipes its damage record every round
+    (`CLEAR_SUIT_ATTACKERS = 1`, cleared in `__initRound`), so a toon who
+    stops attacking leaves the revenge pool there. [OWNER] that is a bug
+    in TTO rather than a rule, so `damage_by_toon` accumulates here and
+    is never reset.
+
+    Pinned because the divergence is real and looks like a missing
+    reset to anyone diffing against the source. It is deliberate --
+    the third accident in that one function this project declines to
+    reproduce.
+    """
+
+    def _board(self):
+        from solver import data
+        from solver.state import BattleState, CogState, ToonState, Track
+        hp = data.cog_max_hp(6)
+        cogs = [CogState(department="sellbot", cog_type="cold_caller",
+                         level=6, hp=hp, max_hp=hp)]
+        toons = [ToonState(80, 137, {t: 7 for t in Track},
+                           {(Track.THROW, 3): 9, (Track.SQUIRT, 3): 9},
+                           frozenset()) for _ in range(2)]
+        return BattleState(toons=toons, cogs=cogs)
+
+    def test_damage_accumulates_across_rounds(self):
+        from solver import simulator
+        from solver.state import Action, Track
+        state = self._board()
+        simulator.apply_party_round(
+            state, [Action(track=Track.THROW, level=3, target_index=0), None],
+            hits=[True, True])
+        first = dict(state.cogs[0].status.damage_by_toon)
+        simulator.apply_party_round(
+            state, [None, Action(track=Track.SQUIRT, level=3, target_index=0)],
+            hits=[True, True])
+        second = dict(state.cogs[0].status.damage_by_toon)
+        self.assertEqual(set(first), {0})
+        self.assertEqual(set(second), {0, 1},
+                         "round one's attacker was forgotten -- that is "
+                         "Open Toontown's behaviour, and it is a bug")
+        self.assertEqual(second[0], first[0])
+
+    def test_a_toon_that_stops_attacking_stays_a_target(self):
+        """The consequence: passing does not shed aggro here."""
+        import random
+        from solver import mechanics, simulator
+        from solver.state import Action, Track
+        state = self._board()
+        simulator.apply_party_round(
+            state, [Action(track=Track.THROW, level=3, target_index=0), None],
+            hits=[True, True])
+        for _ in range(4):        # toon 0 passes from here on
+            simulator.apply_party_round(state, [None, None], hits=[True, True])
+        self.assertIn(0, state.cogs[0].status.damage_by_toon)
+        picks = [mechanics.pick_cog_target(state.cogs[0], state.toons,
+                                           random.Random(s))
+                 for s in range(200)]
+        self.assertGreater(picks.count(0), 0,
+                           "the earlier attacker left the revenge pool")

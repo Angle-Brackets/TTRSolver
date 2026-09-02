@@ -413,6 +413,19 @@ def pick_cog_target(cog: CogState, toons, rng=random) -> int:
     clobber and a probable integer-division bug that would floor
     multi-attacker weights to zero -- on the judgement that what's
     implemented here is what the code evidently means, not its accidents.
+    THE MEMORY IS THE WHOLE BATTLE, not the round, and this is the
+    THIRD thing in that source deliberately not copied. Open Toontown
+    wipes its damage record every round -- `CLEAR_SUIT_ATTACKERS = 1`,
+    cleared at the top of `__initRound` -- so a cog there forgets who
+    hurt it as soon as the round ends, and a toon who stops attacking
+    drops out of the revenge pool entirely.
+
+    [OWNER] that is a bug in TTO, not a rule: a cog remembers who has
+    been hitting it for the fight. `damage_by_toon` therefore
+    accumulates and is never reset. The owner's play knowledge outranks
+    the source here, and the wiki settles nothing either way -- it gives
+    only a direction, with no memory window at all.
+
     Full reasoning and what to check if play disagrees:
     docs/mechanics-notes.md#pick_cog_target.
     """

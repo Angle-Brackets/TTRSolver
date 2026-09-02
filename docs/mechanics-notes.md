@@ -716,3 +716,60 @@ Contrast `round_num`, which stays out: nothing in the mechanics reads
 it, so including it would split identical nodes for nothing. The test
 is whether a field can change what happens next, not whether it
 changes.
+
+
+## `pick_cog_target` — a third Open Toontown oddity, not copied
+
+Two were already recorded: the dict-versus-list clobber in
+`__rememberToonAttack`, and the integer division that floors every
+multi-attacker weight to zero. Both are now **confirmed in the fetched
+source** rather than inferred:
+
+    if self.SuitAttackers[suitId][toonId] <= damage:
+        self.SuitAttackers[suitId] = [toonId, damage]     # dict -> list
+
+    dmgs.append(self.SuitAttackers[suitId][currToon] / totalDamage * 100)
+    # Python 2 integer division: 0 for anyone who did not deal all of it
+
+The third is the **memory window**. Open Toontown wipes the damage
+record every round:
+
+    CLEAR_SUIT_ATTACKERS = 1
+
+    def __initRound(self):
+        if self.CLEAR_SUIT_ATTACKERS:
+            self.SuitAttackers = {}
+
+so a cog there forgets who hurt it the moment the round ends, and a toon
+who stops attacking leaves the revenge pool — reachable afterwards only
+by the 25% random branch.
+
+**[OWNER]: that is a bug in TTO, not a rule.** A cog remembers who has
+been hitting it for the whole fight. `CogStatus.damage_by_toon`
+therefore accumulates and is never reset, which is what this solver
+does.
+
+The hierarchy decides it. The wiki gives only a direction — "more
+likely to target whoever dealt the most damage, though this may not
+always be the case" — and names no memory window, so it corroborates
+neither. Between `[OPEN TOONTOWN SOURCE]` and the owner's play
+knowledge, the owner wins.
+
+Worth knowing because the divergence is real and visible: diff this
+against the source and it looks like a missing reset. It is not. It is
+the third accident in one function that this project declines to
+reproduce.
+
+### The belief this came from
+
+The question that surfaced it was whether repeatedly passing in front of
+cogs lowers their accuracy, as an anti-Toon-Up-training measure. **It
+does not — there is no accuracy decay anywhere.** `suitAtkStats` does
+count how often each toon has been attacked, which is probably why the
+belief exists, but it is read in exactly one place,
+`__printSuitAtkStats`, a debug logger. It never reaches gameplay.
+
+What is real is the damage-weighted targeting above: 75% of the time a
+cog attacks someone who has damaged it, weighted by how much. In TTO,
+passing sheds that within a round. Here it does not, because the memory
+is the fight.
