@@ -392,3 +392,80 @@ class TestTealMask(unittest.TestCase):
         from solver.live.vision import teal_mask
         frame = np.full((4, 4, 3), (5, 30, 60), dtype=np.uint8)
         self.assertFalse(teal_mask(frame).any())
+
+
+class HealthBarAnchorTest(unittest.TestCase):
+    """Finding a plate where the portrait colour cannot.
+
+    Bossbot HQ's icy cobblestone has mortar at rgb(87,137,160) against a
+    `TEAL` of (90,141,158), so `teal_mask` matched 19.7% of a live frame
+    as one connected web and both plates were swallowed into a
+    1721x1081 blob the width filter then threw away. Neither obvious
+    knob helps: capping run length changes nothing because the mortar is
+    wide rather than thin, and an opening at radius 4 moved coverage
+    19.75% -> 18.86%.
+
+    The health bar is saturated green, which scenery is not, and
+    `PARTS["health"]` gives its box in slot-relative units -- so finding
+    the bar gives the slot by inverting the geometry.
+    """
+
+    def _frame(self, bar, slot, size=(400, 700)):
+        """A frame with one green bar and one teal slot, nothing else."""
+        frame = np.zeros((size[0], size[1], 3), dtype=np.uint8)
+        frame[:, :] = (20, 20, 20)
+        sx0, sy0, sx1, sy1 = slot
+        frame[sy0:sy1, sx0:sx1] = V.TEAL
+        bx0, by0, bx1, by1 = bar
+        frame[by0:by1, bx0:bx1] = (40, 230, 60)
+        return frame
+
+    def _placed(self, slot):
+        """The bar box `PARTS` puts against a given slot."""
+        left, top, right, bottom = V.PARTS["health"]
+        x0, y0, x1, y1 = slot
+        w, h = x1 - x0, y1 - y0
+        return (round(x0 + left * w), round(y0 + top * h),
+                round(x0 + right * w), round(y0 + bottom * h))
+
+    def test_the_geometry_round_trips(self):
+        """A bar placed by `PARTS` recovers the slot it came from."""
+        slot = (200, 100, 265, 144)
+        frame = self._frame(self._placed(slot), slot)
+        found = V.find_plates_by_health(frame)
+        self.assertEqual(1, len(found))
+        # A FEW PIXELS, not exact. The bar's box is `PARTS` rounded to
+        # whole pixels and the inversion divides by those same fractions
+        # twice, so the round trip cannot be lossless. What matters is
+        # that the recovered slot is close enough for the regions
+        # measured off it -- on the live frame this recovered a slot
+        # whose level read 7 at margin 0.35 and department Lawbot at
+        # 0.55, both well clear of their floors.
+        for got, want in zip(found[0].slot, slot):
+            self.assertLessEqual(abs(got - want), 5)
+
+    def test_a_bar_with_no_teal_behind_it_is_refused(self):
+        """Both cues must agree. The teal test does not go away -- it
+        stops searching the frame and starts confirming one box."""
+        slot = (200, 100, 265, 144)
+        frame = self._frame(self._placed(slot), slot)
+        frame[100:144, 200:265] = (20, 20, 20)      # blank the slot
+        rejects = []
+        self.assertEqual([], V.find_plates_by_health(frame, rejects))
+        self.assertTrue(any("teal" in r["why"] for r in rejects))
+
+    def test_a_long_green_band_is_not_a_health_bar(self):
+        """The gag menu's Lure row is 880x68 on a live frame, aspect
+        12.9 -- outside the band a plate's meter can occupy."""
+        frame = self._frame((40, 300, 660, 350), (200, 100, 265, 144))
+        self.assertEqual([], V._health_bars(frame))
+
+    def test_it_only_runs_when_the_colour_search_failed(self):
+        """A fallback cannot regress a zone that reads today."""
+        import inspect
+
+        src = inspect.getsource(V.find_plates)
+        self.assertIn("if not plates:", src)
+        self.assertIn("find_plates_by_health", src)
+        self.assertLess(src.index("if not plates:"),
+                        src.index("find_plates_by_health"))

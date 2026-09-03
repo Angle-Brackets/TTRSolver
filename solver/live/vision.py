@@ -265,6 +265,105 @@ def _reject(log, x0, y0, x1, y1, filled, why: str) -> None:
                     "filled": filled, "why": why})
 
 
+# A SECOND WAY TO FIND A PLATE, for zones where the colour cannot.
+#
+# `teal_mask` is a box around one sampled triple, and it works because
+# the portrait backdrop is an unusual colour. In Bossbot HQ's icy
+# cobblestone it is not: the mortar between the stones reads
+# rgb(87,137,160) against a TEAL of (90,141,158), so the mask matched
+# 19.7% OF THE WHOLE FRAME as one connected web and both plates were
+# swallowed into a 1721x1081 blob that the width filter then threw away.
+#
+# Neither knob helps. Capping run length changes nothing (the mortar is
+# wide, not thin) and an opening at radius 4 moved coverage 19.75% ->
+# 18.86%. Measured, on the frame that failed.
+#
+# So this anchors on the HEALTH BAR instead: saturated green, which the
+# scenery does not have. `PARTS["health"]` already gives the bar's box
+# in slot-relative units, so finding the bar gives the slot by inverting
+# it -- on the failing frame a 75x18 bar at (948,185) predicts a slot at
+# (881,123) 65x44, and the slot really there is 53% teal.
+#
+# THE TEAL TEST DOES NOT GO AWAY, it changes job: from searching the
+# frame, where it is ambiguous, to confirming one small box, where it is
+# decisive. Both cues have to agree before a plate is reported.
+HEALTH_GREEN_MIN = 150           # the bar is bright, the scenery is not
+HEALTH_GREEN_MARGIN = 60         # green over BOTH red and blue
+# Bar aspect follows from `PARTS`: 1.15 slot widths by 0.41 slot
+# heights on a slot near 1.48:1, so about 4.15. Measured on the frame
+# this was built against: a 75x18 bar, aspect 4.17.
+#
+# KNOWN LIMIT, AND DELIBERATELY NOT "FIXED" ON GUESSWORK.
+# `PARTS["health"]` was calibrated on two FULL-health cogs -- its own
+# comment says so -- so inverting through the bar's width is only right
+# while the bar is fullish, and a badly hurt cog draws too short a bar
+# to pass the aspect band. Deriving the slot from the bar's HEIGHT
+# instead would be fill-independent, and was tried: it admits far more
+# candidates and needs a stronger verifier than teal, which is useless
+# in exactly the zone this exists for. That is a real change needing
+# real frames to settle, not a constant to nudge.
+HEALTH_ASPECT = (2.6, 6.0)
+HEALTH_WIDTH_FRAC = (0.015, 0.14)
+# How much of the predicted slot must actually be teal. The plate's own
+# portrait is split by the cog's head, so this is never near 100%.
+HEALTH_SLOT_TEAL_MIN = 0.20
+
+
+def _health_bars(frame: np.ndarray) -> List[Tuple[int, int, int, int]]:
+    """Boxes of saturated green that could be a cog's health meter."""
+    rgb = frame[:, :, :3].astype(np.int16)
+    red, green, blue = rgb[:, :, 0], rgb[:, :, 1], rgb[:, :, 2]
+    mask = ((green > HEALTH_GREEN_MIN)
+            & (green - red > HEALTH_GREEN_MARGIN)
+            & (green - blue > HEALTH_GREEN_MARGIN))
+    height, width = mask.shape
+    runs = _runs(mask)
+    if not runs:
+        return []
+    out = []
+    lo, hi = HEALTH_WIDTH_FRAC
+    for x0, y0, x1, y1, _filled in _boxes(runs, _label(runs), 24):
+        box_w, box_h = x1 - x0, y1 - y0
+        if not box_h or not (width * lo <= box_w <= width * hi):
+            continue
+        if not HEALTH_ASPECT[0] <= box_w / box_h <= HEALTH_ASPECT[1]:
+            continue
+        out.append((x0, y0, x1, y1))
+    return out
+
+
+def find_plates_by_health(frame: np.ndarray,
+                          rejects: Optional[List[dict]] = None
+                          ) -> List["Plate"]:
+    """Plates located from the health bar rather than the portrait.
+
+    A FALLBACK, not a replacement: `find_plates` calls this only when
+    the colour search found nothing, so no zone that works today can be
+    changed by it.
+    """
+    left, top, right, bottom = PARTS["health"]
+    plates = []
+    for x0, y0, x1, y1 in _health_bars(frame):
+        slot_w = (x1 - x0) / (right - left)
+        slot_h = (y1 - y0) / (bottom - top)
+        sx0 = int(round(x0 - left * slot_w))
+        sy0 = int(round(y0 - top * slot_h))
+        sx1, sy1 = int(round(sx0 + slot_w)), int(round(sy0 + slot_h))
+        if sx0 < 0 or sy0 < 0 or sy1 > frame.shape[0] or sx1 > frame.shape[1]:
+            _reject(rejects, sx0, sy0, sx1, sy1, 0,
+                    "predicted slot falls outside the frame")
+            continue
+        teal = teal_mask(frame[sy0:sy1, sx0:sx1])
+        share = float(teal.mean())
+        if share < HEALTH_SLOT_TEAL_MIN:
+            _reject(rejects, sx0, sy0, sx1, sy1, int(teal.sum()),
+                    f"slot behind the bar is only {share:.0%} teal")
+            continue
+        plates.append(Plate(slot=(sx0, sy0, sx1, sy1),
+                            filled=int(teal.sum())))
+    return sorted(plates, key=lambda p: p.slot[0])
+
+
 def find_plates(frame: np.ndarray,
                 reference_area: Optional[int] = None,
                 rejects: Optional[List[dict]] = None) -> List[Plate]:
@@ -323,6 +422,13 @@ def find_plates(frame: np.ndarray,
             _reject(rejects, x0, y0, x1, y1, filled, "touches the frame edge")
             continue
         plates.append(Plate(slot=(x0, y0, x1, y1), filled=filled))
+    if not plates:
+        # THE COLOUR FOUND NOTHING, so try the health bar. Only on the
+        # empty result, so a zone that reads today cannot be changed by
+        # this -- and "nothing" is exactly the answer the icy cobblestone
+        # of Bossbot HQ produces, where the mortar IS the portrait
+        # colour and every plate is swallowed into one frame-wide blob.
+        return find_plates_by_health(frame, rejects=rejects)
     return plates
 
 
