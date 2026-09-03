@@ -110,14 +110,25 @@ class ReachesTheJudgeTest(unittest.TestCase):
         self.assertIsNone(getattr(plan[0], "sos", None))
 
 
-class HealIsInvisibleTest(unittest.TestCase):
-    """Why no card can win at the shipped weights, recorded so the
-    price is not blamed for it.
+class HealIsVisibleTest(unittest.TestCase):
+    """A heal card now pays for the laff it puts back.
 
-    `_score_leaf` simulates the toon phase only, so laff never moves
-    within it and a term reading laff LEVEL is the only thing that can
-    see a heal. That term is `survival_rounds` and its weight is 0.0 --
-    the same wall that made a unite score exactly zero.
+    THIS CLASS USED TO ASSERT THE OPPOSITE, and was right to: with
+    `survive` at 0.0 a Flippy scored EXACTLY `-SOS_PRICE`, so the 180
+    laff it restored contributed nothing at all and the price was
+    getting blamed for a defect somewhere else.
+
+    The defect was in the report, not the weights. `apply_toon_action`
+    returned `0, 0` for an SOS -- correct for the damage, which an SOS
+    does not deal as the toon, and wrong for the FIRST element, which is
+    laff healed. `apply_party_round` recorded no healing, so
+    `QUICK_W["heal"]` never saw a card heal at all.
+
+    What it cost: `_restored` caps a heal at the toon's headroom, which
+    is precisely the "worth more when you are low" weighting a heal
+    should have -- 17 laff into a full toon, 125 into a dying one. With
+    the report stuck at zero that weighting could not apply, and Flippy
+    scored 558.4 at 120 laff and 558.4 at 12.
     """
 
     def setUp(self):
@@ -126,16 +137,28 @@ class HealIsInvisibleTest(unittest.TestCase):
     def tearDown(self):
         ps_weights.QUICK_W["survive"] = self._survive
 
-    def test_a_heal_is_worth_exactly_its_price_and_nothing_else(self):
+    def test_a_heal_is_worth_more_than_its_price_alone(self):
         ps_weights.QUICK_W["survive"] = 0.0
         state = _board(3)
         score = ps._quick_score(state, [Action(track=None, sos="Flippy")],
                                 random.Random(0))
-        # Not "about" -0400: EXACTLY. Flippy restores 180 laff to a toon
-        # on 12 and the score is the price alone, so the heal
-        # contributed zero. Dropping SOS_PRICE would not help -- at
-        # price 0 this reads 0.00 and still loses to any gag.
-        self.assertAlmostEqual(score, -sos_mod.SOS_PRICE, places=6)
+        # The old assertion was `== -SOS_PRICE` exactly. Anything above
+        # it is the heal being counted; below would mean it is being
+        # charged for healing.
+        self.assertGreater(score, -sos_mod.SOS_PRICE)
+
+    def test_it_is_worth_more_to_a_toon_with_more_room(self):
+        """The laff-relative half, which `_restored` supplies by capping
+        at headroom -- the same card is worth less to a healthy toon."""
+        ps_weights.QUICK_W["survive"] = 0.0
+        card = [Action(track=None, sos="Flippy")]
+        hurt = _board(3)
+        full = _board(3)
+        for toon in full.toons:
+            toon.laff = toon.max_laff
+        self.assertGreater(
+            ps._quick_score(hurt, card, random.Random(0)),
+            ps._quick_score(full, card, random.Random(0)))
 
     def test_the_survive_term_is_what_reveals_it(self):
         state = _board(3)
@@ -471,3 +494,40 @@ class SosTrapSurvivesACloneTest(unittest.TestCase):
                 clone = state.clone()
                 self.assertEqual(clone.cogs[0].status.trap_damage,
                                  sos_mod.BY_NAME[name].amount)
+
+
+class VpFloorCapTest(unittest.TestCase):
+    """A VP floor gets longer than the default 20 rounds.
+
+    Twenty cogs with four on the field runs into the forties, so every
+    long VP was ending in `truncated: True` -- the harness calling time,
+    not a defeat. Measured once the unite cooldown was also fixed: at a
+    cap of 20 the solo clear rate was 0.0% in every condition; at 60 it
+    was 8.3% with unites and 33.3% with cards.
+    """
+
+    def _env(self, kind, **kw):
+        e = env_mod.BattleEnv(rng=random.Random(1), sampler=_sampler,
+                              coordinated=True, **kw)
+        e.reset()
+        e.state.kind = kind
+        return e
+
+    def test_a_vp_floor_gets_the_longer_cap(self):
+        self.assertEqual(env_mod.VP_FLOOR_ROUNDS,
+                         self._env("vp")._floor_cap())
+
+    def test_everything_else_keeps_the_default(self):
+        env = self._env("facility")
+        self.assertEqual(env.max_rounds, env._floor_cap())
+        self.assertEqual(20, env.max_rounds)
+
+    def test_an_explicit_longer_cap_still_wins(self):
+        """A caller who asked for a long fight gets one."""
+        env = self._env("vp", max_rounds=env_mod.VP_FLOOR_ROUNDS + 40)
+        self.assertEqual(env_mod.VP_FLOOR_ROUNDS + 40, env._floor_cap())
+
+    def test_it_is_long_enough_for_an_observed_clear(self):
+        """A solo clear was seen at about 48 rounds; the cap has to
+        leave room above that rather than sit on it."""
+        self.assertGreater(env_mod.VP_FLOOR_ROUNDS, 48)

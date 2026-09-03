@@ -43,7 +43,8 @@ import random
 from enum import Enum
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from . import data, facility, mechanics, outcomes as outcomes_mod, simulator
+from . import (data, facility, mechanics, outcomes as outcomes_mod,
+               simulator, unites as unites_mod)
 from .data import gags as gags_mod
 from .search import expectimax
 from .state import Action, BattleState, Track
@@ -390,6 +391,27 @@ def step(state: BattleState, mine: Optional[Action] = None,
     if not nxt.is_terminal():
         _party_cog_phase(nxt, healed, rng)
     nxt.round_num += 1
+
+    # THE UNITE COOLDOWN TICKS HERE, at the round boundary.
+    #
+    # `unites.tick_cooldown` had NO CALLER anywhere in `solver/`. Using
+    # a unite set `unite_cooldown = COOLDOWN_ROUNDS` and nothing ever
+    # decremented it, so `can_use_unite` stayed False for the rest of
+    # the battle: one unite per fight, permanently, however many the
+    # toon carried.
+    #
+    # Found in a solo VP trace -- the toon died on round 37 holding
+    # SEVEN of its eight unites, having sat on 2 laff for nine straight
+    # rounds. In a fight this project's own arithmetic says is decided
+    # by laff, that is most of the healing on hand being unreachable.
+    #
+    # Ticked in `step`, not in `apply_party_round`: the scorers call
+    # that one on scratch clones to price a plan, and a cooldown that
+    # ran down during scoring would let a search see a unite it cannot
+    # actually have yet.
+    for toon in nxt.toons:
+        unites_mod.tick_cooldown(toon)
+
 
     # Cogs walk in to replace the dead, at the ROUND BOUNDARY.
     #

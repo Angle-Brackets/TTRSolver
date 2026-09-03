@@ -415,8 +415,18 @@ def apply_toon_action(state: BattleState, action: Action,
         cards = dict(toon.sos_cards)
         cards[action.sos] = held - 1
         toon.sos_cards = cards
-        sos_mod.apply(sos_mod.BY_NAME[action.sos], state)
-        return 0, 0
+        did = sos_mod.apply(sos_mod.BY_NAME[action.sos], state)
+        # DAMAGE stays 0, for the reason above. LAFF HEALED DOES NOT.
+        # The first element of this tuple is laff restored, not damage,
+        # and returning 0 for it meant `apply_party_round` recorded no
+        # healing and `QUICK_W["heal"]` never saw an SOS heal at all.
+        #
+        # What that cost: `_restored` caps a heal at the toon's
+        # headroom, which is exactly the "worth more when you are low"
+        # weighting a heal should have -- 17 laff into a full toon, 125
+        # into a dying one. With the report stuck at zero, Flippy
+        # scored 558.4 at 120 laff and 558.4 at 12.
+        return int(did.get("healed", 0)), 0
 
     if action.fire:
         # A pink slip removes the cog from the battle. It cannot miss, so
@@ -707,6 +717,14 @@ def step(state: BattleState, action: Action, gag_cost_lambda=None,
 
     next_state.round_num += 1
 
+    # The unite cooldown, for the same reason `party.step` ticks it --
+    # see the note there. Nothing decremented it anywhere, so a toon got
+    # one unite per battle however many it held.
+    from . import unites as unites_mod
+
+    for toon in next_state.toons:
+        unites_mod.tick_cooldown(toon)
+
     # Same reinforcement rule as the party path; see the note in
     # `apply_party_round`.
     facility.reinforce(next_state)
@@ -903,7 +921,21 @@ def apply_party_round(state: BattleState,
     # Throw arrives to collect the knockback.
     for i, action in enumerate(actions):
         if action is not None and getattr(action, "sos", None):
-            apply_toon_action(state, action, hit=True, actor=i)
+            # THE RETURN VALUE IS THE POINT for a heal card. This
+            # discarded it, so Flippy restored the laff on the state and
+            # reported healing NOTHING -- and `_score_leaf` reads the
+            # report, not the state. The whole `QUICK_W["heal"]` term
+            # was therefore blind to every SOS heal.
+            #
+            # It also hid the laff-relative weighting that `_restored`
+            # already implements: that caps a heal at the toon's
+            # headroom, so 180 laff into a full toon is worth 17 and the
+            # same card into a dying one is worth 125. With the report
+            # stuck at zero, Flippy scored the SAME at 120 laff as at
+            # 12 -- measured, 558.4 both.
+            gained, _damage = apply_toon_action(state, action,
+                                                hit=True, actor=i)
+            healed[i] += gained
 
     order = sorted(
         (i for i, a in enumerate(actions)

@@ -539,3 +539,82 @@ class PerBuildToonUpTest(unittest.TestCase):
             self.skipTest(f"realms reader unavailable: {exc}")
         self.assertEqual(realms_mod.TOON_UP_VALUES, self.REALMS)
         self.assertNotEqual(realms_mod.TOON_UP_VALUES, unites.TOON_UP_VALUES)
+
+
+class CooldownTicksInPlayTest(unittest.TestCase):
+    """`tick_cooldown` had no caller anywhere in `solver/`.
+
+    Using a unite set `unite_cooldown = COOLDOWN_ROUNDS` and nothing
+    ever decremented it, so `can_use` stayed False for the rest of the
+    battle: ONE UNITE PER FIGHT, permanently, however many were carried.
+    The function was written, documented and tested here -- and never
+    wired into a round.
+
+    Found in a solo VP trace: the toon died on round 37 holding seven of
+    its eight unites, having sat on 2 laff for nine straight rounds.
+    With the tick wired the same seed runs to round 56 and spends all
+    eight, and the clear rate over 12 paired runs went 0.0% -> 33.3%.
+    """
+
+    def _fight(self, laff=50):
+        from solver import data
+        from solver.state import BattleState, CogState, ToonState, Track
+
+        tracks = [t for t in Track if t is not Track.TOON_UP]
+        hp = data.cog_max_hp(8)
+        toon = ToonState(laff, 137, {t: 7 for t in tracks},
+                         {(t, l): 5 for t in tracks for l in range(1, 8)},
+                         frozenset())
+        toon.unites_held = 8
+        return BattleState(
+            toons=[toon],
+            cogs=[CogState(cog_type="mr_hollywood", department="sellbot",
+                           level=8, hp=hp, max_hp=hp)])
+
+    def _play(self, state, rounds):
+        from solver import party
+        from solver.state import Action, Track
+
+        act = Action(track=Track.THROW, level=1, target_index=0)
+        for _ in range(rounds):
+            state, _healed, _done = party.step(
+                state, act, mode=party.Mode.COORDINATED, joint=[act])
+            if state.is_terminal():
+                break
+        return state
+
+    def test_a_round_of_play_counts_down(self):
+        state = self._fight()
+        unites.apply_toon_up(state.toons[0], 80)
+        self.assertEqual(unites.COOLDOWN_ROUNDS,
+                         state.toons[0].unite_cooldown)
+        after = self._play(state, 1)
+        self.assertEqual(unites.COOLDOWN_ROUNDS - 1,
+                         after.toons[0].unite_cooldown)
+
+    def test_it_clears_after_the_confirmed_three_rounds(self):
+        state = self._fight()
+        unites.apply_toon_up(state.toons[0], 80)
+        after = self._play(state, unites.COOLDOWN_ROUNDS)
+        self.assertEqual(0, after.toons[0].unite_cooldown)
+        self.assertTrue(unites.available(after.toons[0]))
+
+    def test_it_does_not_go_negative(self):
+        state = self._play(self._fight(), 4)
+        self.assertEqual(0, state.toons[0].unite_cooldown)
+
+    def test_scoring_a_plan_must_not_tick_it(self):
+        """The scorers call `apply_party_round` on scratch clones to
+        price a plan. A cooldown that ran down there would let a search
+        see a unite the toon cannot have yet."""
+        from solver import simulator
+        from solver.state import Action, Track
+
+        state = self._fight()
+        unites.apply_toon_up(state.toons[0], 80)
+        probe = state.clone()
+        simulator.apply_party_round(
+            probe, [Action(track=Track.THROW, level=1, target_index=0)],
+            hits=[True])
+        self.assertEqual(state.toons[0].unite_cooldown,
+                         probe.toons[0].unite_cooldown)

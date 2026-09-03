@@ -170,6 +170,28 @@ QUICK_W = {
     # that is the ONLY thing that kills pays almost nothing while the
     # same gag into a nearly-dead cog pays nearly in full.
     "waste": 0.0,
+    # Toons that one round of the WOKEN field would knock out. [OWNER]
+    # "if the expected incoming from the cogs, assuming they are all
+    # unlured, is greater than the current HP, shouldn't we heal", and
+    # "we should heal or kill". `past_the_death_line` is that rule, and
+    # it does behave as stated: on a lured board of four level 11-12
+    # cogs (84 damage when they wake) a toon on 25 is forced to heal,
+    # while a toon on 60 may throw a Wedding Cake instead -- because
+    # that kills two cogs and drops the woken round to 44, under their
+    # laff. Heal OR kill, decided by the board rather than by a laff
+    # threshold.
+    #
+    # SHIPPED AT 0.0, because it changes nothing measurable. Solo VP,
+    # 20 a round, 15 runs a cell on identical seeds, weight 0 against
+    # 300: bare 21.7 -> 21.9 rounds, cards 8.0 -> 8.0, cleared 0.0% in
+    # every cell. That is the same verdict `QUICK_W["risk"]` earned and
+    # for the same recorded reason -- the term is flat while the toon is
+    # healthy and only separates plans once the fight is already lost.
+    #
+    # Kept, wired and tested rather than deleted: it is a rule about the
+    # game that the scorer could not previously express at all, and the
+    # measurement says it does not pay YET, not that it is wrong.
+    "deadline": 0.0,
     "risk": 0.0,
     # Rounds of incoming the party's laff covers, capped. The only term
     # that reads laff LEVEL rather than a delta.
@@ -612,3 +634,47 @@ MIN_LEAF_PROB = 1e-3
 # agree on.
 
 ROLLOUT_ROUNDS = 12
+
+
+# Is a heal worth less while the cogs are still swinging?
+#
+# [OWNER, from play] "if cogs aren't lured, then healing is rather
+# pointless because they'll just attack" -- the laff you put back under
+# fire is handed straight back, so what a heal is really worth is what
+# SURVIVES the round. Lure the field (or land Cogs Miss) and the same
+# heal keeps all of it.
+#
+# `_restored` already caps a heal at the toon's headroom, which is the
+# "worth more when you are low" half. This is the other half, and the
+# two are independent: headroom says how much CAN go in, this says how
+# much STAYS in.
+#
+# Charged against `expected_incoming(state)` -- the PRE-plan figure, the
+# same one `survival_rounds` reads, and for the same reason. Using the
+# post-plan board would credit a heal twice for a lure thrown in the
+# same round, once here and once in `prevented`.
+#
+# NOT YET SWEPT. It is a rule the owner states about the game rather
+# than a fitted number, and it is on because of that. If it is ever
+# measured and found to cost play, the honest fix is to turn it off
+# here rather than to bury a compensating constant somewhere else.
+HEAL_DISCOUNTS_INCOMING = True
+
+
+# Does a sleeping cog still count against how long the party survives?
+#
+# [OWNER, from play] the good play is to lure the field and heal INSIDE
+# that window. The solver could not express it: with everything asleep
+# `expected_incoming` is 0, and `survival_rounds` divides laff by it, so
+# the term saturated at `SURVIVAL_CAP` and 120 laff scored the same as
+# 4. The one term that can see a toon about to die went blind precisely
+# when it was safe to do something about it.
+#
+# On, the survival term falls back to `latent_incoming` -- the same
+# board with the sleepers counted -- whenever nothing is swinging right
+# now. Off, it saturates as before.
+#
+# It does NOT touch `expected_incoming` itself, which is right as it
+# stands: a lured cog really does skip its attack, and `prevented` is
+# built on that.
+LURE_IS_A_REPRIEVE = True

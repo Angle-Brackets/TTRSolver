@@ -220,7 +220,10 @@ def _logits(model, state: BattleState, seat: int, pending,
         # and discarded -- otherwise `climb` spends its budget
         # rediscovering the answer that was just turned down.
         for index, entry in enumerate(env_mod.ACTIONS):
-            if index < len(out) and reject_key(entry) in reject:
+            # ANY granularity the entry answers to -- gag, kind, or
+            # track. Testing one key would make the set's meaning depend
+            # on which control produced it.
+            if index < len(out) and not reject.isdisjoint(reject_keys(entry)):
                 out[index] = -np.inf
     return out
 
@@ -777,6 +780,36 @@ def reject_key(entry) -> object:
     if entry is None:
         return "pass"
     return _track_key(entry)
+
+
+def gag_reject_key(entry) -> object:
+    """Just this gag: "not the Grand Piano", Safe still on offer.
+
+    Narrower than `reject_key`, which turns down a whole kind of move.
+    Both exist because the player means different things by them and
+    only they know which: dismissing a Piano because it is overkill on a
+    56 hp cog is not the same as dismissing Drop because the cog is
+    lured.
+    """
+    return ("gag", entry.track, entry.level)
+
+
+def track_reject_key(entry) -> object:
+    """The whole track: "no Drop at all, at any level"."""
+    return ("track", entry.track)
+
+
+def reject_keys(entry) -> tuple:
+    """Every key `entry` answers to, for the mask to test against.
+
+    The mask checks membership of ANY of these rather than of one, so
+    the three granularities can be mixed in a single rejection set and a
+    caller that only ever stores `reject_key` values keeps working
+    unchanged -- which `realms_panel` does.
+    """
+    if entry is None:
+        return ("pass",)
+    return (reject_key(entry), gag_reject_key(entry), track_reject_key(entry))
 
 
 def _track_key(entry):

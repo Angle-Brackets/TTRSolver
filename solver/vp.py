@@ -22,22 +22,45 @@ twenty A ROUND for a solo, and that is what they now hold. Still
 parameters -- `vp_plan` takes them as arguments -- but no longer
 guesses.
 
-AT THAT SIZE THE MODEL SCORES ZERO AND THE OWNER WINS, which is the
-most useful thing this module currently records. Measured across
-sizes, 150 solo runs a cell with five slips:
+THE ZERO AT TWENTY WAS THREE BUGS, NOT A VERDICT. This module used to
+record 0.0% cleared at twenty a round and conclude the model could not
+play the fight. Measured across sizes, 150 solo runs a cell with five
+slips, that table read:
 
     cogs a round   cleared   died round 1   gags left
                8     81.3%           2.0%        76.8
               10     50.7%           2.7%        80.2
               20      0.0%          68.0%        71.0
 
-Every VP figure quoted anywhere in this project before that table was
-taken at 8, which is under half the real fight.
+Every one of those runs was crippled by things outside the model:
 
-The losses are not close and they are not about gags: seventy left in
-the pouch, no laff. Unites and SOS cards restore laff and neither is
-modelled. That is the gap, and it is a modelling one rather than a
-weight to tune.
+  * `unites.tick_cooldown` had NO CALLER in `solver/`, so a unite set a
+    three-round cooldown that never expired -- one unite per battle
+    however many were carried. A traced run died on round 37 holding
+    seven of eight.
+  * `env.BattleEnv.max_rounds` capped a FLOOR at 20 rounds. A solo VP
+    floor is twenty cogs with four on the field and runs into the
+    forties, so every long fight ended `truncated`, which is the
+    harness calling time rather than a defeat. See `VP_FLOOR_ROUNDS`.
+  * SOS cards were never played by the measuring harness at all:
+    `BattleEnv.step` takes an index and no SOS has one, so each card
+    fell to `PASS_INDEX` and the toon stood still while the run
+    recorded a card as spent.
+
+Re-measured at twenty a round with those fixed, 12 runs a cell on
+identical seeds:
+
+    carrying   cleared   rounds   laff left   gags left
+    bare          0.0%     22.1         0.0        64.0
+    unites        8.3%     48.5         5.2        64.2
+    cards        33.3%     48.3        37.1        60.8
+
+So the fight IS winnable solo, about one in three with cards, and the
+resource is still the whole story -- bare is 0% and dies with two
+thirds of the pouch unthrown. What that costs in rounds is the thing to
+carry forward: a solo clear takes about 48 rounds, and `train_ppo`
+builds its envs at the 20-round default, so the policy has never played
+a fight of the length it would have to win.
 
 A ROUND IS A FLOOR, and the waves are the holdout. That mapping is why
 this fits the existing machinery with no new mechanics: four cogs on the

@@ -114,10 +114,44 @@ class IncomingOverrideTest(unittest.TestCase):
         far = ps.survival_rounds(state, incoming=10.0)
         self.assertLess(near, far)
 
-    def test_nothing_swinging_reads_the_cap(self):
+    def test_nothing_swinging_falls_back_to_what_wakes_up(self):
+        """Zero incoming used to read the cap. It no longer does when
+        the board still has live cogs on it.
+
+        A LURE IS A REPRIEVE, NOT SAFETY. With the field asleep incoming
+        is 0, and dividing laff by it saturated this term, so 120 laff
+        and 4 laff both scored the cap -- the one term that can see a
+        toon about to die was blind exactly in the window where healing
+        is safe. It now measures against `latent_incoming`, the same
+        board with the sleepers counted.
+        """
         state = _party_board()
+        got = ps.survival_rounds(state, incoming=0.0)
+        self.assertLess(got, ps_weights.SURVIVAL_CAP)
+        self.assertAlmostEqual(
+            got, min(ps_weights.SURVIVAL_CAP,
+                     min(t.laff for t in state.toons if t.laff > 0)
+                     / ps.latent_incoming(state)), places=9)
+
+    def test_an_empty_board_still_reads_the_cap(self):
+        """Nothing alive is genuinely safe, and the fallback must not
+        pretend otherwise -- there is no threat to measure against."""
+        state = _party_board()
+        # Emptied rather than zeroed: `hp = 0` does not retire a cog,
+        # because a Version 2.0 has a second layer behind the suit and
+        # `active_cogs` still counts it.
+        state.cogs = []
         self.assertEqual(ps.survival_rounds(state, incoming=0.0),
                          ps_weights.SURVIVAL_CAP)
+
+    def test_the_fallback_can_be_turned_off(self):
+        saved = ps_weights.LURE_IS_A_REPRIEVE
+        ps_weights.LURE_IS_A_REPRIEVE = False
+        try:
+            self.assertEqual(ps.survival_rounds(_party_board(), incoming=0.0),
+                             ps_weights.SURVIVAL_CAP)
+        finally:
+            ps_weights.LURE_IS_A_REPRIEVE = saved
 
     def test_it_is_capped(self):
         state = _party_board()
@@ -318,3 +352,72 @@ class TrappedLureTest(unittest.TestCase):
         untrapped = hybrid.climb(self._board(False), random.Random(0),
                                  budget=8)
         self.assertIsNotNone(untrapped[0])
+
+
+class DeathLineTest(unittest.TestCase):
+    """"Heal or kill" -- the rule, and why it is not a laff threshold.
+
+    [OWNER] "if the expected incoming from the cogs, assuming they are
+    all unlured, is greater than the current HP, shouldn't we heal" and
+    "we should heal or kill". `toons_at_risk` cannot answer it: that one
+    SKIPS a lured cog on purpose, so that luring visibly lowers it. Both
+    questions are worth asking and they disagree on a sleeping field.
+    """
+
+    def _lured_board(self, laff):
+        from solver import data
+        from solver.state import BattleState, CogState, ToonState, Track
+
+        cogs = []
+        for level in (11, 12, 11, 12):
+            hp = data.cog_max_hp(level)
+            cog = CogState(cog_type="mr_hollywood", department="sellbot",
+                           level=level, hp=hp, max_hp=hp)
+            cog.status.apply_lure(80, 3, None)
+            cogs.append(cog)
+        tracks = [t for t in Track if t is not Track.TOON_UP]
+        toon = ToonState(laff, 137, {t: 7 for t in tracks},
+                         {(t, l): 3 for t in tracks for l in range(1, 8)},
+                         frozenset())
+        return BattleState(toons=[toon], cogs=cogs)
+
+    def test_a_sleeping_field_still_counts_against_you(self):
+        """The difference from `toons_at_risk`, stated as a test."""
+        state = self._lured_board(25)
+        self.assertEqual(0.0, ps.toons_at_risk(state))
+        self.assertEqual(1.0, ps.past_the_death_line(state))
+
+    def test_a_healthy_toon_is_not_past_it(self):
+        self.assertEqual(0.0, ps.past_the_death_line(self._lured_board(120)))
+
+    def test_killing_enough_clears_it_without_healing(self):
+        """Why the threshold is not a laff number. A Wedding Cake kills
+        two of the four, dropping the woken round from 84 to 44 -- under
+        a toon on 60, who therefore does not have to heal."""
+        from solver import simulator
+        from solver.state import Action, Track
+
+        state = self._lured_board(60)
+        self.assertEqual(1.0, ps.past_the_death_line(
+            self._lured_board(40)), "40 laff should be past the line")
+        probe = state.clone()
+        simulator.apply_party_round(
+            probe, [Action(track=Track.THROW, level=7, target_index=None)],
+            hits=[True])
+        self.assertLess(len(list(probe.active_cogs())), 4)
+        self.assertEqual(0.0, ps.past_the_death_line(probe))
+
+    def test_the_same_kill_does_not_save_a_lower_toon(self):
+        from solver import simulator
+        from solver.state import Action, Track
+
+        probe = self._lured_board(25).clone()
+        simulator.apply_party_round(
+            probe, [Action(track=Track.THROW, level=7, target_index=None)],
+            hits=[True])
+        self.assertEqual(1.0, ps.past_the_death_line(probe))
+
+    def test_it_ships_off_and_that_is_recorded(self):
+        """Measured at 0 against 300 on the solo VP and moved nothing.
+        The term stays wired; the weight stays honest."""
+        self.assertEqual(0.0, ps_weights.QUICK_W["deadline"])

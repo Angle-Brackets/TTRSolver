@@ -478,6 +478,31 @@ def legal_mask(state: BattleState, actor: int = 0) -> List[bool]:
     return mask
 
 
+# How many rounds a VP FLOOR is allowed before it counts as stalled.
+#
+# `max_rounds` defaults to 20, which is right for a street or a building
+# floor and far too short here: a VP floor is twenty cogs with four on
+# the field, so it legitimately runs into the forties. Every long VP was
+# therefore ending in `truncated: True` -- not a defeat, the harness
+# calling time.
+#
+# Measured, solo VP, 12 runs a cell on identical seeds, once the unite
+# cooldown was also fixed:
+#
+#     floor cap    bare    unites    cards
+#            20    0.0%      0.0%     0.0%
+#            60    0.0%      8.3%    33.3%
+#
+# A winnable fight was reading as unwinnable because nothing was allowed
+# to finish. 60 is chosen to clear the observed length (about 48 rounds
+# for a solo clear) with room, not tuned for the win rate.
+#
+# IT DOES NOT APPLY TO TRAINING BY ITSELF. `train_ppo` builds its own
+# envs and the policy has never played a 48-round fight; that is a
+# separate gap, recorded in docs rather than fixed here.
+VP_FLOOR_ROUNDS = 60
+
+
 class BattleEnv:
     """One battle. `reset()` starts a new one, `step()` plays a round."""
 
@@ -544,6 +569,17 @@ class BattleEnv:
 
     def _standing(self):
         return [i for i, t in enumerate(self.state.toons) if t.laff > 0]
+
+    def _floor_cap(self) -> int:
+        """Rounds this FLOOR may run before it counts as stalled.
+
+        A VP floor gets `VP_FLOOR_ROUNDS`; everything else keeps
+        `max_rounds`. An explicit larger `max_rounds` still wins, so a
+        caller who asked for a long fight gets one.
+        """
+        if getattr(self.state, "kind", None) == "vp":
+            return max(self.max_rounds, VP_FLOOR_ROUNDS)
+        return self.max_rounds
 
     def _begin_round(self):
         self.pending = [None] * len(self.state.toons)
@@ -901,11 +937,12 @@ class BattleEnv:
             self.floor_rounds = 0
 
         self.state = nxt
-        stalled = self.floor_rounds >= self.max_rounds
+        cap = self._floor_cap()
+        stalled = self.floor_rounds >= cap
         # A hard episode ceiling as well, so a pathological facility
         # cannot run forever: generous enough that a five-floor building
         # finishes well inside it.
-        overrun = self.rounds >= self.max_rounds * 6
+        overrun = self.rounds >= cap * 6
         done = nxt.is_terminal() or stalled or overrun
 
         # SHAPING IS APPLIED HERE, AFTER THE FLOOR ADVANCE, and keyed on

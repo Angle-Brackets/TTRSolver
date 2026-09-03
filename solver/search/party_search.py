@@ -373,6 +373,25 @@ def _cog_threat(cog) -> float:
                in outcomes_mod.cog_attack_outcomes(cog) if hit)
 
 
+def latent_incoming(state: BattleState) -> float:
+    """What the field threatens once the sleepers WAKE.
+
+    `expected_incoming` skips a lured cog because it skips its attack,
+    which is right for "what lands next round" and wrong for "am I going
+    to survive this fight". A LURE IS A REPRIEVE, NOT SAFETY: the cogs
+    are still there and still swinging in three rounds' time.
+
+    This exists for `survival_rounds`, where the difference decided
+    something real. With the whole field asleep, incoming reads 0, and a
+    ratio of laff to zero saturated the term at `SURVIVAL_CAP` -- so 120
+    laff and 4 laff both scored 4.00 and the one term that can see a
+    toon about to die was blind exactly during the window where healing
+    is safe. [OWNER] "you want the cogs lured and then you want to heal";
+    the solver could not tell the difference.
+    """
+    return sum(_cog_threat(cog) for cog in state.active_cogs())
+
+
 def expected_incoming(state: BattleState) -> float:
     """Laff the cogs are expected to take off the party next round.
 
@@ -666,12 +685,50 @@ def survival_rounds(state: BattleState, incoming=None) -> float:
     if not standing:
         return 0.0
     incoming = expected_incoming(state) if incoming is None else incoming
+    if incoming <= 0 and weights.LURE_IS_A_REPRIEVE:
+        # Asleep is not safe -- see `latent_incoming`. Measured against
+        # what wakes up, so a dying toon under a lure still reads as
+        # dying. Only a board with nothing left alive falls through to
+        # the cap.
+        incoming = latent_incoming(state)
     if incoming <= 0:
         # Nothing is swinging -- every plan survives, so this cannot
         # discriminate and should not be allowed to dominate.
         return weights.SURVIVAL_CAP
     laff = min(t.laff for t in standing)
     return min(weights.SURVIVAL_CAP, laff / incoming)
+
+
+def past_the_death_line(state: BattleState) -> float:
+    """Standing toons that one round of the WOKEN field would knock out.
+
+    [OWNER] "if the expected incoming from the cogs, assuming they are
+    all unlured, is greater than the current HP, shouldn't we heal" --
+    and "we should heal or kill". This is that test, and it is a
+    deadline rather than a danger: the lure is running out, and when it
+    does, this toon dies to one round.
+
+    `toons_at_risk` deliberately SKIPS a lured cog, because it answers
+    "does this plan stop me dying next round" and luring is one of the
+    ways to make that true. Both questions are worth asking and they
+    give opposite answers on a sleeping field, so this is a second
+    function rather than a flag on that one.
+
+    Post-plan, which is what makes it "heal OR kill": healing lifts the
+    toon over the line, and killing or firing enough cogs drops the line
+    under the toon. A gag that does neither leaves it standing, which is
+    the plan the owner is objecting to.
+    """
+    standing = [t for t in state.toons if t.laff > 0]
+    if not standing:
+        return 0.0
+    worst = 0
+    for cog in state.active_cogs():
+        try:
+            worst += outcomes_mod.worst_case_damage(cog)
+        except NotImplementedError:      # a [TODO] attack table
+            pass
+    return sum(1.0 for t in standing if t.laff <= worst)
 
 
 def toons_at_risk(state: BattleState) -> float:
@@ -922,6 +979,9 @@ def _score_leaf(state: BattleState, plan, hits, record=None,
     # plan attacking and was truncated before evaluation -- the
     # shortlist-deletion failure this file has had three times.
     restored = _restored(healed, state.toons)
+    if weights.HEAL_DISCOUNTS_INCOMING and restored > 0:
+        # What the heal KEEPS, not what it pours in. See the weight.
+        restored = max(0.0, restored - expected_incoming(state))
     landed = _landed(state.cogs, probe.cogs)
     killed = _killed(state.cogs, probe.cogs)
     # TWO PRICES, NOT ONE. `gag_price` is the pouch; `spend_price` is the
@@ -986,6 +1046,8 @@ def _score_leaf(state: BattleState, plan, hits, record=None,
                if objective is not None else 0.0)
             - (weights.QUICK_W["risk"] * toons_at_risk(probe)
                if weights.QUICK_W["risk"] else 0.0)
+            - (weights.QUICK_W["deadline"] * past_the_death_line(probe)
+               if weights.QUICK_W["deadline"] else 0.0)
             # `expected_incoming(state)`, not of `probe`: see
             # `survival_rounds`. With the board's own figure this term
             # double-counts damage prevention and reorders gag choice.
