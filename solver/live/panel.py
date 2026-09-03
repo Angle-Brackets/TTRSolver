@@ -81,6 +81,10 @@ def _lure_icon_uri() -> str:
 
 LURE_ICON = ""
 MAP_ICON = ""
+ORGANIC_ICON = ""
+# track slug -> data URI, for the Silly Team badge of each track. Empty
+# when the game is not installed; the page falls back to text.
+TRACK_ICONS: dict = {}
 
 # The webview is told to poll this often. Python cannot push into the
 # page from another thread safely, so the page asks -- which also means
@@ -109,6 +113,8 @@ def model_json(model: Model) -> str:
         "survive": model.survive,
         "accuracy": model.accuracy,
         "reason": model.reason,
+        "organic": model.organic,
+        "organic_tracks": list(model.organic_tracks),
         "rows": [{"name": r.name, "level": r.level,
                   "health": r.health, "hp": r.hp, "max_hp": r.max_hp,
                   "identified": r.identified,
@@ -128,12 +134,32 @@ def model_json(model: Model) -> str:
         "max_fires": model.max_fires,
         "max_unites": model.max_unites,
         "max_sos": model.max_sos,
+        # What is LEFT after the advice already given.
+        "fires_left": model.fires_left,
+        "unites_left": model.unites_left,
+        "sos_left": model.sos_left,
         "unite": model.unite,
         "search_ready": model.search_ready,
+        # BOTH ENGINES' ANSWERS, each with its OWN reasons. The page can
+        # show the runner-up as a second row without borrowing the
+        # winner's numbers -- which is what a single `accuracy`/`reason`
+        # pair forced it to do.
         "rl_gag": model.rl_gag,
+        "rl_track": model.rl_track,
+        "rl_gag_level": model.rl_gag_level,
+        "rl_accuracy": model.rl_accuracy,
+        "rl_reason": model.rl_reason,
+        "rl_organic": model.rl_organic,
         "search_gag": model.search_gag,
+        "search_track": model.search_track,
+        "search_gag_level": model.search_gag_level,
+        "search_accuracy": model.search_accuracy,
+        "search_reason": model.search_reason,
+        "search_organic": model.search_organic,
         "lure_icon": LURE_ICON,
         "map_icon": MAP_ICON,
+        "organic_icon": ORGANIC_ICON,
+        "track_icons": dict(TRACK_ICONS),
         "zone": model.zone,
         "neighborhood": model.neighborhood,
         "district": model.district,
@@ -186,8 +212,14 @@ class Api:
     def set_max_sos(self, count) -> None:
         self._worker.set_max_sos(count)
 
-    def reconsider(self) -> None:
-        self._worker.reconsider()
+    def reconsider(self, scope=None) -> None:
+        """"No, not that" at the width the player picked.
+
+        "gag" | "track" | anything else for the original "kind of
+        move". Defaulted so an older page calling `reconsider()` with
+        no argument keeps working.
+        """
+        self._worker.reconsider(str(scope) if scope else "kind")
 
     def toggle_fight(self) -> None:
         """Confirm a fight, or end one and reset.
@@ -342,11 +374,18 @@ def main(argv: Optional[list] = None) -> int:
         from .. import state as state_mod
         state_mod.ALLOW_LEVEL_7 = False
 
-    global LURE_ICON, MAP_ICON
+    global LURE_ICON, MAP_ICON, ORGANIC_ICON, TRACK_ICONS
     from . import ttr_assets
 
     LURE_ICON = _lure_icon_uri()
     MAP_ICON = _icon_uri(ttr_assets.map_icon)
+    ORGANIC_ICON = _icon_uri(ttr_assets.organic_icon)
+    try:
+        TRACK_ICONS = {track: _icon_uri(lambda p=path: p)
+                       for track, path in ttr_assets.track_icons().items()}
+        TRACK_ICONS = {k: v for k, v in TRACK_ICONS.items() if v}
+    except Exception:
+        TRACK_ICONS = {}
 
     objective = objectives.PRESETS[args.objective]
     objective_name = args.objective

@@ -113,6 +113,19 @@ class CogReading:
     # lured cog does not attack. Treating a sleeping cog as awake means
     # planning every one of those wrong.
     lured: bool = False
+    # A trap laid in front of this cog. TTR floats a banana peel over a
+    # trapped cog -- `ttr_t_gui_bat_statusEffect_icon_trapped` -- so
+    # unlike `lured` this one is readable in principle; see
+    # `ttr_assets.status_icon`.
+    #
+    # WHICH trap is a separate question and this cannot answer it. The
+    # marker is the same peel for Quicksand and for TNT, and
+    # `CogStatus` needs a level (or an explicit damage) before a Lure
+    # can spring it for the right number. So this says "something is
+    # under it" and the level still has to come from the player or from
+    # what the solver itself advised.
+    trapped: bool = False
+    trap_level: Optional[int] = None
 
     @property
     def identified(self) -> bool:
@@ -292,6 +305,8 @@ class BattleWatcher:
         # Plates the player has marked as lured, by plate order. Same
         # keying and same expiry as `_named`.
         self._lured: set = set()
+        # Traps the player has marked, plate order -> gag level.
+        self._trapped: dict = {}
         # Levels the player typed in, by plate order. `read_level` gates
         # on a margin over the runner-up and refuses when a digit could
         # equally be another -- a live "Level 8" reads at score 0.73 with
@@ -306,6 +321,15 @@ class BattleWatcher:
         # Set once per poll and shared, rather than recomputed by every
         # caller that wants it.
         self.menu_visible = False
+        # THE FRAME `menu_visible` AND THE READINGS WERE TAKEN FROM, kept
+        # so the solver reads the same capture the watcher graded. The
+        # overlay used to grab a SECOND frame of its own and hand that to
+        # `read_panel`, so the two ran the identical `find_panel` check on
+        # two different moments -- and mid-animation they disagree. The
+        # panel then said "see: 2 cog plates, gag menu" and "no gag menu
+        # on screen" at the same time, which is not a contradiction the
+        # player can do anything about.
+        self.last_frame = None
         # Slots the player named that are not in the library yet. The
         # panel names a slot without a frame in hand, so the head is
         # recorded on the next frame that reads the slot -- which is
@@ -464,6 +488,41 @@ class BattleWatcher:
         if 1 <= value <= 20:
             self._levels[index] = value
 
+    def _traps(self) -> dict:
+        """The player's trap marks, created on demand.
+
+        `getattr` rather than a class attribute: a dict on the class
+        would be SHARED by every watcher, so one battle's traps would
+        appear in the next one's. Instances built with `__new__` -- which
+        the tests do -- have no `__init__` to set it up.
+        """
+        traps = getattr(self, "_trapped", None)
+        if traps is None:
+            traps = {}
+            self._trapped = traps
+        return traps
+
+    def mark_trapped(self, index, level) -> None:
+        """The player says a trap of `level` sits in front of this cog.
+
+        A LEVEL, not a flag. The floating marker is the same banana peel
+        whatever the trap is, and `CogStatus` cannot spring a trap it
+        cannot price -- `data.gag(TRAP, None)` raises. `None` clears.
+        """
+        try:
+            index = int(index)
+        except (TypeError, ValueError):
+            return
+        if level in (None, "", 0):
+            self._traps().pop(index, None)
+            return
+        try:
+            value = int(level)
+        except (TypeError, ValueError):
+            return
+        if 1 <= value <= 7:
+            self._traps()[index] = value
+
     def mark_lured(self, index, lured: bool) -> None:
         """The player says this cog is asleep, or is not."""
         try:
@@ -499,6 +558,7 @@ class BattleWatcher:
             self._named.clear()
             self._learn.clear()
             self._lured.clear()
+            self._traps().clear()
             self._levels.clear()
             self._low_frames = 0
             return
@@ -531,6 +591,8 @@ class BattleWatcher:
             self._named.pop(index, None)
             self._learn.pop(index, None)
         self._lured = {i for i in self._lured if i < count}
+        self._trapped = {i: v for i, v in self._traps().items()
+                         if i < count}
         for index in [i for i in self._levels if i >= count]:
             self._levels.pop(index, None)
 
@@ -643,6 +705,7 @@ class BattleWatcher:
     def poll(self) -> List[Event]:
         """Grab one frame and return whatever changed because of it."""
         frame = self.capture.grab()
+        self.last_frame = frame
         # Once per poll, for the read gate and for anyone displaying it.
         from .gagpanel import find_panel
 
@@ -689,9 +752,42 @@ class BattleWatcher:
         # meanwhile, so the end fires on the first poll after the grace
         # expires rather than needing another `agree` frames of a thing
         # that has already been stable for twenty seconds.
-        if (any(e.kind == "battle_ended" for e in events)
-                and not self._battle_is_over()):
-            return []
+        if any(e.kind == "battle_ended" for e in events):
+            if not self._battle_is_over():
+                return []
+            # THE PLAYER'S MARKS DIE WITH THE FIGHT THEY WERE MADE IN.
+            #
+            # `_forget_names(-1)` used to be reachable ONLY from the
+            # "Fight is over" button, so a fight that ended the normal
+            # way -- cogs defeated, walk into the next one -- left every
+            # hand-set mark in place, keyed on PLATE ORDER. A cog named
+            # at index 0 in one battle was then stamped onto whatever
+            # stood at index 0 in the next, and `read_frame` puts the
+            # player's name FIRST, so the stale pick beat a correct read
+            # rather than losing to it. Reported from play: a Name
+            # Dropper named in one fight reappeared in the next, where
+            # the cog was really a Bean Counter -- 56 hp planned against
+            # 72 hp actual.
+            #
+            # `_lured` and `_levels` carry the same way and are worse,
+            # because nothing on screen contradicts them: a fresh cog
+            # inherits "asleep" and the solver quietly plans the whole
+            # round around a lure that does not exist.
+            self._forget_names(-1)
+        # BACKSTOP, for an end that was never seen. The reset above is
+        # the one with the right timing -- it runs before any reading of
+        # the next fight -- but it needs the end to have been detected,
+        # and detection can miss one. A fight STARTING is the other
+        # moment nothing may be carried into, and at that point the
+        # player has had no chance to mark anything yet, so there is
+        # nothing of theirs to lose.
+        #
+        # It is a poll late: this frame's readings were already stamped
+        # with the old names above. One frame of a wrong name that then
+        # corrects itself is worth having over a wrong name that never
+        # does.
+        if any(e.kind == "battle_started" for e in events):
+            self._forget_names(-1)
         if self.collect:
             self._collect(frame, readings)
         if events:

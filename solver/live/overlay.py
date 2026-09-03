@@ -47,6 +47,8 @@ import time
 from dataclasses import dataclass, field
 from typing import List, Optional
 
+from .worker import AdviceWorker
+
 # Poll cadence for the eye. The solver runs only when the battle
 # changes, so this is the cost of noticing that it has.
 POLL_INTERVAL = 0.5
@@ -62,6 +64,12 @@ ADVICE_LINGER = 4.0
 # otherwise count a round; nothing in Toontown resolves a round and
 # offers the menu again inside a few seconds.
 MIN_TURN_GAP = 4.0
+
+# How long to wait before asking again after a read that produced no
+# state. Slow enough not to re-run the gag-menu scan every poll, fast
+# enough that a player who has just watched a round resolve gets their
+# advice while they are still choosing.
+RETRY_INTERVAL = 2.0
 
 
 class TurnCounter:
@@ -214,6 +222,29 @@ class Model:
     search_gag_level: int = 0
     search_ready: bool = False
     preferred_engine: str = "rl"
+    # THE REASONS ARE PER ENGINE, for the same reason the gag is. They
+    # describe a MOVE, and the two engines routinely pick different
+    # ones -- so a single pair of fields shows one engine's numbers
+    # under the other engine's advice. That is not hypothetical: with
+    # the RL badge on, a live board read "Grand Piano on cog 1 -- 95%
+    # acc, kills 2" while the piano was 70% and killed one. The 95 and
+    # the 2 belonged to a group Wedding Cake the search had picked and
+    # the page never displayed.
+    #
+    # `incoming` and `survive` stay single because they describe the
+    # BOARD, which both engines read identically.
+    rl_accuracy: Optional[int] = None
+    rl_reason: str = ""
+    rl_organic: bool = False
+    search_accuracy: Optional[int] = None
+    search_reason: str = ""
+    search_organic: bool = False
+    # Whether the DISPLAYED gag's track is organic, and which tracks are.
+    # Both come from the Local API rather than the screen: it states
+    # organic outright, so nothing has to recognise the sprout on the
+    # gag button to know.
+    organic: bool = False
+    organic_tracks: List[str] = field(default_factory=list)
     # The most pink slips the solver may PLAN with, whatever the toon
     # actually holds. Zero -- the default -- means never advise a fire.
     #
@@ -238,6 +269,13 @@ class Model:
     # default and the unknown case agree.
     max_unites: int = 0
     max_sos: int = 0
+    # WHAT IS LEFT, after the advice already given this fight. The
+    # `max_*` above are what the player says they carry; these are what
+    # the solver is actually planning with, so the page can show
+    # "2 of 5" and a spent resource visibly runs down.
+    fires_left: int = 0
+    unites_left: int = 0
+    sos_left: int = 0
 
     # The unite the panel is advising ALONGSIDE the gag, as a phrase
     # ("80 Toon-Up unite"), or "" for none.
@@ -365,36 +403,29 @@ class Model:
         return list(self.problems)
 
 
-class Worker(threading.Thread):
-    """Runs the eye and the solver, and posts Models to the UI."""
+class Worker(AdviceWorker):
+    """Runs the eye and the solver, and posts Models to the UI.
+
+    The screen half. Everything about WHICH answer is shown, what a
+    rejection means and how a setting reaches the search lives in
+    `AdviceWorker`; what is here is the part that has to look at
+    pixels -- and the player overrides for what pixels cannot say.
+    """
 
     def __init__(self, outbox: "queue.Queue", objective, depth: int,
                  budget: float, ignore_checksum: bool = False):
-        super().__init__(daemon=True)
-        self.outbox = outbox
-        self.objective = objective
-        self.objective_name = getattr(objective, "name", "balanced")
-        self.depth = depth
-        self.budget = budget
-        self.ignore_checksum = ignore_checksum
-        # OWNED HERE, not on the Model the UI holds. `_post` ships a
-        # fresh copy every cycle, so anything written onto the UI's model
-        # from outside is overwritten within 250ms -- which is what made
-        # the level-7 button look dead even though the solver was
-        # honouring it.
-        from .. import state as state_mod
-        self.allow_level_7 = state_mod.ALLOW_LEVEL_7
-        self.toon_count = 1
-        self.max_fires = 0
-        self.max_unites = 0
-        self.max_sos = 0
-        self._rejected = set()
-        self._forced: Optional[bool] = None
-        self._lock = threading.Lock()
-        self._stop = threading.Event()
-        self._asked = threading.Event()
-        self.turns = TurnCounter()
+        # `model` FIRST: the base sets `allow_level_7` and the holdings
+        # onto it, so it has to exist before that runs.
         self.model = Model()
+        super().__init__(outbox, objective, depth, budget)
+        self.ignore_checksum = ignore_checksum
+        # The player's "I am / am not in a fight", which only a panel
+        # reading a SCREEN needs -- a client that is told the battle
+        # has nothing to override.
+        self._forced: Optional[bool] = None
+        # When the last search was launched, for the failed-read retry.
+        self._last_try = 0.0
+        self.turns = TurnCounter()
 
     # -- called from the UI thread --------------------------------------
 
@@ -405,79 +436,6 @@ class Worker(threading.Thread):
     def forced(self) -> Optional[bool]:
         with self._lock:
             return self._forced
-
-    def ask_now(self) -> None:
-        """Run the search on the next poll, whatever the battle did.
-
-        An Event rather than a direct call: the search must start on the
-        worker thread, and the button is pressed on Tk's.
-        """
-        self._asked.set()
-
-    def stop(self) -> None:
-        self._stop.set()
-
-    def prefer_engine(self, name) -> None:
-        """Swap which engine's answer is on screen."""
-        choice = "search" if str(name).lower() == "search" else "rl"
-        with self._lock:
-            self.model.preferred_engine = choice
-            if choice == "search":
-                if not self.model.search_ready:
-                    self._post()
-                    return
-                self.model.gag = self.model.search_gag
-                self.model.track = self.model.search_track or None
-                self.model.gag_level = self.model.search_gag_level or None
-                self.model.engine = "search"
-            else:
-                if not self.model.rl_gag:
-                    self._post()
-                    return
-                self.model.gag = self.model.rl_gag
-                self.model.track = self.model.rl_track or None
-                self.model.gag_level = self.model.rl_gag_level or None
-                self.model.engine = "rl"
-            self.model.gag_at = time.time()
-        self._post()
-
-    def set_max_fires(self, count) -> None:
-        try:
-            value = int(count)
-        except (TypeError, ValueError):
-            return
-        with self._lock:
-            self.max_fires = max(0, min(99, value))
-            self.model.max_fires = self.max_fires
-        self.ask_now()
-
-    def set_max_unites(self, count) -> None:
-        try:
-            value = int(count)
-        except (TypeError, ValueError):
-            return
-        with self._lock:
-            self.max_unites = max(0, min(99, value))
-            self.model.max_unites = self.max_unites
-        self.ask_now()
-
-    def set_max_sos(self, count) -> None:
-        try:
-            value = int(count)
-        except (TypeError, ValueError):
-            return
-        with self._lock:
-            self.max_sos = max(0, min(99, value))
-            self.model.max_sos = self.max_sos
-        self.ask_now()
-
-    def reconsider(self) -> None:
-        with self._lock:
-            if self.model.gag:
-                self._rejected.add(self.model.gag)
-        self.ask_now()
-
-    # -- the worker thread ----------------------------------------------
 
     def run(self) -> None:
         from . import advise as advise_mod
@@ -495,7 +453,18 @@ class Worker(threading.Thread):
             while not self._stop.is_set():
                 cycle = time.time()
                 events = watcher.poll()
-                frame = watcher.capture.grab()
+                # THE FRAME THE WATCHER JUST GRADED, not a fresh one.
+                # Grabbing again here meant `menu_visible` and
+                # `read_panel` ran the same `find_panel` check on two
+                # different captures taken milliseconds apart, and the
+                # menu is mid-slide for several of those. The panel
+                # reported "see: gag menu" and "no gag menu on screen"
+                # together, which reads as the tool contradicting
+                # itself. One frame, one answer -- and one screen grab
+                # per poll instead of two.
+                frame = watcher.last_frame
+                if frame is None:               # nothing polled yet
+                    frame = watcher.capture.grab()
                 model = self.model
                 model.window_found = game_rect() is not None
                 model.plates = len(watcher.view.cogs)
@@ -525,24 +494,70 @@ class Worker(threading.Thread):
                     invasion = getattr(snap, "invasion", None)
                     model.invasion = str(invasion) if invasion else ""
                 model.rows = [_row(r) for r in watcher.view.cogs]
-                model.turn = self.turns.observe(model.in_battle,
-                                                model.menu_visible)
+                turn = self.turns.observe(model.in_battle,
+                                          model.menu_visible)
+                if turn != model.turn:
+                    # A NEW ROUND, so whatever was on screen for the last
+                    # one has been played. Charged here rather than when
+                    # the advice is produced, because the same move is
+                    # re-scored several times while the player reads it.
+                    if model.turn:
+                        self.note_spent(self.displayed_action(),
+                                        model.unite or None)
+                    model.turn = turn
+                if not model.in_battle:
+                    self.reset_spending()
+                model.fires_left = self.remaining("fires")
+                model.unites_left = self.remaining("unites")
+                model.sos_left = self.remaining("sos")
                 asked = self._asked.is_set()
                 if asked:
                     self._asked.clear()
-                if asked or any(e.kind in advise_mod.RECOMPUTE_ON
-                                for e in events):
+                retry = self._should_retry(model, cycle)
+                changed = any(e.kind in advise_mod.RECOMPUTE_ON
+                              for e in events)
+                if changed:
+                    # A REJECTION IS ABOUT THIS POSITION. `reject_key` is
+                    # (track, group), so "no, not that" turns down a whole
+                    # kind of move -- which is the point, and is why it
+                    # must not outlive the board it was said about.
+                    # Kept across `asked`, because the player pressing
+                    # Reconsider again means "still no", not "start over".
+                    self._rejected.clear()
+                if asked or retry or changed:
+                    self._last_try = cycle
                     model.thinking = True
                     thinker.submit(frame, list(watcher.view.cogs), None,
                                    self.objective, self.depth, self.budget,
                                    self.ignore_checksum,
                                    allies=max(0, self.toon_count - 1),
-                                   fires=self.model.max_fires,
+                                   fires=self.remaining("fires"),
                                    reject=self._rejected)
                 self._post()
                 time.sleep(max(0.0, POLL_INTERVAL - (time.time() - cycle)))
         finally:
             watcher.close()
+
+    def _should_retry(self, model, now: float) -> bool:
+        """Ask again after a read that produced no state.
+
+        A FAILED READ MUST NOT BE FINAL. Searches run on position
+        CHANGES, and the frame grabbed at a round boundary is the
+        likeliest one to be unreadable -- the gag menu is sliding, the
+        plates are behind an attack animation. That read failed, posted
+        its reasons, and then NOTHING ASKED AGAIN: the next `damage`
+        event cannot arrive, because the player is sitting at the gag
+        menu waiting for the advice that never came. The panel looked
+        like it had given up mid-fight, and it had.
+
+        Gated on `problems` rather than on the absence of advice,
+        because the PREVIOUS round's advice is still on screen at that
+        moment -- so "no answer yet" is not what the failure looks
+        like. Success clears `problems`, so this stops on its own.
+        """
+        return bool(model.in_battle and not model.thinking
+                    and model.problems
+                    and now - self._last_try >= RETRY_INTERVAL)
 
     def _on_first_answer(self, action, unite_str, state) -> None:
         from . import advise as advise_mod
@@ -552,6 +567,7 @@ class Worker(threading.Thread):
             track = advise_mod.track_of(action)
             level = action.level if (track and track not in ("fire", "sos")) else (7 if track in ("fire", "sos") else None)
             with self._lock:
+                self._rl_action = action
                 model.rl_gag = text
                 model.rl_track = track or ""
                 model.rl_gag_level = level or 0
@@ -563,7 +579,14 @@ class Worker(threading.Thread):
                     model.track = track
                     model.gag_level = level
                     model.engine = "rl"
-                model.thinking = True
+                # THE RL PATH EXPLAINS ITSELF TOO. This ran only in
+                # `_on_advice` and so only ever described the SEARCH's
+                # move, which the panel then printed under whichever
+                # move was actually on screen.
+                self._describe_into(model, state, action, "rl")
+                self._sync_explanation(model)
+                if model.preferred_engine == "rl":
+                    model.thinking = False
             self._post()
 
     def _on_advice(self, lines, state, action=None) -> None:
@@ -581,6 +604,7 @@ class Worker(threading.Thread):
                     text = lines[0]
                     track = advise_mod.track_of(action)
                     level = action.level if (track and track not in ("fire", "sos")) else (7 if track in ("fire", "sos") else None)
+                    self._search_action = action
                     model.search_gag = text
                     model.search_track = track or ""
                     model.search_gag_level = level or 0
@@ -596,13 +620,7 @@ class Worker(threading.Thread):
 
                     # The reasons behind the move, read off the same
                     # functions the scorer used rather than re-derived.
-                    from . import explain as explain_mod
-
-                    detail = explain_mod.describe(state, action)
-                    model.incoming = detail.get("incoming")
-                    model.survive = detail.get("survive")
-                    model.accuracy = detail.get("accuracy")
-                    model.reason = explain_mod.reason(detail)
+                    self._describe_into(model, state, action, "search")
 
                     if model.preferred_engine == "search" or not model.rl_gag:
                         model.gag = text
@@ -610,6 +628,7 @@ class Worker(threading.Thread):
                         model.track = track
                         model.gag_level = level
                         model.engine = "search"
+                    self._sync_explanation(model)
         self._post()
 
     def mark_lured(self, index, lured) -> None:
@@ -657,32 +676,6 @@ class Worker(threading.Thread):
                 choice["current"] = choice["key"] == cog
         self._post()
 
-    def set_objective(self, name: str) -> None:
-        """Switch how the solver is being asked to play, mid-fight."""
-        from ..search import objective as objectives
-
-        preset = objectives.PRESETS.get(name)
-        if preset is None:
-            return
-        with self._lock:
-            self.objective = preset
-            self.objective_name = name
-        self.model.objective = name
-        self._post()
-
-    def set_budget(self, seconds) -> None:
-        """Seconds per search. Clamped: below a second nothing finishes,
-        and past a minute the advice arrives after the round."""
-        try:
-            value = float(seconds)
-        except (TypeError, ValueError):
-            return
-        value = max(1.0, min(60.0, value))
-        with self._lock:
-            self.budget = value
-        self.model.budget = value
-        self._post()
-
     def end_fight(self) -> None:
         """The player says the fight is over. Wipe it and stop advising.
 
@@ -715,33 +708,6 @@ class Worker(threading.Thread):
         model.problems, model.rows, model.cogs = [], [], []
         model.turn = 0
         model.thinking = False
-        self._post()
-
-    def set_level_7(self, allow: bool) -> None:
-        """Offer level 7 gags, or hold them back for a boss."""
-        from .. import state as state_mod
-
-        with self._lock:
-            self.allow_level_7 = bool(allow)
-        state_mod.ALLOW_LEVEL_7 = bool(allow)
-        self.model.allow_level_7 = bool(allow)
-        self._post()
-
-    def set_toon_count(self, count) -> None:
-        """How many toons are in the fight, counting you.
-
-        Player-set. `find_toon_panels` can count the meters along the
-        bottom of the battle UI, but this stays authoritative when it
-        is called: a miscount is not cosmetic, it scales how dangerous
-        every cog looks, and the player can see the row better than the
-        reader can.
-        """
-        try:
-            value = int(count)
-        except (TypeError, ValueError):
-            return
-        with self._lock:
-            self.toon_count = max(1, min(4, value))
         self._post()
 
     def _post(self) -> None:

@@ -72,6 +72,18 @@ def describe(state, action, actor: int = 0) -> Dict:
     if action is None or getattr(action, "is_pass", False):
         return out
 
+    # ORGANIC, WHICH IS NOT READ OFF THE SCREEN. The Local API states
+    # which tracks are organic, so this is the authoritative answer and
+    # the gag menu's sprout does not have to be recognised to get it.
+    # It is worth showing: organic raises a gag's damage, and Lure's
+    # accuracy along with it.
+    try:
+        track = getattr(action, "track", None)
+        if track is not None:
+            out["organic"] = bool(state.toons[actor].is_organic(track))
+    except Exception:                   # noqa: BLE001
+        pass
+
     # WHAT THE ROUND WOULD DO, from the simulator rather than a second
     # opinion about it. All-hit, matching how `_score_leaf` reads a
     # plan before averaging over the dice.
@@ -85,6 +97,25 @@ def describe(state, action, actor: int = 0) -> Dict:
         simulator.apply_party_round(probe, plan, hits=[True] * len(plan))
         out["damage"] = int(ps._landed(state.cogs, probe.cogs))
         out["kills"] = int(ps._killed(state.cogs, probe.cogs))
+
+        # HOW IT LANDS, not just how much. A group gag's total is the
+        # number the SCORER wants and the wrong one to show a player:
+        # Foghorn against two cogs reported "100 damage" beside a
+        # 110/110 cog, which reads as very nearly a kill. It is 50 each
+        # and both cogs live. Sound is the whole reason this matters --
+        # spreading damage IS the track's point, so the spread has to be
+        # visible rather than summed away.
+        #
+        # Taken from actual hp deltas rather than the gag's table value,
+        # so a lured cog's knockback bonus shows up as the larger number
+        # it is. `each` is therefore offered only when every target
+        # really did take the same amount.
+        hits = [before.hp - after.hp
+                for before, after in zip(state.cogs, probe.cogs)
+                if before.hp > after.hp]
+        out["targets"] = len(hits)
+        if len(hits) > 1 and len(set(hits)) == 1:
+            out["each"] = int(hits[0])
         prevented = float(ps.prevented(state, probe))
         if prevented:
             out["prevented"] = round(prevented, 1)
@@ -106,6 +137,19 @@ def reason(detail: Dict) -> str:
     """
     if not detail:
         return ""
+    # A MOVE THAT CANNOT LAND IS THE MOST IMPORTANT THING TO SAY, and
+    # this used to say nothing at all: no kill, nothing prevented, no
+    # trap, no damage, so every branch below fell through to "". A blank
+    # line under a recommendation reads as a broken explainer rather
+    # than as a warning, which is exactly backwards -- it was reported
+    # from live play as "doesn't give the reasoning", when the reasoning
+    # was that the gag was a guaranteed miss.
+    #
+    # Zero is reachable one way only. `ACCURACY_FLOOR` lifts every
+    # rolled accuracy to 5%, and Drop is the single track exempt from
+    # it, so a stated 0 is always the rule that Drop misses a lured cog.
+    if detail.get("accuracy") == 0:
+        return "always misses a lured cog"
     kills = detail.get("kills") or 0
     if kills == 1:
         return "kills it"
@@ -118,5 +162,12 @@ def reason(detail: Dict) -> str:
         return "arms the trap"
     damage = detail.get("damage") or 0
     if damage:
+        targets = detail.get("targets") or 0
+        each = detail.get("each")
+        if targets > 1:
+            # Per cog when they all took the same, the total otherwise --
+            # a mixed spread has no single "each" to quote.
+            return ("%d to each of %d cogs" % (each, targets) if each
+                    else "%d damage across %d cogs" % (damage, targets))
         return "%d damage" % damage
     return ""

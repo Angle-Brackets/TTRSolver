@@ -120,6 +120,14 @@ def cog_from_reading(reading) -> Tuple[Optional[CogState], List[str]]:
         # wake-up check; 80 is the mid-range of the Lure gags. It does
         # not affect the forced accuracies that make this matter.
         cog.status.apply_lure(80, 1, None)
+    level = getattr(reading, "trap_level", None)
+    if getattr(reading, "trapped", False) and level:
+        # A LEVEL IS REQUIRED, not just the flag. `CogStatus.trapped`
+        # with `trap_level=None` raises the moment a Lure tries to
+        # spring it -- `data.gag(TRAP, None)` has nothing to look up --
+        # which is the crash the SOS trap cards hit first.
+        cog.status.trapped = True
+        cog.status.trap_level = int(level)
     return cog, []
 
 

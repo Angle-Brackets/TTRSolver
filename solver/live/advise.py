@@ -278,11 +278,22 @@ class Thinker:
             res = build_state(snapshot=snap, panel=pnl, readings=readings,
                               ignore_checksum=ignore_checksum, allies=allies,
                               fires=fires)
-            if not res or not res.state:
+            if res is None or res.state is None:
                 with self._lock:
                     superseded = token != self._current
                 if not superseded:
-                    self.on_result(res.problems if res else ["no battle detected"], None, None)
+                    # `res is not None`, NOT `res`. `BuildResult.__bool__`
+                    # is `state is not None`, so a result carrying the
+                    # reasons there is no state is FALSY -- and the
+                    # truthiness test therefore threw those reasons away
+                    # and substituted "no battle detected" every single
+                    # time. The panel's whole job at this moment is to
+                    # say what it could not read ("cog 1: level
+                    # unreadable", "gag menu not visible"); it said the
+                    # one thing that helps nobody instead.
+                    self.on_result(
+                        res.problems if res is not None
+                        else ["no battle detected"], None, None)
                 return
 
             state = res.state
@@ -632,7 +643,11 @@ def main(argv: Optional[List[str]] = None) -> int:
             if any(e.kind in RECOMPUTE_ON for e in events):
                 # Hand the frame to the search and carry on polling; a
                 # nine-second think must not stall the eye.
-                thinker.submit(watcher.capture.grab(),
+                # The frame the watcher just graded, for the reason
+                # `overlay.run` records: a second grab makes
+                # `menu_visible` and `read_panel` disagree about the
+                # same check on two different moments.
+                thinker.submit(watcher.last_frame or watcher.capture.grab(),
                                list(watcher.view.cogs), None, objective,
                                args.depth, args.budget,
                                args.ignore_checksum)

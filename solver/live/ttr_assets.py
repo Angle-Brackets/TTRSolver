@@ -177,6 +177,23 @@ LURE_CELL = (1, 1)          # column, row in the 2x2 atlas
 BUTTON_ICONS = ("ttr_t_gui_sbk_buttonIcons.jpg", "phase_3.5.mf")
 BUTTON_ALPHA = ("ttr_t_gui_sbk_buttonIcons_a.rgb", "phase_3.5.mf")
 MAP_CELL = (1, 0)
+
+# The organic indicator: the green leaf badge the game draws on a gag
+# grown on a gag tree. Unlike the two above it is NOT on a regular grid
+# -- the battle GUI palettes are packed sheets, not atlases with equal
+# cells -- so it is an explicit box rather than a (column, row).
+#
+# Found by name rather than by eye: `ttr_m_gui_bat_gagGUI.bam` carries a
+# node called `ttr_t_gui_bat_toonGUI_indicator_organic_card`, and the
+# only green blob on the palettes that model references is this one.
+# The box is the alpha bounding box of that blob with two pixels of
+# margin, so a future repack shows up as a misaligned crop rather than
+# as a silently wrong icon.
+ORGANIC_PALETTE = ("battle_gui_remastered_palette_4amla_20.jpg",
+                   "phase_3.5.mf")
+ORGANIC_ALPHA = ("battle_gui_remastered_palette_4amla_20_a.rgb",
+                 "phase_3.5.mf")
+ORGANIC_BOX = (155, 2, 225, 68)
 EMBLEM_ORDER = ("sellbot", "cashbot", "lawbot", "bossbot")
 
 
@@ -261,6 +278,146 @@ def map_icon(override: Optional[str] = None) -> Path:
         icon = atlas.crop(box).convert("RGBA")
         try:
             alpha_path = extract(*BUTTON_ALPHA, override=override)
+            with Image.open(alpha_path) as mask:
+                mask = mask.convert("L").resize(atlas.size)
+                icon.putalpha(mask.crop(box))
+        except Exception:
+            pass
+        icon.save(target)
+    return target
+
+
+def organic_icon(override: Optional[str] = None) -> Path:
+    """The green leaf the game puts on an organic gag, as a cut-out PNG.
+
+    Same rule as `lure_icon` and the emblems: read from the player's
+    installation at runtime, cached, never vendored.
+
+    This is decoration, not evidence. Whether a track is organic is
+    stated by the Local API, so nothing needs to recognise this badge on
+    screen to know -- it exists so the panel can draw what the game
+    draws instead of inventing a marker of its own.
+    """
+    from PIL import Image
+
+    atlas_path = extract(*ORGANIC_PALETTE, override=override)
+    target = atlas_path.parent / "indicator_organic.png"
+    with Image.open(atlas_path) as atlas:
+        icon = atlas.crop(ORGANIC_BOX).convert("RGBA")
+        # The alpha is a separate SGI RGB file. A missing mask leaves the
+        # palette backdrop behind the leaf rather than raising -- the
+        # icon is still recognisable, and a decoration must never stop
+        # the panel starting.
+        try:
+            alpha_path = extract(*ORGANIC_ALPHA, override=override)
+            with Image.open(alpha_path) as mask:
+                mask = mask.convert("L").resize(atlas.size)
+                icon.putalpha(mask.crop(ORGANIC_BOX))
+        except Exception:
+            pass
+        icon.save(target)
+    return target
+
+
+# The Silly Meter's reward badges: one per gag track, the same art the
+# Silly Teams use for a double-experience week. Standalone files with
+# their own alpha, so unlike the lure magnet and the map globe there is
+# no atlas cell to cut -- extract, mask, done.
+#
+# Keyed by the SOLVER's track slug rather than the game's filename, so
+# a caller can look one up with `model.track` and never has to know that
+# the game writes "toonup" where `Track.TOON_UP` is "toon_up".
+TRACK_ICON_FILES = {
+    "toon_up": "toonup", "trap": "trap", "lure": "lure", "sound": "sound",
+    "throw": "throw", "squirt": "squirt", "drop": "drop",
+}
+TRACK_ICON_PREFIX = "ttr_t_gui_sbk_sillyMeter_rewardIcons_"
+
+
+def track_icon(track: str, override: Optional[str] = None) -> Path:
+    """One track's Silly Team badge, as a cut-out PNG.
+
+    Same rule as `lure_icon`, `map_icon` and `organic_icon`: read from
+    the player's own installation at runtime, cached, never vendored.
+    That matters more here than usual -- this art is also published on
+    the wiki, and copying it in from there would put TTR's files in this
+    repository by a different door.
+    """
+    from PIL import Image
+
+    name = TRACK_ICON_FILES[track]
+    atlas = extract(TRACK_ICON_PREFIX + name + ".jpg", "phase_3.5.mf",
+                    override=override)
+    target = atlas.parent / ("track_" + track + ".png")
+    with Image.open(atlas) as art:
+        icon = art.convert("RGBA")
+        try:
+            alpha = extract(TRACK_ICON_PREFIX + name + "_a.rgb",
+                            "phase_3.5.mf", override=override)
+            with Image.open(alpha) as mask:
+                icon.putalpha(mask.convert("L").resize(icon.size))
+        except Exception:
+            pass
+        icon.save(target)
+    return target
+
+
+def track_icons(override: Optional[str] = None) -> Dict[str, Path]:
+    """Every track badge that could be read. Missing ones are omitted.
+
+    Never raises for a missing file: a decoration that cannot be found
+    must not stop the panel starting, and a partial set still leaves
+    every track it did find looking right.
+    """
+    out: Dict[str, Path] = {}
+    for track in TRACK_ICON_FILES:
+        try:
+            out[track] = track_icon(track, override=override)
+        except Exception:                          # noqa: BLE001
+            continue
+    return out
+
+
+# The floating markers TTR draws above a cog for each status effect.
+#
+# `ttr_m_gui_bat_statusEffect.bam` names every one of them --
+# `..._icon_trapped`, `..._icon_lured`, `..._icon_v2_0` and thirty more
+# -- and the art is packed two-by-two into the
+# `battle_gui_status_effects_remastered_palette_*` sheets. The bam does
+# not say WHICH cell, so the two that matter here were identified by
+# eye against a live frame: the trap marker is a banana peel, the lure
+# marker the red magnet.
+#
+# Only these two are mapped. The rest exist and are findable the same
+# way, but an entry here is a claim that the cell is right, and a wrong
+# cell would have the reader hunting for the wrong picture.
+STATUS_ICON_CELLS = {
+    "trapped": ("8", (1, 0)),
+    "lured": ("5", (1, 0)),
+}
+STATUS_PALETTE = "battle_gui_status_effects_remastered_palette_4amla_%s"
+
+
+def status_icon(name: str, override: Optional[str] = None) -> Path:
+    """One status marker, cut out of its palette. See `STATUS_ICON_CELLS`.
+
+    Same rule as every other asset here: read from the player's own
+    installation at runtime, cached, never vendored.
+    """
+    from PIL import Image
+
+    sheet, (col, row) = STATUS_ICON_CELLS[name]
+    base = STATUS_PALETTE % sheet
+    atlas_path = extract(base + ".jpg", "phase_3.5.mf", override=override)
+    target = atlas_path.parent / ("status_%s.png" % name)
+    with Image.open(atlas_path) as atlas:
+        half_w, half_h = atlas.width // 2, atlas.height // 2
+        box = (col * half_w, row * half_h,
+               col * half_w + half_w, row * half_h + half_h)
+        icon = atlas.crop(box).convert("RGBA")
+        try:
+            alpha_path = extract(base + "_a.rgb", "phase_3.5.mf",
+                                 override=override)
             with Image.open(alpha_path) as mask:
                 mask = mask.convert("L").resize(atlas.size)
                 icon.putalpha(mask.crop(box))

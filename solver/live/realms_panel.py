@@ -41,6 +41,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from .overlay import ADVICE_LINGER, CogRow, Model
+from .worker import AdviceWorker
 from .panel import DIST, PULL_INTERVAL_MS, model_json
 
 # Evaluations `hybrid.climb` may spend per answer. See the call site for
@@ -222,7 +223,7 @@ def rows_from_state(state) -> List[CogRow]:
     return out
 
 
-class RealmsWorker(threading.Thread):
+class RealmsWorker(AdviceWorker):
     """Reads the cluster, searches when the position moves, posts a Model."""
 
     # CLASS-LEVEL, not only set in `__init__`. The consumable caps must
@@ -236,12 +237,10 @@ class RealmsWorker(threading.Thread):
 
     def __init__(self, outbox: "queue.Queue", objective, depth: int,
                  budget: float, listener=None, engine: str = "both"):
-        super().__init__(daemon=True)
-        self.outbox = outbox
-        self.objective = objective
-        self.objective_name = getattr(objective, "name", "balanced")
-        self.depth = depth
-        self.budget = budget
+        # `model` FIRST: the base writes `allow_level_7` and the
+        # holdings onto it, so it has to exist before that runs.
+        self.model = Model()
+        super().__init__(outbox, objective, depth, budget)
         self.listener = listener
         # "rl", "search" or "both". WHICH IS BETTER IS NOT ESTABLISHED,
         # which is the honest reason this is a choice rather than a
@@ -251,204 +250,27 @@ class RealmsWorker(threading.Thread):
         # panel, not the policy. The owner reports preferring the
         # policy's picks and there is no measurement to contradict them.
         self.engine = engine
-        self.max_fires = 0
-        self.max_unites = 0
-        self.max_sos = 0
-        # Moves the player has turned down for the CURRENT position, as
-        # `hybrid.reject_key` values. Cleared when the board changes: a
-        # rejection is about this board, not about the move in general.
-        self._rejected: set = set()
         self.record_to = None
         self.recorded = 0
         self.record_error = None
-        self.model = Model()
-        # Owned here rather than on the Model the UI holds, for the same
-        # reason `overlay.Worker` owns them: `_post` ships a fresh copy
-        # every cycle and anything written onto the UI's model from
-        # outside is overwritten within the poll interval.
-        from .. import state as state_mod
-
-        self.allow_level_7 = state_mod.ALLOW_LEVEL_7
-        self._lock = threading.Lock()
-        self._stop = threading.Event()
         self._generation = count()
         self._current = -1
         self._last_key: tuple = ()
-        self._asked = threading.Event()
         self._executor = None
 
     # -- controls -----------------------------------------------------
-    def set_objective(self, name: str) -> None:
-        from ..search import objective as objectives
 
-        preset = objectives.PRESETS.get(name)
-        if preset is None:
-            return
-        with self._lock:
-            self.objective, self.objective_name = preset, name
-        self._last_key = ()             # re-search under the new one
-        self.ask_now()
+    def _settings_changed(self) -> None:
+        """Redraw, recompute -- and drop the position key.
 
-    def set_budget(self, seconds) -> None:
-        try:
-            value = float(seconds)
-        except (TypeError, ValueError):
-            return
-        with self._lock:
-            self.budget = max(1.0, min(60.0, value))
-        self._post()
-
-    def set_level_7(self, allow) -> None:
-        from .. import state as state_mod
-
-        with self._lock:
-            self.allow_level_7 = bool(allow)
-        state_mod.ALLOW_LEVEL_7 = bool(allow)
+        `tick` searches only when the position key CHANGES, so without
+        this a setting moved mid-fight is honoured on the next cog
+        action rather than now. `reconsider` deliberately does not come
+        through here: clearing the key there wiped the rejection before
+        anything could read it, because an empty key always differs.
+        """
         self._last_key = ()
-        self.ask_now()
-
-    def reconsider(self) -> None:
-        """Turn down what is on screen and ask for the next best.
-
-        Rejects by `hybrid.reject_key` rather than by the exact action,
-        and that is the whole design. Every fire shares one key, so
-        dismissing "pink slip on cog 2" dismisses spending a slip at all
-        -- rather than offering the same move against cog 3, then cog 1,
-        then cog 4, which is exactly how this control would become
-        useless. The same click gives "not Drop" or "not a pass".
-
-        Rejections last for THIS BOARD only and are dropped as soon as
-        anything changes, so they cannot quietly narrow the rest of the
-        fight.
-        """
-        from ..search import hybrid
-
-        with self._lock:
-            if not self.model.gag:
-                return              # nothing on screen to turn down
-            track = self.model.track
-            level = self.model.gag_level
-            if track == "fire":
-                key = (None, False)         # every slip, one key
-            elif not track:
-                key = "pass"
-            else:
-                from ..state import Track
-                try:
-                    key = hybrid.reject_key(_entry_for(Track(track), level))
-                except Exception:           # noqa: BLE001
-                    return
-            self._rejected.add(key)
-        # NOT `self._last_key = ()`. That was here to force a recompute
-        # and it silently undid the rejection: `tick` clears the set
-        # whenever the position key differs, and an empty key always
-        # differs. The rejection was wiped on the very next tick, before
-        # anything could read it -- which is why the button appeared to
-        # do nothing at all.
-        #
-        # `ask_now` already forces the recompute on its own, through the
-        # `_asked` arm of the same condition, and leaves the key alone
-        # so the board still counts as unchanged.
-        self.ask_now()
-
-    def set_max_fires(self, count) -> None:
-        """Cap the slips the solver may plan with. Zero advises none.
-
-        NOT a count of what is held -- `setPinkSlips` supplies that and
-        is always current, because the game decrements it when a slip is
-        fired and the panel re-reads it every cycle. So there is no
-        used-count to track and nothing to reset when a VP reaches its
-        second wave or a building its next floor, which is the trap this
-        control looks like it should fall into.
-
-        What it caps is how many the PLAYER is willing to spend, which
-        nothing on the wire can say. Recomputes: the advice on screen
-        was worked out under the old cap.
-        """
-        try:
-            value = int(count)
-        except (TypeError, ValueError):
-            return
-        with self._lock:
-            self.max_fires = max(0, min(99, value))
-            self.model.max_fires = self.max_fires
-        self._last_key = ()
-        self.ask_now()
-
-    def set_max_unites(self, count) -> None:
-        """Cap the unites the solver may plan with. Zero advises none.
-
-        The same shape as `set_max_fires`: what the toon HOLDS comes off
-        the wire (`setResistanceMessages`), and this caps how many the
-        player is willing to spend, which nothing on the wire can say.
-        """
-        try:
-            value = int(count)
-        except (TypeError, ValueError):
-            return
-        with self._lock:
-            self.max_unites = max(0, min(99, value))
-            self.model.max_unites = self.max_unites
-        self._last_key = ()
-        self.ask_now()
-
-    def set_max_sos(self, count) -> None:
-        """Cap the SOS cards the solver may plan with. Zero advises none.
-
-        Caps the number of CALLS, not which cards -- those come from
-        `setNPCFriendsDict`, so the budget can never invent a card the
-        toon does not hold.
-        """
-        try:
-            value = int(count)
-        except (TypeError, ValueError):
-            return
-        with self._lock:
-            self.max_sos = max(0, min(99, value))
-            self.model.max_sos = self.max_sos
-        self._last_key = ()
-        self.ask_now()
-
-    def prefer_engine(self, name) -> None:
-        """Swap which engine's answer is on screen. No recomputation.
-
-        Both answers are already in the model -- the search runs in the
-        background whichever one the player is reading -- so this is a
-        read, not a search. That is the whole point: the search costs
-        fifteen seconds on any board with two or more cogs, and a player
-        who wants a second opinion mid-fight cannot spend that.
-
-        Asking for the search before it has finished sets the
-        PREFERENCE and leaves the policy's move on screen, so the swap
-        happens by itself when the answer lands. It does not blank the
-        panel to wait, because a blank panel mid-fight is worse than a
-        move from the other engine with a badge saying so.
-        """
-        choice = "search" if str(name).lower() == "search" else "rl"
-        with self._lock:
-            self.model.preferred_engine = choice
-            if choice == "search":
-                if not self.model.search_ready:
-                    self._post()
-                    return          # it will swap in when it arrives
-                self.model.gag = self.model.search_gag
-                self.model.track = self.model.search_track or None
-                self.model.gag_level = self.model.search_gag_level or None
-                self.model.engine = "search"
-            else:
-                if not self.model.rl_gag:
-                    self._post()
-                    return
-                self.model.gag = self.model.rl_gag
-                self.model.track = self.model.rl_track or None
-                self.model.gag_level = self.model.rl_gag_level or None
-                self.model.engine = "rl"
-            self.model.gag_at = time.time()
-        self._post()
-
-    def ask_now(self) -> None:
-        self._asked.set()
-
+        super()._settings_changed()
     def close(self) -> None:
         self._stop.set()
         if self._executor is not None:
@@ -510,9 +332,9 @@ class RealmsWorker(threading.Thread):
         from . import realms_session
 
         result = realms_session.build_state(self.listener,
-                                            max_fires=self.max_fires,
-                                            max_unites=self.max_unites,
-                                            max_sos=self.max_sos)
+                                            max_fires=self.remaining("fires"),
+                                            max_unites=self.remaining("unites"),
+                                            max_sos=self.remaining("sos"))
         model = self.model
         model.window_found = True
         model.detected_battle = result.state is not None
@@ -544,6 +366,13 @@ class RealmsWorker(threading.Thread):
                 # Reconsider itself asking, and clearing there would
                 # undo the rejection it was just given.
                 self._rejected.clear()
+                # THE BOARD MOVED, so the advice that stood for the last
+                # one has been played. Charge it against the holdings,
+                # but not on the `_asked` arm -- that is a recompute of
+                # the SAME round and would spend a slip per press.
+                if self._last_key:
+                    self.note_spent(self.displayed_action(),
+                                    self.model.unite or None)
             self._last_key = key
             self._asked.clear()
             model.thinking = True
@@ -690,9 +519,15 @@ class RealmsWorker(threading.Thread):
                 with self._lock:
                     fresh = token == self._current
                 if fresh:
+                    self._rl_action = quick
                     self.model.rl_gag = _render(quick, state)
                     self.model.rl_track = _track_of(quick) or ""
                     self.model.rl_gag_level = _level_of(quick) or 0
+                    # THE WHY-LINE, which this panel never had. Same
+                    # solver, same numbers -- there was no reason for it
+                    # to explain itself in one window and not the other.
+                    self._describe_into(self.model, state, quick, "rl")
+                    self._sync_explanation(self.model)
                     # Shown now whatever the preference: it is the only
                     # answer that exists this early, and a blank panel
                     # while the search runs is the complaint that
@@ -740,9 +575,34 @@ class RealmsWorker(threading.Thread):
         # engine the player is reading, precisely so that swapping to it
         # costs nothing: the fifteen seconds are spent while they are
         # looking at the policy's move, not after they ask.
+        # THE SEARCH HANDS BACK TEXT, NOT AN ACTION. `search_in_child`
+        # runs in another process and returns `(text, track, level)`, so
+        # there is no Action here to keep -- and assigning one crashed
+        # this thread with `NameError: name 'action' is not defined`,
+        # which takes the search with it and looks exactly like a slow
+        # search that never finishes.
+        #
+        # Reconstructed by the same route Reconsider always used: any
+        # `ACTIONS` entry of that track and level. It is the right one
+        # for both purposes here, because `reject_key` ignores the
+        # target and `explain.describe` is asked only about the move's
+        # own track and level.
+        self._search_action = None
+        rebuilt = None
+        if track and track not in ("fire", "sos") and level:
+            from ..state import Track
+
+            try:
+                rebuilt = _entry_for(Track(track), level)
+            except (LookupError, ValueError):
+                rebuilt = None
+        self._search_action = rebuilt
         self.model.search_gag = text
         self.model.search_track = track or ""
         self.model.search_gag_level = level or 0
+        if rebuilt is not None:
+            self._describe_into(self.model, state, rebuilt, "search")
+        self._sync_explanation(self.model)
         self.model.search_ready = True
         self.model.thinking = False
 
@@ -793,6 +653,9 @@ class RealmsWorker(threading.Thread):
         self.model.max_fires = self.max_fires
         self.model.max_unites = self.max_unites
         self.model.max_sos = self.max_sos
+        self.model.fires_left = self.remaining("fires")
+        self.model.unites_left = self.remaining("unites")
+        self.model.sos_left = self.remaining("sos")
         self.model.objective = self.objective_name
         self.model.budget = self.budget
         # LATEST WINS. This was a FIFO that dropped the NEWEST model when
@@ -850,9 +713,15 @@ class RealmsApi:
     def set_max_sos(self, count) -> None:
         self._worker.set_max_sos(count)
 
-    def reconsider(self) -> None:
-        """Reject the move on screen and offer the next best."""
-        self._worker.reconsider()
+    def reconsider(self, scope=None) -> None:
+        """Reject the move on screen and offer the next best.
+
+        `scope` is "gag" | "track" | omitted for the middle width, the
+        same three the other panel offers -- one page renders both, so
+        a control that worked in one window and not the other would be
+        the drift this shares a worker to avoid.
+        """
+        self._worker.reconsider(str(scope) if scope else "kind")
 
     def set_objective(self, name) -> None:
         self._worker.set_objective(str(name))

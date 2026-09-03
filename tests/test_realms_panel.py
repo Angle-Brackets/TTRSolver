@@ -254,9 +254,14 @@ class SeparationTest(unittest.TestCase):
         Realms edit can break the pixel path."""
         import inspect
 
-        from solver.live import overlay, panel, session
+        from solver.live import overlay, panel, session, worker
 
-        for module in (overlay, panel, session):
+        # `worker` is SHARED -- both panels subclass `AdviceWorker` --
+        # which puts it on the TTR import path, so it is held to the
+        # same rule. A shared module that named one of the two games
+        # would be the coupling this test exists to prevent, arriving
+        # by the back door.
+        for module in (overlay, panel, session, worker):
             source = inspect.getsource(module)
             self.assertNotIn("realms", source.lower(),
                              f"{module.__name__} mentions realms")
@@ -420,10 +425,29 @@ class ReconsiderTest(unittest.TestCase):
     """
 
     def _worker_with(self, track, level=None, gag="something"):
+        """A worker showing one move, as the ACTION behind it.
+
+        The panel used to rebuild the reject key from the displayed
+        track and level. It now keeps the action itself, which is
+        strictly better information -- the display text and its parts
+        change as the cog takes damage, the action does not -- so an
+        empty `gag` is "nothing on screen" expressed as no action.
+        """
+        from solver.state import Action, Track
+
         w = worker(FakeListener([], {}))
         w.model.gag = gag
         w.model.track = track
         w.model.gag_level = level
+        if not gag:
+            w._rl_action = None
+        elif track == "fire":
+            w._rl_action = Action(track=None, target_index=1, fire=True)
+        elif track is None:
+            w._rl_action = Action(track=None)
+        else:
+            w._rl_action = Action(track=Track(track), level=level,
+                                  target_index=0)
         return w
 
     def test_rejecting_a_fire_rejects_every_fire(self):
@@ -750,3 +774,100 @@ class PanelBudgetTest(unittest.TestCase):
                             budget=realms_panel.PANEL_BUDGET)
         self.assertEqual(plan[0].track, Track.LURE)
         self.assertIsNotNone(plan[0].target_index)
+
+
+@unittest.skipUnless(HAVE_MODULE, "realms panel unavailable")
+class SearchThreadSurvivesTest(unittest.TestCase):
+    """`_run_search` runs on its own thread, so anything it raises is
+    printed and otherwise ignored -- the panel just sits on "thinking"
+    for ever, which looks like a slow search rather than a dead one.
+
+    This is the SECOND bug of that exact shape here; `worker()` above
+    records the first. It crashed with
+
+        NameError: name 'action' is not defined
+
+    because the search returns `(text, track, level)` from another
+    process and there is no Action to keep. The move is rebuilt from the
+    track and level instead, by the same route Reconsider always used.
+    """
+
+    class _Pool:
+        def __init__(self, result):
+            self._result = result
+
+        def submit(self, *_a, **_k):
+            outer = self
+
+            class _Future:
+                def result(self, timeout=None):
+                    return outer._result
+            return _Future()
+
+    def _worker(self, result):
+        from solver.search import objective as objectives
+
+        w = worker(FakeListener([], {}))
+        w.engine = "search"          # skip the policy arm; search only
+        w._rl_action = None
+        w._search_action = None
+        w._current = 0
+        w._pool = lambda: self._Pool(result)
+        w._post = lambda: None
+        w.allow_level_7 = True
+        self.objective = objectives.DEFAULT
+        return w
+
+    def _state(self):
+        from solver import data
+        from solver.state import BattleState, CogState, ToonState, Track
+
+        tracks = [t for t in Track if t is not Track.TOON_UP]
+        hp = data.cog_max_hp(8)
+        toon = ToonState(90, 137, {t: 7 for t in tracks},
+                         {(t, l): 3 for t in tracks for l in range(1, 8)},
+                         frozenset())
+        return BattleState(
+            toons=[toon],
+            cogs=[CogState(cog_type="mr_hollywood", department="sellbot",
+                           level=8, hp=hp, max_hp=hp)])
+
+    def test_a_gag_result_rebuilds_the_move(self):
+        from solver.state import Track
+
+        w = self._worker(("Birthday Cake on cog 1", "throw", 6))
+        w._run_search(0, self._state(), self.objective, 1, 1.0)
+        self.assertTrue(w.model.search_ready)
+        self.assertIsNotNone(w._search_action)
+        self.assertEqual(Track.THROW, w._search_action.track)
+        self.assertEqual(6, w._search_action.level)
+
+    def test_reconsider_can_then_reject_it(self):
+        """The whole reason the action is kept."""
+        from solver.search import hybrid
+        from solver.state import Track
+
+        w = self._worker(("Birthday Cake on cog 1", "throw", 6))
+        w._run_search(0, self._state(), self.objective, 1, 1.0)
+        w.model.engine = "search"
+        w.reconsider()
+        self.assertIn(hybrid.reject_key(w._search_action), w._rejected)
+        self.assertIn((Track.THROW, False), w._rejected)
+
+    def test_a_trackless_result_is_not_rebuilt_and_does_not_raise(self):
+        """A fire, an SOS or a failed search has no (track, level) to
+        rebuild from. That must leave the action empty, not explode."""
+        for result in (("pink slip on cog 1", "fire", None),
+                       ("the search failed: X: y", None, None)):
+            w = self._worker(result)
+            w._run_search(0, self._state(), self.objective, 1, 1.0)
+            self.assertIsNone(w._search_action, result)
+            self.assertTrue(w.model.search_ready, result)
+
+    def test_nothing_escapes_the_thread(self):
+        """The failure mode this exists for: an exception here is
+        invisible and the panel sits on 'thinking' for ever."""
+        w = self._worker(("Birthday Cake on cog 1", "throw", 6))
+        w.model.thinking = True
+        w._run_search(0, self._state(), self.objective, 1, 1.0)
+        self.assertFalse(w.model.thinking)
