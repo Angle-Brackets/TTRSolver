@@ -25,3 +25,8 @@ solver/live/_cog_heads/
 # CRN disagreement dumps: regenerate with tools/disagree.py
 disagreements-*.tsv
 disagreements.tsv
+
+# Frames saved by `read_battle --live --save`. They are screenshots of
+# the game, so they are TTR artwork and must not be committed -- see
+# `ttr_assets` for the rule this follows.
+/frame*.png
