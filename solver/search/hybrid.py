@@ -952,6 +952,25 @@ def _menu_is_degenerate(order, values) -> bool:
 
 
 def climb(state: BattleState, rng=random, budget: int = 16,
+          # WIDTH IS WHY THE TWO ENGINES DISAGREE, and widening it does
+          # not pay. [OWNER] reported the policy spending a dearer gag
+          # than the exact search wanted on the same board. Measured, by
+          # spying on every plan `_judge` is asked to score:
+          #
+          #   width   search's pick offered   RL agrees with it
+          #       3            0 of 4                0 of 4
+          #       8            2 of 4                2 of 4
+          #      16            4 of 4                3 of 4
+          #
+          # So the scorer never sees the move -- no weight on `price` or
+          # `waste` could reach it, which is what those sweeps were
+          # really measuring. Widening fixes the disagreement outright.
+          #
+          # It also changes nothing. Solo VP, 20 a round, everything
+          # carried, 10 runs a cell: cleared 80% / 70% / 80% at width
+          # 3 / 8 / 16, paired +1/-2 and +1/-1, mean gag level 5.68 ->
+          # 5.63, 19ms -> 24ms a round. Stays at 3: the agreement is
+          # free to buy and buys nothing.
           width: int = 3, probe_tracks: Optional[bool] = None,
           deep: bool = False, rollout: int = 0,
           fixed: Optional[Mapping[int, Optional[Action]]] = None,
