@@ -984,8 +984,18 @@ def climb(state: BattleState, rng=random,
           #     25   selection        60%        76%   +6/-2
           #     40   HELD OUT         48%        75%   +15/-4, p=0.019
           #
-          # Buildings are untouched, 88% at both, +0/-0 over 40 paired
-          # runs. Cost is 20ms -> 26ms a decision.
+          # BUILDINGS ARE UNTOUCHED, and that was re-run properly: the
+          # first check reported one floor a run, which barely exercises
+          # the pouch. On real multi-floor buildings, 2.6-toon parties,
+          # 40 paired runs: 82% finished at both widths, +0/-0.
+          #
+          # The split is the point. Width pays where the POUCH binds --
+          # a solo VP is 40 cogs over two long floors, and my own
+          # arithmetic puts 4255 cog HP against a pouch worth ~2730
+          # single-target. A two-floor building shared by three toons
+          # never gets near that, so a better menu has nothing to buy.
+          #
+          # Cost is 20ms -> 26ms a decision.
           #
           # WIDTH AND BUDGET ARE COUPLED, and this is the thing to know
           # before changing either. `budget` counts JUDGE CALLS and the
