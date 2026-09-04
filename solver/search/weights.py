@@ -236,6 +236,32 @@ QUICK_W = {
     # neither, nothing can change a toon's laff mid-plan, so this
     # contributes the same constant to every candidate.
     "survive": 400.0,      # CHARGED, per standing toon a round could sink
+    # RE-SWEPT ON A VP THAT ACTUALLY FINISHES, and it stays at 1.0.
+    #
+    # The earlier sweeps for this and for `waste` ran before two fixes:
+    # `unites.tick_cooldown` had no caller (one unite a fight) and a VP
+    # floor truncated at 20 rounds. Husbanding a pouch cannot show up in
+    # a fight that ends before the pouch binds, so the question was open
+    # again. [OWNER] reported the behaviour directly -- a level 7 spent
+    # where a 5 would do, and the exact search preferring the cheaper
+    # gag on the same board.
+    #
+    # Solo VP, 20 a round, fires+unites+SOS, 10 runs a cell, paired:
+    #
+    #   price   cleared   mean gag level   7s used
+    #     1.0       80%             5.68       5.2
+    #     2.0       50%             5.58       4.9
+    #     4.0       60%             5.56       5.0
+    #     8.0        0%             5.21       3.4
+    #
+    #   vs 1.0 paired: +0/-3, +0/-2, +0/-8
+    #
+    # The thrift is REAL and it LOSES. Mean level and sevens both fall,
+    # so the weight does what it says; not one win was gained in any
+    # cell and thirteen were lost. Third independent time this project
+    # has reached that answer, and the mechanism is the one `waste`
+    # already records: a cheaper gag does not quite kill, the cog
+    # survives to swing again, and laff is what runs out.
     "price": 1.0,       # gags spent, from the pouch
     # CONSUMABLES, priced separately from the pouch. Slips and cards used
     # to ride on `price`, so lowering that to loosen gag thrift also made

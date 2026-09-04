@@ -192,6 +192,20 @@ class Snapshot:
         return [track for track in Track
                 if self.tracks.get(track, (0, False))[1]]
 
+    @property
+    def invasion_text(self) -> str:
+        """The invasion as a person would say it, or "" for none.
+
+        HERE RATHER THAN AT EACH CALLER. `invasion` is a
+        `(cog, count, mega)` tuple, and the panel was rendering it with
+        `str()` -- which put a raw Python repr on screen,
+        `('Spin Doctors', 3000, False)`, over a live battle.
+        """
+        if not self.invasion:
+            return ""
+        cog, count, mega = self.invasion
+        return f"{cog} x{count}{' (MEGA)' if mega else ''}"
+
     def describe(self) -> str:
         lines = [f"{self.name} ({self.toon_id})",
                  f"  laff      {self.laff}/{self.max_laff}",
@@ -200,9 +214,7 @@ class Snapshot:
         if self.instance_id:
             lines.append(f"  instance  {self.instance_id}")
         if self.invasion:
-            cog, count, mega = self.invasion
-            lines.append(f"  invasion  {cog} x{count}"
-                         f"{' (MEGA)' if mega else ''}")
+            lines.append(f"  invasion  {self.invasion_text}")
         lines.append("  gags")
         for track in Track:
             entry = self.tracks.get(track)

@@ -446,6 +446,10 @@ class RetryAfterAFailedReadTest(unittest.TestCase):
 
         w = Worker.__new__(Worker)
         w._last_try = 0.0
+        # `_should_retry` also refuses to trust a `thinking` flag for
+        # ever; a worker that never thought has no clock running.
+        w._thinking_since = 0.0
+        w.budget = 15.0
         w.model = Model()
         for key, value in kw.items():
             setattr(w.model, key, value)
@@ -1151,3 +1155,104 @@ class SpentBudgetRunsDownTest(unittest.TestCase):
 
         self.assertIn('fires=self.remaining("fires")',
                       inspect.getsource(Worker.run))
+
+
+class InvasionReadsAsWordsTest(unittest.TestCase):
+    """`Snapshot.invasion` is a `(cog, count, mega)` tuple.
+
+    The panel rendered it with `str()`, which put a raw Python repr on
+    screen over a live battle: `('Spin Doctors', 3000, False)`. The
+    phrasing lives next to the field now, so the panel and
+    `Snapshot.describe` cannot drift.
+    """
+
+    def _snapshot(self, invasion):
+        import dataclasses
+
+        from solver.live.ttr_local import Snapshot
+
+        blank = {f.name: (None if f.default is dataclasses.MISSING
+                          else f.default)
+                 for f in dataclasses.fields(Snapshot)}
+        return dataclasses.replace(Snapshot(**blank), invasion=invasion)
+
+    def test_an_invasion_reads_as_a_sentence(self):
+        self.assertEqual("Spin Doctors x3000",
+                         self._snapshot(("Spin Doctors", 3000, False))
+                         .invasion_text)
+
+    def test_a_mega_says_so(self):
+        self.assertEqual("Spin Doctors x3000 (MEGA)",
+                         self._snapshot(("Spin Doctors", 3000, True))
+                         .invasion_text)
+
+    def test_no_invasion_is_empty_not_none(self):
+        """The model's field is a string the page prints directly."""
+        self.assertEqual("", self._snapshot(None).invasion_text)
+
+    def test_the_panel_does_not_str_the_tuple(self):
+        import inspect
+
+        from solver.live.overlay import Worker
+
+        src = inspect.getsource(Worker.run)
+        self.assertIn("invasion_text", src)
+        self.assertNotIn("str(invasion)", src)
+
+
+class AStuckThinkingFlagUnblocksTest(unittest.TestCase):
+    """`thinking` is cleared only by a search reporting back.
+
+    A superseded search never reports -- `Thinker` drops the older
+    result on purpose -- so a flag left raised would block every retry
+    for the rest of the fight. The panel then sits on a stale problem
+    while the readers are, by then, seeing the board perfectly well.
+    """
+
+    def _worker(self, thinking, since, now=1000.0):
+        from solver.live.overlay import Worker
+
+        w = Worker.__new__(Worker)
+        w.model = Model()
+        w.model.forced = True
+        w.model.problems = ["no cog plates on screen"]
+        w.model.thinking = thinking
+        w.budget = 15.0
+        w._last_try = 0.0
+        w._thinking_since = since
+        return w, now
+
+    def test_a_search_still_inside_its_budget_blocks_the_retry(self):
+        w, now = self._worker(True, since=995.0)      # 5s in
+        self.assertFalse(w._should_retry(w.model, now))
+
+    def test_one_far_past_its_budget_does_not(self):
+        from solver.live.overlay import STUCK_SLACK
+
+        w, now = self._worker(True, since=1000.0 - (15.0 + STUCK_SLACK + 1))
+        self.assertTrue(w._should_retry(w.model, now))
+
+    def test_the_slack_sits_outside_the_child_deadline(self):
+        """`Thinker._run` gives the child `budget + 15`, so anything
+        later is not a slow answer -- it is one that never arrives."""
+        from solver.live.overlay import STUCK_SLACK
+
+        self.assertGreater(STUCK_SLACK, 15.0)
+
+    def test_a_worker_that_never_thought_is_not_called_stuck(self):
+        w, now = self._worker(False, since=0.0)
+        self.assertTrue(w._should_retry(w.model, now))
+        w.model.problems = []
+        self.assertFalse(w._should_retry(w.model, now))
+
+    def test_the_clock_starts_only_on_the_rising_edge(self):
+        """Re-submitting while already thinking must not push the
+        deadline out for ever."""
+        import inspect
+
+        from solver.live.overlay import Worker
+
+        src = inspect.getsource(Worker.run)
+        self.assertIn("if not model.thinking:", src)
+        self.assertLess(src.index("if not model.thinking:"),
+                        src.index("model.thinking = True"))

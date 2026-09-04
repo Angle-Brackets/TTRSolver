@@ -71,6 +71,12 @@ MIN_TURN_GAP = 4.0
 # advice while they are still choosing.
 RETRY_INTERVAL = 2.0
 
+# How far past its own budget a search may run before `thinking` stops
+# being believed. The child process is given `budget + 15` by
+# `Thinker._run`, so this sits outside that: anything later is not a
+# slow answer, it is one that will never arrive.
+STUCK_SLACK = 25.0
+
 
 class TurnCounter:
     """Which round the battle is on, near enough to display.
@@ -423,8 +429,11 @@ class Worker(AdviceWorker):
         # reading a SCREEN needs -- a client that is told the battle
         # has nothing to override.
         self._forced: Optional[bool] = None
-        # When the last search was launched, for the failed-read retry.
+        # When the last search was launched, for the failed-read retry,
+        # and when `thinking` was last raised, so a flag that never
+        # comes down cannot block every retry after it.
         self._last_try = 0.0
+        self._thinking_since = 0.0
         self.turns = TurnCounter()
 
     # -- called from the UI thread --------------------------------------
@@ -492,7 +501,11 @@ class Worker(AdviceWorker):
                     model.neighborhood = getattr(snap, "neighborhood", "") or ""
                     model.district = getattr(snap, "district", "") or ""
                     invasion = getattr(snap, "invasion", None)
-                    model.invasion = str(invasion) if invasion else ""
+                    # `invasion_text`, not `str()`: the field is a
+                    # (cog, count, mega) tuple and `str()` put a raw
+                    # Python repr on screen over a live battle.
+                    model.invasion = getattr(
+                        snap, "invasion_text", "") or ""
                 model.rows = [_row(r) for r in watcher.view.cogs]
                 turn = self.turns.observe(model.in_battle,
                                           model.menu_visible)
@@ -526,6 +539,8 @@ class Worker(AdviceWorker):
                     self._rejected.clear()
                 if asked or retry or changed:
                     self._last_try = cycle
+                    if not model.thinking:
+                        self._thinking_since = cycle
                     model.thinking = True
                     thinker.submit(frame, list(watcher.view.cogs), None,
                                    self.objective, self.depth, self.budget,
@@ -554,8 +569,18 @@ class Worker(AdviceWorker):
         because the PREVIOUS round's advice is still on screen at that
         moment -- so "no answer yet" is not what the failure looks
         like. Success clears `problems`, so this stops on its own.
+
+        `thinking` IS NOT TRUSTED INDEFINITELY. It is only ever cleared
+        by a search reporting back, and a search that is superseded
+        never reports -- so a flag stuck on would block every retry for
+        the rest of the fight and freeze the panel on a stale problem
+        while the readers were, by then, seeing the board perfectly
+        well. Past the budget plus slack it is treated as gone.
         """
-        return bool(model.in_battle and not model.thinking
+        stuck = (self._thinking_since
+                 and now - self._thinking_since > self.budget + STUCK_SLACK)
+        return bool(model.in_battle
+                    and (not model.thinking or stuck)
                     and model.problems
                     and now - self._last_try >= RETRY_INTERVAL)
 
