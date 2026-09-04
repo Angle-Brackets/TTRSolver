@@ -951,7 +951,17 @@ def _menu_is_degenerate(order, values) -> bool:
     return len(keys) == 1
 
 
-def climb(state: BattleState, rng=random, budget: int = 16,
+def climb(state: BattleState, rng=random,
+          # RAISED WITH `width`, and it has to be. `budget` counts judge
+          # calls and the scoring loop breaks on `spent >= budget`, so a
+          # default budget of 16 against a default width of 16 starves
+          # the probes appended after the policy's own entries. Measured
+          # on the trapped ambulance chaser: budget 12 picks Storm
+          # Cloud, 16 picks Small Magnet, 20 and 24 pick the $1 Bill
+          # that springs the trap. The shipped panels already pass 24;
+          # this stops a caller relying on the default from silently
+          # getting the truncated answer.
+          budget: int = 24,
           # WIDTH IS WHY THE TWO ENGINES DISAGREE, and 16 is worth it.
           # [OWNER] reported the policy spending a dearer gag than the
           # exact search wanted on the same board. Spying on every plan
