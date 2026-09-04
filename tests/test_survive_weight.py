@@ -334,8 +334,14 @@ class TrappedLureTest(unittest.TestCase):
         self.assertGreater(cheap, dear)
 
     def test_it_no_longer_advises_a_group_lure_on_one_cog(self):
+        """A budget must cover the menu. `spent >= budget` breaks the
+        scoring loop, so a wide menu with a small budget never reaches
+        the probes appended after the policy's own entries -- at width
+        16 and budget 8 this board picks Foghorn, wasting an armed trap,
+        and at budget 24 (what the panel runs) it picks the $1 Bill.
+        """
         from solver.search import hybrid
-        plan = hybrid.climb(self._board(), random.Random(0), budget=8)
+        plan = hybrid.climb(self._board(), random.Random(0), budget=24)
         self.assertIsNotNone(plan[0])
         self.assertEqual(plan[0].track, Track.LURE)
         self.assertIsNotNone(plan[0].target_index,

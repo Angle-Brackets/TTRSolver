@@ -952,26 +952,51 @@ def _menu_is_degenerate(order, values) -> bool:
 
 
 def climb(state: BattleState, rng=random, budget: int = 16,
-          # WIDTH IS WHY THE TWO ENGINES DISAGREE, and widening it does
-          # not pay. [OWNER] reported the policy spending a dearer gag
-          # than the exact search wanted on the same board. Measured, by
-          # spying on every plan `_judge` is asked to score:
+          # WIDTH IS WHY THE TWO ENGINES DISAGREE, and 16 is worth it.
+          # [OWNER] reported the policy spending a dearer gag than the
+          # exact search wanted on the same board. Spying on every plan
+          # `_judge` is asked to score says why:
           #
           #   width   search's pick offered   RL agrees with it
           #       3            0 of 4                0 of 4
           #       8            2 of 4                2 of 4
           #      16            4 of 4                3 of 4
           #
-          # So the scorer never sees the move -- no weight on `price` or
-          # `waste` could reach it, which is what those sweeps were
-          # really measuring. Widening fixes the disagreement outright.
+          # At 3 the scorer NEVER SEES the move, so no weight on `price`
+          # or `waste` could reach it -- those sweeps were measuring a
+          # menu, not a scorer.
           #
-          # It also changes nothing. Solo VP, 20 a round, everything
-          # carried, 10 runs a cell: cleared 80% / 70% / 80% at width
-          # 3 / 8 / 16, paired +1/-2 and +1/-1, mean gag level 5.68 ->
-          # 5.63, 19ms -> 24ms a round. Stays at 3: the agreement is
-          # free to buy and buys nothing.
-          width: int = 3, probe_tracks: Optional[bool] = None,
+          # A FIRST PASS AT 10 RUNS A CELL SAID IT BOUGHT NOTHING AND
+          # THAT WAS TOO SMALL A SAMPLE. Solo VP, 20 a round, everything
+          # carried, paired on identical seeds:
+          #
+          #   runs   seeds        width 3   width 16   paired
+          #     25   selection        60%        76%   +6/-2
+          #     40   HELD OUT         48%        75%   +15/-4, p=0.019
+          #
+          # Buildings are untouched, 88% at both, +0/-0 over 40 paired
+          # runs. Cost is 20ms -> 26ms a decision.
+          #
+          # WIDTH AND BUDGET ARE COUPLED, and this is the thing to know
+          # before changing either. `budget` counts JUDGE CALLS and the
+          # scoring loop breaks on `spent >= budget`, so a menu wider
+          # than the budget never reaches the probes appended after the
+          # policy's own entries -- `_cheapest_kills`, `_cheapest_lures`
+          # and the SOS list, which exist precisely because the policy
+          # ranks them nowhere.
+          #
+          # On the trapped ambulance chaser the owner reported:
+          #
+          #   width 16, budget  8 -> Foghorn, wasting the armed trap
+          #   width 16, budget 24 -> $1 Bill, springing it   (the panel)
+          #   width 32, budget 24 -> Small Magnet, starved again
+          #   width 32, budget 48 -> $1 Bill
+          #
+          # So width 32 measuring worse than 3 on the VP (+3/-7) was
+          # BUDGET STARVATION, not the approximate-scorer effect the
+          # module docstring records for budget. 16 fits inside the
+          # panel's 24; anything wider needs the budget raised with it.
+          width: int = 16, probe_tracks: Optional[bool] = None,
           deep: bool = False, rollout: int = 0,
           fixed: Optional[Mapping[int, Optional[Action]]] = None,
           pairs: bool = True, pair_width: int = 7, reject=None,

@@ -95,7 +95,12 @@ class ReachesTheJudgeTest(unittest.TestCase):
         # for why the shipped weights can never pick one.
         ps_weights.QUICK_W["survive"] = 1000.0
         hybrid.OFFER_SOS = True
-        plan = hybrid.climb(_board(19), random.Random(19), budget=10)
+        # BUDGET 24, the panel's. `budget` counts judge calls and the
+        # scoring loop breaks on `spent >= budget`, so a menu wider than
+        # the budget never reaches the probes -- and the SOS list is
+        # appended last of all. At 10 this test was measuring the
+        # truncation, not the path.
+        plan = hybrid.climb(_board(19), random.Random(19), budget=24)
         # Flippy, and it used to be Lil Oldman. Pinning `incoming` in
         # `survival_rounds` stopped the lure being paid twice -- once as
         # `prevented` and again through the incoming it removed -- and
@@ -106,7 +111,12 @@ class ReachesTheJudgeTest(unittest.TestCase):
     def test_the_flag_off_means_never(self):
         ps_weights.QUICK_W["survive"] = 1000.0
         hybrid.OFFER_SOS = False
-        plan = hybrid.climb(_board(19), random.Random(19), budget=10)
+        # BUDGET 24, the panel's. `budget` counts judge calls and the
+        # scoring loop breaks on `spent >= budget`, so a menu wider than
+        # the budget never reaches the probes -- and the SOS list is
+        # appended last of all. At 10 this test was measuring the
+        # truncation, not the path.
+        plan = hybrid.climb(_board(19), random.Random(19), budget=24)
         self.assertIsNone(getattr(plan[0], "sos", None))
 
 

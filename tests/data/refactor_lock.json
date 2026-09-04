@@ -647,7 +647,7 @@
     0.0,
     0.3333
    ],
-   "pick": "lure/4/None"
+   "pick": "sound/4/None"
   },
   {
    "obs": [
@@ -970,7 +970,7 @@
     0.0,
     1.0
    ],
-   "pick": "sound/4/None"
+   "pick": "sound/3/None"
   },
   {
    "obs": [
@@ -1939,7 +1939,7 @@
     48.0,
     0.3333
    ],
-   "pick": "squirt/4/1"
+   "pick": "throw/5/1"
   },
   {
    "obs": [
@@ -2262,7 +2262,7 @@
     0.0,
     1.0
    ],
-   "pick": "pass"
+   "pick": "lure/3/1"
   },
   {
    "obs": [
@@ -3877,7 +3877,7 @@
     0.0,
     1.0
    ],
-   "pick": "sound/6/None"
+   "pick": "sound/4/None"
   },
   {
    "obs": [
@@ -4523,7 +4523,7 @@
     0.0,
     0.3333
    ],
-   "pick": "throw/6/2"
+   "pick": "throw/5/2"
   },
   {
    "obs": [
@@ -4846,7 +4846,7 @@
     0.0,
     1.0
    ],
-   "pick": "drop/6/2"
+   "pick": "fire"
   },
   {
    "obs": [
@@ -5169,7 +5169,7 @@
     98.0,
     1.0
    ],
-   "pick": "throw/7/None"
+   "pick": "throw/4/0"
   },
   {
    "obs": [
@@ -5815,7 +5815,7 @@
     49.0,
     1.0
    ],
-   "pick": "sound/4/None"
+   "pick": "sound/3/None"
   },
   {
    "obs": [
@@ -6461,7 +6461,7 @@
     0.0,
     1.0
    ],
-   "pick": "lure/6/None"
+   "pick": "lure/7/None"
   },
   {
    "obs": [
@@ -8399,7 +8399,7 @@
     70.0,
     1.0
    ],
-   "pick": "squirt/7/None"
+   "pick": "throw/4/2"
   },
   {
    "obs": [
@@ -9368,7 +9368,7 @@
     0.0,
     1.0
    ],
-   "pick": "drop/4/0"
+   "pick": "sound/3/None"
   },
   {
    "obs": [
@@ -10660,7 +10660,7 @@
     87.0,
     1.0
    ],
-   "pick": "squirt/7/None"
+   "pick": "squirt/4/0"
   },
   {
    "obs": [
@@ -11952,7 +11952,7 @@
     97.0,
     0.3333
    ],
-   "pick": "throw/5/0"
+   "pick": "throw/4/0"
   },
   {
    "obs": [
@@ -12598,7 +12598,7 @@
     0.0,
     0.3333
    ],
-   "pick": "pass"
+   "pick": "trap/3/0"
   },
   {
    "obs": [
@@ -12921,7 +12921,7 @@
     43.0,
     1.0
    ],
-   "pick": "pass"
+   "pick": "throw/4/0"
   },
   {
    "obs": [
@@ -13244,7 +13244,7 @@
     0.0,
     0.3333
    ],
-   "pick": "lure/4/None"
+   "pick": "lure/6/None"
   },
   {
    "obs": [
@@ -13567,7 +13567,7 @@
     0.0,
     1.0
    ],
-   "pick": "lure/3/1"
+   "pick": "squirt/4/1"
   },
   {
    "obs": [
@@ -15505,7 +15505,7 @@
     60.0,
     1.0
    ],
-   "pick": "squirt/6/0"
+   "pick": "squirt/4/0"
   },
   {
    "obs": [
@@ -15828,7 +15828,7 @@
     0.0,
     0.3333
    ],
-   "pick": "throw/5/1"
+   "pick": "drop/4/1"
   },
   {
    "obs": [
@@ -16474,7 +16474,7 @@
     0.0,
     1.0
    ],
-   "pick": "throw/6/0"
+   "pick": "sound/7/None"
   },
   {
    "obs": [
@@ -16797,7 +16797,7 @@
     51.0,
     1.0
    ],
-   "pick": "pass"
+   "pick": "throw/4/0"
   },
   {
    "obs": [
@@ -19381,7 +19381,7 @@
     0.0,
     1.0
    ],
-   "pick": "sound/6/None"
+   "pick": "sound/4/None"
   },
   {
    "obs": [
@@ -19704,7 +19704,7 @@
     32.0,
     1.0
    ],
-   "pick": "sound/6/None"
+   "pick": "sound/7/None"
   },
   {
    "obs": [
@@ -20996,7 +20996,7 @@
     0.0,
     1.0
    ],
-   "pick": "drop/4/0"
+   "pick": "sound/5/None"
   },
   {
    "obs": [
@@ -21319,7 +21319,7 @@
     0.0,
     1.0
    ],
-   "pick": "drop/7/None"
+   "pick": "squirt/6/1"
   },
   {
    "obs": [
@@ -21965,7 +21965,7 @@
     0.0,
     1.0
    ],
-   "pick": "throw/4/2"
+   "pick": "throw/6/1"
   },
   {
    "obs": [
@@ -23257,7 +23257,7 @@
     29.0,
     0.3333
    ],
-   "pick": "pass"
+   "pick": "sound/2/None"
   },
   {
    "obs": [
@@ -23580,7 +23580,7 @@
     0.0,
     0.3333
    ],
-   "pick": "drop/4/1"
+   "pick": "sound/4/None"
   },
   {
    "obs": [
@@ -23903,7 +23903,7 @@
     108.0,
     1.0
    ],
-   "pick": "throw/7/None"
+   "pick": "throw/3/1"
   },
   {
    "obs": [
@@ -24226,7 +24226,7 @@
     0.0,
     0.3333
    ],
-   "pick": "squirt/4/2"
+   "pick": "sound/4/None"
   },
   {
    "obs": [
@@ -24872,7 +24872,7 @@
     0.0,
     0.3333
    ],
-   "pick": "sound/4/None"
+   "pick": "throw/4/1"
   },
   {
    "obs": [
@@ -25518,7 +25518,7 @@
     57.0,
     0.3333
    ],
-   "pick": "squirt/6/0"
+   "pick": "squirt/4/0"
   },
   {
    "obs": [
@@ -25841,7 +25841,7 @@
     0.0,
     1.0
    ],
-   "pick": "throw/4/2"
+   "pick": "throw/4/0"
   },
   {
    "obs": [
@@ -27779,7 +27779,7 @@
     72.0,
     0.3333
    ],
-   "pick": "lure/4/None"
+   "pick": "squirt/6/2"
   },
   {
    "obs": [
@@ -29394,7 +29394,7 @@
     111.0,
     1.0
    ],
-   "pick": "sound/5/None"
+   "pick": "squirt/7/None"
   },
   {
    "obs": [
@@ -30040,7 +30040,7 @@
     0.0,
     1.0
    ],
-   "pick": "throw/7/None"
+   "pick": "fire"
   },
   {
    "obs": [
@@ -31332,7 +31332,7 @@
     0.0,
     1.0
    ],
-   "pick": "throw/6/1"
+   "pick": "throw/4/1"
   },
   {
    "obs": [
@@ -33270,7 +33270,7 @@
     0.0,
     1.0
    ],
-   "pick": "lure/4/None"
+   "pick": "sound/4/None"
   },
   {
    "obs": [
@@ -33593,7 +33593,7 @@
     0.0,
     1.0
    ],
-   "pick": "sound/6/None"
+   "pick": "throw/4/2"
   },
   {
    "obs": [
@@ -34562,7 +34562,7 @@
     0.0,
     1.0
    ],
-   "pick": "fire"
+   "pick": "drop/3/1"
   },
   {
    "obs": [
@@ -35208,7 +35208,7 @@
     0.0,
     1.0
    ],
-   "pick": "throw/7/None"
+   "pick": "sound/4/None"
   },
   {
    "obs": [
@@ -35854,7 +35854,7 @@
     0.0,
     1.0
    ],
-   "pick": "drop/7/None"
+   "pick": "drop/4/0"
   },
   {
    "obs": [
@@ -36177,7 +36177,7 @@
     35.0,
     0.3333
    ],
-   "pick": "pass"
+   "pick": "throw/3/1"
   },
   {
    "obs": [
@@ -37146,7 +37146,7 @@
     0.0,
     1.0
    ],
-   "pick": "sound/6/None"
+   "pick": "sound/7/None"
   },
   {
    "obs": [
@@ -37469,7 +37469,7 @@
     0.0,
     1.0
    ],
-   "pick": "throw/4/1"
+   "pick": "throw/3/1"
   },
   {
    "obs": [
@@ -38115,7 +38115,7 @@
     92.0,
     1.0
    ],
-   "pick": "squirt/4/0"
+   "pick": "throw/4/0"
   },
   {
    "obs": [
