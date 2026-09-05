@@ -13,8 +13,12 @@ python tools/fetch_icons.py     # once, optional -- gag/cog/emblem art
 python -m visualizer.serve      # opens localhost:8000/visualizer/index.html
 ```
 
-Flags: `--port N`, `--no-browser`. Verified working: the server starts,
-serves the page, and the manifest lists ~60 solver source files.
+Flags: `--port N`, `--no-browser`.
+
+The server now answers the page's solver calls at `POST /api/call`.
+The OLD page still boots Pyodide off `/api/manifest`, which is left in
+place so it keeps working until the rewrite replaces it; the new page
+should not use it.
 
 ## The architecture
 
@@ -97,7 +101,7 @@ Counted by mentions in each file, which is blunt but decisive:
 | organic | 5 | **0** |
 | lured | 5 | 2 |
 | objective | 17 | 10 |
-| SOS / unites / slips | **0** (now fixed) | **0** |
+| SOS / unites / slips | 0 → **fixed** | **0** |
 
 So the page is a **solo, single-toon position explorer** that predates
 most of what the solver became. Adding three fields will not cover it.
@@ -126,37 +130,24 @@ track. A party-capable page needs it to accept:
 `catalogue()` should also expose the SOS card table and the unite kinds,
 so the page can offer them without hardcoding names.
 
-## It cannot run the policy at all, and that is the biggest gap
+## The policy: was unreachable, now wired
 
-`bridge.py`, `index.html` and `worker.js` mention `hybrid`, `climb`,
-`policy`, `ppo` and `numpy` **zero times each**. Every number this tool
-shows comes from `expectimax` — the exact search.
+Worth knowing because it shaped the architecture. `bridge.py`,
+`index.html` and `worker.js` mentioned `hybrid`, `climb`, `policy`,
+`ppo` and `numpy` **zero times each**. Every number the tool showed came
+from `expectimax` — and that is the engine you do NOT play with. The
+overlay panel's default is `hybrid.climb`: PPO proposes a menu and
+`_quick_score` disposes. The two are measured to disagree, picking the
+same KIND of move and a different gag, on 6 boards out of 6.
 
-That is the engine you do NOT play with. The overlay panel's default is
-`hybrid.climb`: the PPO policy proposes a menu and `_quick_score`
-disposes. So the tool for understanding the solver cannot show the
-engine that actually gives the advice, and the two are measured to
-disagree — same kind of move, different gag, on 6 boards out of 6.
+It was doubly blocked in the browser: `worker.js` never called
+`loadPackage`, so numpy was absent and `hybrid.available()` was False
+whatever the API did; and `serve.python_manifest` globbed `*.py`, so the
+7.7 MB policy export never reached the browser filesystem.
 
-Two hard blockers, both verified:
-
-1. **numpy is never loaded.** `worker.js` has no `loadPackage` call, so
-   `hybrid.available()` is False in the browser however the API is
-   wired. Pyodide ships numpy; it just has to be asked for.
-2. **The policy weights are not mounted.** `serve.python_manifest`
-   globs `*.py` only — 59 files, no non-Python entry — so
-   `solver/rl/ppo_facility.json` never reaches the browser filesystem
-   and `hybrid._load()` finds no export.
-
-Neither is hard to fix. The cost is the thing to decide: numpy adds
-several MB to the boot and the policy export is **7.7 MB**, on top of
-the ~10 MB of Pyodide already downloaded. Roughly doubling first load
-for a debugging tool is a real trade, and it may be worth loading the
-policy lazily — only when the user asks for the PPO answer.
-
-What it buys is the comparison the panel already makes and this tool
-cannot: the policy's move beside the search's, on a position you built
-by hand, with the tree underneath showing why the search disagrees.
+Both blockers were Pyodide's. Server side numpy is installed and the
+export is on disk, so `api_climb` just works — see the API table. That
+is the largest single reason the solver moved out of the browser.
 
 ## What to build, in order
 
@@ -168,21 +159,22 @@ by hand, with the tree underneath showing why the search disagrees.
    positions that actually matter.
 3. **Consumables in the scenario builder.** Slips, unites, SOS cards.
    The Python side now carries them; nothing offers them.
-4. **The two engines side by side** — see the section above. Needs
-   numpy loaded, the 7.7 MB policy mounted, and an `api_climb` exposing
-   `hybrid.climb`. This is the single most valuable addition: it is the
-   comparison the panel already makes and the reason to open this tool
-   at all.
+4. **The two engines side by side.** `api_climb` exists and works, so
+   this is page work only: show the policy's move beside the search's
+   best line, on a position built by hand, with the tree underneath
+   showing why they differ. The comparison the panel already makes and
+   the best reason to open this tool at all.
 5. **Objective comparison.** `catalogue()` already returns every preset
    with its weights; the page uses one at a time.
 
 ## Caveats
 
-**Never write the rules in JavaScript.** The whole point of Pyodide here
-is that there is no second implementation. Anything the page needs to
-know about damage, accuracy, lure or trap goes through `bridge`.
-
-**`result` is a JSON string, not an object.** Parse it.
+**Never write the rules in JavaScript.** The point of running the real
+solver is that there is no second implementation to drift. The last one
+did: by the time the old JavaScript port was retired it still thought
+Small Magnet was single-target and that lures never expired. Anything
+the page needs to know about damage, accuracy, lure or trap goes through
+`bridge`.
 
 **The tree is lazy, one layer per call.** `api_expand_decision` returns
 children, not a subtree. Deep expansion is many round trips, each one a
@@ -197,8 +189,11 @@ pouch over capacity is rejected with `{error}`. The limits are in
 `catalogue().limits`; enforce them in the grid so the error is never the
 first thing the user learns.
 
-**First load is slow.** ~10 MB of Pyodide from a CDN before anything
-works. Whatever replaces the current page needs an honest loading state.
+**A search takes seconds, not milliseconds.** The panel budgets 15s and
+a crowded board uses it. `serve.py` is a `ThreadingTCPServer` so the
+server stays responsive, but the page must show that a call is running
+and never block on one. First load is no longer slow — that was
+Pyodide.
 
 ## The stack: match the overlay panel
 
@@ -230,21 +225,20 @@ The pieces that carry the identity:
 A tree node coloured by its gag's track, using the same palette the
 panel uses for its advice card, is most of the visual work done.
 
-### This does not threaten the Pyodide property
+### What the build step does and does not change
 
-The build step applies to the PAGE. `serve.py` still mounts the real
-`solver` package into the browser at runtime and the worker still
-imports `bridge`, so there is still no JavaScript copy of the rules.
-What changes is that `index.html` becomes a Vite entry point with
-components instead of one 1005-line file.
+It applies to the PAGE only. Every answer still comes from `bridge`
+calling the real `solver` package, now over HTTP, so there is still no
+JavaScript copy of the rules. What changes is that `index.html` becomes
+a Vite entry point with components instead of one 1005-line file.
 
-Two consequences to plan for:
+One consequence to plan for: **`visualizer/dist` gets committed**, the
+way `overlay_ui/dist` is, so running the tool needs Node no more than
+running the solver needs a compiler. `serve.py` then serves the built
+page instead of the hand-written one.
 
-- **`visualizer/dist` gets committed**, the way `overlay_ui/dist` is,
-  so running the tool needs Node no more than running the solver needs
-  a compiler. `serve.py` then serves the built page.
-- **Pyodide still comes from the CDN at runtime** -- it is not an npm
-  dependency and should not become one.
+There is no Pyodide and no npm solver dependency to worry about any
+more -- that whole class of problem left with it.
 
 ### Shared components
 
