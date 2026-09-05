@@ -80,16 +80,32 @@ def toon_to_dict(toon: ToonState) -> Dict[str, Any]:
         # 10-15%, so anything measured across this boundary was measuring
         # the wrong loadout.
         "organic": sorted(t.value for t in toon.organic_tracks),
+        # THE CONSUMABLES, and they were all missing. Same failure the
+        # organic note above describes and for the same reason: a
+        # dropped field is invisible rather than broken. A position
+        # built here with five slips and a book of cards came back
+        # carrying none, so every line this tool showed was the line for
+        # a toon holding nothing -- and a solo VP is 0% without them
+        # against 45% with.
+        "fires": int(getattr(toon, "fires", 0)),
+        "unites_held": int(getattr(toon, "unites_held", 0)),
+        # Keyed by the card's own name, exactly as `simulator` looks
+        # them up. JSON has no tuple keys but these are plain strings.
+        "sos_cards": dict(getattr(toon, "sos_cards", {}) or {}),
     }
 
 
 def toon_from_dict(d: Dict[str, Any]) -> ToonState:
-    return ToonState(
+    toon = ToonState(
         laff=d["laff"], max_laff=d["max_laff"],
         track_exp={Track(k): v for k, v in d["track_exp"].items()},
         gag_counts={(Track(track), lvl): n for track, lvl, n in d["gags"]},
         organic_tracks=frozenset(Track(t) for t in d.get("organic", ())),
+        fires=int(d.get("fires", 0)),
     )
+    toon.unites_held = int(d.get("unites_held", 0))
+    toon.sos_cards = dict(d.get("sos_cards", {}) or {})
+    return toon
 
 
 def state_to_dict(state: BattleState) -> Dict[str, Any]:
