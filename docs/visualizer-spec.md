@@ -94,6 +94,38 @@ track. A party-capable page needs it to accept:
 `catalogue()` should also expose the SOS card table and the unite kinds,
 so the page can offer them without hardcoding names.
 
+## It cannot run the policy at all, and that is the biggest gap
+
+`bridge.py`, `index.html` and `worker.js` mention `hybrid`, `climb`,
+`policy`, `ppo` and `numpy` **zero times each**. Every number this tool
+shows comes from `expectimax` — the exact search.
+
+That is the engine you do NOT play with. The overlay panel's default is
+`hybrid.climb`: the PPO policy proposes a menu and `_quick_score`
+disposes. So the tool for understanding the solver cannot show the
+engine that actually gives the advice, and the two are measured to
+disagree — same kind of move, different gag, on 6 boards out of 6.
+
+Two hard blockers, both verified:
+
+1. **numpy is never loaded.** `worker.js` has no `loadPackage` call, so
+   `hybrid.available()` is False in the browser however the API is
+   wired. Pyodide ships numpy; it just has to be asked for.
+2. **The policy weights are not mounted.** `serve.python_manifest`
+   globs `*.py` only — 59 files, no non-Python entry — so
+   `solver/rl/ppo_facility.json` never reaches the browser filesystem
+   and `hybrid._load()` finds no export.
+
+Neither is hard to fix. The cost is the thing to decide: numpy adds
+several MB to the boot and the policy export is **7.7 MB**, on top of
+the ~10 MB of Pyodide already downloaded. Roughly doubling first load
+for a debugging tool is a real trade, and it may be worth loading the
+policy lazily — only when the user asks for the PPO answer.
+
+What it buys is the comparison the panel already makes and this tool
+cannot: the policy's move beside the search's, on a position you built
+by hand, with the tree underneath showing why the search disagrees.
+
 ## What to build, in order
 
 1. **A party.** Up to four toons, each with their own pouch, training,
@@ -104,11 +136,11 @@ so the page can offer them without hardcoding names.
    positions that actually matter.
 3. **Consumables in the scenario builder.** Slips, unites, SOS cards.
    The Python side now carries them; nothing offers them.
-4. **The two engines side by side.** The overlay panel shows the policy's
-   move and the exact search's answer together, each with its own
-   accuracy and reason. This tool shows only the tree. Seeing where they
-   disagree is exactly what a position explorer is for — measured, they
-   pick the same *kind* of move but a different gag.
+4. **The two engines side by side** — see the section above. Needs
+   numpy loaded, the 7.7 MB policy mounted, and an `api_climb` exposing
+   `hybrid.climb`. This is the single most valuable addition: it is the
+   comparison the panel already makes and the reason to open this tool
+   at all.
 5. **Objective comparison.** `catalogue()` already returns every preset
    with its weights; the page uses one at a time.
 
