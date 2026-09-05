@@ -168,6 +168,60 @@ first thing the user learns.
 **First load is slow.** ~10 MB of Pyodide from a CDN before anything
 works. Whatever replaces the current page needs an honest loading state.
 
+## The stack: match the overlay panel
+
+[OWNER] Decided -- the page is rebuilt on the same stack and the same
+colours as the live UI, rather than staying a hand-written CDN page.
+
+From `overlay_ui/package.json`:
+
+| | |
+|---|---|
+| build | Vite 8 (`npm run dev` / `npm run build`) |
+| framework | React 19 |
+| styling | Tailwind 4 + daisyUI 5, via `@tailwindcss/vite` |
+| font | Fredoka, falling back to Segoe UI / system-ui |
+
+Reuse `overlay_ui/src/index.css` wholesale rather than re-deriving it.
+The pieces that carry the identity:
+
+- The daisyUI theme block -- `--color-base-100` through `-300`,
+  `--color-primary`, `success`, `warning`, `error`, and the
+  `--radius-box` / `--radius-field` rounding.
+- The seven track palettes, `.track-toon_up` through `.track-drop`,
+  each giving `--track-bg`, `--track-border`, `--track-text` and an
+  `--accent-glow`. Plus `.track-none`, `.track-fire` and `.track-sos`,
+  which are sentinels rather than gag tracks and must stay visually
+  distinct from a pass.
+- `.toontown-card-hero`, `.toontown-card-panel` and `.toontown-btn-3d`.
+
+A tree node coloured by its gag's track, using the same palette the
+panel uses for its advice card, is most of the visual work done.
+
+### This does not threaten the Pyodide property
+
+The build step applies to the PAGE. `serve.py` still mounts the real
+`solver` package into the browser at runtime and the worker still
+imports `bridge`, so there is still no JavaScript copy of the rules.
+What changes is that `index.html` becomes a Vite entry point with
+components instead of one 1005-line file.
+
+Two consequences to plan for:
+
+- **`visualizer/dist` gets committed**, the way `overlay_ui/dist` is,
+  so running the tool needs Node no more than running the solver needs
+  a compiler. `serve.py` then serves the built page.
+- **Pyodide still comes from the CDN at runtime** -- it is not an npm
+  dependency and should not become one.
+
+### Shared components
+
+The two tools now overlap: a cog row, a gag icon, a track badge, an
+advice card. Whether they share a package or copy is worth deciding
+early. Copying is what produced the last drift here -- two panel
+workers diverged until one's Reconsider silently did nothing, which is
+why `solver/live/worker.py` now exists.
+
 ## Worth deciding before starting
 
 The overlay panel (`overlay_ui/`) is a built React app with a component
