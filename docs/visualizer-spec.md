@@ -16,32 +16,56 @@ python -m visualizer.serve      # opens localhost:8000/visualizer/index.html
 Flags: `--port N`, `--no-browser`. Verified working: the server starts,
 serves the page, and the manifest lists ~60 solver source files.
 
-## The architecture, and why it stays
+## The architecture
 
 ```
-index.html ──postMessage──► worker.js ──fetch /api/manifest──► serve.py
-   (React 18 UMD)           (Pyodide)  ──fetch each .py──────► browser FS
-        ▲                              └── import bridge ──► solver.*
-        └────────── {id, result} ──────────────┘
+page ──POST /api/call {fn, payload}──► serve.py ──► bridge ──► solver.*
+  ▲                                                              │
+  └──────────────── JSON ────────────────────────────────────────┘
 ```
 
-**The browser runs the real solver.** `serve.py` mounts the actual
-`solver` package into Pyodide, so there is no JavaScript copy of the
-battle rules and nothing to keep in sync. That property is the reason
-this tool is trustworthy and it is not up for negotiation in a rewrite.
+**The solver runs in the server, not the browser.** `serve.py` is
+CPython in the repo: numpy is installed, `solver/rl/ppo_facility.json`
+is on disk, and `bridge` imports directly.
 
-**The solver runs in a Web Worker.** Pyodide is single-threaded and its
-calls are synchronous; in the page it froze the UI.
+It used to run in the browser under Pyodide, and that is now gone from
+the plan. The property Pyodide existed for -- no JavaScript copy of the
+battle rules -- is kept and is in fact stronger, since every answer
+comes from `bridge` calling the same `solver` package the tests import.
+A JSON call over HTTP is a shorter path to that than shipping the
+interpreter.
 
-**No build step.** React 18 comes from a CDN as UMD, the page is one
-hand-written `index.html`. First load pulls ~10 MB of Pyodide and is
-slow; after that it is cached.
+What it cost, and why it went:
+
+| | Pyodide | server |
+|---|---|---|
+| first load | ~10 MB runtime | nothing |
+| numpy | must `loadPackage`; never was | already installed |
+| policy weights | 7.7 MB download; never mounted | already on disk |
+| search speed | Pyodide's interpreter | full CPython |
+| the PPO engine | **blocked** | works |
+
+The search is CPU-bound against a seconds budget, so an interpreter
+penalty comes straight off the depth it reaches.
+
+The one thing Pyodide bought was hosting the page with no backend, and
+that was never used -- the tool has always required
+`python -m visualizer.serve`, and a server was needed regardless
+because `file://` blocks the fetches.
+
+**No Web Worker either.** It existed because Pyodide is synchronous and
+froze the page. `serve.py` is a `ThreadingTCPServer`, so a long search
+occupies its own thread and the page just awaits a `fetch`.
 
 ## The API the page calls
 
-Every call is `postMessage({id, fn, payload})` and comes back as
-`{type: "result", id, result | error}`. `result` is a JSON **string**.
-`bridge[fn]` is called with `JSON.stringify(payload)`.
+`POST /api/call` with `{"fn": "...", "payload": {...}}`, JSON back.
+One endpoint rather than a route per call, so adding a bridge function
+needs no server change. Only names beginning `api_` are callable --
+`bridge` is full of helpers that take Python objects. Anything that
+raises comes back as `{"error": "..."}` with a 200, because the useful
+failures here are ordinary: a loadout over the pouch cap, a `[TODO]`
+attack table.
 
 | `fn` | payload | returns |
 |---|---|---|
@@ -51,8 +75,16 @@ Every call is `postMessage({id, fn, payload})` and comes back as
 | `api_expand_action` | `{state, action, objective}` | `{children}` |
 | `api_cog_forecast` | `{state}` | `{cogs}` — what each cog threatens |
 | `api_best_line` | `{state, depth, objective}` | `{line}` |
+| `api_climb` | `{state, budget?, width?}` | `{available, plan, labels, unite}` or `{available: false, reason}` |
 
-`api_catalogue` is pushed once on `{type: "ready"}` at boot.
+`api_catalogue` takes no payload; call it once at boot to fill the
+pickers.
+
+`api_climb` is new and is the policy -- `hybrid.climb`, the engine the
+overlay panel plays with. Deterministic on a fixed seed, because the
+page re-asks the same position as the user clicks about and an answer
+that changed each time would read as a solver bug. Defaults are
+`budget=24, width=16`, matching the panel.
 
 ## What it cannot express
 

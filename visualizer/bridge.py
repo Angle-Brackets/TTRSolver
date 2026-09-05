@@ -479,3 +479,55 @@ def api_best_line(payload_json: str) -> str:
     except NotImplementedError as exc:
         return json.dumps({"error": str(exc)})
     return json.dumps({"line": line})
+
+
+def climb_plan(state_dict: Dict[str, Any], budget: int = 24,
+               width: int = 16) -> Dict[str, Any]:
+    """What the POLICY would play here, beside what the search says.
+
+    `hybrid.climb` is the engine the overlay panel plays with by
+    default: PPO proposes a menu and `_quick_score` disposes. Every
+    other number this module returns comes from `expectimax`, so
+    without this the tool cannot show the engine that actually gives
+    the advice -- and the two are measured to disagree, picking the same
+    KIND of move and a different gag.
+
+    It needs numpy and the exported policy, neither of which existed in
+    the browser: `worker.js` never called `loadPackage` and the source
+    manifest globbed `*.py`, so the 7.7 MB export never arrived. Server
+    side both are simply present. `available()` is still checked, so a
+    checkout without the export reports why instead of raising.
+    """
+    from solver.search import hybrid
+
+    if not hybrid.available():
+        return {"available": False, "reason": hybrid.unavailable_reason()}
+    import random
+
+    state = state_from_dict(state_dict)
+    # A FIXED SEED. The page re-asks the same position as the user
+    # clicks about, and `climb` is deterministic given one -- an answer
+    # that changed on every refresh would look like a bug in the solver.
+    hybrid.LAST_UNITE = None
+    plan = hybrid.climb(state, random.Random(0), budget=budget, width=width)
+    if plan is None:
+        return {"available": True, "plan": None}
+    return {
+        "available": True,
+        "budget": budget,
+        "width": width,
+        "unite": list(hybrid.LAST_UNITE) if hybrid.LAST_UNITE else None,
+        "plan": [None if a is None else action_to_dict(a) for a in plan],
+        "labels": [describe_action(a) for a in plan],
+    }
+
+
+def api_climb(payload_json: str) -> str:
+    payload = json.loads(payload_json)
+    try:
+        return json.dumps(climb_plan(
+            payload["state"],
+            budget=int(payload.get("budget", 24)),
+            width=int(payload.get("width", 16))))
+    except (NotImplementedError, ValueError, KeyError) as exc:
+        return json.dumps({"error": f"{exc.__class__.__name__}: {exc}"})

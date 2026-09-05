@@ -91,3 +91,119 @@ class StateRoundTripTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PolicyEndpointTest(unittest.TestCase):
+    """`api_climb` is why the solver moved out of the browser.
+
+    Every other number the tool returns comes from `expectimax`. The
+    overlay panel plays with `hybrid.climb`, and under Pyodide that was
+    doubly blocked -- numpy was never `loadPackage`d and the source
+    manifest globbed `*.py`, so the 7.7 MB policy export never reached
+    the browser filesystem. Server side both are simply present.
+    """
+
+    def _state(self):
+        from solver import data
+
+        hp = data.cog_max_hp(8)
+        cog = CogState(cog_type="loan_shark", department="cashbot",
+                       level=8, hp=hp, max_hp=hp)
+        toon = ToonState(90, 137, {t: 7 for t in Track},
+                         {(Track.THROW, 5): 3, (Track.THROW, 6): 2,
+                          (Track.SQUIRT, 5): 3},
+                         frozenset())
+        return bridge.state_to_dict(BattleState(toons=[toon], cogs=[cog]))
+
+    def test_it_answers_with_a_plan(self):
+        import json
+
+        out = json.loads(bridge.api_climb(json.dumps({"state": self._state()})))
+        if not out.get("available"):
+            self.skipTest("policy unavailable: %s" % out.get("reason"))
+        self.assertEqual(1, len(out["plan"]))
+        self.assertTrue(out["labels"][0])
+
+    def test_it_is_deterministic(self):
+        """The page re-asks the same position as the user clicks about;
+        an answer that changed each time would read as a solver bug."""
+        import json
+
+        payload = json.dumps({"state": self._state()})
+        a = json.loads(bridge.api_climb(payload))
+        b = json.loads(bridge.api_climb(payload))
+        if not a.get("available"):
+            self.skipTest("policy unavailable")
+        self.assertEqual(a["labels"], b["labels"])
+
+    def test_a_missing_policy_is_reported_not_raised(self):
+        import json
+
+        from solver.search import hybrid
+
+        saved = hybrid.available
+        hybrid.available = lambda: False
+        try:
+            out = json.loads(
+                bridge.api_climb(json.dumps({"state": self._state()})))
+        finally:
+            hybrid.available = saved
+        self.assertFalse(out["available"])
+        self.assertIn("reason", out)
+
+
+class CallEndpointTest(unittest.TestCase):
+    """`POST /api/call` is the whole page-to-solver contract."""
+
+    @classmethod
+    def setUpClass(cls):
+        import socketserver
+        import threading
+
+        from visualizer.serve import Handler
+
+        cls.httpd = socketserver.ThreadingTCPServer(("127.0.0.1", 0), Handler)
+        cls.port = cls.httpd.server_address[1]
+        threading.Thread(target=cls.httpd.serve_forever, daemon=True).start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.httpd.shutdown()
+
+    def _post(self, body):
+        import json
+        import urllib.request
+
+        req = urllib.request.Request(
+            "http://127.0.0.1:%d/api/call" % self.port,
+            data=json.dumps(body).encode(),
+            headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            return json.loads(resp.read())
+
+    def test_the_catalogue_comes_back(self):
+        out = self._post({"fn": "api_catalogue"})
+        for key in ("departments", "gags", "objectives", "limits"):
+            self.assertIn(key, out)
+
+    def test_a_scenario_builds(self):
+        out = self._post({"fn": "api_root", "payload": {
+            "laff": 90, "gags": [["throw", 5, 3]],
+            "cogs": [{"type": "loan_shark", "department": "cashbot",
+                      "level": 8}]}})
+        self.assertEqual("decision", out["kind"])
+        self.assertEqual(["Loan Shark L8 90/90"], out["cogs"])
+
+    def test_only_api_functions_are_callable(self):
+        """`bridge` is full of helpers that take Python objects, and the
+        module namespace is not a safe thing to expose wholesale."""
+        out = self._post({"fn": "os"})
+        self.assertIn("error", out)
+        out = self._post({"fn": "state_from_dict", "payload": {}})
+        self.assertIn("error", out)
+
+    def test_a_bad_loadout_is_an_error_not_a_crash(self):
+        out = self._post({"fn": "api_root", "payload": {
+            "laff": 90, "gags": [["throw", 5, 999]], "cogs": []}})
+        self.assertIn("error", out)
+        self.assertIn("pouch", out["error"])
