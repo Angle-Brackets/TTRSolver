@@ -172,9 +172,19 @@ def search_in_child(state, objective_name: str, depth: int,
     four only made that less obvious rather than fixing it. A process
     has its own interpreter and cannot interfere at all.
 
-    Returns `(text, track, level)` rather than an `Action`, so nothing
-    crosses the process boundary but a string and two scalars, and the
-    child renders the wording itself so it stays identical either way.
+    Returns `(text, track, level, target)` rather than an `Action`, so
+    nothing crosses the process boundary but a string and three scalars,
+    and the child renders the wording itself so it stays identical
+    either way.
+
+    THE TARGET IS PART OF THE MOVE, not decoration on the label. It was
+    left out on the grounds that the caller only needed the track and
+    the level -- true for `reject_key`, which ignores the target, and
+    false for `explain.describe`, which SIMULATES the round. A move
+    rebuilt without one has `target_index=None`, and
+    `simulator._targets_for` reads that as every active cog, so a
+    single-target gag was described as hitting the whole lineup: a
+    Whole Fruit Pie on one cog captioned "147 damage across 4 cogs".
 
     Top-level rather than a closure because Windows spawns rather than
     forks, and a closure cannot be pickled into a fresh interpreter.
@@ -194,10 +204,11 @@ def search_in_child(state, objective_name: str, depth: int,
         # unaffected, so the caller keeps its answer -- but it has to be
         # told, or the panel silently downgrades to the policy on every
         # board holding that cog and looks like it is merely slow.
-        return MISSING_DATA, str(exc), None
+        return MISSING_DATA, str(exc), None, None
     if action is None:
-        return "no legal move -- nothing left to throw", None, None
-    return (_render(action, state), _track_of(action), _level_of(action))
+        return "no legal move -- nothing left to throw", None, None, None
+    return (_render(action, state), _track_of(action), _level_of(action),
+            getattr(action, "target_index", None))
 
 
 def rows_from_state(state) -> List[CogRow]:
@@ -546,7 +557,7 @@ class RealmsWorker(AdviceWorker):
             # A margin past the child's own deadline. It should return
             # on time by itself; this only stops a wedged process
             # holding the panel on "thinking" for ever.
-            text, track, level = future.result(timeout=budget + 20.0)
+            text, track, level, target = future.result(timeout=budget + 20.0)
             if text == MISSING_DATA:
                 # Keep the policy's move -- it is a real answer and the
                 # only one available here -- and say what stopped the
@@ -564,8 +575,8 @@ class RealmsWorker(AdviceWorker):
             # A search that dies takes its thread with it and nothing
             # else notices: no advice appears, which looks exactly like
             # a search still running.
-            text, track, level = (f"the search failed: "
-                                  f"{exc.__class__.__name__}: {exc}"), None, None
+            text, track, level, target = (f"the search failed: "
+                                          f"{exc.__class__.__name__}: {exc}"), None, None, None
 
         with self._lock:
             if token != self._current:
@@ -576,26 +587,38 @@ class RealmsWorker(AdviceWorker):
         # costs nothing: the fifteen seconds are spent while they are
         # looking at the policy's move, not after they ask.
         # THE SEARCH HANDS BACK TEXT, NOT AN ACTION. `search_in_child`
-        # runs in another process and returns `(text, track, level)`, so
-        # there is no Action here to keep -- and assigning one crashed
-        # this thread with `NameError: name 'action' is not defined`,
-        # which takes the search with it and looks exactly like a slow
-        # search that never finishes.
+        # runs in another process and returns `(text, track, level,
+        # target)`, so there is no Action here to keep -- and assigning
+        # one crashed this thread with `NameError: name 'action' is not
+        # defined`, which takes the search with it and looks exactly
+        # like a slow search that never finishes.
         #
         # Reconstructed by the same route Reconsider always used: any
-        # `ACTIONS` entry of that track and level. It is the right one
-        # for both purposes here, because `reject_key` ignores the
-        # target and `explain.describe` is asked only about the move's
-        # own track and level.
+        # `ACTIONS` entry of that track and level, THEN the real target
+        # copied onto it. The target used to be dropped, on the reading
+        # that `reject_key` ignores it -- which is true of Reconsider
+        # and false of `explain.describe`, the other consumer, because
+        # that one simulates the round.
         self._search_action = None
         rebuilt = None
         if track and track not in ("fire", "sos") and level:
+            import dataclasses
+
             from ..state import Track
 
             try:
                 rebuilt = _entry_for(Track(track), level)
             except (LookupError, ValueError):
                 rebuilt = None
+            if rebuilt is not None:
+                # A COPY, CARRYING THE REAL TARGET. `_entry_for` hands
+                # back the shared `env.ACTIONS` entry, so setting the
+                # target on it would edit the action table itself for
+                # every later lookup. And the target has to be set: a
+                # `target_index` of None means "every active cog" to the
+                # simulator, which is how a single-target gag came to be
+                # described as hitting four.
+                rebuilt = dataclasses.replace(rebuilt, target_index=target)
         self._search_action = rebuilt
         self.model.search_gag = text
         self.model.search_track = track or ""

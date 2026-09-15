@@ -277,6 +277,21 @@ def toon_from_object(obj, max_fires: int = 0, max_unites: int = 0,
     if max_sos:
         cards = realms_mod.parse_npc_friends(obj.get("setNPCFriendsDict"))
         if cards:
+            # ONLY NAMES `sos.BY_NAME` KNOWS. `npc_names()` maps every
+            # NPC in the game -- 593 of them, of which 29 are SOS cards
+            # -- so a stray id in the dict arrives here as a perfectly
+            # plausible name like "Al Capella". `legal_actions` would
+            # then offer calling it and `apply_toon_action` would raise
+            # `KeyError` on `BY_NAME[action.sos]`, inside the search's
+            # child process, where it looks like a search that failed
+            # rather than a card that does not exist. `_sos_probes`
+            # already filters this way, which is why the POLICY merely
+            # went quiet while the search died.
+            from .. import sos as sos_mod
+
+            cards = {name: count for name, count in cards.items()
+                     if name in sos_mod.BY_NAME}
+        if cards:
             budget = int(max_sos)
             trimmed, spent = {}, 0
             for name in sorted(cards):

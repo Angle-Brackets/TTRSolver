@@ -835,19 +835,48 @@ class SearchThreadSurvivesTest(unittest.TestCase):
     def test_a_gag_result_rebuilds_the_move(self):
         from solver.state import Track
 
-        w = self._worker(("Birthday Cake on cog 1", "throw", 6))
+        w = self._worker(("Birthday Cake on cog 1", "throw", 6, 0))
         w._run_search(0, self._state(), self.objective, 1, 1.0)
         self.assertTrue(w.model.search_ready)
         self.assertIsNotNone(w._search_action)
         self.assertEqual(Track.THROW, w._search_action.track)
         self.assertEqual(6, w._search_action.level)
 
+    def test_the_rebuilt_move_keeps_its_target(self):
+        """THE TARGET IS PART OF THE MOVE.
+
+        Dropping it left `target_index=None`, which
+        `simulator._targets_for` reads as EVERY active cog -- so
+        `explain.describe` simulated a single-target gag as hitting the
+        whole lineup and the panel captioned a Whole Fruit Pie on one
+        cog "147 damage across 4 cogs".
+        """
+        from solver.live import explain
+
+        w = self._worker(("Whole Fruit Pie on cog 1", "throw", 4, 0))
+        state = self._state()
+        w._run_search(0, state, self.objective, 1, 1.0)
+        self.assertEqual(0, w._search_action.target_index)
+        detail = explain.describe(state, w._search_action)
+        self.assertEqual(1, detail.get("targets"))
+
+    def test_the_shared_action_table_is_never_edited(self):
+        """`_entry_for` hands back the live `env.ACTIONS` entry, so the
+        target has to go on a COPY or every later lookup inherits it."""
+        from solver.live.realms_panel import _entry_for
+        from solver.state import Track
+
+        w = self._worker(("Whole Fruit Pie on cog 3", "throw", 4, 2))
+        w._run_search(0, self._state(), self.objective, 1, 1.0)
+        self.assertEqual(2, w._search_action.target_index)
+        self.assertIsNone(_entry_for(Track.THROW, 4).target_index)
+
     def test_reconsider_can_then_reject_it(self):
         """The whole reason the action is kept."""
         from solver.search import hybrid
         from solver.state import Track
 
-        w = self._worker(("Birthday Cake on cog 1", "throw", 6))
+        w = self._worker(("Birthday Cake on cog 1", "throw", 6, 0))
         w._run_search(0, self._state(), self.objective, 1, 1.0)
         w.model.engine = "search"
         w.reconsider()
@@ -857,8 +886,8 @@ class SearchThreadSurvivesTest(unittest.TestCase):
     def test_a_trackless_result_is_not_rebuilt_and_does_not_raise(self):
         """A fire, an SOS or a failed search has no (track, level) to
         rebuild from. That must leave the action empty, not explode."""
-        for result in (("pink slip on cog 1", "fire", None),
-                       ("the search failed: X: y", None, None)):
+        for result in (("pink slip on cog 1", "fire", None, 0),
+                       ("the search failed: X: y", None, None, None)):
             w = self._worker(result)
             w._run_search(0, self._state(), self.objective, 1, 1.0)
             self.assertIsNone(w._search_action, result)
@@ -867,7 +896,64 @@ class SearchThreadSurvivesTest(unittest.TestCase):
     def test_nothing_escapes_the_thread(self):
         """The failure mode this exists for: an exception here is
         invisible and the panel sits on 'thinking' for ever."""
-        w = self._worker(("Birthday Cake on cog 1", "throw", 6))
+        w = self._worker(("Birthday Cake on cog 1", "throw", 6, 0))
         w.model.thinking = True
         w._run_search(0, self._state(), self.objective, 1, 1.0)
         self.assertFalse(w.model.thinking)
+
+
+class SosNamesMustBeRealCardsTest(unittest.TestCase):
+    """`setNPCFriendsDict` is keyed by NPC id, and `npc_names()` maps
+    EVERY NPC in the game -- 593 of them, 29 of which are SOS cards. A
+    stray id therefore arrives as a plausible name like "Al Capella".
+
+    Offered by `legal_actions`, that name reaches
+    `sos_mod.BY_NAME[action.sos]` and raises `KeyError` inside the
+    search's child process, where it reads as a search that failed
+    rather than a card that does not exist. `hybrid._sos_probes` has
+    always filtered; the two enumerators must agree.
+    """
+
+    def test_the_name_tables_really_do_disagree(self):
+        from solver import sos
+        from solver.live import realms
+
+        npc = set(realms.npc_names().values())
+        self.assertGreater(len(npc), len(sos.BY_NAME))
+        self.assertTrue(npc - set(sos.BY_NAME))
+
+    def test_legal_actions_will_not_offer_a_non_card(self):
+        from solver import data, simulator, sos
+        from solver.state import BattleState, CogState, ToonState, Track
+
+        hp = data.cog_max_hp(4)
+        toon = ToonState(90, 137, {Track.THROW: 7}, {(Track.THROW, 3): 2},
+                         frozenset())
+        real = sorted(sos.BY_NAME)[0]
+        toon.sos_cards = {real: 1, "Al Capella": 1}
+        state = BattleState(
+            toons=[toon],
+            cogs=[CogState(cog_type="cold_caller", department="sellbot",
+                           level=4, hp=hp, max_hp=hp)])
+
+        offered = {a.sos for a in simulator.legal_actions(state) if a.sos}
+        self.assertIn(real, offered)
+        self.assertNotIn("Al Capella", offered)
+
+    def test_every_offered_card_can_actually_be_played(self):
+        """The invariant behind the guard: anything enumerated must
+        survive `apply_toon_action`'s `BY_NAME` lookup."""
+        from solver import data, simulator, sos
+        from solver.state import BattleState, CogState, ToonState, Track
+
+        hp = data.cog_max_hp(4)
+        toon = ToonState(90, 137, {Track.THROW: 7}, {(Track.THROW, 3): 2},
+                         frozenset())
+        toon.sos_cards = dict.fromkeys(list(sos.BY_NAME) + ["Ahab", "Alice"], 1)
+        state = BattleState(
+            toons=[toon],
+            cogs=[CogState(cog_type="cold_caller", department="sellbot",
+                           level=4, hp=hp, max_hp=hp)])
+        for action in simulator.legal_actions(state):
+            if action.sos:
+                self.assertIn(action.sos, sos.BY_NAME)

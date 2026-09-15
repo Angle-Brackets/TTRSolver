@@ -163,7 +163,13 @@ def legal_actions(state: BattleState) -> List[Action]:
     # strictly decreasing like a pink slip, so it does not threaten the
     # termination argument above.
     for name, held in getattr(toon, "sos_cards", {}).items():
-        if held > 0:
+        # `name in BY_NAME` is not paranoia: the live readers build
+        # `sos_cards` from what the game sends, and a name the tables do
+        # not know would be offered here and then raise `KeyError` in
+        # `apply_toon_action` -- a crash in the search rather than a
+        # card politely not offered. `hybrid._sos_probes` has always
+        # filtered this way; the two enumerators must agree.
+        if held > 0 and name in sos_mod.BY_NAME:
             actions.append(Action(track=None, sos=name))
 
     for (track, level), count in toon.gag_counts.items():
