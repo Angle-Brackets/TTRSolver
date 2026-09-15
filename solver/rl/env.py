@@ -156,6 +156,35 @@ PENDING_DIM = MAX_TOONS * (len(TRACKS) + 2)      # track one-hot, group, none
 # An unknown kind encodes as all zeros rather than being bucketed into
 # `street`, so a kind added later reads as "not any of these" instead
 # of quietly claiming to be one of them.
+#
+# MEASURED, AND IT BOUGHT NOTHING. Two policies at 2M steps, identical
+# width, seed and settings, differing only in whether these floats are
+# live (`MASK_KINDS_IN_OBS` is the control):
+#
+#     cell        kinds   nokind   discordant     p
+#     street      52.0%    52.7%      +0/-1     1.000
+#     facility    45.3%    44.0%     +12/-10    0.832
+#
+# 150 paired sides a cell, common random numbers. A coin flip.
+#
+# The training eval said otherwise -- 42.75 return against 34.61 -- and
+# that gap did not survive a held-out paired test. It is in-sample luck,
+# and it is the reason the control arm exists: against a SHIPPED policy
+# the same pair would have shown a 55-point "win" caused entirely by a
+# different training recipe.
+#
+# WHAT THIS DOES NOT SAY. Not that context is worthless -- the cells
+# where it should matter most could not be measured. Both arms score
+# ~0% on the VP (a default-recipe policy cannot win one), and the CEO
+# cell raises on a [TODO] accuracy for the_big_cheese/glower_power.
+# Street is most of training and barely moves by construction, leaving
+# facility as the only informative cell. One training run each, and
+# PPO runs are high variance.
+#
+# Kept because it costs nothing: no shipped policy reads these floats,
+# older versions encode unchanged, and the reserved slots mean a new
+# facility will not need another OBS_VERSION bump. It must not be
+# described as an improvement until a boss cell can be measured.
 KINDS = (
     "street",       # an ordinary street battle
     "building",     # a cog building floor
