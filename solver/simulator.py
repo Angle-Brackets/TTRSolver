@@ -618,8 +618,27 @@ def _tick_lure(cog: CogState, rng=random) -> bool:
 
     lure_rounds_remaining counts cog phases the cog skips, so a lure of N
     rounds set this round makes the cog miss this round and the next N-1.
-    The exact off-by-one against the source can't be pinned down while the
-    per-level durations are [TODO] -- see mechanics.lure_duration_rounds.
+
+    THE OFF-BY-ONE IS SETTLED, and this used to say it could not be --
+    on the grounds that the per-level durations were [TODO], which they
+    have not been for some time (`mechanics.lure_duration_rounds` is
+    [CONFIRMED] against the wiki). Measured two ways, agreeing:
+
+    * Here. Lure a board and call this function until something lands:
+      Big Magnet skips 3 cog phases, Hypno-goggles 4, Presentation 8 --
+      each exactly its table value, with damage on the very next phase.
+    * In play. A recorded solo VP, Hypno-goggles onto four cogs: laff
+      held at 106/140 across four consecutive gag-menu rounds and fell
+      on the fifth, immediately after the cog's badge switched to the
+      crossed-out magnet that marks a lure ending.
+
+    **The in-game numbers are one higher and must not be copied.** The
+    gag tooltip reads "Rounds: 5" for Hypno-goggles, 4 for Big Magnet
+    and 9 for Presentation -- it counts the round the lure is thrown in,
+    which is not a round the cog would have attacked in anyway. The
+    badge above a lured cog does NOT count that round and so matches the
+    table. A reader watching footage sees the tooltip first and finds
+    four apparent confirmations that this table is one short; it is not.
     """
     status = cog.status
     if status.lure_rounds_remaining <= 0:

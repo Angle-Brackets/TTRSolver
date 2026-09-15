@@ -891,3 +891,77 @@ class WatchModeTest(unittest.TestCase):
         self.assertIn('self.engine == "none"', src)
         self.assertLess(src.index('self.engine == "none"'),
                         src.index("threading.Thread"))
+
+
+class LureLastsItsTableValueTest(unittest.TestCase):
+    """How many cog phases a lure actually skips.
+
+    Measured two ways that agree: this simulation, and a recorded solo
+    VP where laff held across four consecutive gag-menu rounds after a
+    Hypno-goggles and fell on the fifth.
+
+    The IN-GAME TOOLTIP reads one higher -- 5 for Hypno-goggles, 4 for
+    Big Magnet, 9 for Presentation -- because it counts the round the
+    lure is thrown in, which is not a round the cog would have attacked
+    in. Anyone checking this table against footage will see the tooltip
+    first and conclude the table is one short. It is not, and this test
+    is here so that conclusion fails loudly.
+    """
+
+    def _lured_board(self, level):
+        from solver import data, mechanics
+        from solver.state import BattleState, ToonState
+
+        gag = data.gag(Track.LURE, level)
+        rounds = mechanics.lure_duration_rounds(level)
+        toon = ToonState(laff=140, max_laff=140)
+        toon.track_exp = {Track.LURE: 7}
+        cogs = []
+        for lvl in (9, 3, 12, 2):
+            hp = data.cog_max_hp(lvl)
+            cogs.append(CogState(
+                cog_type="mr_hollywood" if lvl >= 8 else "cold_caller",
+                department="sellbot", level=lvl, hp=hp, max_hp=hp))
+        state = BattleState(toons=[toon], cogs=cogs)
+        for cog in state.cogs:
+            cog.status.apply_lure(acc_before_bonus=gag.accuracy,
+                                  rounds=rounds, level=level)
+        return state, rounds
+
+    def _phases_skipped(self, level):
+        from solver import simulator
+
+        state, rounds = self._lured_board(level)
+        skipped = 0
+        for _ in range(rounds + 4):
+            if simulator._resolve_cog_phase(state) > 0:
+                break
+            skipped += 1
+        return skipped, rounds
+
+    def test_every_lure_level_skips_exactly_its_table_value(self):
+        from solver import data
+
+        for level in range(1, 8):
+            data.gag(Track.LURE, level)
+            skipped, rounds = self._phases_skipped(level)
+            self.assertEqual(rounds, skipped,
+                             "lure level %d skipped %d cog phases, table "
+                             "says %d" % (level, skipped, rounds))
+
+    def test_the_cogs_attack_on_the_very_next_phase(self):
+        """Not one later -- which is what an off-by-one would look like."""
+        from solver import simulator
+
+        state, rounds = self._lured_board(6)
+        for _ in range(rounds):
+            self.assertEqual(0, simulator._resolve_cog_phase(state))
+        self.assertGreater(simulator._resolve_cog_phase(state), 0)
+
+    def test_the_table_still_matches_the_wiki(self):
+        """[CONFIRMED] TTR wiki: 2/2/3/3/4/4/8 by level."""
+        from solver import mechanics
+
+        self.assertEqual([2, 2, 3, 3, 4, 4, 8],
+                         [mechanics.lure_duration_rounds(l)
+                          for l in range(1, 8)])
