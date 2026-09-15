@@ -13,6 +13,9 @@ const EMPTY = {
   search_gag: '', search_track: '', search_gag_level: 0, search_accuracy: null, search_reason: '', search_organic: false,
   zone: '', neighborhood: '', district: '', invasion: '',
   lure_icon: '', map_icon: '', track_icons: {},
+  feedback_move: '', feedback_against: '', feedback_problem: '',
+  feedback_fixable: false, feedback_needs_target: false, feedback_showing: false,
+  feedback_stated: false, pouch: [],
 }
 
 const GAG_ART = import.meta.glob('./assets/gags/*.png', {
@@ -60,6 +63,229 @@ const OBJECTIVES = ['balanced', 'conserve', 'glass cannon', 'speedrun', 'survive
 
 const call = (name, ...args) => {
   if (window.pywebview?.api?.[name]) window.pywebview.api[name](...args)
+}
+
+// "I'D USE THIS INSTEAD" -- the positive channel.
+//
+// The pouch diff can only report what HAPPENED, and what happened is
+// not always what the player endorses: following the advice to see how
+// it plays records agreement, a misclick records a preference nobody
+// holds, and a round that could not be read records nothing. This is
+// where they say it outright.
+//
+// It offers ONLY what the toon is carrying. A preference for a move
+// that was never available is not a preference, and the full
+// seven-by-seven grid is unusable in a strip this size anyway.
+function SuggestPicker({ model, onDone }) {
+  const [track, setTrack] = useState(null)     // a track name, or null
+  const [aiming, setAiming] = useState(null)   // a chosen move awaiting a cog
+
+  const pouch = model.pouch || []
+  const cogs = model.rows || []
+  const tracks = []
+  for (const row of pouch) if (!tracks.includes(row.track)) tracks.push(row.track)
+
+  const send = (move, target) => {
+    // Flattened deliberately: `test_panel_bridge` parses these call
+    // sites to check they match the Python Api, and its reader stops at
+    // the first ")" -- so a nested call here reads as a short argument
+    // list and the arity check silently compares the wrong number.
+    const isFire = move.fire === true
+    const isPass = move.pass === true
+    const track = move.track ?? null
+    const level = move.level ?? null
+    const at = target ?? null
+    call('suggest_move', track, level, at, isFire, isPass)
+    onDone()
+  }
+
+  // Ask for a cog only when there is a choice to make: a group gag has
+  // no single target, and a one-cog board has only one answer.
+  const choose = (move) => {
+    if (move.pass) return send(move, null)
+    if (move.group) return send(move, null)
+    if (cogs.length <= 1) return send(move, 0)
+    setAiming(move)
+  }
+
+  const title = aiming ? `${aiming.name} — at which cog?`
+    : track ? 'which one?' : 'what would you use?'
+
+  return (
+    <div className="flex flex-col gap-1 rounded-lg border border-sky-600/40 bg-sky-50/80 px-2 py-1.5">
+      <div className="flex items-center justify-between text-[9px] font-black uppercase tracking-wider text-sky-800">
+        <span className="truncate">{title}</span>
+        <button type="button" onMouseDown={stopDrag} onClick={onDone}
+                className="shrink-0 opacity-60 hover:opacity-100">✕</button>
+      </div>
+
+      {aiming ? (
+        <div className="flex flex-wrap gap-1">
+          <button type="button" onMouseDown={stopDrag} onClick={() => setAiming(null)}
+                  className="rounded px-1 py-0.5 text-[10px] font-black opacity-60 hover:opacity-100">←</button>
+          {cogs.map((row, i) => (
+            <button
+              key={i} type="button" onMouseDown={stopDrag}
+              onClick={() => send(aiming, i)}
+              className="rounded border border-sky-700/40 bg-white/70 px-2 py-0.5 text-[10px] font-extrabold text-sky-900 hover:bg-white"
+            >
+              {i + 1}. {row.name || `cog ${i + 1}`}
+            </button>
+          ))}
+        </div>
+      ) : !track ? (
+        <div className="flex flex-wrap gap-1">
+          {tracks.map((name) => (
+            <button
+              key={name} type="button" onMouseDown={stopDrag}
+              onClick={() => setTrack(name)}
+              className={`track-${name} rounded border px-2 py-0.5 text-[10px] font-extrabold capitalize`}
+            >
+              {name.replace('_', '-')}
+            </button>
+          ))}
+          {model.fires_left > 0 && cogs.length > 0 && (
+            <button
+              type="button" onMouseDown={stopDrag}
+              onClick={() => choose({ fire: true, name: 'Pink slip' })}
+              className="rounded border border-rose-600/40 bg-rose-50 px-2 py-0.5 text-[10px] font-extrabold text-rose-800"
+            >
+              pink slip
+            </button>
+          )}
+          <button
+            type="button" onMouseDown={stopDrag}
+            onClick={() => choose({ pass: true, name: 'Pass' })}
+            className="rounded border border-amber-700/30 bg-amber-100/70 px-2 py-0.5 text-[10px] font-extrabold text-amber-900"
+          >
+            pass
+          </button>
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center gap-1">
+          <button type="button" onMouseDown={stopDrag} onClick={() => setTrack(null)}
+                  className="rounded px-1 py-0.5 text-[10px] font-black opacity-60 hover:opacity-100">←</button>
+          {pouch.filter((row) => row.track === track).map((row) => (
+            <button
+              key={row.level} type="button" onMouseDown={stopDrag}
+              onClick={() => choose(row)}
+              title={`${row.name} — carrying ${row.count}`}
+              className={`track-${row.track} flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-extrabold`}
+            >
+              <span>{row.name}</span>
+              <span className="opacity-60">×{row.count}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// THE FEEDBACK RECEIPT.
+//
+// A receipt, not a question. The move was READ off the pouch rather
+// than asked for, so the ordinary round needs no answer and this exists
+// to be glanced at and ignored. It says what went into the log while
+// the player still remembers the round, which is the only moment that
+// memory is worth anything.
+//
+// `feedback_showing` is decided in Python, beside every other decision
+// the panel makes, so the strip cannot outlive its row because a window
+// was left open.
+function FeedbackReceipt({ model }) {
+  const [asking, setAsking] = useState(false)
+
+  // Collapse the picker whenever the row underneath it goes away --
+  // otherwise it hangs over the NEXT round and corrects a row the
+  // player never looked at.
+  useEffect(() => {
+    if (!model.feedback_showing) setAsking(false)
+  }, [model.feedback_showing])
+
+  if (!model.feedback_showing) return null
+
+  const cogs = model.rows || []
+  const problem = model.feedback_problem
+
+  return (
+    <div
+      className={`flex items-center gap-1.5 rounded-lg border px-2 py-1 text-[9.5px] font-extrabold ${
+        problem
+          ? 'border-amber-500/50 bg-amber-100/70 text-amber-900'
+          : 'border-emerald-600/30 bg-emerald-50/70 text-emerald-900'
+      }`}
+    >
+      <span className="shrink-0 text-[10px]">{problem ? '⚠' : '✓'}</span>
+
+      <div className="min-w-0 flex-1 truncate">
+        {problem ? (
+          <>not logged — {problem}</>
+        ) : (
+          <>
+            {/* WHICH KIND OF LABEL, always said out loud. Treating an
+                inference as though it were a statement is the mistake
+                the two fields exist to keep apart. */}
+            {model.feedback_stated ? 'you said: ' : 'logged: '}
+            <span className="font-black">{model.feedback_move}</span>
+            {model.feedback_against && (
+              <span className="opacity-70">
+                {' '}· differs from {model.feedback_against}
+              </span>
+            )}
+          </>
+        )}
+      </div>
+
+      {model.feedback_fixable && !asking && (
+        <button
+          type="button"
+          onClick={() => setAsking(true)}
+          onMouseDown={stopDrag}
+          className="shrink-0 rounded border border-current/30 px-1.5 py-0.5 opacity-70 hover:opacity-100"
+        >
+          wrong?
+        </button>
+      )}
+
+      {asking && (
+        <div className="flex shrink-0 items-center gap-1">
+          {/* Naming the cog is the ONLY field that can be edited: the
+              gag came off the pouch exactly, so a player disagreeing
+              with it means something else is wrong and the row should
+              go rather than be patched into something plausible. */}
+          {model.feedback_needs_target && cogs.map((row, i) => (
+            <button
+              key={i}
+              type="button"
+              title={`aimed at ${row.name || `cog ${i + 1}`}`}
+              onMouseDown={stopDrag}
+              onClick={() => { call('correct_feedback', i, false); setAsking(false) }}
+              className="rounded border border-current/30 px-1.5 py-0.5 hover:bg-white/60"
+            >
+              {i + 1}
+            </button>
+          ))}
+          <button
+            type="button"
+            onMouseDown={stopDrag}
+            onClick={() => { call('correct_feedback', null, true); setAsking(false) }}
+            className="rounded border border-rose-600/40 bg-rose-50 px-1.5 py-0.5 text-rose-800 hover:bg-rose-100"
+          >
+            discard
+          </button>
+          <button
+            type="button"
+            onMouseDown={stopDrag}
+            onClick={() => setAsking(false)}
+            className="rounded px-1 py-0.5 opacity-60 hover:opacity-100"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+    </div>
+  )
 }
 
 const stopDrag = (e) => {
@@ -480,6 +706,11 @@ export default function App() {
   const [model, setModel] = useState(EMPTY)
   // Which width of "no, not that" the player is choosing. False = closed.
   const [rejecting, setRejecting] = useState(false)
+  // Collapsed whenever the board moves: a picker left open across a
+  // round would attach the next answer to a position the player is no
+  // longer looking at.
+  const [suggesting, setSuggesting] = useState(false)
+  useEffect(() => { setSuggesting(false) }, [model.advice, model.in_battle])
 
   // Labels for the reject popup. The gag's name is the advice text up to
   // " on ", which is how `advise._render` builds it; the track comes off
@@ -830,6 +1061,26 @@ export default function App() {
           </div>
         </div>
       </div>
+
+      {/* SECTION 3.5: FEEDBACK -- receipt, and the "I'd use" picker */}
+      {suggesting ? (
+        <SuggestPicker model={model} onDone={() => setSuggesting(false)} />
+      ) : (
+        <div className="flex items-stretch gap-1">
+          <div className="min-w-0 flex-1"><FeedbackReceipt model={model} /></div>
+          {model.in_battle && (model.pouch || []).length > 0 && (
+            <button
+              type="button"
+              onMouseDown={stopDrag}
+              onClick={() => setSuggesting(true)}
+              title="tell the solver what you would use here"
+              className="shrink-0 self-center rounded-lg border border-sky-600/40 bg-sky-50/70 px-2 py-1 text-[9.5px] font-extrabold text-sky-800 hover:bg-sky-100"
+            >
+              I'd use…
+            </button>
+          )}
+        </div>
+      )}
 
       {/* SECTION 4: LOCAL API CONNECTION STRIP */}
       <div className="flex items-center justify-between gap-1 px-1 pt-1 border-t border-amber-900/10 text-[9px] font-extrabold text-amber-900/60">

@@ -57,6 +57,10 @@ POLL_INTERVAL = 0.5
 # produced it ends. Long enough to read, short enough not to be mistaken
 # for advice about the next one.
 ADVICE_LINGER = 4.0
+# How long the feedback receipt stays up. Shorter than the advice
+# it sits under: it is a confirmation of something already done,
+# so it must not compete with the move you are about to make.
+FEEDBACK_LINGER = 3.5
 
 
 # Shortest believable gap between two rounds. The gag menu is what the
@@ -275,6 +279,46 @@ class Model:
     # default and the unknown case agree.
     max_unites: int = 0
     max_sos: int = 0
+
+    # -- the feedback strip ------------------------------------------
+    # What the last round's label recorded, for the receipt under the
+    # advice. Source-neutral on purpose: only one front end records
+    # today, and the page must not learn which.
+    #
+    # `feedback_move` is what the player was SEEN to do, read off the
+    # pouch rather than asked for, and `feedback_against` names the
+    # engine it departed from. `feedback_problem` is why a round was not
+    # readable -- shown INSTEAD, because a gap the player can see while
+    # playing is worth more than one discovered at fit time.
+    #
+    # `feedback_fixable` says whether the row can still be amended. Only
+    # the most recent one can: the log is append-only and a correction
+    # rewrites the tail, so offering it on an older row would silently
+    # edit the wrong record.
+    feedback_move: str = ""
+    feedback_against: str = ""
+    feedback_problem: str = ""
+    feedback_at: float = 0.0
+    feedback_fixable: bool = False
+    # Whether a target is MISSING from the row rather than merely
+    # unknown to the page -- the one thing the pouch diff cannot see, so
+    # the one thing worth asking about.
+    feedback_needs_target: bool = False
+    # Whether the row on screen was STATED by the player rather
+    # than inferred from the pouch. The strip says which, because
+    # trusting an inference as though it were a statement is the
+    # mistake this whole split exists to prevent.
+    feedback_stated: bool = False
+
+    # WHAT THE TOON IS HOLDING, as {track, level, count}, so the page can
+    # offer a move the player could actually make and nothing else.
+    #
+    # The alternative -- a full seven-by-seven grid -- invites naming a
+    # gag that is not in the pouch, and a preference for a move that was
+    # never available is not a preference, it is a wish. Forty-nine
+    # cells is also unusable in a strip this size, where the handful
+    # actually carried is not.
+    pouch: List[dict] = field(default_factory=list)
     # WHAT IS LEFT, after the advice already given this fight. The
     # `max_*` above are what the player says they carry; these are what
     # the solver is actually planning with, so the page can show
@@ -322,6 +366,18 @@ class Model:
         if self.forced is not None:
             return self.forced
         return self.detected_battle
+
+    @property
+    def feedback_showing(self) -> bool:
+        """Whether the receipt is still on screen.
+
+        A DECISION, so it lives here rather than in the page -- the same
+        rule `advice_text` follows. It also means the strip cannot
+        outlive its row because a browser tab was left open.
+        """
+        if not (self.feedback_move or self.feedback_problem):
+            return False
+        return (time.time() - self.feedback_at) < FEEDBACK_LINGER
 
     @property
     def can_confirm(self) -> bool:

@@ -91,6 +91,68 @@ def _position_key(state) -> tuple:
             state.allies_standing)
 
 
+def _pouch_of(state) -> list:
+    """What the toon holds, in the shape the picker needs.
+
+    Sorted by track then level so the rows do not reshuffle between
+    polls -- a control that moves under the cursor while a count ticks
+    down is worse than no control.
+    """
+    from .. import data
+
+    out = []
+    try:
+        counts = getattr(state.toon, "gag_counts", {}) or {}
+    except Exception:                          # noqa: BLE001
+        return out
+    for (track, level), count in counts.items():
+        if count <= 0:
+            continue
+        try:
+            gag = data.gag(track, level)
+        except Exception:                      # noqa: BLE001
+            continue
+        out.append({"track": track.value, "level": int(level),
+                    "count": int(count), "name": gag.display,
+                    "group": bool(gag.group)})
+    out.sort(key=lambda row: (row["track"], row["level"]))
+    return out
+
+
+def _policy_id() -> str:
+    """Which policy proposed the moves in a record.
+
+    A preference is relative to what it was offered: comparisons
+    collected against one checkpoint are off-policy for the next, and a
+    log that does not say which is one that cannot be split later.
+    """
+    try:
+        from ..rl import policy as policy_mod
+
+        return str(getattr(policy_mod, "EXPORT_ID", "") or "unknown")
+    except Exception:                          # noqa: BLE001
+        return "unknown"
+
+
+def _outcome(before, after) -> dict:
+    """What the round actually did, as metadata rather than as label.
+
+    Kept SEPARATE from the preference on purpose. The label is about the
+    decision, taken against the board as it stood; this is the roll that
+    followed. Folding the two together is how outcome bias gets in --
+    a correct 95% play that missed would train as a bad move.
+    """
+    out = {"hp": [], "laff": []}
+    try:
+        out["hp"] = [int(b.hp) - int(a.hp)
+                     for b, a in zip(before.cogs, after.cogs)]
+        out["laff"] = [int(b.laff) - int(a.laff)
+                       for b, a in zip(before.toons, after.toons)]
+    except Exception:                          # noqa: BLE001
+        pass
+    return out
+
+
 def _entry_for(track, level):
     """Any `env.ACTIONS` entry with this track and level, for keying.
 
@@ -245,6 +307,18 @@ class RealmsWorker(AdviceWorker):
     max_fires = 0
     max_unites = 0
     max_sos = 0
+    # Same reason as the caps above: an instance built with `__new__`
+    # must read "not recording" rather than raise. Off is the safe
+    # default here too -- a panel that quietly starts writing training
+    # rows nobody asked for is worse than one that records nothing.
+    feedback_to = None
+    _feedback = None
+    _prev_state = None
+    _last_rid = ""
+    # WATCH MODE: record the fight as a trajectory, advice or no advice.
+    watch_to = None
+    _watch = None
+    _episode = None
 
     def __init__(self, outbox: "queue.Queue", objective, depth: int,
                  budget: float, listener=None, engine: str = "both"):
@@ -262,6 +336,14 @@ class RealmsWorker(AdviceWorker):
         # policy's picks and there is no measurement to contradict them.
         self.engine = engine
         self.record_to = None
+        # HUMAN FEEDBACK. `feedback_to` is a path or None; the log is
+        # built lazily so an unset flag costs nothing. `_prev_state` is
+        # the board the standing advice was given for, kept so the next
+        # round can diff the pouch against it and see what was actually
+        # thrown -- see `solver.live.feedback`.
+        self.feedback_to = None
+        self._feedback = None
+        self._prev_state = None
         self.recorded = 0
         self.record_error = None
         self._generation = count()
@@ -353,16 +435,24 @@ class RealmsWorker(AdviceWorker):
         model.menu_visible = result.state is not None
 
         if result.state is None:
+            # THE FIGHT ENDED HERE, and this is the only place that
+            # knows it. The round recorder keys off the board CHANGING,
+            # so the last round of every fight went unrecorded -- which
+            # for a trajectory is the one round that matters, since
+            # whether a run was won is carried entirely by it.
+            self._close_episode()
             model.problems = list(result.problems)
             model.rows = []
             model.cogs = []
             self._last_key = ()
+            self._prev_state = None
             self._post()
             return
 
         state = result.state
         model.problems = []
         model.rows = rows_from_state(state)
+        model.pouch = _pouch_of(state)
         model.cogs = [f"{r.name} (level {r.level})" for r in model.rows]
         model.toon_count = state.allies_standing + 1
 
@@ -376,6 +466,12 @@ class RealmsWorker(AdviceWorker):
                 # cleared when `_asked` fired instead -- that is
                 # Reconsider itself asking, and clearing there would
                 # undo the rejection it was just given.
+                # BEFORE the rejections are dropped: a Reconsider is
+                # the player saying "not this" about THIS board, and it
+                # is the highest-signal label the panel produces.
+                if self._last_key:
+                    self._record_feedback(state)
+                    self._watch_step(state)
                 self._rejected.clear()
                 # THE BOARD MOVED, so the advice that stood for the last
                 # one has been played. Charge it against the holdings,
@@ -384,10 +480,329 @@ class RealmsWorker(AdviceWorker):
                 if self._last_key:
                     self.note_spent(self.displayed_action(),
                                     self.model.unite or None)
+            self._prev_state = state
             self._last_key = key
             self._asked.clear()
             model.thinking = True
             self._search(state)
+        self._post()
+
+    def _record_feedback(self, now_state) -> None:
+        """One round's label: what was advised against what was thrown.
+
+        THE MOVE IS OBSERVED, NEVER ASKED FOR. The pouch is read every
+        poll anyway, and throwing a gag takes exactly one off exactly
+        one cell, so diffing the board the advice stood for against the
+        board that followed says what was played -- exactly, with no
+        question put to a player who is mid-fight and no reliance on
+        them remembering correctly afterwards.
+
+        A round it cannot read is recorded WITH THE REASON rather than
+        dropped or guessed at. These rows are training data and nothing
+        downstream re-derives them, so a wrong one is permanent in a way
+        a missing one is not. `feedback.spent_gag` owns that judgement.
+
+        Never raises. Advice must not be lost to its own bookkeeping --
+        the same rule `explain` keeps.
+        """
+        if not self.feedback_to:
+            return
+        try:
+            from . import feedback as feedback_mod
+
+            before = self._prev_state
+            if before is None:
+                return
+            if self._feedback is None:
+                # "realms" IS A QUARANTINE FLAG. Realms is Toontown
+                # Online lineage and nothing read from it may train a
+                # TTR policy or fit a weight; stamping it at write time
+                # is what stops a renamed file breaking that later.
+                self._feedback = feedback_mod.FeedbackLog(
+                    self.feedback_to, source="realms")
+
+            key, why = feedback_mod.spent_gag(
+                getattr(before.toon, "gag_counts", None),
+                getattr(now_state.toon, "gag_counts", None))
+
+            observed = None
+            if key is not None:
+                from .. import data
+                from ..state import Action
+
+                track, level = key
+                try:
+                    group = bool(data.gag(track, level).group)
+                except Exception:              # noqa: BLE001
+                    group = False
+                observed = Action(
+                    track=track, level=level,
+                    target_index=feedback_mod.infer_target(
+                        before.cogs, now_state.cogs, group))
+
+            decision = feedback_mod.Decision(
+                source="realms",
+                round_num=getattr(before, "round_num", 0),
+                state=before,
+                rl=self._rl_action,
+                search=self._search_action,
+                observed=observed,
+                unreadable=why,
+                engine_shown=self.model.engine or "",
+                rejected=tuple(sorted(map(repr, self._rejected))),
+                objective=self.objective_name,
+                policy_id=_policy_id(),
+                outcome=_outcome(before, now_state))
+            written = self._feedback.append(decision)
+            self._show_receipt(decision, before, written)
+        except Exception:                      # noqa: BLE001
+            # Recording must never cost the advice it records.
+            pass
+
+    def _watch_step(self, now_state) -> None:
+        """One round of a watched fight, appended to the open episode.
+
+        INDEPENDENT OF THE ADVICE. This runs whether or not either
+        engine was consulted, which is the point: watch mode is for
+        recording how the fight was actually played, and paying fifteen
+        seconds of search per round for advice nobody is reading would
+        make a VP run unwatchable.
+
+        The board recorded is the one BEFORE the action, so the pair is
+        a transition rather than a snapshot.
+        """
+        if not self.watch_to:
+            return
+        try:
+            from . import feedback as feedback_mod
+
+            before = self._prev_state
+            if before is None:
+                return
+            if self._watch is None:
+                self._watch = feedback_mod.WatchLog(self.watch_to,
+                                                    source="realms")
+            if self._episode is None:
+                self._episode = feedback_mod.Episode(
+                    source="realms",
+                    kind=str(getattr(before, "kind", "street") or "street"))
+
+            key, why = feedback_mod.spent_gag(
+                getattr(before.toon, "gag_counts", None),
+                getattr(now_state.toon, "gag_counts", None))
+            action = None
+            if key is not None:
+                from .. import data
+                from ..state import Action
+
+                track, level = key
+                try:
+                    group = bool(data.gag(track, level).group)
+                except Exception:                  # noqa: BLE001
+                    group = False
+                action = Action(track=track, level=level,
+                                target_index=feedback_mod.infer_target(
+                                    before.cogs, now_state.cogs, group))
+
+            self._episode.steps.append(feedback_mod.Step(
+                round_num=getattr(before, "round_num", 0),
+                state=before, action=action, unreadable=why,
+                laff=tuple(int(t.laff) for t in before.toons),
+                hp=tuple(int(c.hp) for c in before.cogs)))
+            self._episode.final = now_state
+        except Exception:                          # noqa: BLE001
+            pass
+
+    def _close_episode(self) -> None:
+        """Write the fight that just ended, and start a fresh one.
+
+        The outcome is read from the LAST board seen rather than from
+        the absence of one: a battle can also vanish because the client
+        dropped or the player walked away, and calling that a loss would
+        teach the wrong lesson about the position it stopped in.
+        `feedback.outcome_of` leaves it unknown instead.
+        """
+        episode = self._episode
+        self._episode = None
+        if episode is None or self._watch is None:
+            return
+        try:
+            from . import feedback as feedback_mod
+
+            # The final round: the board moved from `_prev_state` to
+            # nothing, so the action is unreadable -- but the STATE is
+            # the terminal position and is worth having on its own.
+            if self._prev_state is not None:
+                episode.steps.append(feedback_mod.Step(
+                    round_num=getattr(self._prev_state, "round_num", 0),
+                    state=self._prev_state, action=None,
+                    unreadable="the fight ended on this round",
+                    laff=tuple(int(t.laff) for t in self._prev_state.toons),
+                    hp=tuple(int(c.hp) for c in self._prev_state.cogs)))
+                episode.final = self._prev_state
+            episode.outcome = feedback_mod.outcome_of(episode.final)
+            self._watch.append(episode)
+        except Exception:                          # noqa: BLE001
+            pass
+
+    def _show_receipt(self, decision, state, written: bool) -> None:
+        """The strip under the advice: what was just logged, or why not.
+
+        A RECEIPT, not a question. The move was read rather than asked
+        for, so the ordinary case needs no answer and the strip is there
+        to be ignored -- it says what went into the file so a player can
+        notice it going wrong while they still remember the round, which
+        is the only moment the memory is any use.
+
+        An unreadable round says so INSTEAD of naming a move. That is
+        the case worth surfacing: a gap discovered here costs one glance
+        and a gap discovered at fit time costs the run.
+        """
+        from .. import data
+
+        model = self.model
+        model.feedback_move = ""
+        model.feedback_against = ""
+        model.feedback_problem = ""
+        model.feedback_fixable = False
+        model.feedback_needs_target = False
+        model.feedback_stated = False
+
+        if decision.unreadable:
+            model.feedback_problem = decision.unreadable
+        elif decision.observed is not None:
+            try:
+                model.feedback_move = data.gag(decision.observed.track,
+                                               decision.observed.level).display
+            except Exception:                  # noqa: BLE001
+                model.feedback_move = "your move"
+            # Name the engine departed from, not both: the point of the
+            # line is the disagreement, and "differs from both" is what
+            # two names side by side already say.
+            beats = decision.beats()
+            against = [name for name, differed in beats.items() if differed]
+            if against:
+                model.feedback_against = ", ".join(sorted(against))
+            # Only worth asking about when the answer is missing AND
+            # there is more than one cog it could have been.
+            model.feedback_needs_target = (
+                decision.observed.target_index is None
+                and len(getattr(state, "cogs", ()) or ()) > 1)
+        if written:
+            self._last_rid = decision.rid
+            model.feedback_fixable = True
+        model.feedback_at = time.time()
+
+    def suggest_move(self, track=None, level=None, target_index=None,
+                     fire: bool = False, is_pass: bool = False) -> None:
+        """The player naming the move they would make instead.
+
+        WRITTEN AGAINST THE BOARD ON SCREEN, immediately and as its own
+        row. It does not wait for the round to resolve, because a stated
+        preference is already a complete label -- board, both proposals,
+        and what a human says beats them -- and waiting would lose every
+        one given on the last round of a fight, which is exactly when
+        the interesting ones get given.
+
+        A row can therefore carry a stated move and, later, an observed
+        one for the same board. That is deliberate: whether a player
+        does what they say is worth being able to count, and folding the
+        two together would throw that away. See `Decision.player_move`.
+
+        Refuses a gag the toon is not carrying. A preference for a move
+        that was never available is not a preference.
+        """
+        if not self.feedback_to:
+            return
+        try:
+            from .. import data
+            from . import feedback as feedback_mod
+            from ..state import Action, Track
+
+            state = self._prev_state
+            if state is None:
+                return
+
+            if is_pass:
+                action = Action(track=None)
+            elif fire:
+                if target_index is None:
+                    return
+                action = Action(track=None, fire=True,
+                                target_index=int(target_index))
+            else:
+                if track is None or level is None:
+                    return
+                key = (Track(str(track)), int(level))
+                held = (getattr(state.toon, "gag_counts", {}) or {}).get(key, 0)
+                if held <= 0:
+                    self.model.feedback_problem = (
+                        "not carrying that -- nothing recorded")
+                    self.model.feedback_move = ""
+                    self.model.feedback_at = time.time()
+                    self._post()
+                    return
+                group = bool(data.gag(*key).group)
+                action = Action(track=key[0], level=key[1],
+                                target_index=(None if group or target_index is None
+                                              else int(target_index)))
+
+            if self._feedback is None:
+                self._feedback = feedback_mod.FeedbackLog(
+                    self.feedback_to, source="realms")
+            decision = feedback_mod.Decision(
+                source="realms",
+                round_num=getattr(state, "round_num", 0),
+                state=state,
+                rl=self._rl_action,
+                search=self._search_action,
+                preferred=action,
+                engine_shown=self.model.engine or "",
+                rejected=tuple(sorted(map(repr, self._rejected))),
+                objective=self.objective_name,
+                policy_id=_policy_id())
+            written = self._feedback.append(decision)
+
+            model = self.model
+            model.feedback_move = _render(action, state)
+            model.feedback_problem = ""
+            model.feedback_needs_target = False
+            beats = decision.beats()
+            against = [n for n, differed in beats.items() if differed]
+            model.feedback_against = ", ".join(sorted(against))
+            model.feedback_stated = True
+            if written:
+                self._last_rid = decision.rid
+                model.feedback_fixable = True
+            model.feedback_at = time.time()
+            self._post()
+        except Exception:                      # noqa: BLE001
+            # Never at the cost of the advice on screen.
+            pass
+
+    def correct_feedback(self, target_index=None, discard: bool = False) -> None:
+        """The player overruling the last row, from the strip.
+
+        Only the most recent row can be amended. The log is append-only
+        and a correction names the row it fixes, so offering this on an
+        older one would quietly edit whichever row happened to be last.
+        """
+        rid = getattr(self, "_last_rid", "")
+        if not rid or self._feedback is None:
+            return
+        index = None
+        if target_index is not None and not discard:
+            try:
+                index = int(target_index)
+            except (TypeError, ValueError):
+                return
+        self._feedback.correct(rid, target_index=index, discard=bool(discard))
+        self._last_rid = ""
+        self.model.feedback_fixable = False
+        self.model.feedback_needs_target = False
+        if discard:
+            self.model.feedback_move = ""
+            self.model.feedback_problem = "not logged -- you said it was wrong"
         self._post()
 
     def _record_position(self, state, advice: str) -> None:
@@ -430,6 +845,14 @@ class RealmsWorker(AdviceWorker):
                     f"{self.record_error}"]
 
     def _search(self, state) -> None:
+        # WATCH MODE RUNS NEITHER ENGINE. A VP is forty-plus rounds and
+        # the search budgets fifteen seconds of CPU each; spending that
+        # on advice nobody is reading makes the machine the player is
+        # playing on worse for no return. The board is still read every
+        # poll, which is all the recorder needs.
+        if self.engine == "none":
+            self.model.thinking = False
+            return
         with self._lock:
             token = next(self._generation)
             self._current = token
@@ -725,6 +1148,25 @@ class RealmsApi:
     def prefer_engine(self, name) -> None:
         """Badge click: read the other engine's answer, already computed."""
         self._worker.prefer_engine(name)
+
+    def suggest_move(self, track=None, level=None, target_index=None,
+                     fire=False, is_pass=False) -> None:
+        """The "I'd use" picker: the move the player says is right here."""
+        self._worker.suggest_move(track=track, level=level,
+                                  target_index=target_index,
+                                  fire=bool(fire), is_pass=bool(is_pass))
+
+    def correct_feedback(self, target_index=None, discard=False) -> None:
+        """The strip's "wrong?" control.
+
+        Two answers only: name the cog the reader could not pin, or
+        throw the row away. There is deliberately no way to edit the GAG
+        from here -- that field was read off the pouch exactly, so a
+        player disagreeing with it means something else is wrong and the
+        row should go rather than be patched into something plausible.
+        """
+        self._worker.correct_feedback(target_index=target_index,
+                                      discard=bool(discard))
 
     def set_max_fires(self, count) -> None:
         """The pink slip cap box. Zero means never advise a fire."""
@@ -1057,7 +1499,7 @@ def main(argv: Optional[list] = None) -> int:   # pragma: no cover
     parser.add_argument("--no-level-7", action="store_true")
     parser.add_argument("--dir", help="Realms install directory")
     parser.add_argument("--engine", default="both",
-                        choices=("both", "rl", "search"),
+                        choices=("both", "rl", "search", "none"),
                         help="'rl' is the trained policy alone, answering "
                              "in milliseconds and ignoring the objective. "
                              "'search' is expectimax alone, which honours "
@@ -1066,6 +1508,24 @@ def main(argv: Optional[list] = None) -> int:   # pragma: no cover
                              "is genuinely unmeasured -- everything "
                              "offline here evaluates the policy, so the "
                              "search is the untested one.")
+    parser.add_argument("--watch", metavar="PATH",
+                        help="record the fight as a TRAJECTORY to PATH: "
+                             "one episode per battle, every round's board "
+                             "and the move you made, written when the "
+                             "fight ends so the terminal round -- the one "
+                             "that says whether a VP was won -- is in it. "
+                             "Pair with --engine none to watch without "
+                             "paying for advice nobody is reading. Rows "
+                             "are stamped source=realms.")
+    parser.add_argument("--feedback", metavar="PATH",
+                        help="append one labelled row per round to PATH: "
+                             "the board, both engines' proposals, and the "
+                             "move you ACTUALLY made, read off the pouch "
+                             "rather than asked for. Rounds it cannot "
+                             "read are recorded with the reason instead "
+                             "of guessed at. Rows are stamped source="
+                             "realms, which quarantines them from TTR "
+                             "training -- see solver/live/feedback.py.")
     parser.add_argument("--record", metavar="PATH",
                         help="append every searched position and the "
                              "advice given to PATH, so a bad pick can be "
@@ -1138,6 +1598,8 @@ def main(argv: Optional[list] = None) -> int:   # pragma: no cover
                   f"{exc.__class__.__name__}: {exc}")
             return 1
     worker.record_to = args.record
+    worker.feedback_to = args.feedback
+    worker.watch_to = args.watch
     worker.objective_name = args.objective
     state = RealmsPanelState()
     state.model.objective = args.objective

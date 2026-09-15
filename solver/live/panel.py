@@ -166,6 +166,17 @@ def model_json(model: Model) -> str:
         "invasion": model.invasion,
         "objective": model.objective,
         "budget": model.budget,
+        # THE FEEDBACK RECEIPT. `feedback_showing` is a decision, and
+        # decisions live in `Model` -- the page renders it or does not,
+        # and does not own the timing.
+        "feedback_move": model.feedback_move,
+        "feedback_against": model.feedback_against,
+        "feedback_problem": model.feedback_problem,
+        "feedback_fixable": model.feedback_fixable,
+        "feedback_needs_target": model.feedback_needs_target,
+        "feedback_showing": model.feedback_showing,
+        "pouch": list(model.pouch),
+        "feedback_stated": model.feedback_stated,
     })
 
 
@@ -178,6 +189,25 @@ class Api:
 
     def pull(self) -> str:
         return model_json(self._state.model)
+
+    def suggest_move(self, track=None, level=None, target_index=None,
+                     fire=False, is_pass=False) -> None:
+        """Present because the PAGE IS SHARED. See `correct_feedback`."""
+
+    def correct_feedback(self, target_index=None, discard=False) -> None:
+        """Present because the PAGE IS SHARED, and does nothing here.
+
+        This front end records no feedback, so there is no row to amend.
+        The control it belongs to is never reachable either: the strip
+        renders on `feedback_showing`, which needs a move this panel
+        never writes -- so this is the arity contract being honoured,
+        not a feature quietly switched off.
+
+        Recording here is a decision that has not been taken. This panel
+        reads the board off the screen, so a row would carry a read that
+        can be wrong in ways the other front end's cannot, and the
+        labels would not be comparable.
+        """
 
     def prefer_engine(self, name) -> None:
         """Swap which engine's answer is on screen."""
