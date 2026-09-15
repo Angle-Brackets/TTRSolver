@@ -107,19 +107,39 @@ PASS_INDEX = 0
 # actions -- four Lures on the same board. Coordination needs the
 # pending plan to be visible.
 PENDING_DIM = MAX_TOONS * (len(TRACKS) + 2)      # track one-hot, group, none
+
+# WHAT KIND OF FIGHT THIS IS, one-hot, added at OBS_VERSION 4.
+#
+# The observation carried a single `facility` bit and a count of cogs
+# still to come, and nothing else about context -- so a street battle
+# and a VP wave with the same board read almost identically. That is
+# not a hypothetical cost: `_stock_fires` records the policy learning
+# "hold slips -> fire" because it is a reasonable habit on a one-to-four
+# cog street, and that "carried to an eight-cog VP wave ... is the
+# reflex that loses fifty points of win rate". The workaround was to
+# tune what fraction of TRAINING episodes stock slips, which treats the
+# symptom: the agent still could not see which fight it was in.
+#
+# Exactly the kinds `state.kind` actually takes, in a fixed order. An
+# unknown kind encodes as all zeros rather than being bucketed into
+# `street`, so a kind added later reads as "not any of these" instead
+# of quietly claiming to be one of them.
+KINDS = ("street", "facility", "vp", "ceo")
 def obs_dim_for(version: int) -> int:
     """How wide the observation is at a given `OBS_VERSION`.
 
     Version 3 added ABSOLUTE remaining laff to each toon block, so the
-    per-toon scalars went from four to five. Older policies are still
-    loadable and still read their own width -- see `encode`.
+    per-toon scalars went from four to five. Version 4 appended the
+    `KINDS` one-hot. Older policies are still loadable and still read
+    their own width -- see `encode`.
     """
     per_toon = 5 if version >= 3 else 4
-    return (MAX_COGS * 11 + MAX_TOONS * (per_toon + 49) + 6
+    kinds = len(KINDS) if version >= 4 else 0
+    return (MAX_COGS * 11 + MAX_TOONS * (per_toon + 49) + 6 + kinds
             + MAX_TOONS + PENDING_DIM)
 
 
-OBS_DIM = obs_dim_for(3)
+OBS_DIM = obs_dim_for(4)
 
 # Cog level and max hp were scaled by 12 and 200, which is the top of a
 # cog BUILDING and nowhere near the top of the game. A level 15 Big
@@ -193,7 +213,7 @@ def _trap_damage(cog) -> float:
         return 0.0
 
 
-OBS_VERSION = 3
+OBS_VERSION = 4
 """Bumped whenever `encode` changes what a slot MEANS.
 
 A policy is a pile of floats against a fixed layout, and `OBS_DIM` does
@@ -377,6 +397,13 @@ def encode(state: BattleState, actor: int = 0,
             1.0 if state.kind == "facility" else 0.0,
             # Cogs waiting to walk in to THIS fight as slots free.
             min(len(state.holdout), MAX_COGS) / MAX_COGS]
+
+    if obs_version >= 4:
+        # Appended rather than folded into the block above, so a version
+        # 3 policy encoded at its own version sees the layout it was
+        # fitted on, byte for byte.
+        kind = getattr(state, "kind", "street")
+        out += [1.0 if kind == name else 0.0 for name in KINDS]
 
     # Whose decision this is. Solo play always sets index 0, so the
     # block is constant there and costs nothing.

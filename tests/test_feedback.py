@@ -965,3 +965,72 @@ class LureLastsItsTableValueTest(unittest.TestCase):
         self.assertEqual([2, 2, 3, 3, 4, 4, 8],
                          [mechanics.lure_duration_rounds(l)
                           for l in range(1, 8)])
+
+
+class FightKindIsObservableTest(unittest.TestCase):
+    """OBS_VERSION 4: the agent can see which fight it is in.
+
+    It could not before. The observation carried one `facility` bit and
+    a count of cogs still to come, so a street battle and a VP wave with
+    the same board read almost identically -- and `_stock_fires` records
+    what that cost: the policy learned "hold slips -> fire", reasonable
+    on a one-to-four cog street, and "carried to an eight-cog VP wave
+    ... the reflex that loses fifty points of win rate".
+    """
+
+    def _state(self, kind):
+        from solver import data
+        from solver.state import BattleState, ToonState
+
+        toon = ToonState(laff=100, max_laff=140)
+        toon.track_exp = {Track.THROW: 7}
+        toon.gag_counts = {(Track.THROW, 4): 3}
+        hp = data.cog_max_hp(8)
+        cog = CogState(cog_type="mr_hollywood", department="sellbot",
+                       level=8, hp=hp, max_hp=hp)
+        return BattleState(toons=[toon], cogs=[cog], kind=kind)
+
+    def _kind_block(self, state):
+        from solver.rl import env as env_mod
+
+        obs = env_mod.encode(state, 0, obs_version=4)
+        tail = env_mod.MAX_TOONS + env_mod.PENDING_DIM
+        return obs[-(tail + len(env_mod.KINDS)):-tail]
+
+    def test_each_kind_gets_its_own_slot(self):
+        from solver.rl import env as env_mod
+
+        for index, kind in enumerate(env_mod.KINDS):
+            block = self._kind_block(self._state(kind))
+            self.assertEqual(1.0, block[index], kind)
+            self.assertEqual(1.0, sum(block), kind)
+
+    def test_two_kinds_differ_on_an_identical_board(self):
+        """The whole point: same cogs, same pouch, different answer."""
+        self.assertNotEqual(self._kind_block(self._state("street")),
+                            self._kind_block(self._state("vp")))
+
+    def test_an_unknown_kind_is_all_zeros_not_street(self):
+        """A kind added later must read as "none of these" rather than
+        quietly claiming to be a street battle."""
+        self.assertEqual(0.0, sum(self._kind_block(self._state("sellbot_hq"))))
+
+    def test_older_layouts_are_untouched(self):
+        """Shipped policies encode at their OWN version. A v3 policy fed
+        a v4 observation reads every feature shifted and returns
+        confident nonsense -- see `env.check_export`."""
+        from solver.rl import env as env_mod
+
+        state = self._state("vp")
+        for version in (1, 2, 3, 4):
+            self.assertEqual(env_mod.obs_dim_for(version),
+                             len(env_mod.encode(state, 0, obs_version=version)),
+                             "version %d" % version)
+        self.assertEqual(306, env_mod.obs_dim_for(3))
+        self.assertEqual(310, env_mod.obs_dim_for(4))
+
+    def test_the_width_grew_by_exactly_the_one_hot(self):
+        from solver.rl import env as env_mod
+
+        self.assertEqual(env_mod.obs_dim_for(3) + len(env_mod.KINDS),
+                         env_mod.obs_dim_for(4))
