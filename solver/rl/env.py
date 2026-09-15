@@ -120,11 +120,42 @@ PENDING_DIM = MAX_TOONS * (len(TRACKS) + 2)      # track one-hot, group, none
 # tune what fraction of TRAINING episodes stock slips, which treats the
 # symptom: the agent still could not see which fight it was in.
 #
-# Exactly the kinds `state.kind` actually takes, in a fixed order. An
-# unknown kind encodes as all zeros rather than being bucketed into
+# EVERY FIGHT THE GAME HAS, not only the ones the harness builds today.
+# Four of these are live (`street` by default, plus `facility`, `vp` and
+# `ceo`); the rest are reserved. That is deliberate: the width is fixed
+# at export and a policy is only valid against its own, so filling in a
+# slot later would cost another OBS_VERSION bump and invalidate every
+# policy again. Eleven floats against 306 is nothing; a second retrain
+# is not.
+#
+# `facility` is kept ALONGSIDE the specific facilities because the code
+# still emits the generic string -- `facility_position` builds a floor
+# without saying which HQ it belongs to. Dropping it would encode every
+# position that harness produces as all zeros.
+#
+# ORDER IS PART OF THE FORMAT. Appending is safe; inserting or
+# reordering silently changes what every fitted weight means. It was
+# still free to slot `field_office` in beside the other facilities
+# because nothing has been fitted on version 4 yet -- once a policy
+# ships against it, this tuple may only grow at the end.
+#
+# An unknown kind encodes as all zeros rather than being bucketed into
 # `street`, so a kind added later reads as "not any of these" instead
 # of quietly claiming to be one of them.
-KINDS = ("street", "facility", "vp", "ceo")
+KINDS = (
+    "street",       # an ordinary street battle
+    "building",     # a cog building floor
+    "facility",     # a facility floor, HQ unspecified
+    "factory",      # Sellbot
+    "mint",         # Cashbot
+    "da_office",    # Lawbot
+    "golf_course",  # Bossbot
+    "field_office", # Sellbot, street-side
+    "vp",           # Sellbot boss
+    "cfo",          # Cashbot boss
+    "cj",           # Lawbot boss
+    "ceo",          # Bossbot boss
+)
 def obs_dim_for(version: int) -> int:
     """How wide the observation is at a given `OBS_VERSION`.
 

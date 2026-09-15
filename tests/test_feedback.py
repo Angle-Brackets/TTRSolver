@@ -1027,7 +1027,33 @@ class FightKindIsObservableTest(unittest.TestCase):
                              len(env_mod.encode(state, 0, obs_version=version)),
                              "version %d" % version)
         self.assertEqual(306, env_mod.obs_dim_for(3))
-        self.assertEqual(310, env_mod.obs_dim_for(4))
+        self.assertEqual(306 + len(env_mod.KINDS), env_mod.obs_dim_for(4))
+
+    def test_every_fight_the_game_has_owns_a_slot(self):
+        """Reserved on purpose: filling one in later would cost another
+        OBS_VERSION bump and invalidate every policy again."""
+        from solver.rl import env as env_mod
+
+        for kind in ("street", "building", "facility", "factory", "mint",
+                     "da_office", "golf_course", "field_office",
+                     "vp", "cfo", "cj", "ceo"):
+            self.assertIn(kind, env_mod.KINDS)
+
+    def test_the_kinds_the_code_actually_emits_are_all_covered(self):
+        """A kind the solver produces must never encode as all zeros."""
+        from solver.rl import env as env_mod
+
+        for kind in ("street", "facility", "vp", "ceo"):
+            self.assertEqual(1.0, sum(self._kind_block(self._state(kind))),
+                             kind)
+
+    def test_the_order_is_fixed(self):
+        """Appending is safe; reordering silently changes what every
+        fitted weight means."""
+        from solver.rl import env as env_mod
+
+        self.assertEqual("street", env_mod.KINDS[0])
+        self.assertEqual(len(set(env_mod.KINDS)), len(env_mod.KINDS))
 
     def test_the_width_grew_by_exactly_the_one_hot(self):
         from solver.rl import env as env_mod
