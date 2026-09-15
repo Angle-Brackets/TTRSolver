@@ -70,6 +70,12 @@ def main():
     ap.add_argument("--rollout", type=int, default=128)
     ap.add_argument("--epochs", type=int, default=4)
     ap.add_argument("--minibatch", type=int, default=1024)
+    ap.add_argument("--mask-kinds", action="store_true",
+                    help="zero the fight-kind one-hot, keeping the width. "
+                         "The control arm: a policy trained with this on "
+                         "differs from one trained without it in that "
+                         "feature and nothing else, which is what makes "
+                         "the comparison mean anything.")
     ap.add_argument("--obs-version", type=int, default=None,
                     help="train against an OLDER observation layout, as "
                          "a matched control. Defaults to the current "
@@ -184,6 +190,8 @@ def main():
                          "standard deviation instead, which preserves "
                          "relative magnitudes")
     args = ap.parse_args()
+    if args.mask_kinds:
+        env_mod.MASK_KINDS_IN_OBS = True
 
     # BEFORE ANY ENVIRONMENT EXISTS. `encode` reads the module global at
     # call time, so this has to be set before the first observation is

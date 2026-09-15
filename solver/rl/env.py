@@ -62,6 +62,20 @@ from .. import state as state_mod
 # no-7 play as an explicit arm might use those inputs differently, and
 # this is the knob that would test it.
 MASK_SEVENS_IN_OBS = False
+
+# Zero the `KINDS` one-hot, keeping the width. THE CONTROL ARM, and the
+# only way to measure what that feature is worth.
+#
+# Comparing a version 4 policy against a shipped version 3 one confounds
+# the feature with the retrain -- different run, different seed, possibly
+# different hyperparameters -- so a win there says nothing about which
+# change caused it. Training a second policy at the SAME width, seed and
+# settings with these twelve floats held at zero isolates it exactly:
+# the two differ in the feature and in nothing else.
+#
+# Width is deliberately unchanged, so a control policy is still a valid
+# version 4 export and `check_export` accepts it.
+MASK_KINDS_IN_OBS = False
 from ..data import gags as gags_mod
 from ..search import objective as objective_mod
 from ..state import Action, BattleState, CogState, ToonState, Track
@@ -434,7 +448,8 @@ def encode(state: BattleState, actor: int = 0,
         # 3 policy encoded at its own version sees the layout it was
         # fitted on, byte for byte.
         kind = getattr(state, "kind", "street")
-        out += [1.0 if kind == name else 0.0 for name in KINDS]
+        out += [0.0] * len(KINDS) if MASK_KINDS_IN_OBS else [
+            1.0 if kind == name else 0.0 for name in KINDS]
 
     # Whose decision this is. Solo play always sets index 0, so the
     # block is constant there and costs nothing.
