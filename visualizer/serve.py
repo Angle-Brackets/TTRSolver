@@ -54,6 +54,28 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(REPO_ROOT), **kwargs)
 
+    def translate_path(self, path):
+        dist = REPO_ROOT / "visualizer" / "dist"
+        if dist.exists() and (dist / "index.html").exists():
+            clean = path.split("?")[0].split("#")[0]
+            if clean in ("/", "/visualizer", "/visualizer/", "/visualizer/index.html"):
+                return str(dist / "index.html")
+            if clean.startswith("/visualizer/"):
+                rel = clean[len("/visualizer/"):]
+                if (dist / rel).exists():
+                    return str(dist / rel)
+                vis_rel = REPO_ROOT / "visualizer" / rel
+                if vis_rel.exists():
+                    return str(vis_rel)
+            if clean.startswith("/assets/"):
+                sub = clean.lstrip("/")
+                if (dist / sub).exists():
+                    return str(dist / sub)
+                vis_sub = REPO_ROOT / "visualizer" / sub
+                if vis_sub.exists():
+                    return str(vis_sub)
+        return super().translate_path(path)
+
     def do_POST(self):
         """`{"fn": "api_root", "payload": {...}}` -> whatever `bridge`
         returns, which is already a JSON string.

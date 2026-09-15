@@ -17,7 +17,7 @@ Runs fine under CPython too, which is how it's tested
 """
 import dataclasses
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from solver import data, outcomes, simulator
 from solver.search import expectimax
@@ -44,18 +44,20 @@ def cog_to_dict(cog: CogState) -> Dict[str, Any]:
         "lure_level": st.lure_level,
         "trapped": st.trapped,
         "trap_level": st.trap_level,
+        "suited": getattr(st, "suited", False),
     }
 
 
 def cog_from_dict(d: Dict[str, Any]) -> CogState:
     status = CogStatus(
-        lured=d["lured"],
-        lure_rounds_remaining=d["lure_rounds"],
-        lure_acc_before_bonus=d["lure_acc"],
-        lure_level=d["lure_level"],
-        trapped=d["trapped"],
-        trap_level=d["trap_level"],
-        is_dead=d["dead"],
+        lured=d.get("lured", False),
+        lure_rounds_remaining=d.get("lure_rounds", 0),
+        lure_acc_before_bonus=d.get("lure_acc"),
+        lure_level=d.get("lure_level"),
+        trapped=d.get("trapped", False),
+        trap_level=d.get("trap_level"),
+        is_dead=d.get("dead", False),
+        suited=d.get("suited", False),
     )
     return CogState(cog_type=d["type"], department=d["department"],
                     level=d["level"], hp=d["hp"], max_hp=d["max_hp"],
@@ -117,28 +119,37 @@ def state_to_dict(state: BattleState) -> Dict[str, Any]:
         "toons": [toon_to_dict(t) for t in state.toons],
         "cogs": [cog_to_dict(c) for c in state.cogs],
         "round": state.round_num,
+        "kind": getattr(state, "kind", "street"),
+        "street": getattr(state, "street", None),
     }
 
 
 def state_from_dict(d: Dict[str, Any]) -> BattleState:
-    toons = [toon_from_dict(t) for t in d["toons"]] if "toons" in d         else [toon_from_dict(d["toon"])]
+    toons = [toon_from_dict(t) for t in d["toons"]] if "toons" in d else [toon_from_dict(d["toon"])]
     return BattleState(toons=toons,
                        cogs=[cog_from_dict(c) for c in d["cogs"]],
-                       round_num=d["round"])
+                       round_num=d.get("round", 0),
+                       kind=d.get("kind", "street"),
+                       street=d.get("street", None))
 
 
 def action_to_dict(a: Action) -> Dict[str, Any]:
-    # A pass has no track; the front end keys off `track: null`.
-    return {"track": None if a.is_pass else a.track.value,
-            "level": a.level, "target": a.target_index}
+    if a.fire:
+        return {"track": "fire", "level": None, "target": a.target_index, "fire": True}
+    if a.sos:
+        return {"track": "sos", "level": None, "target": a.target_index, "sos": a.sos}
+    if a.is_pass or a.track is None:
+        return {"track": None, "level": 0, "target": None}
+    return {"track": a.track.value, "level": a.level, "target": a.target_index}
 
 
 def action_from_dict(d: Dict[str, Any]) -> Action:
-    # `track: null` is a pass, and must round-trip as one. `Track(None)`
-    # raises, which only became reachable once the pass stopped being
-    # confined to lured positions.
-    track = None if d["track"] is None else Track(d["track"])
-    return Action(track=track, level=d["level"], target_index=d["target"])
+    if d.get("fire") or d.get("track") == "fire":
+        return Action(track=None, level=0, target_index=d.get("target"), fire=True)
+    if d.get("sos") or d.get("track") == "sos":
+        return Action(track=None, level=0, target_index=d.get("target"), sos=d.get("sos"))
+    track = None if d.get("track") is None else Track(d["track"])
+    return Action(track=track, level=d.get("level", 0), target_index=d.get("target"))
 
 
 # ---------------------------------------------------------------------
@@ -146,7 +157,9 @@ def action_from_dict(d: Dict[str, Any]) -> Action:
 # ---------------------------------------------------------------------
 
 
-def gag_name(track: Track, level: int) -> str:
+def gag_name(track: Optional[Track], level: int) -> str:
+    if track is None:
+        return "None"
     return data.gag(track, level).display
 
 
@@ -179,6 +192,11 @@ def department_icon(department: str) -> str:
 def describe_action(action: Action) -> str:
     if action.is_pass:
         return "pass (wait out the lure)"
+    if action.fire:
+        target = f"cog {action.target_index + 1}" if action.target_index is not None else "cog"
+        return f"Pink Slip -> {target}"
+    if action.sos:
+        return f"SOS {action.sos}"
     name = gag_name(action.track, action.level)
     where = "all cogs" if action.target_index is None else f"cog {action.target_index + 1}"
     return f"{name} -> {where}"
@@ -202,34 +220,178 @@ def cog_label(cog: CogState, index: int) -> str:
 # ---------------------------------------------------------------------
 
 
+def _normalize_gag_input(raw_gags) -> Dict[Tuple[Track, int], int]:
+    counts = {}
+    if isinstance(raw_gags, dict):
+        for tr, levels in raw_gags.items():
+            if isinstance(levels, dict):
+                for lvl, n in levels.items():
+                    if int(n) > 0:
+                        counts[(Track(tr), int(lvl))] = int(n)
+            elif isinstance(levels, (list, tuple)):
+                for lvl, n in enumerate(levels, 1):
+                    if int(n) > 0:
+                        counts[(Track(tr), int(lvl))] = int(n)
+    elif isinstance(raw_gags, (list, tuple)):
+        for item in raw_gags:
+            if isinstance(item, (list, tuple)) and len(item) >= 3:
+                tr, lvl, n = item[:3]
+                if int(n) > 0:
+                    counts[(Track(tr), int(lvl))] = int(n)
+    return counts
+
+
+def _parse_toon_cfg(tcfg: Dict[str, Any]) -> ToonState:
+    counts = _normalize_gag_input(tcfg.get("gags", []))
+    problems = data.validate_loadout(counts)
+    if problems:
+        raise ValueError("; ".join(problems))
+    tracks = {track for track, _lvl in counts.keys()}
+    track_exp = {Track(k): int(v) for k, v in tcfg.get("track_exp", {}).items()} if tcfg.get("track_exp") else {t: 7 for t in tracks}
+    raw_org = tcfg.get("organic", ())
+    if isinstance(raw_org, str):
+        organic = frozenset([Track(raw_org)])
+    elif isinstance(raw_org, (list, tuple, set, frozenset)):
+        organic = frozenset(Track(t) for t in raw_org if t)
+    else:
+        organic = frozenset()
+    laff = int(tcfg.get("laff", 50))
+    max_laff = int(tcfg.get("max_laff", laff))
+    toon = ToonState(
+        laff=laff, max_laff=max_laff,
+        track_exp=track_exp,
+        gag_counts=counts,
+        organic_tracks=organic,
+        fires=int(tcfg.get("fires", 0)),
+        pouch_capacity=int(tcfg.get("pouch_capacity", 80)),
+    )
+    raw_unites = tcfg.get("unites_held", 0)
+    toon.unites_held = len(raw_unites) if isinstance(raw_unites, (list, tuple)) else int(raw_unites or 0)
+    raw_sos = tcfg.get("sos_cards", {})
+    from solver import sos
+
+    def _card(name):
+        """A real card name, or None. NEVER the caller's string.
+
+        This used to fall back to the string it was given, so anything
+        the page invented became a card the toon "held" -- and the
+        failure surfaced four layers down as
+        `KeyError: 'cogs_miss'` inside `simulator.apply_toon_action`,
+        with nothing pointing at the scenario that caused it.
+        `cogs_miss` is a card KIND, not a card; the page was offering
+        kinds as if they were cards.
+        """
+        wanted = str(name).lower()
+        return next((real for real in sos.BY_NAME
+                     if real.lower() == wanted), None)
+
+    pairs = ((raw_sos, 1) for raw_sos in raw_sos) if isinstance(
+        raw_sos, (list, tuple)) else raw_sos.items() if isinstance(
+        raw_sos, dict) else ()
+    sos_cards, unknown = {}, []
+    for name, count in pairs:
+        real = _card(name)
+        if real is None:
+            unknown.append(str(name))
+            continue
+        sos_cards[real] = int(count)
+    if unknown:
+        # RAISED, not dropped. `build_state` already refuses a loadout no
+        # toon could carry, and a card that does not exist is the same
+        # kind of thing -- planning around one is worse than saying so.
+        raise ValueError(
+            "no SOS card named %s. Use the `name` field from "
+            "`catalogue().sos_cards`; `kind` is not a card."
+            % ", ".join(repr(u) for u in sorted(unknown)))
+    toon.sos_cards = sos_cards
+    return toon
+
+
 def build_state(cfg: Dict[str, Any]) -> BattleState:
-    """cfg: {laff, cogs: [{type, department, level}], gags: [[track, level, n]]}
+    """cfg: {laff, cogs: [{type, department, level, ...}], gags: [[track, level, n]], ...}
+       or {toons: [...], cogs: [...], kind, street}
 
     Rejects loadouts no real toon could carry -- more than six gag tracks or
     more than a full pouch. Without this the solver will happily plan for a
     toon with all seven tracks and 200 gags and hand back advice nobody can
     follow.
     """
-    counts = {(Track(t), lvl): n for t, lvl, n in cfg["gags"] if n > 0}
-    problems = data.validate_loadout(counts)
-    if problems:
-        raise ValueError("; ".join(problems))
+    toons = []
+    if "toons" in cfg and cfg["toons"]:
+        for tcfg in cfg["toons"]:
+            toons.append(_parse_toon_cfg(tcfg))
+    else:
+        toons.append(_parse_toon_cfg(cfg))
 
-    tracks = {Track(track) for track, _lvl, n in cfg["gags"] if n > 0}
-    toon = ToonState(
-        laff=cfg["laff"], max_laff=cfg["laff"],
-        track_exp={t: 7 for t in tracks},      # maxed in every owned track
-        gag_counts={(Track(track), lvl): n for track, lvl, n in cfg["gags"]},
-    )
     cogs = []
-    for c in cfg["cogs"]:
-        lvl = c["level"]
-        cogs.append(CogState(cog_type=c["type"],
-                             department=c.get("department", "bossbot"),
+    for c in cfg.get("cogs", []):
+        lvl = int(c["level"])
+        max_hp = int(c.get("max_hp", data.cog_max_hp(lvl)))
+        hp = int(c.get("hp", max_hp))
+        is_trapped = bool(c.get("trapped", False))
+        trap_level = c.get("trap_level")
+        if is_trapped:
+            if trap_level is None or int(trap_level) <= 0:
+                raise ValueError("A trapped cog requires a trap level (1-7)")
+            trap_level = int(trap_level)
+        else:
+            trap_level = None
+
+        is_lured = bool(c.get("lured", False))
+        lure_rounds = int(c.get("lure_rounds", 2 if is_lured else 0))
+        lure_level = c.get("lure_level")
+        if lure_level is not None:
+            lure_level = int(lure_level)
+
+        status = CogStatus(
+            lured=is_lured,
+            lure_rounds_remaining=lure_rounds,
+            lure_acc_before_bonus=c.get("lure_acc"),
+            lure_level=lure_level,
+            trapped=is_trapped,
+            trap_level=trap_level,
+            is_dead=bool(c.get("dead", hp <= 0)),
+            suited=bool(c.get("suited", False)),
+        )
+        dept = str(c.get("department") or c.get("dept") or "sellbot").lower()
+        raw_type = c.get("type") or c.get("name")
+        cog_key = None
+        if raw_type:
+            normalized = str(raw_type).lower().strip().replace(" ", "_").replace("-", "_").replace(".", "")
+            for cog_spec in data.all_cogs():
+                if cog_spec.key == normalized or cog_spec.display.lower() == str(raw_type).lower().strip():
+                    cog_key = cog_spec.key
+                    dept = cog_spec.department
+                    break
+        if not cog_key:
+            # A department with no named cog: pick one that can actually
+            # APPEAR at this level. `COG_DEPARTMENTS[dept]` is a
+            # `Department`, not a list -- indexing it with 0 asked it for
+            # a cog keyed "0", and since a Department is always truthy
+            # the "flunky" fallback beside it could never run. So
+            # department-plus-level, the most ordinary way to describe a
+            # cog, raised `KeyError: "Sellbots has no cog '0'"`.
+            #
+            # Level matters beyond not crashing: a cog's damage and
+            # accuracy are indexed by where the level falls in its own
+            # range, so a level 4 Sellbot must not be built as a
+            # Mr. Hollywood. First match, so the choice is repeatable.
+            department = data.COG_DEPARTMENTS.get(dept)
+            candidates = list(department.cogs) if department else []
+            at_level = [c for c in candidates if lvl in c.levels]
+            cog_key = (at_level or candidates)[0].key if candidates else "flunky"
+
+        cogs.append(CogState(cog_type=cog_key,
+                             department=dept,
                              level=lvl,
-                             hp=data.cog_max_hp(lvl),
-                             max_hp=data.cog_max_hp(lvl)))
-    return BattleState(toon=toon, cogs=cogs)
+                             hp=hp,
+                             max_hp=max_hp,
+                             status=status))
+
+    return BattleState(toons=toons, cogs=cogs,
+                       round_num=int(cfg.get("round", 0)),
+                       kind=cfg.get("kind", "street"),
+                       street=cfg.get("street"))
 
 
 def catalogue() -> Dict[str, Any]:
@@ -246,18 +408,44 @@ def catalogue() -> Dict[str, Any]:
         for level in range(1, 8):
             spec = data.gag(track, level)
             gags.append({"track": track.value, "level": level,
-                         "name": spec.display,
-                         "icon": gag_icon(track, level),
-                         "max_carry": spec.max_carry,
-                         "group": simulator.is_group_action(track, level)})
+                          "name": spec.display,
+                          "icon": gag_icon(track, level),
+                          "max_carry": spec.max_carry,
+                          "group": simulator.is_group_action(track, level)})
     presets = [{"name": o.name, "description": o.description,
                 "gag_cost": o.gag_cost, "scarcity_cost": o.scarcity_cost,
                 "turn_cost": o.turn_cost, "laff_weight": o.laff_weight}
                for o in objective_mod.PRESETS.values()]
     emblems = {d: department_icon(d) for d in sorted(data.COG_DEPARTMENTS)}
+
+    from solver import sos
+    sos_cards = [{"name": c.name, "kind": c.kind, "stars": c.tier,
+                  "amount": c.amount, "track": c.track.value if c.track else None}
+                 for c in sos.CARDS]
+    unites_catalog = {
+        "toon_up": [20, 35, 50, 65, 80],
+        "gag_up": [t.value for t in Track] + ["all"],
+    }
+    scenarios = [
+        {"id": "building", "label": "Cog Building (Standard)"},
+        {"id": "scrappy", "label": "Scrappy Building (Underleveled)"},
+        {"id": "strange", "label": "Weird Mid-Battle (Pre-Lured & Trapped)"},
+        {"id": "hard", "label": "Wall of Cogs (Brutal L10-12)"},
+        {"id": "combo", "label": "Trap + Lure Combo"},
+        {"id": "street", "label": "Street Encounter"},
+    ]
+
     return {"departments": depts, "gags": gags, "emblems": emblems,
             "tracks": [t.value for t in Track],
+            # BOTH NAMES, deliberately. The page reads `presets`; the
+            # spec and the older callers say `objectives`. One list,
+            # two keys, rather than a rename that silently empties a
+            # dropdown -- which is what the mismatch did.
             "objectives": presets,
+            "presets": presets,
+            "sos_cards": sos_cards,
+            "unites": unites_catalog,
+            "scenarios": scenarios,
             "limits": {"max_tracks": data.MAX_GAG_TRACKS,
                        "max_pouch": data.MAX_POUCH}}
 
@@ -267,15 +455,25 @@ def catalogue() -> Dict[str, Any]:
 # ---------------------------------------------------------------------
 
 
-def resolve_objective(spec: Optional[Dict[str, Any]]):
-    """Turn the UI's {preset, overrides...} into an Objective.
+def resolve_objective(spec):
+    """Turn the UI's preset into an Objective.
 
-    The presets are the interesting part -- they change what "best" means,
-    not how hard the solver looks -- so they live in solver/search and the
-    page only names one.
+    Takes either a bare preset NAME -- `"balanced"` -- or a
+    `{preset, overrides...}` mapping. The name alone is what the page
+    naturally has, because `catalogue()` lists the presets by name and a
+    dropdown holds one; requiring the mapping crashed every tree
+    expansion with `AttributeError: 'str' object has no attribute 'get'`,
+    which surfaced in the browser as "Failed to init tree" and nowhere
+    in the Python tests.
+
+    The presets are the interesting part -- they change what "best"
+    means, not how hard the solver looks -- so they live in
+    solver/search and the page only names one.
     """
     if not spec:
         return objective_mod.DEFAULT
+    if isinstance(spec, str):
+        return objective_mod.get(spec)
     base = objective_mod.get(spec.get("preset", "balanced"))
     tweaks = {k: float(v) for k, v in spec.items()
               if k in ("gag_cost", "scarcity_cost", "turn_cost", "laff_weight")
@@ -512,6 +710,11 @@ def climb_plan(state_dict: Dict[str, Any], budget: int = 24,
     plan = hybrid.climb(state, random.Random(0), budget=budget, width=width)
     if plan is None:
         return {"available": True, "plan": None}
+
+    first_act = plan[0] if plan else None
+    first_dict = None if first_act is None else action_to_dict(first_act)
+    first_label = None if first_act is None else describe_action(first_act)
+
     return {
         "available": True,
         "budget": budget,
@@ -519,6 +722,14 @@ def climb_plan(state_dict: Dict[str, Any], budget: int = 24,
         "unite": list(hybrid.LAST_UNITE) if hybrid.LAST_UNITE else None,
         "plan": [None if a is None else action_to_dict(a) for a in plan],
         "labels": [describe_action(a) for a in plan],
+        "first": {
+            "action": first_dict,
+            "label": first_label,
+            "track": first_dict["track"] if first_dict else None,
+            "level": first_dict["level"] if first_dict else None,
+            "target": first_dict["target"] if first_dict else None,
+            "icon": gag_icon(first_act.track, first_act.level) if first_act else None,
+        } if first_act else None,
     }
 
 
@@ -530,4 +741,56 @@ def api_climb(payload_json: str) -> str:
             budget=int(payload.get("budget", 24)),
             width=int(payload.get("width", 16))))
     except (NotImplementedError, ValueError, KeyError) as exc:
+        return json.dumps({"error": f"{exc.__class__.__name__}: {exc}"})
+
+
+def generate_scenario(kind: str = "building", seed: Optional[int] = None) -> BattleState:
+    import random
+    from solver.rl import env
+
+    rng = random.Random(seed)
+    kind = (kind or "building").lower()
+    if kind in ("building", "facility"):
+        be = env.BattleEnv(sampler=env.facility_position, rng=rng)
+        be.reset()
+        return be.state
+    elif kind == "scrappy":
+        be = env.BattleEnv(sampler=env.scrappy_position, rng=rng)
+        be.reset()
+        return be.state
+    elif kind == "strange":
+        return env.strange_position(rng)
+    elif kind == "hard":
+        return env.hard_position(rng)
+    elif kind == "combo":
+        return env.combo_position(rng)
+    else:
+        return env.default_position(rng)
+
+
+def api_generate_scenario(payload_json: str) -> str:
+    payload = json.loads(payload_json or "{}")
+    try:
+        st = generate_scenario(payload.get("kind", "building"), payload.get("seed"))
+        return json.dumps({
+            "kind": "decision",
+            "label": "Toon's turn",
+            "state": state_to_dict(st),
+            "cogs": [cog_label(c, i) for i, c in enumerate(st.cogs)],
+            "cog_icons": [cog_icon(c.department, c.cog_type) for c in st.cogs],
+        })
+    except Exception as exc:
+        return json.dumps({"error": f"{exc.__class__.__name__}: {exc}"})
+
+
+def api_random_toon(payload_json: str) -> str:
+    payload = json.loads(payload_json or "{}")
+    try:
+        import random
+        from solver.rl import env
+
+        rng = random.Random(payload.get("seed"))
+        toon = env.random_toon(rng)
+        return json.dumps({"toon": toon_to_dict(toon)})
+    except Exception as exc:
         return json.dumps({"error": f"{exc.__class__.__name__}: {exc}"})

@@ -1,0 +1,21 @@
+{
+  "name": "ttrsolver-visualizer",
+  "private": true,
+  "version": "0.2.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && node -e \"const fs=require('fs'); fs.cpSync('assets', 'dist/assets', {recursive: true});\""
+  },
+  "dependencies": {
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@vitejs/plugin-react": "^6.1.0",
+    "daisyui": "^5.7.20",
+    "tailwindcss": "^4.3.3",
+    "vite": "^8.2.2"
+  }
+}

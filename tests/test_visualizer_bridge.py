@@ -89,6 +89,82 @@ class StateRoundTripTest(unittest.TestCase):
         self.assertEqual(4, status.trap_level)
 
 
+class SosNameTest(unittest.TestCase):
+    """An SOS name the tables don't know must not reach the simulator.
+
+    `build_state` used to fall back to the string it was handed, so
+    anything the page invented became a card the toon "held" -- and the
+    first sign of it was `KeyError: 'cogs_miss'` four layers down in
+    `simulator.apply_toon_action`, naming nothing that caused it.
+    """
+
+    def _cfg(self, cards):
+        return {"cogs": [{"level": 4, "dept": "sellbot"}],
+                "toons": [{"laff": 100, "gags": [["throw", 4, 3]],
+                           "sos_cards": cards}]}
+
+    def test_a_real_name_is_matched_case_insensitively(self):
+        state = bridge.build_state(self._cfg(["flippy", "LIL OLDMAN"]))
+        self.assertEqual({"Flippy": 1, "Lil Oldman": 1},
+                         state.toon.sos_cards)
+
+    def test_counts_survive_the_dict_form(self):
+        state = bridge.build_state(self._cfg({"flippy": 3}))
+        self.assertEqual({"Flippy": 3}, state.toon.sos_cards)
+
+    def test_a_card_kind_is_refused_not_carried(self):
+        # 'cogs_miss' is a KIND. Every card has one; no card is named it.
+        with self.assertRaises(ValueError) as caught:
+            bridge.build_state(self._cfg(["flippy", "cogs_miss"]))
+        self.assertIn("cogs_miss", str(caught.exception))
+
+    def test_the_catalogue_names_are_all_accepted(self):
+        names = [c["name"] for c in bridge.catalogue()["sos_cards"]]
+        self.assertTrue(names)
+        state = bridge.build_state(self._cfg(names))
+        self.assertEqual(len(names), len(state.toon.sos_cards))
+
+
+class UnnamedCogTest(unittest.TestCase):
+    """Department plus level, with no cog named -- the ordinary case.
+
+    It used to raise `KeyError: "Sellbots has no cog '0'"`: the code
+    indexed a `Department` as if it were a list, and the fallback beside
+    it was unreachable because a Department is always truthy.
+    """
+
+    def _cog(self, dept, level):
+        cfg = {"cogs": [{"level": level, "dept": dept}],
+               "toons": [{"laff": 100, "gags": [["throw", 4, 3]]}]}
+        return bridge.build_state(cfg).cogs[0]
+
+    def test_every_department_builds_unnamed(self):
+        from solver import data
+
+        for dept in data.COG_DEPARTMENTS:
+            for level in (1, 6, 12):
+                cog = self._cog(dept, level)
+                self.assertEqual(dept, cog.department)
+                self.assertEqual(level, cog.level)
+
+    def test_the_chosen_cog_can_appear_at_that_level(self):
+        from solver import data
+
+        # Damage and accuracy are indexed by position in the cog's own
+        # level range, so a cog picked outside it would be priced wrong.
+        for dept in data.COG_DEPARTMENTS:
+            for level in range(1, 13):
+                cog = self._cog(dept, level)
+                spec = data.COG_DEPARTMENTS[dept][cog.cog_type]
+                if any(level in c.levels for c in data.COG_DEPARTMENTS[dept].cogs):
+                    self.assertIn(level, spec.levels,
+                                  f"{dept} level {level} -> {cog.cog_type}")
+
+    def test_the_choice_is_repeatable(self):
+        self.assertEqual(self._cog("sellbot", 4).cog_type,
+                         self._cog("sellbot", 4).cog_type)
+
+
 if __name__ == "__main__":
     unittest.main()
 
@@ -207,3 +283,47 @@ class CallEndpointTest(unittest.TestCase):
             "laff": 90, "gags": [["throw", 5, 999]], "cogs": []}})
         self.assertIn("error", out)
         self.assertIn("pouch", out["error"])
+
+    def test_party_scenario_builds(self):
+        out = self._post({"fn": "api_root", "payload": {
+            "toons": [
+                {"laff": 50, "gags": [["throw", 3, 2]], "fires": 2},
+                {"laff": 60, "gags": [["sound", 4, 3]], "unites_held": 1},
+            ],
+            "cogs": [
+                {"type": "flunky", "department": "bossbot", "level": 4, "trapped": True, "trap_level": 3},
+                {"type": "yesman", "department": "bossbot", "level": 6, "suited": True, "lured": True, "lure_rounds": 2},
+            ]
+        }})
+        self.assertNotIn("error", out)
+        self.assertEqual("decision", out["kind"])
+        self.assertEqual(2, len(out["state"]["toons"]))
+        self.assertEqual(2, out["state"]["toons"][0]["fires"])
+        self.assertEqual(1, out["state"]["toons"][1]["unites_held"])
+        self.assertTrue(out["state"]["cogs"][0]["trapped"])
+        self.assertEqual(3, out["state"]["cogs"][0]["trap_level"])
+        self.assertTrue(out["state"]["cogs"][1]["suited"])
+        self.assertTrue(out["state"]["cogs"][1]["lured"])
+
+    def test_trapped_cog_without_trap_level_is_error(self):
+        out = self._post({"fn": "api_root", "payload": {
+            "laff": 50, "gags": [["throw", 3, 2]],
+            "cogs": [{"type": "flunky", "department": "bossbot", "level": 4, "trapped": True}]
+        }})
+        self.assertIn("error", out)
+        self.assertIn("trap level", out["error"])
+
+    def test_scenario_generation(self):
+        for kind in ("building", "strange", "hard", "combo"):
+            out = self._post({"fn": "api_generate_scenario", "payload": {"kind": kind, "seed": 42}})
+            self.assertNotIn("error", out, f"Scenario {kind} failed")
+            self.assertEqual("decision", out["kind"])
+            self.assertTrue(len(out["state"]["toons"]) >= 1)
+            self.assertTrue(len(out["cogs"]) >= 1)
+
+    def test_random_toon_generation(self):
+        out = self._post({"fn": "api_random_toon", "payload": {"seed": 42}})
+        self.assertNotIn("error", out)
+        self.assertIn("toon", out)
+        self.assertGreater(out["toon"]["max_laff"], 0)
+        self.assertTrue(len(out["toon"]["gags"]) > 0)

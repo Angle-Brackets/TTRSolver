@@ -1,0 +1,146 @@
+@import "tailwindcss";
+@plugin "daisyui";
+
+/* Toontown Light Theme: Playful, 3D bubbly cartoon aesthetic */
+@plugin "daisyui/theme" {
+  name: "ttr";
+  default: true;
+  color-scheme: light;
+  --color-base-100: oklch(97% 0.01 90);
+  --color-base-200: oklch(93% 0.015 90);
+  --color-base-300: oklch(86% 0.02 90);
+  --color-base-content: oklch(25% 0.03 260);
+  --color-primary: oklch(62% 0.22 250);
+  --color-primary-content: oklch(98% 0.01 250);
+  --color-success: oklch(68% 0.2 150);
+  --color-warning: oklch(80% 0.18 80);
+  --color-error: oklch(62% 0.22 25);
+  --radius-box: 1rem;
+  --radius-field: 0.75rem;
+}
+
+html, body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: "Fredoka", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  background: #F4F1EA;
+  color: #2D2722;
+  overflow: hidden;
+}
+
+/* OFFICIAL TOONTOWN GAG TRACK PALETTE */
+.track-toon_up { --track-bg: #EED7FF; --track-border: #9D4EDD; --track-text: #5A189A; --accent-glow: rgba(157, 78, 221, 0.25); }
+.track-trap    { --track-bg: #FFF8D6; --track-border: #E0A96D; --track-text: #7C5200; --accent-glow: rgba(224, 169, 109, 0.25); }
+.track-lure    { --track-bg: #E1F8EB; --track-border: #52B788; --track-text: #1B4332; --accent-glow: rgba(82, 183, 136, 0.25); }
+.track-sound   { --track-bg: #E0F2FE; --track-border: #3A86FF; --track-text: #1E3A8A; --accent-glow: rgba(58, 134, 255, 0.25); }
+.track-throw   { --track-bg: #FFEAD5; --track-border: #F77F00; --track-text: #7F2700; --accent-glow: rgba(247, 127, 0, 0.25); }
+.track-squirt  { --track-bg: #FFE5EC; --track-border: #FF006E; --track-text: #800037; --accent-glow: rgba(255, 0, 110, 0.25); }
+.track-drop    { --track-bg: #E0F7FA; --track-border: #00B4D8; --track-text: #004B6E; --accent-glow: rgba(0, 180, 216, 0.25); }
+.track-none    { --track-bg: #FFFFFF; --track-border: #CBD5E1; --track-text: #475569; --accent-glow: rgba(0, 0, 0, 0.05); }
+
+/* SENTINEL TRACKS (Fire / Pink Slip & SOS Call) */
+.track-fire    { --track-bg: #FFE4E6; --track-border: #FF4D6D; --track-text: #9F1239; --accent-glow: rgba(255, 77, 109, 0.3); }
+.track-sos     { --track-bg: #FEF3C7; --track-border: #F59E0B; --track-text: #78350F; --accent-glow: rgba(245, 158, 11, 0.3); }
+
+/* TOONTOWN 3D CARD HELPERS */
+.toontown-card-hero {
+  background-color: var(--track-bg, #FFFFFF);
+  border: 3px solid var(--track-border, #E2DCD0);
+  box-shadow: 0 4px 0 rgba(0, 0, 0, 0.12), inset 0 2px 0 rgba(255, 255, 255, 0.6);
+}
+
+.toontown-card-panel {
+  background-color: #FFFFFF;
+  border: 2px solid #E2DCD0;
+  box-shadow: 0 3px 0 #D5CFC3, inset 0 2px 0 rgba(255, 255, 255, 0.8);
+}
+
+.toontown-btn-3d {
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.16);
+  transition: all 0.1s ease-out;
+}
+.toontown-btn-3d:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 0 rgba(0, 0, 0, 0.2);
+}
+.toontown-btn-3d:active {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.2);
+}
+
+/* TREE NODE CARDS */
+.tree-node-card {
+  position: absolute;
+  width: 106px;
+  height: 60px;
+  border-radius: 12px;
+  padding: 4px 6px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  background-color: #FFFFFF;
+  border: 2.5px solid #E2DCD0;
+  box-shadow: 0 3px 0 #D5CFC3;
+  transition: all 0.15s ease-out;
+  user-select: none;
+}
+.tree-node-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 5px 0 #C4BCAF;
+}
+.tree-node-card.selected {
+  outline: 3px solid #2563EB;
+  outline-offset: 1px;
+}
+.tree-node-card.on-ppo-path {
+  border-color: #10B981 !important;
+  box-shadow: 0 3px 0 #059669, 0 0 10px rgba(16, 185, 129, 0.35);
+}
+.tree-node-card.on-search-path {
+  border-color: #0284C7 !important;
+  box-shadow: 0 3px 0 #0369A1, 0 0 10px rgba(14, 165, 233, 0.35);
+}
+.tree-node-card.on-both-path {
+  border-color: #F59E0B !important;
+  box-shadow: 0 3px 0 #D97706, 0 0 12px rgba(245, 158, 11, 0.45);
+}
+
+/* Target Cog Highlighting animation & styling */
+@keyframes target-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 3px #F59E0B, 0 4px 12px rgba(245, 158, 11, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 4px #F59E0B, 0 6px 16px rgba(245, 158, 11, 0.6);
+  }
+}
+
+.cog-target-highlight {
+  animation: target-pulse 1.8s infinite ease-in-out;
+  background-color: #FEF3C7 !important;
+  border-color: #F59E0B !important;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #EAE6DF;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb {
+  background: #C8C2B5;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #B3AAA3;
+}
