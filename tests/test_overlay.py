@@ -10,6 +10,8 @@ battle that is not happening, and the state would then be assembled
 from whatever the readers last saw -- which is the same failure as
 guessing, arrived at by a different route.
 """
+import threading
+import types
 import unittest
 
 from solver.live.overlay import ADVICE_LINGER, Model, TurnCounter
@@ -508,7 +510,7 @@ class FailedReadSaysWhyTest(unittest.TestCase):
 
         seen = []
         thinker = advise_mod.Thinker(
-            lambda lines, state, action: seen.append(list(lines)))
+            lambda lines, state, action, unite=None: seen.append(list(lines)))
         thinker._current = 0
 
         saved = (advise_mod._snapshot, advise_mod._panel,
@@ -531,7 +533,7 @@ class FailedReadSaysWhyTest(unittest.TestCase):
 
         seen = []
         thinker = advise_mod.Thinker(
-            lambda lines, state, action: seen.append(list(lines)))
+            lambda lines, state, action, unite=None: seen.append(list(lines)))
         thinker._current = 0
 
         saved = (advise_mod._snapshot, advise_mod._panel,
@@ -1256,3 +1258,91 @@ class AStuckThinkingFlagUnblocksTest(unittest.TestCase):
         self.assertIn("if not model.thinking:", src)
         self.assertLess(src.index("if not model.thinking:"),
                         src.index("model.thinking = True"))
+
+
+class PairedAdviceTest(unittest.TestCase):
+    """A gag label and the numbers under it are ONE statement.
+
+    Reported from live play: a single-target level 4 Throw ("Whole Fruit
+    Pie on cog 3") captioned "147 damage across 4 cogs" -- a group gag's
+    total, from an earlier round, still on screen under a fresh label.
+    `explain.describe` is sound for any one (state, action) pair, so the
+    only way to show that is a half-updated model.
+    """
+
+    def _worker(self):
+        from solver.live.overlay import Model, Worker
+
+        w = Worker.__new__(Worker)
+        w.model = Model()
+        w._lock = threading.RLock()
+        w._rl_action = None
+        w._search_action = None
+        w._posted = []
+        w._post = lambda: w._posted.append(1)
+        return w
+
+    def _stale(self, w):
+        w.model.search_gag = "Wedding Cake on all cogs"
+        w.model.search_track = "throw"
+        w.model.search_gag_level = 7
+        w.model.search_reason = "147 damage across 4 cogs"
+        w.model.search_accuracy = 85
+        w.model.search_ready = True
+
+    def test_a_raise_mid_update_drops_the_row_rather_than_splitting_it(self):
+        from solver.live import advise as advise_mod
+
+        w = self._worker()
+        self._stale(w)
+        boom = types.SimpleNamespace(
+            is_pass=False, fire=False, sos=None, track=None, level=4,
+            target_index=2)
+        real = advise_mod.track_of
+        try:
+            # Anything raising between the label write and the reason.
+            advise_mod.track_of = lambda a: (_ for _ in ()).throw(
+                RuntimeError("boom"))
+            w._on_advice(["Whole Fruit Pie on cog 3"], object(), boom)
+        finally:
+            advise_mod.track_of = real
+
+        self.assertEqual("", w.model.search_gag)
+        self.assertEqual("", w.model.search_reason,
+                         "a stale reason outlived the label it explained")
+        self.assertIsNone(w.model.search_accuracy)
+        self.assertFalse(w.model.search_ready)
+
+    def test_clear_engine_drops_label_and_reason_together(self):
+        w = self._worker()
+        self._stale(w)
+        w._clear_engine(w.model, "search")
+        for field in ("search_gag", "search_track", "search_reason"):
+            self.assertEqual("", getattr(w.model, field), field)
+        self.assertIsNone(w.model.search_accuracy)
+        self.assertEqual(0, w.model.search_gag_level)
+        self.assertFalse(w.model.search_ready)
+
+
+class SearchUniteCrossesTheProcessTest(unittest.TestCase):
+    """`search_in_child` runs in another process, so the `LAST_UNITE`
+    global it sets is set over THERE. The panel read its own copy and so
+    the search could never recommend a unite, silently -- while the
+    in-process policy path could."""
+
+    def test_the_unite_is_in_the_return_value(self):
+        import inspect
+
+        from solver.live import advise as advise_mod
+
+        src = inspect.getsource(advise_mod.search_in_child)
+        self.assertIn("state, action, LAST_UNITE", src,
+                      "the unite must come back in the return value")
+
+    def test_thinker_forwards_it(self):
+        import inspect
+
+        from solver.live import advise as advise_mod
+
+        src = inspect.getsource(advise_mod.Thinker._run)
+        self.assertIn("self.on_result(lines, state, action, unite)", src)

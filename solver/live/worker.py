@@ -293,20 +293,59 @@ class AdviceWorker(threading.Thread):
         `incoming` and `survive` are written straight to the model
         because they describe the board rather than the move, and both
         engines are looking at the same board.
+
+        NEVER LEAVES A HALF-WRITTEN EXPLANATION. Every value is computed
+        before the first assignment, so a raise anywhere in here cannot
+        land a fresh accuracy beside a stale reason. See
+        `_clear_engine`, which is what the callers use to make the same
+        guarantee across the label as well.
         """
         from . import explain as explain_mod
 
         detail = explain_mod.describe(state, action)
+        accuracy = detail.get("accuracy")
+        why = explain_mod.reason(detail)
+        organic = bool(detail.get("organic"))
+        try:
+            tracks = sorted(t.name.lower()
+                            for t in state.toon.organic_tracks)
+        except Exception:                          # noqa: BLE001
+            tracks = None
+
         model.incoming = detail.get("incoming")
         model.survive = detail.get("survive")
-        setattr(model, engine + "_accuracy", detail.get("accuracy"))
-        setattr(model, engine + "_reason", explain_mod.reason(detail))
-        setattr(model, engine + "_organic", bool(detail.get("organic")))
-        try:
-            model.organic_tracks = sorted(
-                t.name.lower() for t in state.toon.organic_tracks)
-        except Exception:                          # noqa: BLE001
-            pass
+        setattr(model, engine + "_accuracy", accuracy)
+        setattr(model, engine + "_reason", why)
+        setattr(model, engine + "_organic", organic)
+        if tracks is not None:
+            model.organic_tracks = tracks
+
+    @staticmethod
+    def _clear_engine(model, engine: str) -> None:
+        """Drop one engine's whole answer -- label AND explanation.
+
+        THE PAIR IS THE UNIT. A gag name and the numbers under it are
+        one statement about one move, and the panel had no way to write
+        only half of it deliberately -- but several ways to do it by
+        accident, because the label was assigned first and the reason
+        several statements later. Anything raising in between (and the
+        block between them calls into the unite tables) left the new
+        gag on screen under the previous round's numbers: a plausible
+        move beside damage that belongs to a move you are not being
+        shown, which is far worse than showing nothing.
+
+        Reported from live play as a single-target level 4 Throw
+        claiming "147 damage across 4 cogs" -- a group gag's total from
+        an earlier round, still on screen under a fresh label.
+        """
+        setattr(model, engine + "_gag", "")
+        setattr(model, engine + "_track", "")
+        setattr(model, engine + "_gag_level", 0)
+        setattr(model, engine + "_accuracy", None)
+        setattr(model, engine + "_reason", "")
+        setattr(model, engine + "_organic", False)
+        if engine == "search":
+            model.search_ready = False
 
     @staticmethod
     def _sync_explanation(model) -> None:

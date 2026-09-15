@@ -110,9 +110,15 @@ def describe(state, action, actor: int = 0) -> Dict:
         # so a lured cog's knockback bonus shows up as the larger number
         # it is. `each` is therefore offered only when every target
         # really did take the same amount.
-        hits = [before.hp - after.hp
+        # `remaining_hp`, THE SAME MEASURE `_landed` TOTALS. Reading
+        # raw `.hp` here while the total came from `remaining_hp` made
+        # the two disagree on a v2.0: a broken suit reads `hp == 0`, so
+        # a cog that visibly took damage could be missing from `targets`
+        # entirely -- and "N to each of M cogs" is derived from this
+        # list while the total beside it is not.
+        hits = [ps.remaining_hp(before) - ps.remaining_hp(after)
                 for before, after in zip(state.cogs, probe.cogs)
-                if before.hp > after.hp]
+                if ps.remaining_hp(before) > ps.remaining_hp(after)]
         out["targets"] = len(hits)
         if len(hits) > 1 and len(set(hits)) == 1:
             out["each"] = int(hits[0])

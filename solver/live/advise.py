@@ -235,8 +235,14 @@ def search_in_child(state, objective_name: str, depth: int,
         action, _value = _value_of(state)
 
     if action is None:
-        return ["no legal move -- nothing left to throw"], state, None
-    return [_render(action, state)], state, action
+        return ["no legal move -- nothing left to throw"], state, None, None
+    # THE UNITE COMES BACK IN THE RETURN VALUE, not in `LAST_UNITE`.
+    # This function runs in a CHILD PROCESS, so the global it sets is
+    # set over there and the panel's process never sees it -- the search
+    # path could not recommend a unite at all, silently, while the
+    # policy path (in-process) could. The global is still assigned for
+    # the in-process callers that read it.
+    return [_render(action, state)], state, action, LAST_UNITE
 
 
 class Thinker:
@@ -293,7 +299,7 @@ class Thinker:
                     # one thing that helps nobody instead.
                     self.on_result(
                         res.problems if res is not None
-                        else ["no battle detected"], None, None)
+                        else ["no battle detected"], None, None, None)
                 return
 
             state = res.state
@@ -312,7 +318,7 @@ class Thinker:
             allow_level_7 = getattr(state, "allow_level_7", True)
 
             future = _pool().submit(search_in_child, state, objective_name, depth, budget, allow_level_7)
-            lines, state, action = future.result(timeout=budget + 15.0)
+            lines, state, action, unite = future.result(timeout=budget + 15.0)
         except Exception as exc:            # noqa: BLE001 -- see below
             import traceback
 
@@ -320,10 +326,11 @@ class Thinker:
                      *traceback.format_exc().strip().splitlines()[-3:]]
             state = None
             action = None
+            unite = None
         with self._lock:
             superseded = token != self._current
         if not superseded:
-            self.on_result(lines, state, action)
+            self.on_result(lines, state, action, unite)
 
     @property
     def busy(self) -> bool:

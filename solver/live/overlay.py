@@ -614,7 +614,7 @@ class Worker(AdviceWorker):
                     model.thinking = False
             self._post()
 
-    def _on_advice(self, lines, state, action=None) -> None:
+    def _on_advice(self, lines, state, action=None, unite=None) -> None:
         from . import advise as advise_mod
         from .. import unites as unites_mod
 
@@ -626,22 +626,45 @@ class Worker(AdviceWorker):
             else:
                 model.problems = []
                 if lines:
-                    text = lines[0]
-                    track = advise_mod.track_of(action)
-                    level = action.level if (track and track not in ("fire", "sos")) else (7 if track in ("fire", "sos") else None)
+                    # EVERYTHING THAT CAN RAISE HAPPENS FIRST, before a
+                    # single field is written. The label used to be
+                    # assigned here and the reason eleven statements
+                    # later, with the unite tables called in between --
+                    # so anything raising in the middle left the new gag
+                    # on screen under the OLD move's numbers. See
+                    # `Worker._clear_engine`.
+                    try:
+                        text = lines[0]
+                        track = advise_mod.track_of(action)
+                        level = (action.level
+                                 if (track and track not in ("fire", "sos"))
+                                 else (7 if track in ("fire", "sos") else None))
+                        # `unite` comes back FROM THE SEARCH rather than
+                        # off a module global: `search_in_child` runs in
+                        # another process, so the `LAST_UNITE` it set was
+                        # set in that process and this one never saw it.
+                        chosen = unite or getattr(advise_mod, "LAST_UNITE", None)
+                        unite_text = ("" if chosen is None
+                                      else unites_mod.describe(chosen))
+                    except Exception:              # noqa: BLE001
+                        # Half an answer is worse than none: drop the
+                        # whole row rather than pair a fresh label with
+                        # a stale explanation.
+                        self._clear_engine(model, "search")
+                        self._sync_explanation(model)
+                        self._post()
+                        return
+
                     self._search_action = action
                     model.search_gag = text
                     model.search_track = track or ""
                     model.search_gag_level = level or 0
                     model.search_ready = True
-
                     # CLEARED WHEN THERE IS NONE, not only set when
                     # there is. Assigning only on the `is not None` side
                     # left the previous round's unite on screen beside a
                     # move that does not use one.
-                    chosen = getattr(advise_mod, "LAST_UNITE", None)
-                    model.unite = ("" if chosen is None
-                                   else unites_mod.describe(chosen))
+                    model.unite = unite_text
 
                     # The reasons behind the move, read off the same
                     # functions the scorer used rather than re-derived.
@@ -730,6 +753,17 @@ class Worker(AdviceWorker):
         model.plates = 0
         model.gag, model.gag_at, model.track = None, 0.0, None
         model.gag_level = None
+        # BOTH ENGINES' ROWS TOO. Clearing only the displayed advice left
+        # `rl_gag` / `search_gag` and their reasons behind, so the
+        # runner-up row carried the last fight's move into the next one
+        # -- the one place the panel shows a gag without the staleness
+        # dimming that `problems` drives.
+        for engine in ("rl", "search"):
+            self._clear_engine(model, engine)
+        model.unite = ""
+        self._sync_explanation(model)
+        model.incoming = model.survive = None
+        self._rl_action = self._search_action = None
         model.problems, model.rows, model.cogs = [], [], []
         model.turn = 0
         model.thinking = False
