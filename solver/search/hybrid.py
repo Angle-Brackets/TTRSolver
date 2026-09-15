@@ -1370,13 +1370,34 @@ def climb(state: BattleState, rng=random,
                     order.append(env_mod.PASS_INDEX)
             if not TARGETED_PROBES_FIRST:
                 _add_targeted()
-            trials = [env_mod.action_at(int(index)) for index in order
-                      if np.isfinite(values[index])]
+            queue = [(env_mod.action_at(int(index)), True) for index in order
+                     if np.isfinite(values[index])]
             if OFFER_SOS:
                 # Appended, not merged: these have no index and no
                 # logit, so they cannot be ordered against the rest.
-                trials.extend(_sos_probes(state, seat))
-            for action in trials:
+                #
+                # AND NOT CHARGED TO THE BUDGET. They used to be, and
+                # sat at the very end of the queue, so on any board big
+                # enough to fill the sweep they were never reached: the
+                # loop broke on `spent >= budget` first. A four-cog VP
+                # board with seven cards held is past the default 24
+                # before the first card, which is why the panel "never
+                # suggests SOS" -- the judge ranked a card FIRST and
+                # `climb` never asked it. Measured on a recorded run:
+                # at budget 24 the plan is Presentation, at 40 it is the
+                # card the judge preferred all along.
+                #
+                # Not fixed by moving them earlier: `TARGETED_PROBES_FIRST`
+                # records that reversing which sweep gets starved cost
+                # difficulty 9 sixty percent to forty-two. So the sweep
+                # keeps its place and its budget, and the cards -- of
+                # which there are at most a handful, one per distinct
+                # card held -- are simply always judged.
+                queue += [(action, False)
+                          for action in _sos_probes(state, seat)]
+            for action, charge in queue:
+                if charge and spent >= budget:
+                    continue          # sweep truncated; cards still judged
                 trial = list(plan)
                 trial[seat] = None if action.is_pass else action
                 if trial == plan:
@@ -1387,11 +1408,10 @@ def climb(state: BattleState, rng=random,
                     score = judge(state, trial)
                 except (NotImplementedError, ValueError, KeyError):
                     continue
-                spent += 1
+                if charge:
+                    spent += 1
                 if score > best_score:
                     plan, best_score, improved = trial, score, True
-                if spent >= budget:
-                    break
 
         # A joint move, once no single seat can improve alone. Narrower
         # than the single-seat menu on purpose: this is width^2 per

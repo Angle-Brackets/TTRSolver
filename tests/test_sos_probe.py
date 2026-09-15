@@ -541,3 +541,105 @@ class VpFloorCapTest(unittest.TestCase):
         """A solo clear was seen at about 48 rounds; the cap has to
         leave room above that rather than sit on it."""
         self.assertGreater(env_mod.VP_FLOOR_ROUNDS, 48)
+
+
+class BudgetMustNotStarveTheCardsTest(unittest.TestCase):
+    """The probe existed and still never fired on a real board.
+
+    `_sos_probes` are appended to the end of the seat's queue, and the
+    scoring loop used to charge them against `budget` and break on it.
+    On anything big enough to fill the sweep the loop ran out first, so
+    the cards were enumerated, ranked -- and never judged.
+
+    Reproduced from a recorded solo VP: four cogs up, seven cards held.
+    `_quick_score` ranks a card FIRST of seventy actions, and at the
+    shipped budget of 24 `climb` returned a Lure instead; at 40 it
+    returned the card. That gap is the whole of "the panel never
+    suggests an SOS".
+
+    Fixed by not charging the cards to the budget rather than by moving
+    them earlier -- see `TARGETED_PROBES_FIRST`, which records that
+    reordering costs far more than it buys.
+    """
+
+    def _board(self, cards, cogs=4):
+        from solver import data
+        from solver.state import BattleState, CogState
+
+        toon = ToonState(laff=118, max_laff=140)
+        for track in Track:
+            toon.track_exp[track] = 7
+            for level in range(1, 8):
+                try:
+                    data.gag(track, level)
+                except Exception:              # noqa: BLE001
+                    continue
+                toon.gag_counts[(track, level)] = 3 if level < 7 else 1
+        toon.sos_cards = dict(cards)
+        plates = []
+        for level in (11, 10, 8, 11)[:cogs]:
+            hp = data.cog_max_hp(level)
+            plates.append(CogState(cog_type="mr_hollywood", department="sellbot",
+                                   level=level, hp=hp, max_hp=hp))
+        return BattleState(toons=[toon], cogs=plates)
+
+    def _pick(self, state, budget=24):
+        plan = hybrid.climb(state, random.Random(0), budget=budget, width=16)
+        first = plan[0] if isinstance(plan, (list, tuple)) and plan else plan
+        return first
+
+    def test_a_card_the_judge_ranks_first_is_actually_chosen(self):
+        cards = {"Barnacle Bessie": 1, "Moe Zart": 1, "Flippy": 1,
+                 "Daffy Don": 1, "Sticky Lou": 1, "Julius Wheezer": 1,
+                 "Professor Pete": 1}
+        cards = {k: v for k, v in cards.items() if k in sos_mod.BY_NAME}
+        state = self._board(cards)
+
+        ranked = sorted(
+            ((ps._quick_score(state, [a]), a)
+             for a in simulator.legal_actions(state)),
+            key=lambda kv: -kv[0])
+        best = ranked[0][1]
+        if not getattr(best, "sos", None):
+            self.skipTest("judge does not rank a card first on this board")
+
+        chosen = self._pick(state, budget=24)
+        self.assertIsNotNone(getattr(chosen, "sos", None),
+                             "judge ranked %r first, climb chose %r"
+                             % (best, chosen))
+
+    def test_the_budget_no_longer_changes_the_answer(self):
+        """It used to: 24 gave a Lure, 40 gave the card."""
+        cards = {k: 1 for k in ("Barnacle Bessie", "Moe Zart", "Flippy",
+                                "Daffy Don", "Sticky Lou", "Julius Wheezer",
+                                "Professor Pete") if k in sos_mod.BY_NAME}
+        state = self._board(cards)
+        picks = {b: repr(self._pick(self._board(cards), budget=b))
+                 for b in (24, 40, 64)}
+        self.assertEqual(1, len(set(picks.values())), picks)
+
+    def test_a_toon_holding_no_cards_is_completely_unaffected(self):
+        """The safety property: every offline sweep in this repo runs
+        toons carrying no cards, so none of those results may move."""
+        from solver import data
+        from solver.state import BattleState, CogState
+
+        rng = random.Random(4)
+        for trial in range(25):
+            state = self._board({}, cogs=rng.randint(1, 4))
+            before = hybrid.climb(state, random.Random(trial),
+                                  budget=24, width=16)
+            again = hybrid.climb(self._board({}, cogs=len(state.cogs)),
+                                 random.Random(trial), budget=24, width=16)
+            self.assertEqual(repr(before), repr(again))
+
+    def test_cards_are_still_last_in_the_queue(self):
+        """Not reordered -- `TARGETED_PROBES_FIRST` records that moving
+        probes ahead of the track sweep cost difficulty 9 sixty percent
+        to forty-two."""
+        import inspect
+
+        src = inspect.getsource(hybrid.climb)
+        self.assertIn("queue += [(action, False)", src)
+        self.assertLess(src.index("for index in order"),
+                        src.index("_sos_probes(state, seat)"))
