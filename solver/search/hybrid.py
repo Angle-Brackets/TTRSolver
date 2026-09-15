@@ -564,6 +564,35 @@ PROBE_CHEAPEST_LURE = True
 # is left recorded rather than papered over.
 TARGETED_PROBES_FIRST = False
 
+# Whether an SOS card costs a judge call out of `budget`. It used to,
+# and that is the bug: the cards sit at the END of the queue, so on any
+# board big enough to fill the sweep the loop broke before reaching one.
+# A four-cog VP wave with seven cards held is past the default 24 well
+# before the first card, so `_quick_score` ranked a card first of
+# seventy actions and `climb` never asked it.
+#
+# False is the shipped behaviour. True restores the old one, and exists
+# so the two can be measured against each other on identical seeds
+# rather than by checking out an old revision.
+#
+# MEASURED, because the judge preferring a card is not proof the card
+# wins. 100 paired VP sides, two maxed toons, seven cards and three
+# slips held, budget 24, common random numbers:
+#
+#     charged (old)  88/100   cards called 225   17.7 rounds/side
+#     free    (new)  97/100   cards called 370   14.8 rounds/side
+#
+# +10 sides won only when free against 1 only when charged; sign test
+# on the 11 discordant pairs p = 0.0117. Nine points and three rounds
+# a side, from moves that were already being ranked and thrown away.
+#
+# The regime matters and cost an afternoon: a two-toon party is the only
+# one that discriminates here. Solo never clears this harness (0/8 with
+# or without unites) and there is nothing to compare; and an early n=8
+# probe came back 7 against 6 the WRONG way, which is what a single
+# discordant pair looks like. Do not read this flag on a small sample.
+SOS_CHARGED_TO_BUDGET = False
+
 # The one narrow exception, and it is narrow on purpose: a LURE aimed at
 # a TRAPPED cog. There the lure's level buys nothing -- the trap
 # resolves at once, so duration is worthless -- and every lure lands at
@@ -1396,6 +1425,8 @@ def climb(state: BattleState, rng=random,
                 queue += [(action, False)
                           for action in _sos_probes(state, seat)]
             for action, charge in queue:
+                if SOS_CHARGED_TO_BUDGET:
+                    charge = True        # the pre-fix behaviour, for A/B
                 if charge and spent >= budget:
                     continue          # sweep truncated; cards still judged
                 trial = list(plan)
