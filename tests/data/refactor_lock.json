@@ -3340,7 +3340,7 @@
     1.0
    ],
    "legal": 29,
-   "quick": 2332.3896,
+   "quick": 2292.3896,
    "incoming": 18.8175,
    "survival": 4.0,
    "at_risk": 0.0,
@@ -4345,7 +4345,7 @@
     1.0
    ],
    "legal": 27,
-   "quick": 1006.9988,
+   "quick": 966.9988,
    "incoming": 22.145,
    "survival": 1.3096,
    "at_risk": 0.0,
@@ -5350,7 +5350,7 @@
     1.0
    ],
    "legal": 15,
-   "quick": 522.6697,
+   "quick": 482.6697,
    "incoming": 5.025,
    "survival": 0.597,
    "at_risk": 2.0,
@@ -6020,7 +6020,7 @@
     1.0
    ],
    "legal": 17,
-   "quick": 656.9531,
+   "quick": 616.9531,
    "incoming": 22.9525,
    "survival": 0.1743,
    "at_risk": 3.0,
@@ -6355,7 +6355,7 @@
     1.0
    ],
    "legal": 8,
-   "quick": 1705.0,
+   "quick": 1665.0,
    "incoming": 0.0,
    "survival": 1.3296,
    "at_risk": 0.0,
@@ -8700,7 +8700,7 @@
     1.0
    ],
    "legal": 24,
-   "quick": 1056.7563,
+   "quick": 1016.7563,
    "incoming": 8.51,
    "survival": 1.5276,
    "at_risk": 1.0,
@@ -9035,7 +9035,7 @@
     1.0
    ],
    "legal": 29,
-   "quick": 1573.0,
+   "quick": 1533.0,
    "incoming": 9.585,
    "survival": 4.0,
    "at_risk": 0.0,
@@ -9370,7 +9370,7 @@
     1.0
    ],
    "legal": 11,
-   "quick": 1704.1,
+   "quick": 1664.1,
    "incoming": 0.0,
    "survival": 4.0,
    "at_risk": 0.0,
@@ -9705,7 +9705,7 @@
     1.0
    ],
    "legal": 11,
-   "quick": 1645.1192,
+   "quick": 1605.1192,
    "incoming": 4.2175,
    "survival": 4.0,
    "at_risk": 0.0,
@@ -11045,7 +11045,7 @@
     1.0
    ],
    "legal": 11,
-   "quick": 1969.0,
+   "quick": 1929.0,
    "incoming": 0.0,
    "survival": 0.2975,
    "at_risk": 0.0,
@@ -11380,7 +11380,7 @@
     1.0
    ],
    "legal": 19,
-   "quick": 306.4882,
+   "quick": 266.4882,
    "incoming": 5.6025,
    "survival": 0.714,
    "at_risk": 1.0,
@@ -12720,7 +12720,7 @@
     1.0
    ],
    "legal": 24,
-   "quick": 1533.4515,
+   "quick": 1493.4515,
    "incoming": 6.345,
    "survival": 2.8369,
    "at_risk": 0.0,
@@ -13390,7 +13390,7 @@
     1.0
    ],
    "legal": 11,
-   "quick": 1708.0542,
+   "quick": 1668.0542,
    "incoming": 0.0,
    "survival": 2.8202,
    "at_risk": 0.0,
@@ -14395,7 +14395,7 @@
     1.0
    ],
    "legal": 9,
-   "quick": 1699.7641,
+   "quick": 1659.7641,
    "incoming": 0.0,
    "survival": 3.5457,
    "at_risk": 0.0,
@@ -15400,7 +15400,7 @@
     1.0
    ],
    "legal": 16,
-   "quick": 586.8452,
+   "quick": 546.8452,
    "incoming": 4.5125,
    "survival": 1.108,
    "at_risk": 1.0,
@@ -15735,7 +15735,7 @@
     1.0
    ],
    "legal": 31,
-   "quick": 925.3252,
+   "quick": 885.3252,
    "incoming": 17.47,
    "survival": 0.6869,
    "at_risk": 2.0,
@@ -16070,7 +16070,7 @@
     1.0
    ],
    "legal": 11,
-   "quick": 1867.0,
+   "quick": 1827.0,
    "incoming": 0.0,
    "survival": 0.4998,
    "at_risk": 0.0,
@@ -17086,7 +17086,7 @@
     0.0,
     1.0
    ],
-   "pick": "sound/7/None"
+   "pick": "fire"
   },
   {
    "obs": [
@@ -17410,7 +17410,7 @@
     1.0
    ],
    "legal": 14,
-   "quick": 318.9305,
+   "quick": 278.9305,
    "incoming": 10.78,
    "survival": 0.1855,
    "at_risk": 2.0,
@@ -18415,7 +18415,7 @@
     1.0
    ],
    "legal": 39,
-   "quick": 1508.188,
+   "quick": 1468.188,
    "incoming": 34.755,
    "survival": 2.4169,
    "at_risk": 0.0,
@@ -18750,7 +18750,7 @@
     1.0
    ],
    "legal": 10,
-   "quick": 1139.5958,
+   "quick": 1099.5958,
    "incoming": 15.13,
    "survival": 2.115,
    "at_risk": 0.0,
@@ -19420,7 +19420,7 @@
     1.0
    ],
    "legal": 13,
-   "quick": 1778.2808,
+   "quick": 1738.2808,
    "incoming": 5.565,
    "survival": 4.0,
    "at_risk": 0.0,
@@ -19755,7 +19755,7 @@
     1.0
    ],
    "legal": 14,
-   "quick": 902.8233,
+   "quick": 862.8233,
    "incoming": 3.3825,
    "survival": 2.3651,
    "at_risk": 0.0,
@@ -20425,7 +20425,7 @@
     1.0
    ],
    "legal": 24,
-   "quick": 1716.7311,
+   "quick": 1676.7311,
    "incoming": 21.4875,
    "survival": 2.7458,
    "at_risk": 0.0,
@@ -20760,7 +20760,7 @@
     1.0
    ],
    "legal": 19,
-   "quick": 2129.6449,
+   "quick": 2089.6449,
    "incoming": 39.2275,
    "survival": 2.9316,
    "at_risk": 0.0,
@@ -22100,7 +22100,7 @@
     1.0
    ],
    "legal": 26,
-   "quick": 443.7709,
+   "quick": 403.7709,
    "incoming": 23.64,
    "survival": 0.9729,
    "at_risk": 2.0,
@@ -22435,7 +22435,7 @@
     1.0
    ],
    "legal": 40,
-   "quick": 1186.3055,
+   "quick": 1146.3055,
    "incoming": 19.7025,
    "survival": 1.8272,
    "at_risk": 1.0,
@@ -24780,7 +24780,7 @@
     1.0
    ],
    "legal": 20,
-   "quick": 1243.3984,
+   "quick": 1203.3984,
    "incoming": 8.435,
    "survival": 2.3711,
    "at_risk": 0.0,
@@ -27460,7 +27460,7 @@
     1.0
    ],
    "legal": 30,
-   "quick": 944.1039,
+   "quick": 904.1039,
    "incoming": 11.1275,
    "survival": 1.0784,
    "at_risk": 2.0,
@@ -28130,7 +28130,7 @@
     1.0
    ],
    "legal": 35,
-   "quick": 734.0566,
+   "quick": 694.0566,
    "incoming": 26.535,
    "survival": 0.4899,
    "at_risk": 1.0,
@@ -30140,7 +30140,7 @@
     1.0
    ],
    "legal": 26,
-   "quick": 1491.2275,
+   "quick": 1451.2275,
    "incoming": 5.92,
    "survival": 4.0,
    "at_risk": 0.0,
@@ -30475,7 +30475,7 @@
     1.0
    ],
    "legal": 22,
-   "quick": 1856.2069,
+   "quick": 1816.2069,
    "incoming": 5.0125,
    "survival": 4.0,
    "at_risk": 0.0,
@@ -32820,7 +32820,7 @@
     1.0
    ],
    "legal": 17,
-   "quick": 1162.3406,
+   "quick": 1122.3406,
    "incoming": 11.3475,
    "survival": 2.2031,
    "at_risk": 0.0,
@@ -33825,7 +33825,7 @@
     1.0
    ],
    "legal": 33,
-   "quick": 881.1481,
+   "quick": 841.1481,
    "incoming": 20.5725,
    "survival": 1.118,
    "at_risk": 1.0,
@@ -34160,7 +34160,7 @@
     1.0
    ],
    "legal": 24,
-   "quick": 593.0477,
+   "quick": 553.0477,
    "incoming": 13.455,
    "survival": 0.1486,
    "at_risk": 1.0,
@@ -34495,7 +34495,7 @@
     1.0
    ],
    "legal": 40,
-   "quick": 292.3712,
+   "quick": 252.3712,
    "incoming": 11.4625,
    "survival": 0.6979,
    "at_risk": 1.0,
@@ -35165,7 +35165,7 @@
     1.0
    ],
    "legal": 18,
-   "quick": 1871.357,
+   "quick": 1831.357,
    "incoming": 3.34,
    "survival": 4.0,
    "at_risk": 0.0,
@@ -36170,7 +36170,7 @@
     1.0
    ],
    "legal": 32,
-   "quick": 886.682,
+   "quick": 846.682,
    "incoming": 12.8025,
    "survival": 1.0154,
    "at_risk": 2.0,
@@ -36840,7 +36840,7 @@
     1.0
    ],
    "legal": 25,
-   "quick": 286.8436,
+   "quick": 246.8436,
    "incoming": 28.58,
    "survival": 0.5948,
    "at_risk": 2.0,
@@ -38515,7 +38515,7 @@
     1.0
    ],
    "legal": 17,
-   "quick": 759.7604,
+   "quick": 719.7604,
    "incoming": 10.2125,
    "survival": 1.5667,
    "at_risk": 1.0,
@@ -39520,7 +39520,7 @@
     1.0
    ],
    "legal": 19,
-   "quick": 1851.1505,
+   "quick": 1811.1505,
    "incoming": 3.31,
    "survival": 4.0,
    "at_risk": 0.0,
@@ -40190,7 +40190,7 @@
     1.0
    ],
    "legal": 8,
-   "quick": 1563.6775,
+   "quick": 1523.6775,
    "incoming": 0.0,
    "survival": 4.0,
    "at_risk": 0.0,

@@ -481,6 +481,41 @@ SCARCITY_UNITS = 20.0
 # exactly nothing.
 SCARCITY_USES_HELD_COUNT = True
 
+# Extra cost for spending your LAST copy of a gag, on top of the
+# scarcity term. Zero is off.
+#
+# `level + SCARCITY_UNITS / limit` prices a Presentation at 27 against a
+# Hypno-goggles at 12.67, and that 14-unit gap loses to a 142-point
+# score gap: on a four-cog VP wave the scorer takes Presentation every
+# time, purely on 95% accuracy against 80%. Duration is not the reason
+# -- `prevented` caps by `reach`, so both lures are credited the same
+# 113.1 -- and raising `QUICK_W["price"]` enough to flip it needs 16x,
+# which distorts every other gag.
+#
+# The missing idea is that a one-of-a-kind gag is categorically unlike
+# one you hold three of. `_quick_score` sees one round, so it cannot
+# price the option of still having the thing on a worse board later.
+# This is the crude stand-in for that.
+#
+# SWEPT ON THE VP, where the problem actually shows -- street and
+# facility boards rarely make a level 7 the top pick, and both were
+# unmoved at 40 (+1/-1 and +0/-0 over 150 paired sides each).
+#
+#     units    VP win    discordant      p
+#       0      53.0%     (baseline)
+#      40      57.5%      +21/-12      0.163
+#     100      56.5%      +35/-28      0.450
+#     200      40.0%      +24/-50      0.003
+#
+# 200 is thirteen points WORSE and significantly so: priced that high a
+# last copy never gets thrown, including when it is the only group lure
+# left. A little conservation helps, a lot is hoarding.
+#
+# 40 was the best of three tried, so it was confirmed on a fresh seed
+# base rather than shipped on its selection number: 300 paired sides at
+# 97000, 53.0% -> 60.3%, +45/-23, p = 0.010.
+LAST_COPY_UNITS = 40.0
+
 
 # Credit for an action that finishes a cog. Note this is the GREEDY
 # table's kill price (60.0) and not the QUICK table's (120.0), while the

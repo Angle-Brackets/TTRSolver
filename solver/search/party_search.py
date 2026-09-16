@@ -917,7 +917,14 @@ def _gag_units(track, level: int, unlocked: int, held=None) -> float:
         limit = 1
     if weights.SCARCITY_USES_HELD_COUNT and held:
         limit = max(1, min(int(held), limit))
-    return float(level) + weights.SCARCITY_UNITS / limit
+    units = float(level) + weights.SCARCITY_UNITS / limit
+    if weights.LAST_COPY_UNITS and limit <= 1:
+        # The only one you have. Keyed on the SAME `limit` the scarcity
+        # term uses, so it follows `SCARCITY_USES_HELD_COUNT`: with that
+        # on it means "last one in the pouch", with it off "a gag you
+        # can only ever carry one of".
+        units += weights.LAST_COPY_UNITS
+    return units
 
 
 def _fire_price(cogs_remaining: int, floor: bool = False) -> float:
