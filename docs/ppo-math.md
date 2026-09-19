@@ -25,10 +25,10 @@ $$
 r = -w_\ell \cdot \ell \;-\; \sum_{g \in G} c(g) \;-\; w_k k \;-\; \tau \;+\; W\mathbb{1}[\text{won}] \;-\; L\mathbb{1}[\text{lost}]
 $$
 
-where $\tau = \text{turn\_cost}$ and $W = L = 100$. Gag cost scales with remaining battle horizon:
+where $\tau = \text{turn cost}$ and $W = L = 100$. Gag cost scales with remaining battle horizon:
 
 $$
-c(g) = \Big(\text{gag\_cost} \cdot \text{level}(g) + \frac{\text{scarcity\_cost}}{\text{carry}(g)}\Big)\big(1 + \eta \cdot \text{cogs\_remaining}\big)
+c(g) = \Big(\text{gag cost} \cdot \text{level}(g) + \frac{\text{scarcity cost}}{\text{carry}(g)}\Big)\big(1 + \eta \cdot \text{cogs remaining}\big)
 $$
 
 with $\eta = 0.15$.
@@ -69,6 +69,29 @@ $$
 $$
 
 Candidate menu $\mathcal{M}_i$ combines top-$k$ policy actions with targeted heuristic probes (cheapest kill per cog, cheapest lure on trapped boards, and pass). Coordinate ascent runs to convergence or budget exhaustion (24 evaluations), followed by pairwise joint evaluations.
+
+```mermaid
+flowchart TD
+    classDef stateNode fill:#0369a1,stroke:#38bdf8,stroke-width:2px,color:#ffffff
+    classDef ppoNode fill:#581c87,stroke:#c084fc,stroke-width:2px,color:#ffffff
+    classDef probeNode fill:#0f766e,stroke:#2dd4bf,stroke-width:2px,color:#ffffff
+    classDef climbNode fill:#b45309,stroke:#fbbf24,stroke-width:2px,color:#ffffff
+    classDef outNode fill:#15803d,stroke:#4ade80,stroke-width:3px,color:#ffffff
+
+    S["Observation Vector s<br/>(302 Floats)"] --> PPO["PPO Actor Policy π_θ<br/>(Propose Top-k per Toon)"]
+    S --> PROBES["Targeted Heuristic Probes<br/>(Cheapest Kills, Lure Trapped, Pass)"]
+    PPO --> MENU["Candidate Action Menu M_i"]
+    PROBES --> MENU
+    MENU --> ASCENT["Coordinate Ascent on Q(s, a)<br/>(Single-Seat Iteration, Budget 24)"]
+    ASCENT --> SWAP["Pairwise Joint Evaluations<br/>(Cross-Seat Local Minima Escape)"]
+    SWAP --> BEST["Optimal Joint Action a*"]
+
+    class S stateNode
+    class PPO ppoNode
+    class PROBES,MENU probeNode
+    class ASCENT,SWAP climbNode
+    class BEST outNode
+```
 
 ## 5. Non-Action Consumables
 

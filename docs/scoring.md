@@ -6,7 +6,35 @@ Technical audit and empirical validation of `_quick_score` weights (`QUICK_W`), 
 
 `_quick_score` evaluates candidate joint plans during coordinate ascent (`hybrid.climb`):
 
-$$\text{Score} = \Delta_{\text{damage}} + 2 \cdot \Delta_{\text{heal}} + \text{trap\_stored} + 120 \cdot \text{kills} + 9 \cdot \text{prevented} - \text{price}_{\text{gag}} - \text{price}_{\text{spend}} + \text{survival\_bonus}$$
+$$\text{Score} = \Delta_{\text{damage}} + 2 \cdot \Delta_{\text{heal}} + \text{trap stored} + 120 \cdot \text{kills} + 9 \cdot \text{prevented} - \text{price}_{\text{gag}} - \text{price}_{\text{spend}} + \text{survival bonus}$$
+
+```mermaid
+flowchart LR
+    classDef pos fill:#065f46,stroke:#34d399,stroke-width:2px,color:#ffffff
+    classDef neg fill:#881337,stroke:#fb7185,stroke-width:2px,color:#ffffff
+    classDef score fill:#1e3a8a,stroke:#60a5fa,stroke-width:3px,color:#ffffff
+
+    subgraph PositiveRewards["Positive Value Terms"]
+        D["Damage Inflicted<br/>(Δ_damage)"]
+        H["Laff Restored<br/>(2 × Δ_heal)"]
+        T["Trap Armed<br/>(trap stored)"]
+        K["Cog Kills<br/>(120 × kills)"]
+        P["Damage Prevented<br/>(9 × prevented)"]
+        S["Survival Buffer<br/>(survival bonus)"]
+    end
+
+    subgraph CostPenalties["Resource Conservation & Spending"]
+        G["Gag Conservation<br/>(price_gag)"]
+        C["Consumable Burn<br/>(price_spend)"]
+    end
+
+    D & H & T & K & P & S --> TOTAL["_quick_score (Total EV)"]
+    G & C -.->|Deducted| TOTAL
+
+    class D,H,T,K,P,S pos
+    class G,C neg
+    class TOTAL score
+```
 
 ### Laff Level vs Delta: `survival_rounds`
 Because `_score_leaf` evaluates the toon phase where laff deltas are zero, healing actions would score 0 without an absolute laff term.
@@ -34,7 +62,7 @@ Validation on realistic unmaxed toons (mean training 4.65, 250 runs/cell):
 ## Consumable Pricing
 
 ### Pricing Parameters
-- `FIRE_PRICE`: Dynamic cost scaling with remaining cogs ($\text{base} + \text{cogs\_remaining}$).
+- `FIRE_PRICE`: Dynamic cost scaling with remaining cogs ($\text{base} + \text{cogs remaining}$).
 - `FIRE_FLOOR = 120`: Minimum threshold required to trigger a pink slip.
 - `UNITE_PRICE = 200`: Flat cost (0 turn opportunity cost).
 - `SOS_PRICE = 250`: Flat cost (substitutes for toon turn action).
@@ -128,7 +156,7 @@ Retained as active (`True`).
 ## Scarcity and Conservation Pricing
 
 ### Scarcity Formula
-$$\text{scarcity\_cost} = \frac{\text{SCARCITY\_UNITS}}{\min(\text{inventory}, \text{carry\_limit})}$$
+$$\text{scarcity cost} = \frac{\text{SCARCITY UNITS}}{\min(\text{inventory}, \text{carry limit})}$$
 
 - `SCARCITY_UNITS = 20`: Swept over $\{0, 20, 60, 150\}$; win rates were statistically indistinguishable due to damage and prevention terms dominating the objective ($\approx 95\%$ of score weight).
 - `SCARCITY_USES_HELD_COUNT = True`: Evaluates held inventory rather than static capacity limit. Yields $2.4\%$ reduction in gags consumed with neutral win rates across 1,000 paired runs (88.0% vs 88.4%, $p = 0.454$).
@@ -137,7 +165,7 @@ $$\text{scarcity\_cost} = \frac{\text{SCARCITY\_UNITS}}{\min(\text{inventory}, \
 Initially, `QUICK_W["price"]` multiplied gags, pink slips, and SOS cards simultaneously, causing gag conservation sweeps to inadvertently unprice consumables.
 
 `_score_leaf` partitions price into two independent multipliers:
-1. `price = 1.0`: Multiplies standard gag unit costs and horizon scaling ($1 + \eta \cdot \text{cogs\_remaining}$).
+1. `price = 1.0`: Multiplies standard gag unit costs and horizon scaling ($1 + \eta \cdot \text{cogs remaining}$).
 2. `spend = 1.0`: Multiplies consumable costs (`FIRE_PRICE`, `SOS_PRICE`).
 
 Ablation with consumables active:

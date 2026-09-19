@@ -33,6 +33,29 @@ Branching decreases with depth as pouch depletion restricts downstream legal act
 
 Because cogs make no decisions (attack selections and accuracy rolls are non-strategic damage distributions), replacing the full cog damage distribution with its expected value collapses chance outcomes from 20–70 down to 2 (toon hit vs toon miss).
 
+```mermaid
+flowchart TD
+    classDef toonNode fill:#1e3a8a,stroke:#60a5fa,stroke-width:2px,color:#ffffff
+    classDef exactChance fill:#881337,stroke:#fb7185,stroke-width:2px,color:#ffffff
+    classDef collapsedChance fill:#065f46,stroke:#34d399,stroke-width:2px,color:#ffffff
+    classDef leafNode fill:#581c87,stroke:#c084fc,stroke-width:2px,color:#ffffff
+
+    subgraph Exact["Exact Expectimax (Full Branching)"]
+        T1["Toon Action (b = 40)"] --> C1["Full Cog Attack Distribution<br/>(20–70 outcomes per ply)"]
+        C1 --> L1["Exploding Tree Size<br/>(~8,600 branches/ply, Depth 2 Limit)"]
+    end
+
+    subgraph Collapsed["Cog Phase Collapsing (Optimized)"]
+        T2["Toon Action (b = 40)"] --> C2["Mean Cog Attack Distribution<br/>(2 outcomes: Toon Hit vs Miss)"]
+        C2 --> L2["Pruned Tree Search<br/>(Depth 4–6 in < 4s, +1 to +2 Plies)"]
+    end
+
+    class T1,T2 toonNode
+    class C1 exactChance
+    class C2 collapsedChance
+    class L1,L2 leafNode
+```
+
 ### Benchmark Comparison (15s Budget)
 
 | Position | Exact Depth (Time) | Collapsed Depth (Time) |

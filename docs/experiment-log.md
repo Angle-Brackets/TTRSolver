@@ -609,7 +609,7 @@ fire-bearing plans only, as designed.
 ### SCARCITY_UNITS: swept, and left at 20
 
 
-[OWNER] "It should be weighted by the fact you can carry 7 $10 bills and
+[OWNER] "It should be weighted by the fact you can carry 7 \$10 bills and
 only 3 hypnos." `_gag_units` already charges
 `level + SCARCITY_UNITS / carry_limit`, so a Hypno-goggles (level 6,
 carry 3) costs 12.67 against a Small Magnet's (level 2, carry 25) 2.80.
@@ -646,10 +646,10 @@ carry limit, through `_gag_units`.
 
 That has a visible consequence. Asked what happens when the pouch holds
 nothing below Big Magnet, the panel advises **Big Magnet GROUP** on the
-lone cog, because at `4 + 20/15 = 5.33` it is cheaper than a $10 Bill at
+lone cog, because at `4 + 20/15 = 5.33` it is cheaper than a \$10 Bill at
 `5 + 20/7 = 7.86`. Which is arguably right -- a toon carries 15 Big
-Magnets and 7 $10 Bills, so spending the magnet is the better resource
-decision even though it is the "group" gag. From $10 Bill up it picks
+Magnets and 7 \$10 Bills, so spending the magnet is the better resource
+decision even though it is the "group" gag. From \$10 Bill up it picks
 the single bill; from Hypno up it abandons the lure and throws instead.
 
 **Left alone, because it does not happen.** Group gags thrown onto a
@@ -901,7 +901,7 @@ dearest exactly when you are down to the last one.
 | gag | carry | held | by carry limit | by held count |
 |---|---|---|---|---|
 | Big Magnet | 15 | 9 | 5.33 | 6.22 |
-| $10 Bill | 7 | 6 | 7.86 | 8.33 |
+| \$10 Bill | 7 | 6 | 7.86 | 8.33 |
 | Hypno-goggles | 3 | 3 | 12.67 | 12.67 |
 | Presentation | 1 | 1 | 27.00 | 27.00 |
 

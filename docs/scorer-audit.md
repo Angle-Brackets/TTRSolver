@@ -57,7 +57,7 @@ Rules mandate fixed accuracies for specific interactions (Trap: 100%, Throw/Squi
 ### 4. Zero-Cost Pink Slips in Candidate Ranking
 `_cheap_score` priced fires at 0, depleting all 10 slips during preliminary rounds and leaving 0.3 slips for the final boss encounter.
 
-- **Resolution**: `FIRE_PRICE = 20 \times \text{cogs\_remaining}`. Slips scale in cost when subsequent cogs remain, dropping to 0 at encounter termination. Unstuck 10-leftover CEO win rate from 0%.
+- **Resolution**: `FIRE_PRICE = 20 * cogs_remaining`. Slips scale in cost when subsequent cogs remain, dropping to 0 at encounter termination. Unstuck 10-leftover CEO win rate from 0%.
 - **Opportunity Cost Refutation**: An opportunity cost formulation (pricing slips against the $F$-th best target in the holdout) degraded CEO win rate (88.0% $\to$ 76.0%, $p = 0.0003$). It deferred early slip usage, forfeiting the long-term cumulative damage prevention that early removals provide.
 
 ## Observation Vector Expansion (290 $\to$ 302 Floats)
@@ -67,7 +67,7 @@ Auditing revealed three feature omissions in the 290-dimensional observation vec
 2. Pink slip counts were unrepresented (policy proposed fires blindly, relying on the legality mask).
 3. Level 14–15 cogs exceeded previous normalization ranges (`level / 12.0`, `max_hp / 200.0`).
 
-- **Updates**: Added `suited` flag, remaining work ratio ($\frac{\text{hp} + \text{max\_hp}}{\text{max\_hp}}$ for v2.0), per-toon pink slip counts, and expanded normalization ceilings to level 20 and 476 HP.
+- **Updates**: Added `suited` flag, remaining work ratio ($\frac{\text{hp} + \text{max hp}}{\text{max hp}}$ for v2.0), per-toon pink slip counts, and expanded normalization ceilings to level 20 and 476 HP.
 - **Retraining on Boss Scenarios (`--boss-fraction 0.25`)**:
 
 | Encounter | Control (302-wide, no boss) | Boss-Trained (`boss_s2`) | $\Delta$ (Climb) |

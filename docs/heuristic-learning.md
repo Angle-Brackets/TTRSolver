@@ -17,10 +17,28 @@ Stage 0 linear model trained on 5,000 exact expectimax labels (`tools/fit_heuris
 
 Accurate leaf estimation narrows star1/star2 bounds, accelerating alpha-beta cutoffs and reducing total search time.
 
+```mermaid
+flowchart LR
+    classDef stateNode fill:#0369a1,stroke:#38bdf8,stroke-width:2px,color:#ffffff
+    classDef featNode fill:#4338ca,stroke:#818cf8,stroke-width:2px,color:#ffffff
+    classDef modelNode fill:#0f766e,stroke:#2dd4bf,stroke-width:2px,color:#ffffff
+    classDef resNode fill:#15803d,stroke:#4ade80,stroke-width:2px,color:#ffffff
+
+    S["Cutoff Leaf State s"] --> F["Feature Extractor<br/>(17 Structural Features)"]
+    F --> M["Fitted Ridge Regression<br/>(w · φ(s) + b in Pure Python)"]
+    M --> V["Accurate Leaf EV<br/>(MAE 25.6, r = 0.86)"]
+    V --> P["Tight Star1/Star2 Bounds<br/>(92% Agreement, 40% Faster)"]
+
+    class S stateNode
+    class F featNode
+    class M modelNode
+    class V,P resNode
+```
+
 ## Analysis of Hand-Written Heuristic Baseline
 
 The baseline heuristic evaluated:
-$$\text{heuristic\_value}(s) = 100 \cdot \text{cog\_progress} - 100 \cdot (1 - \text{laff\_kept})$$
+$$\text{heuristic value}(s) = 100 \cdot \text{cog progress} - 100 \cdot (1 - \text{laff kept})$$
 
 Evaluated against exact `solve()` on 45 test positions:
 - **Mean Bias**: $-100.2$ points (heuristic mean $-6.5$ vs true mean $+93.7$). The heuristic centers on 0 for untouched states, omitting the $+100$ terminal win bonus that dominates winnable positions. Cutoff nodes scored $\approx -6$ against terminal $+100$, systematically distorting minimax line selection against depth-limited horizons.

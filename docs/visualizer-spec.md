@@ -22,10 +22,22 @@ should not use it.
 
 ## The architecture
 
-```
-page ──POST /api/call {fn, payload}──► serve.py ──► bridge ──► solver.*
-  ▲                                                              │
-  └──────────────── JSON ────────────────────────────────────────┘
+```mermaid
+flowchart LR
+    classDef pageStyle fill:#1e3a8a,stroke:#60a5fa,stroke-width:2px,color:#ffffff
+    classDef serverStyle fill:#0f766e,stroke:#2dd4bf,stroke-width:2px,color:#ffffff
+    classDef bridgeStyle fill:#581c87,stroke:#c084fc,stroke-width:2px,color:#ffffff
+    classDef solverStyle fill:#065f46,stroke:#34d399,stroke-width:2px,color:#ffffff
+
+    PAGE["Browser Client<br/>(React / Vite UI)"] -->|POST /api/call<br/>{fn, payload}| SERVE["serve.py<br/>(Threading CPython Server)"]
+    SERVE --> BRIDGE["bridge.py<br/>(API Serializer)"]
+    BRIDGE --> SOLVER["solver.*<br/>(Expectimax / PPO)"]
+    SOLVER -.->|Structured JSON| PAGE
+
+    class PAGE pageStyle
+    class SERVE serverStyle
+    class BRIDGE bridgeStyle
+    class SOLVER solverStyle
 ```
 
 **The solver runs in the server, not the browser.** `serve.py` is

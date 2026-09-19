@@ -27,16 +27,22 @@ The following diagram illustrates how game state flows from live clients or simu
 
 ```mermaid
 flowchart TD
+    classDef inputStyle fill:#1e3a8a,stroke:#60a5fa,stroke-width:2px,color:#ffffff
+    classDef stateStyle fill:#0369a1,stroke:#38bdf8,stroke-width:2px,color:#ffffff
+    classDef simStyle fill:#065f46,stroke:#34d399,stroke-width:2px,color:#ffffff
+    classDef engineStyle fill:#581c87,stroke:#c084fc,stroke-width:2px,color:#ffffff
+    classDef uiStyle fill:#7c2d12,stroke:#fb923c,stroke-width:2px,color:#ffffff
+
     subgraph Ingestion["1. State Ingestion"]
-        V[Screen Capture / Vision] --> BS[Normalized BattleState]
-        A[Astron Wire / Realms] --> BS
-        L[TTR Local API] --> BS
-        S[Scenario Generator / CLI] --> BS
+        V["Screen Capture / Vision"] --> BS["Normalized BattleState"]
+        A["Astron Wire / Realms"] --> BS
+        L["TTR Local API"] --> BS
+        S["Scenario Generator / CLI"] --> BS
     end
 
     subgraph Simulation["2. Rules & Simulation Engine"]
-        BS --> SIM[Simulator: Outcomes & Legal Actions]
-        SIM --> ACC[Mechanics: Accuracy, Stuns, Damage, Combos]
+        BS --> SIM["Simulator: Outcomes & Legal Actions"]
+        SIM --> ACC["Mechanics: Accuracy, Stuns, Damage, Combos"]
     end
 
     subgraph Engines["3. Dual Decision Engines"]
@@ -45,12 +51,18 @@ flowchart TD
     end
 
     subgraph Presentation["4. User Interfaces"]
-        E1 --> UI1[Live Advice Overlay / HUD]
+        E1 --> UI1["Live Advice Overlay / HUD"]
         E2 --> UI1
-        E1 --> UI2[Interactive Browser Visualizer]
+        E1 --> UI2["Interactive Browser Visualizer"]
         E2 --> UI2
-        E1 --> UI3[Terminal CLI Advisor]
+        E1 --> UI3["Terminal CLI Advisor"]
     end
+
+    class V,A,L,S inputStyle
+    class BS stateStyle
+    class SIM,ACC simStyle
+    class E1,E2 engineStyle
+    class UI1,UI2,UI3 uiStyle
 ```
 
 ---
@@ -114,7 +126,7 @@ Toon gag accuracy is calculated as:
 $$\text{Accuracy} = \text{propAcc} + \text{trackExp} - \text{tgtDef} + \text{bonus}$$
 
 - **Base Accuracy ($\text{propAcc}$)**: The intrinsic accuracy of the gag tier (e.g., 70 for level 5 Throw, 95 for organic Lure).
-- **Track Experience ($\text{trackExp}$)**: $(\text{training\_level} - 1) \times 10$ points (halved for Toon-Up), reflecting mastery level.
+- **Track Experience ($\text{trackExp}$)**: $(\text{training level} - 1) \times 10$ points (halved for Toon-Up), reflecting mastery level.
 - **Target Defense ($\text{tgtDef}$)**: Defense rating determined by the highest-level cog targeted, scaled by cog tier rank.
 - **Accuracy Bonuses ($\text{bonus}$)**:
   - **Stun Bonus**: $+20\%$ if a prior attack landed successfully earlier in the same round.
@@ -177,15 +189,25 @@ $$V(s) = \max_{a \in \mathcal{A}(s)} \sum_{o \in \Omega} P(o \mid s, a) \Big( r(
 
 ```mermaid
 flowchart TD
+    classDef maxNode fill:#1e3a8a,stroke:#60a5fa,stroke-width:2px,color:#ffffff
+    classDef chanceNode fill:#581c87,stroke:#c084fc,stroke-width:2px,color:#ffffff
+    classDef hitNode fill:#065f46,stroke:#34d399,stroke-width:2px,color:#ffffff
+    classDef missNode fill:#881337,stroke:#fb7185,stroke-width:2px,color:#ffffff
+
     S["MAX Node: Toon Turn (Choose Action)"]
     S -->|Throw Lvl 5| A["CHANCE Node: Accuracy Roll"]
     S -->|Lure Lvl 4| B["CHANCE Node: Accuracy Roll"]
-    A -->|Hit p=0.83| A1[Cog Takes Damage]
-    A -->|Miss p=0.17| A2[No Effect]
+    A -->|Hit p=0.83| A1["Cog Takes Damage"]
+    A -->|Miss p=0.17| A2["No Effect"]
     A1 --> D["CHANCE Node: Cog Attack Phase"]
     A2 --> E["CHANCE Node: Cog Attack Phase"]
     D -->|Attack 1 p=0.50| D1["MAX Node: Next Turn"]
     D -->|Attack 2 p=0.50| D2["MAX Node: Next Turn"]
+
+    class S,D1,D2 maxNode
+    class A,B,D,E chanceNode
+    class A1 hitNode
+    class A2 missNode
 ```
 
 #### Search Optimizations
@@ -201,12 +223,28 @@ Party battles cannot be solved by full enumeration due to the combinatorial expl
 
 ```mermaid
 flowchart TD
-    S[Battle State] --> PPO[PPO Actor-Critic Policy]
-    PPO --> P[Propose Top-k Joint Actions per Seat]
-    P --> PR[Inject Targeted Heuristic Probes]
-    PR --> CLIMB[Coordinate Ascent Hill-Climb]
+    classDef stateNode fill:#0369a1,stroke:#38bdf8,stroke-width:2px,color:#ffffff
+    classDef ppoNode fill:#581c87,stroke:#c084fc,stroke-width:2px,color:#ffffff
+    classDef menuNode fill:#4338ca,stroke:#818cf8,stroke-width:2px,color:#ffffff
+    classDef probeNode fill:#0f766e,stroke:#2dd4bf,stroke-width:2px,color:#ffffff
+    classDef climbNode fill:#b45309,stroke:#fbbf24,stroke-width:2px,color:#ffffff
+    classDef evalNode fill:#047857,stroke:#34d399,stroke-width:2px,color:#ffffff
+    classDef outNode fill:#15803d,stroke:#4ade80,stroke-width:3px,color:#ffffff
+
+    S["Battle State (302-dim Vector)"] --> PPO["PPO Actor-Critic Policy (0.6 ms)"]
+    PPO --> P["Propose Top-k Joint Actions per Seat"]
+    P --> PR["Inject Targeted Heuristic Probes"]
+    PR --> CLIMB["Coordinate Ascent Hill-Climb (5.8 ms)"]
     CLIMB --> EVAL["Evaluate Candidates with _quick_score"]
-    EVAL --> OUT[Selected Optimal Joint Plan]
+    EVAL --> OUT["Selected Optimal Joint Plan"]
+
+    class S stateNode
+    class PPO ppoNode
+    class P menuNode
+    class PR probeNode
+    class CLIMB climbNode
+    class EVAL evalNode
+    class OUT outNode
 ```
 
 #### 1. Neural Policy (PPO)
@@ -227,16 +265,16 @@ The neural policy serves as a candidate generator. `hybrid.climb` then refines t
 
 Candidate plans in the climb and party search are evaluated by `_quick_score`:
 
-$$\text{Score} = \Delta_{\text{damage}} + 2 \cdot \Delta_{\text{heal}} + \text{trap\_stored} + 120 \cdot \text{kills} + 9 \cdot \text{prevented} - \text{price}_{\text{gag}} - \text{price}_{\text{spend}} + \text{survival\_bonus}$$
+$$\text{Score} = \Delta_{\text{damage}} + 2 \cdot \Delta_{\text{heal}} + \text{trap stored} + 120 \cdot \text{kills} + 9 \cdot \text{prevented} - \text{price}_{\text{gag}} - \text{price}_{\text{spend}} + \text{survival bonus}$$
 
 ### Breakdown of Objective Terms
 - **$\Delta_{\text{damage}}$**: Expected damage inflicted across cogs (including Version 2.0 outer suits).
 - **$\Delta_{\text{heal}}$**: Laff restored to the party, weighted at $2\times$ up to maximum health headroom.
-- **$\text{trap\_stored}$**: Expected value of placing an armed trap that will trigger on subsequent lure.
+- **$\text{trap stored}$**: Expected value of placing an armed trap that will trigger on subsequent lure (`trap_stored`).
 - **$\text{kills}$ ($+120$)**: High-priority bonus for eliminating a cog, removing its damage contribution permanently.
 - **$\text{prevented}$ ($+9\times$)**: Expected incoming cog damage averted this round through stun or lure.
-- **$\text{price}_{\text{gag}}$**: Gag conservation penalty scaling with remaining facility length ($\text{cogs\_remaining}$).
-- **$\text{survival\_bonus}$**: Buffers toons against lethal thresholds based on pre-plan expected incoming damage.
+- **$\text{price}_{\text{gag}}$**: Gag conservation penalty scaling with remaining facility length ($\text{cogs remaining}$, via `cogs_remaining`).
+- **$\text{survival bonus}$**: Buffers toons against lethal thresholds based on pre-plan expected incoming damage (`survival_bonus`).
 
 ---
 
