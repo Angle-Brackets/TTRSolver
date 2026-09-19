@@ -1,161 +1,105 @@
-# The maths, as implemented
+# Mathematical Formulation
 
-Written against the code, not against a textbook: every symbol here has
-a line number behind it. Where this project departs from standard PPO —
-and it does, in three places that matter — the departure is marked.
+Mathematical specification of the solver's reinforcement learning objective, search algorithms, and game MDP.
 
-## 1. The decision problem
+## 1. Decision Problem
 
-A battle is a Markov game the solver treats as an MDP over the party's
-*joint* action. State $s$ is a `BattleState`: each toon's laff, pouch,
-training and organic tracks; each cog's level, department, HP and status
-(lured with a countdown, trapped with a damage or level, a v2.0's outer
-suit); plus `round_num` and `cogs_remaining`.
+The battle is formulated as an MDP over joint party actions. State $s \in \mathcal{S}$ (`BattleState`) consists of:
+- Toon features: Laff, gag pouch inventory, track training levels, organic status.
+- Cog features: Level, department, HP, status (lure duration, trap level/damage, Version 2.0 suit).
+- Global features: `round_num`, `cogs_remaining`.
 
-The action set is a fixed table of $|\mathcal{A}| = 250$ entries
-(`env.ACTIONS`) — every (track, level, target) triple, four pink-slip
-targets, and a pass. Legality is a mask $m(s) \in \{0,1\}^{250}$, and it
-is enforced by construction rather than by penalty:
+The action space $|\mathcal{A}| = 250$ (`env.ACTIONS`) comprises (track, level, target) triples, four pink-slip targets, and pass. Action validity is enforced via masking $m(s) \in \{0,1\}^{250}$:
 
 $$
 \pi_\theta(a \mid s) = \operatorname{softmax}\big(z_\theta(s) + \log m(s)\big)_a
 $$
 
-so illegal actions receive $-\infty$ logits and exactly zero
-probability. **Two things live outside this table** and cannot be
-expressed as an $a$: unites, because they cost no turn, and SOS cards,
-because adding them would change $|\mathcal{A}|$ and invalidate every
-trained policy. Both are handled in §5.
+Invalid actions receive $-\infty$ logits and zero probability. Unites and SOS cards are excluded from $\mathcal{A}$ to preserve fixed action cardinality and are evaluated as external state transforms (§5).
 
-## 2. What a round is worth
+## 2. Reward Formulation
 
-`party_search.round_reward`. With $\ell$ laff lost by the team, $G$ the
-multiset of gags spent, $k$ toons knocked out:
+Per-round reward (`party_search.round_reward`), given team laff lost $\ell$, gags spent $G$, and toons eliminated $k$:
 
 $$
 r = -w_\ell \cdot \ell \;-\; \sum_{g \in G} c(g) \;-\; w_k k \;-\; \tau \;+\; W\mathbb{1}[\text{won}] \;-\; L\mathbb{1}[\text{lost}]
 $$
 
-with $\tau$ a flat per-round cost (`turn_cost`, so dithering is priced)
-and $W = L = 100$. The gag price carries the horizon:
+where $\tau = \text{turn\_cost}$ and $W = L = 100$. Gag cost scales with remaining battle horizon:
 
 $$
 c(g) = \Big(\text{gag\_cost} \cdot \text{level}(g) + \frac{\text{scarcity\_cost}}{\text{carry}(g)}\Big)\big(1 + \eta \cdot \text{cogs\_remaining}\big)
 $$
 
-$\eta = 0.15$. **This is why a Railroad spent on floor one costs more
-than the same Railroad spent on the last cog of the day** — the same
-gag, priced by how much fighting is still to come.
+with $\eta = 0.15$.
 
-## 3. Learning: PPO, with one non-standard term
+## 3. PPO Optimization and Track Marginal Entropy
 
-Trajectories come from 32 environments stepped in lockstep, 128 steps
-per update. Advantages by GAE($\lambda$), $\gamma = 0.99$,
-$\lambda = 0.95$:
+Trajectories are gathered synchronously across 32 environments (128 steps per update). Advantages use GAE($\lambda$) with $\gamma = 0.99, \lambda = 0.95$:
 
 $$
 \delta_t = r_t + \gamma V_\phi(s_{t+1})(1 - d_t) - V_\phi(s_t), \qquad
 \hat{A}_t = \sum_{l \ge 0} (\gamma\lambda)^l\,\delta_{t+l}(1 - d_{t+l})
 $$
 
-The clipped surrogate, with $\rho_t(\theta) = \exp(\log \pi_\theta(a_t|s_t) - \log \pi_{\theta_{\text{old}}}(a_t|s_t))$:
+Surrogate loss with probability ratio $\rho_t(\theta) = \exp(\log \pi_\theta(a_t|s_t) - \log \pi_{\theta_{\text{old}}}(a_t|s_t))$:
 
 $$
 \mathcal{L}^{\text{PPO}} = -\,\mathbb{E}_t\Big[\min\big(\rho_t \hat{A}_t,\; \operatorname{clip}(\rho_t, 1-\epsilon, 1+\epsilon)\hat{A}_t\big)\Big] + c_v\,\mathbb{E}_t\big[(V_\phi(s_t) - \hat{R}_t)^2\big] - \beta\,\mathbb{E}_t[H(\pi_\theta)] - \beta_{\text{tr}}\,\mathbb{E}_t[H_{\text{track}}(\pi_\theta)]
 $$
 
-$\epsilon = 0.2$, $c_v = 0.5$, $\beta = 0.01$, gradients clipped to
-norm $0.5$.
+Hyperparameters: $\epsilon = 0.2$, $c_v = 0.5$, $\beta = 0.01$, gradient norm clip $0.5$.
 
-**$H_{\text{track}}$ is the non-standard term, and it exists because a
-measurement said it had to.** Entropy over 250 actions is not entropy
-over the seven tracks: the policy satisfies a flat bonus by spreading
-mass across *levels and targets within one track*. Sweeping $\beta$ over
-$\{0.01, 0.04, 0.10\}$ moved gag entropy not at all — 3.79 at every
-setting. So the bonus is also available on the track marginal:
+### Track Marginal Entropy Regularization
+
+Standard entropy over $|\mathcal{A}| = 250$ permits the policy to maximize entropy by spreading probability mass across levels and targets within a single dominant track without exploring alternate tracks (sweeping $\beta \in \{0.01, 0.04, 0.10\}$ yielded static gag entropy $3.79$). To enforce track exploration, an explicit regularizer penalizes low entropy on the marginal track distribution:
 
 $$
 p_{\text{track}}(T) = \sum_{a \in T} \pi_\theta(a \mid s), \qquad
 H_{\text{track}} = -\sum_T p_{\text{track}}(T) \log p_{\text{track}}(T)
 $$
 
-which is the quantity that decides whether the agent ever tries Lure,
-Toon-Up, or holding.
+## 4. Policy-Guided Coordinate Ascent (The Climb)
 
-## 4. The policy is a proposer, not the agent
-
-$\pi_\theta$ never plays directly. `hybrid.climb` does coordinate ascent
-on the joint plan $\mathbf{a} = (a_1, \dots, a_n)$, judged by
-$Q(s, \mathbf{a}) \equiv$ `_quick_score`:
+$\pi_\theta$ generates candidates; `hybrid.climb` optimizes the joint action $\mathbf{a} = (a_1, \dots, a_n)$ via coordinate ascent against $Q(s, \mathbf{a}) \equiv$ `_quick_score`:
 
 $$
 \mathbf{a}^{(k+1)} = \arg\max_{\mathbf{a} \in \mathcal{N}(\mathbf{a}^{(k)})} Q(s, \mathbf{a}), \qquad
 \mathcal{N}(\mathbf{a}) = \bigcup_{i} \big\{ \mathbf{a}[a_i \!\to\! a'] : a' \in \mathcal{M}_i \big\}
 $$
 
-Seat $i$'s menu $\mathcal{M}_i$ is the policy's top-$k$ by logit, *plus*
-targeted probes the policy ranks nowhere — the cheapest killing gag per
-cog, the cheapest lure of each scope on a trapped board, and the pass.
-Ascent runs to a fixed point or until the evaluation budget (24) is
-spent, then tries pairwise joint moves.
+Candidate menu $\mathcal{M}_i$ combines top-$k$ policy actions with targeted heuristic probes (cheapest kill per cog, cheapest lure on trapped boards, and pass). Coordinate ascent runs to convergence or budget exhaustion (24 evaluations), followed by pairwise joint evaluations.
 
-The division of labour is the point: **$\pi_\theta$ proposes, $Q$
-disposes.** A policy that ranks a good move nowhere loses it — which is
-what the probes exist to prevent, and why raising the budget from 8 to
-24 was worth 14 points.
+## 5. Non-Action Consumables
 
-## 5. The two things outside the action table
-
-**A unite costs no turn**, so a round is *two* decisions. Rather than
-multiply the action space, the state is transformed and re-planned:
+### Unites (0 Turn Cost)
+Unites execute concurrently with gags via SpeedChat. State space is evaluated counterfactually:
 
 $$
 V^{+}(s) = \max\Big(\;\max_{u \in U(s)} \big[\,Q\big(s \oplus u,\, \text{climb}(s \oplus u)\big) - P_u\,\big],\;\; Q\big(s, \text{climb}(s)\big)\Big)
 $$
 
-so a unite must beat the no-unite plan *by more than its price* $P_u$.
-Both engines share this (`unites.best_with_unite`).
+A unite is dispatched only if the evaluated gain exceeds price $P_u$.
 
-**An SOS is the move**, so its turn cost is already paid — the plan
-holds no gag for that toon and the damage terms fall out on their own.
-Its price therefore carries only scarcity, which is why $P_{\text{SOS}}$
-is 250 and not 400.
+### SOS Cards (1 Turn Cost)
+SOS cards substitute for standard gag actions. The opportunity cost of the turn is accounted for in the simulator by omitting gag actions for that seat; $P_{\text{SOS}} = 250$ reflects scarcity only.
 
-## 6. The exact solo search
+## 6. Exact Expectimax Search
 
-Solo, the tree is finite: every action spends a gag and the pouch only
-shrinks, so `expectimax.solve` returns a true value with no heuristic.
+Solo battles are evaluated to terminal states without heuristics:
 
 $$
 V(s) = \max_{a \in \mathcal{A}(s)} \sum_{o} \Pr[o \mid s, a]\; \big(r(s, a, o) + V(s')\big)
 $$
 
-Chance nodes are the accuracy rolls times each cog's attack times its
-target choice. Two things make it tractable: a transposition memo on
-`outcomes.state_key`, and star1/star2 pruning, which bounds a chance
-node's value from the children evaluated so far —
-
+- **Pruning**: star1 bounds chance node expectations via child bounds $[L, U]$:
 $$
-V_{\text{chance}} \le \sum_{i < j} p_i v_i + p_j U + \Big(1 - \sum_{i \le j} p_i\Big) U
+V_{\text{chance}} \le \sum_{i \in \text{seen}} p_i v_i + U \Big(1 - \sum_{i \in \text{seen}} p_i\Big)
 $$
+- **Roll Groups**: Accuracy rolls are evaluated per (track, target) pair. Simultaneous attacks of identical track and target share a single random variable.
 
-for an upper bound $U$ on any child — and cuts the branch when that
-bound cannot beat the incumbent.
+## 7. Model Approximations
 
-**Accuracy is rolled per (track, target), not per gag.** Gags of the
-same track at the same cog share one die, so they land or miss together.
-Rolling independently would let a party hedge — four Throws at one cog
-would almost certainly land *something* — which is not the game and
-badly overvalues stacking.
-
-## 7. Where the maths stops being honest
-
-- **Party values are estimates.** `party_search` samples; its numbers
-  are not comparable with `solve()`'s.
-- $Q$ is a one-round scorer with a single exception: it looks one step
-  past the round for a trap, because a trap deals nothing until a lure
-  arrives and would otherwise score zero.
-- $Q$ cannot see laff *level*, only deltas — `_score_leaf` simulates
-  the toon phase, where laff does not move. `survival_rounds` is the one
-  term that reads the level, which is why a heal is worth exactly zero
-  without it.
+1. **Party Battles**: Evaluated via sampled Monte Carlo rollouts; expected values are estimates not directly comparable with solo exact values.
+2. **Single-Round Horizon in $Q$**: $Q$ evaluates one round ahead, with a one-step lookahead exception for armed traps awaiting lure activation.
+3. **Laff Delta vs Laff Level**: `_score_leaf` simulates the toon phase where laff deltas are zero; `survival_rounds` provides the only dependence on absolute laff.
