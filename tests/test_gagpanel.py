@@ -242,6 +242,38 @@ class TestDarkenedTracks(unittest.TestCase):
         cell = gp._read_cell(grey, Track.TRAP, 5)
         self.assertEqual(0, cell.count)
 
+    def _grey_cell(self, digit=None):
+        import numpy as np
+        h, w = 38, 46
+        p = np.full((h, w, 3), 110, dtype=np.uint8)
+        if digit is not None:
+            y0, x0 = int(0.45 * h), int(0.60 * w)
+            p[y0 + 2:y0 + 4, x0 + 2:x0 + 12] = digit
+            p[y0 + 4:y0 + 14, x0 + 8:x0 + 10] = digit
+        return p
+
+    def test_a_grey_cell_carrying_gags_reads_its_digit(self):
+        """GREY IS NOT EMPTY. The game greys a track it will not let you
+        use this round, digits and all -- Toon-Up in a solo fight, which
+        heals only teammates. Megaphone and Lipstick carried five apiece
+        were drawn in the same grey as an empty cell, `_read_cell` returned
+        0 on the colour without looking at the digit, and the pouch came
+        out 20 against a menu label of 30."""
+        from solver.live import gagpanel as gp
+        from solver.state import Track
+        cell = gp._read_cell(self._grey_cell(digit=235), Track.TOON_UP, 2)
+        self.assertTrue(cell.unlocked)
+        self.assertEqual(7, cell.count)
+
+    def test_a_grey_cell_reading_nothing_is_a_certain_zero(self):
+        """A true empty must not pick up doubt it did not have before, or
+        it would crowd `_repair_with_label` out of the one case it fixes."""
+        from solver.live import gagpanel as gp
+        from solver.state import Track
+        cell = gp._read_cell(self._grey_cell(), Track.TRAP, 5)
+        self.assertEqual(0, cell.count)
+        self.assertFalse(cell.uncertain)
+
     def test_a_dark_empty_cell_finds_no_ink(self):
         """WHITE_FLOOR_MIN stops a relative floor finding a digit in
         noise once the cell is dark enough."""

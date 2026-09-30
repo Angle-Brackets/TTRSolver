@@ -24,7 +24,9 @@ CELL STATES
 -----------
 Three, and they must not be confused:
 
-* greyed -- the gag is unlocked but none are carried, so the count is 0
+* greyed -- usually unlocked with none carried, but NOT always: a track
+  the game will not let you use this round is greyed too, digits and
+  all (Toon-Up in a solo fight). The digit decides, never the colour.
 * blue with a white digit -- carried, and the digit is the count
 * blank -- the gag is not unlocked at that level at all, which is not
   the same as carrying none of it
@@ -532,9 +534,25 @@ def _read_cell(patch: np.ndarray, track: Track, level: int) -> PanelCell:
     blue = ((patch[:, :, 2] > 60)
             & (patch[:, :, 2] - patch[:, :, 0] > 25)).mean()
     if blue <= MIN_BLUE_FRAC:
-        # Greyed: unlocked but empty. A cell that is neither blue nor
-        # grey does not reach here -- see the digit check below.
-        return PanelCell(track, level, 0, unlocked=True)
+        # Greyed. Usually unlocked-but-empty -- BUT READ THE DIGIT ANYWAY,
+        # because grey does not mean empty. The game greys a whole track
+        # it will not let you use this round, and Toon-Up in a solo fight
+        # is the standing case: it heals teammates, so with nobody to heal
+        # a Megaphone and a Lipstick carried five apiece were drawn in the
+        # same grey as an empty cell. Returning 0 on colour alone dropped
+        # all ten, the cells summed to 20 against a menu label of 30, and
+        # the checksum refused the state -- blaming a misread digit when
+        # the digit had never been looked at.
+        #
+        # Every grey cell prints its count, zeros included, so reading it
+        # costs nothing. A grey cell that reads 0, or reads nothing, is
+        # the certain zero it always was, so a true empty cannot pick up
+        # doubt it did not have before and crowd out `_repair_with_label`.
+        count, margin = _read_count(patch)
+        if not count:
+            return PanelCell(track, level, 0, unlocked=True)
+        return PanelCell(track, level, count, unlocked=True,
+                         uncertain=margin < MIN_DIGIT_MARGIN)
 
     count, margin = _read_count(patch)
     if count is None:
@@ -559,7 +577,7 @@ def _read_count(patch: np.ndarray) -> Tuple[Optional[int], float]:
     corner = patch[int(y0 * height):int(y1 * height),
                    int(x0 * width):int(x1 * width)]
     if corner.size == 0:
-        return None
+        return None, 0.0
     hi, lo = corner.max(axis=2), corner.min(axis=2)
     # RELATIVE TO THIS CELL, not an absolute white. The game dims whole
     # tracks -- a row you cannot use this round is drawn darkened -- and
