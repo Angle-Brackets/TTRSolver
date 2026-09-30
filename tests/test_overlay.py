@@ -167,7 +167,10 @@ class TurnCounterTest(unittest.TestCase):
         self.assertEqual(c.observe(True, True, now=30.0), 1)
 
     def test_the_status_line_marks_it_as_an_estimate(self):
-        self.assertIn("~3", Model(detected_battle=True, turn=3).status)
+        # Marked as an estimate in WORDS. It was "~3", and at the panel's
+        # size a tilde reads as a minus: "turn ~1" was taken for "turn -1".
+        self.assertIn("est. turn 3", Model(detected_battle=True, turn=3).status)
+        self.assertNotIn("~", Model(detected_battle=True, turn=3).status)
 
     def test_and_omits_it_before_the_first_menu(self):
         self.assertNotIn("turn", Model(detected_battle=True, turn=0).status)

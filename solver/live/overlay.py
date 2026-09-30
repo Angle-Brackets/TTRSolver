@@ -433,7 +433,7 @@ class Model:
     def status(self) -> str:
         if self.in_battle:
             where = "confirmed" if self.forced else "detected"
-            turn = f", turn ~{self.turn}" if self.turn else ""
+            turn = f", est. turn {self.turn}" if self.turn else ""
             return f"in a battle ({where}{turn})"
         return "waiting for a battle"
 
@@ -1083,7 +1083,9 @@ class Overlay:
         self.status.configure(text=model.status_short.upper(),
                               fg=GOOD if live else DIM)
         self.turn.configure(
-            text=f"turn ~{model.turn}" if model.turn else "")
+            # A word, not "~": at small sizes the tilde reads as a minus
+            # and "turn ~1" was taken for "turn -1".
+            text=f"est. turn {model.turn}" if model.turn else "")
 
         accent = TRACK_COLOUR.get(model.track or "", FAINT)
         showing = bool(model.gag) and live

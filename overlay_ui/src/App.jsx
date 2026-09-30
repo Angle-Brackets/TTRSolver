@@ -814,8 +814,11 @@ export default function App() {
 
         <div className="flex items-center gap-1.5 shrink-0">
           {model.turn > 0 && (
-            <span className="font-black text-[10px] text-amber-900/60">
-              turn ~{model.turn}
+            <span className="font-black text-[10px] text-amber-900/60"
+                  title="estimated from the gag menu opening; misses rounds you let time out">
+              {/* A WORD, not "~". At 10px the tilde flattens into a dash and
+                  "turn ~1" was read as "turn -1" in live play. */}
+              est. turn {model.turn}
             </span>
           )}
           <button
