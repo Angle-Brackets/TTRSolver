@@ -1016,10 +1016,11 @@ def _score_leaf(state: BattleState, plan, hits, record=None,
     # coming" and "nobody told us what is coming" are different states
     # and this term could not tell them apart.
     #
-    # THE PANEL NEVER SETS `cogs_remaining`. Nothing in
-    # `realms_session.build_state` can know how many cogs a VP or a
-    # building still has, so it is 0 on every live board -- and a slip
-    # was therefore free in live play, always. The owner watched it
+    # THE PANEL USED TO NEVER SET `cogs_remaining`, so it was 0 on every
+    # live board -- and a slip was therefore free in live play, always.
+    # A boss fight now sets it (`solver.live.boss`); a building or a
+    # facility still cannot, because its next floor is not something a
+    # player can see. The owner watched it
     # spend one on a level 1 Cold Caller with 6 hp while holding a
     # pouch full of gags that would have killed it.
     #

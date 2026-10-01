@@ -49,12 +49,71 @@ from . import realms as realms_mod
 
 
 class RealmsBuild(NamedTuple):
-    """A state, or the reasons there is not one. Never both."""
+    """A state, or the reasons there is not one. Never both.
+
+    `boss` and `suit_ids` ride along for the boss tracker, and default
+    to "not a boss fight" so every existing two-argument build is
+    unchanged.
+    """
     state: Optional[BattleState]
     problems: List[str]
+    boss: Optional["BossBattle"] = None
+    battle_id: Optional[int] = None
+    suit_ids: Tuple[int, ...] = ()
 
     def __bool__(self) -> bool:
         return self.state is not None
+
+
+# WHICH BOSS a boss-room battle belongs to. Read from the client's own DC
+# declarations, not from Open Toontown: `DistributedBattleFinal`
+# declares `setBossCogId(uint32) required`, alongside `setBattleNumber`
+# and `setBattleSide`, and the boss object's class names the fight. This
+# is the client's own declaration, so it is evidence for this client --
+# nothing here carries over to the other front end, which has no such
+# stream and identifies the fight by location instead.
+BOSS_BATTLE_CLASS = "DistributedBattleFinal"
+BOSS_CLASSES = {"DistributedSellbotBoss": "vp",
+                "DistributedCashbotBoss": "cfo",
+                "DistributedLawbotBoss": "cj",
+                "DistributedBossbotBoss": "ceo"}
+
+
+class BossBattle(NamedTuple):
+    """A boss-room battle, as the stream states it."""
+    kind: str
+    # The boss object's doId. A new one is a new fight, even of the same
+    # kind -- which is what restarts the count between two VPs.
+    boss_id: int
+    # Recorded, not yet used to set the round: whether it counts from 0
+    # or 1 has not been observed, and `BossTracker` infers the round
+    # from cogs defeated instead. Kept so the first real fight shows it.
+    battle_number: Optional[int]
+    side: Optional[int]
+
+
+def boss_of(listener, battle) -> Optional[BossBattle]:
+    """The boss fight `battle` belongs to, or None for any other battle."""
+    if getattr(battle, "dclass", None) != BOSS_BATTLE_CLASS:
+        return None
+    boss_id = battle.get("setBossCogId")
+    if isinstance(boss_id, (list, tuple)):
+        boss_id = boss_id[0] if boss_id else None
+    if boss_id is None:
+        return None
+    boss_obj = listener.store.get(boss_id)
+    kind = BOSS_CLASSES.get(getattr(boss_obj, "dclass", None))
+    if kind is None:
+        return None
+
+    def _scalar(name):
+        value = battle.get(name)
+        if isinstance(value, (list, tuple)):
+            value = value[0] if value else None
+        return value
+
+    return BossBattle(kind, boss_id, _scalar("setBattleNumber"),
+                      _scalar("setBattleSide"))
 
 
 def cog_from_object(obj, lured: bool = False,
@@ -451,7 +510,10 @@ def build_state(listener, player_do_id: Optional[int] = None,
 
     return RealmsBuild(
         BattleState(toon=toon, cogs=cogs, round_num=round_num,
-                    allies_standing=members.allies_standing), [])
+                    allies_standing=members.allies_standing), [],
+        boss=boss_of(listener, battle),
+        battle_id=getattr(battle, "do_id", None),
+        suit_ids=tuple(members.suits))
 
 
 def describe(state: BattleState) -> str:

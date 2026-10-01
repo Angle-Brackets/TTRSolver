@@ -206,6 +206,15 @@ class Model:
     # which is why a Big Wig stays nearly as bad in a four-toon fight
     # as it is solo.
     toon_count: int = 1
+    # THE BOSS FIGHT, when there is one -- see `solver.live.boss`.
+    # `boss_kind` is "vp", "cfo", "cj", "ceo" or "" for none;
+    # `boss_manual` is what the player picked, "" for "use detection".
+    # `cogs_left` is -1 where the fight's size is not confirmed: the
+    # count still shows, the total is not invented.
+    boss_kind: str = ""
+    boss_manual: str = ""
+    cogs_defeated: int = 0
+    cogs_left: int = -1
     # Which engine produced the advice on screen: "rl", "search", or ""
     # for neither. Shown as a badge rather than folded into the advice
     # text, because the advice is the thing being read at a glance and
@@ -517,6 +526,8 @@ class Worker(AdviceWorker):
         try:
             while not self._stop.is_set():
                 cycle = time.time()
+                # The plates as they stood, for counting defeats below.
+                before = list(watcher.view.cogs)
                 events = watcher.poll()
                 # THE FRAME THE WATCHER JUST GRADED, not a fresh one.
                 # Grabbing again here meant `menu_visible` and
@@ -563,6 +574,8 @@ class Worker(AdviceWorker):
                     model.invasion = getattr(
                         snap, "invasion_text", "") or ""
                 model.rows = [_row(r) for r in watcher.view.cogs]
+                self._track_boss(model, events, before,
+                                 list(watcher.view.cogs))
                 turn = self.turns.observe(model.in_battle,
                                           model.menu_visible)
                 if turn != model.turn:
@@ -574,7 +587,9 @@ class Worker(AdviceWorker):
                         self.note_spent(self.displayed_action(),
                                         model.unite or None)
                     model.turn = turn
-                if not model.in_battle:
+                # Not between a boss fight's rounds: the pouch does not
+                # refill there, so neither do the holdings.
+                if not model.in_battle and not self.boss_tracker().kind:
                     self.reset_spending()
                 model.fires_left = self.remaining("fires")
                 model.unites_left = self.remaining("unites")
@@ -603,11 +618,34 @@ class Worker(AdviceWorker):
                                    self.ignore_checksum,
                                    allies=max(0, self.toon_count - 1),
                                    fires=self.remaining("fires"),
-                                   reject=self._rejected)
+                                   reject=self._rejected,
+                                   boss=self.boss_tracker().frozen())
                 self._post()
                 time.sleep(max(0.0, POLL_INTERVAL - (time.time() - cycle)))
         finally:
             watcher.close()
+
+    def _track_boss(self, model, events, before, after) -> None:
+        """Name the fight and count what died, from the screen.
+
+        No cog ids here, so a death is a plate that vanished nearly
+        empty -- `boss.died_plates` -- and only on a poll the watcher
+        itself graded as a cog leaving. The player can correct the
+        count; a misread plate cannot argue with them.
+
+        The zone only names a fight once `boss.TTR_BOSS_ZONES` knows its
+        string; a zone mid-transition (empty) keeps the current answer.
+        """
+        from . import boss as boss_mod
+
+        tracker = self.boss_tracker()
+        zone = getattr(model, "zone", "") or ""
+        if zone:
+            self._observe_boss(boss_mod.boss_from_location(zone))
+        if any(e.kind in ("cog_defeated", "battle_ended") for e in events):
+            tracker.note_defeated(boss_mod.died_plates(before, after))
+        tracker.party_size = self.toon_count
+        self._boss_into(model, on_field=len(after))
 
     def _should_retry(self, model, now: float) -> bool:
         """Ask again after a read that produced no state.

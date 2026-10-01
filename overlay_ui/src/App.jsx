@@ -16,7 +16,12 @@ const EMPTY = {
   feedback_move: '', feedback_against: '', feedback_problem: '',
   feedback_fixable: false, feedback_needs_target: false, feedback_showing: false,
   feedback_stated: false, pouch: [],
+  boss_kind: '', boss_manual: '', cogs_defeated: 0, cogs_left: -1,
 }
+
+const BOSSES = [
+  ['', 'None'], ['vp', 'VP'], ['cfo', 'CFO'], ['cj', 'CJ'], ['ceo', 'CEO'],
+]
 
 const GAG_ART = import.meta.glob('./assets/gags/*.png', {
   eager: true, import: 'default',
@@ -950,6 +955,37 @@ export default function App() {
           BATTLE CONTEXT & INVENTORY
         </div>
         <div className="toontown-card-panel p-1.5 space-y-0.5 rounded-xl">
+          <div
+            className="flex items-center justify-between gap-2 px-1.5 py-0.5"
+            onMouseDown={stopDrag}
+            title="Which boss fight this is. Detected where the game says so; pick it by hand otherwise."
+          >
+            <div className="min-w-0">
+              <div className="text-[11.5px] font-extrabold text-amber-950 tracking-wide">Boss Fight</div>
+              <div className="text-[8.5px] font-extrabold text-amber-900/50 -mt-0.5">
+                {model.boss_kind && !model.boss_manual ? 'Detected' : 'Pick by hand'}
+              </div>
+            </div>
+            <select
+              className="select select-xs h-[24px] min-h-0 w-[72px] bg-amber-50 font-extrabold text-[10.5px] text-amber-950 border-2 border-amber-900/15 rounded-lg cursor-pointer focus:outline-none focus:border-sky-500 px-1.5"
+              onMouseDown={stopDrag}
+              value={model.boss_manual || model.boss_kind}
+              onChange={(e) => call('set_boss', e.target.value)}
+            >
+              {BOSSES.map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
+          </div>
+          {model.boss_kind && (
+            <StepperRow
+              label="Cogs Defeated"
+              subtitle={model.cogs_left >= 0 ? `${model.cogs_left} left` : 'Fight size unknown'}
+              value={model.cogs_defeated}
+              onChange={(val) => call('set_cogs_defeated', val)}
+              title="Cogs defeated this boss fight. Counted automatically; correct it if it drifts."
+            />
+          )}
           <StepperRow
             label="Pink Slips"
             subtitle="How many you have"

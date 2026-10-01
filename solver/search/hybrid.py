@@ -371,6 +371,73 @@ def rollout_judge(state: BattleState, plan, seed: int, depth: int = 3,
     return total
 
 
+# A RESTOCK IS JUDGED ON WHAT IT ENABLES NEXT ROUND -- the one exception
+# to scoring a single round, and a narrow one on purpose.
+#
+# `_quick_score` sees a round. A restock SOS call deals nothing and
+# prevents nothing in the round it is played, so it scored exactly
+# `SOS_PRICE` below a pass, and on a solo VP that had spent its power
+# gags "wait for the lure to lapse, re-lure, wait" beat climbing out of
+# the hole forever. Measured on that board: pass 672.7, Restock All 422.7.
+#
+# NOT the general two-round judge, which is off for a measured reason:
+# it adds a guess about next round to EVERY plan and cost buildings three
+# points. This touches only plans that call a restock, and credits only
+# the DIFFERENCE between next round with the restock and next round
+# without it (the same plan with the call replaced by a pass). With a
+# full pouch that difference is near zero, so a restock stays the bad
+# move it is; with an empty one it is large.
+#
+# SWEPT, AND NULL. Solo VP, realistic loadout, 100 paired sides with
+# common random numbers: 13/100 off, 14/100 on, +4/-3, sign test
+# p = 1.00. It did make restocks happen (0.00 -> 0.63 a side) and cards
+# get spent a little more, but clears did not move. Kept, off, so the
+# next attempt starts from a measured baseline rather than from zero --
+# and because that sweep ran blind to the boss structure, which by
+# itself cost 13 -> 5. Worth re-sweeping once live boss state exists.
+RESTOCK_LOOKAHEAD = False
+
+
+def _is_restock(action) -> bool:
+    name = getattr(action, "sos", None) if action is not None else None
+    if not name:
+        return False
+    card = sos_mod.BY_NAME.get(name)
+    return card is not None and card.kind == sos_mod.RESTOCK
+
+
+def _next_round_value(state: BattleState, plan) -> Optional[float]:
+    """Best one-round score available after `plan` resolves, or None."""
+    from . import party_search as ps
+
+    probe = state.clone()
+    try:
+        ps.simulator.apply_party_round(
+            probe, list(plan), hits=[a is not None and not a.is_pass
+                                     for a in plan])
+        if probe.is_terminal():
+            return None
+        follow = ps.greedy_plan(probe, objective_mod.BALANCED)
+        return ps._quick_score(probe, follow)
+    except (NotImplementedError, ValueError, KeyError):
+        return None
+
+
+def _restock_credit(state: BattleState, plan) -> float:
+    """What the restock calls in `plan` add to next round, discounted.
+
+    Never negative: a restock that enables nothing is worth nothing
+    beyond its own round, which already charges `SOS_PRICE` for it.
+    """
+    if not any(_is_restock(a) for a in plan):
+        return 0.0
+    without = [None if _is_restock(a) else a for a in plan]
+    after, before = _next_round_value(state, plan), _next_round_value(state, without)
+    if after is None or before is None:
+        return 0.0
+    return LOOKAHEAD_DISCOUNT * max(0.0, after - before)
+
+
 def _judge(state: BattleState, plan, deep: bool) -> float:
     """Rank a plan. One round, or two.
 
@@ -411,6 +478,8 @@ def _judge(state: BattleState, plan, deep: bool) -> float:
     from . import party_search as ps
 
     first = ps._quick_score(state, plan)
+    if RESTOCK_LOOKAHEAD:
+        first += _restock_credit(state, plan)
     if not deep:
         return first
     probe = state.clone()

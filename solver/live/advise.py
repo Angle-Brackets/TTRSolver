@@ -265,17 +265,18 @@ class Thinker:
 
     def submit(self, frame, readings, snapshot, objective, depth,
                budget=DEFAULT_BUDGET, ignore_checksum=False,
-               allies=0, fires=0, reject=None) -> None:
+               allies=0, fires=0, reject=None, boss=None) -> None:
         with self._lock:
             token = next(self._generation)
             self._current = token
         threading.Thread(target=self._run, daemon=True,
                          args=(token, frame, readings, snapshot, objective,
                                depth, budget, ignore_checksum,
-                               allies, fires, reject)).start()
+                               allies, fires, reject, boss)).start()
 
     def _run(self, token, frame, readings, snapshot, objective, depth,
-             budget, ignore_checksum=False, allies=0, fires=0, reject=None):
+             budget, ignore_checksum=False, allies=0, fires=0, reject=None,
+             boss=None):
         try:
             snap = snapshot or _snapshot()
             pnl = _panel(frame)
@@ -303,6 +304,10 @@ class Thinker:
                 return
 
             state = res.state
+            # The boss fight's horizon -- a frozen `BossTracker`, so the
+            # count cannot move while this thread reads it.
+            if boss is not None:
+                boss.apply(state)
 
             if self.on_first_answer:
                 try:

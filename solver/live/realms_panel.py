@@ -319,6 +319,10 @@ class RealmsWorker(AdviceWorker):
     watch_to = None
     _watch = None
     _episode = None
+    # THE BOSS COUNT'S MEMORY between polls: the boss object the count
+    # belongs to, and the last boss battle's (doId, cog ids).
+    _boss_obj = None
+    _boss_battle = None
 
     def __init__(self, outbox: "queue.Queue", objective, depth: int,
                  budget: float, listener=None, engine: str = "both"):
@@ -429,6 +433,9 @@ class RealmsWorker(AdviceWorker):
                                             max_unites=self.remaining("unites"),
                                             max_sos=self.remaining("sos"))
         model = self.model
+        self._track_boss(result)
+        self._boss_into(model, on_field=len(result.state.cogs)
+                        if result.state else 0)
         model.window_found = True
         model.detected_battle = result.state is not None
         model.plates = len(result.state.cogs) if result.state else 0
@@ -486,6 +493,49 @@ class RealmsWorker(AdviceWorker):
             model.thinking = True
             self._search(state)
         self._post()
+
+    def _track_boss(self, result) -> None:
+        """Which boss fight this is and how many cogs it has lost.
+
+        EXACT, because this client names its cogs: a cog id that leaves
+        a boss battle's roster died -- nothing else takes a cog out of a
+        battle that is still running. When the battle itself is replaced
+        by the next one of the SAME boss, the round was cleared, so the
+        ids still listed in the old roster died too; that catches the
+        last kill of a round, which the roster may never report because
+        the battle object goes first.
+
+        No state means no fight on screen -- between a VP's two rounds,
+        say -- and leaves the count alone. Clearing it there would
+        restart the count at every round.
+        """
+        if result.state is None:
+            return
+        boss = getattr(result, "boss", None)
+        tracker = self.boss_tracker()
+        self._observe_boss(boss.kind if boss else None)
+        if boss is not None and boss.boss_id != self._boss_obj:
+            if self._boss_obj is not None:
+                tracker.reset()
+            tracker.party_size = 1
+            self._boss_obj = boss.boss_id
+            self._boss_battle = None
+        if boss is None:
+            self._boss_battle = None
+        else:
+            now_ids = set(result.suit_ids)
+            if self._boss_battle is not None:
+                prev_id, prev_ids = self._boss_battle
+                tracker.note_dead_ids(prev_ids - now_ids
+                                      if prev_id == result.battle_id
+                                      else prev_ids)
+            self._boss_battle = (result.battle_id, now_ids)
+        if tracker.kind:
+            # The largest party seen this fight: a toon going sad does
+            # not change how many cogs the fight was built with.
+            tracker.party_size = max(tracker.party_size,
+                                     result.state.allies_standing + 1)
+        tracker.apply(result.state)
 
     def _record_feedback(self, now_state) -> None:
         """One round's label: what was advised against what was thrown.
@@ -1221,6 +1271,14 @@ class RealmsApi:
         shared, so the method has to exist or the click raises.
         """
         return None
+
+    def set_boss(self, kind) -> None:
+        """Name the boss fight by hand, or "" to use detection."""
+        self._worker.set_boss(str(kind or ""))
+
+    def set_cogs_defeated(self, count) -> None:
+        """Correct the cogs-defeated count."""
+        self._worker.set_cogs_defeated(count)
 
     def ask_now(self) -> None:
         """Recompute now. The page's "Work it out" button."""

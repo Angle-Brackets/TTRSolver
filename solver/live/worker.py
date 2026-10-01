@@ -66,6 +66,11 @@ class AdviceWorker(threading.Thread):
     # way a shared `_rejected` set would not be.
     _rl_action = None
     _search_action = None
+    # The boss fight, if any. Class-level None for the same reason as the
+    # two above; `boss_tracker` builds it on first use.
+    _boss = None
+    # What the player picked by hand, or None for "whatever is detected".
+    _boss_manual = None
 
     def __init__(self, outbox, objective, depth: int, budget: float):
         super().__init__(daemon=True)
@@ -213,6 +218,59 @@ class AdviceWorker(threading.Thread):
             self.spent_fires += 1
         elif getattr(action, "sos", None):
             self.spent_sos += 1
+
+    # -- the boss fight ----------------------------------------------------
+
+    def boss_tracker(self):
+        from .boss import BossTracker
+
+        if self._boss is None:
+            self._boss = BossTracker()
+        return self._boss
+
+    def set_boss(self, kind) -> None:
+        """The player naming the fight: "vp", "cfo", "cj", "ceo", or ""
+        to go back to whatever is detected.
+
+        A detected boss outranks this, because detection here reads the
+        server's own objects -- but where nothing is detected, which on
+        a screen-reading client is everywhere until a boss room's zone
+        name has been seen, this is the only way the solver learns it.
+        """
+        from .boss import BOSS_KINDS
+
+        kind = (str(kind or "").strip().lower()) or None
+        if kind is not None and kind not in BOSS_KINDS:
+            return
+        with self._lock:
+            self._boss_manual = kind
+            self.boss_tracker().set_kind(kind)
+        self._settings_changed()
+
+    def set_cogs_defeated(self, count) -> None:
+        """The player correcting the count. They can see the fight."""
+        try:
+            value = int(count)
+        except (TypeError, ValueError):
+            return
+        with self._lock:
+            self.boss_tracker().correct(value)
+        self._settings_changed()
+
+    def _observe_boss(self, detected) -> None:
+        """Name the fight from detection, falling back to the player's
+        pick. `detected` None means "nothing says it is a boss"."""
+        kind = detected or self._boss_manual
+        self.boss_tracker().set_kind(kind)
+
+    def _boss_into(self, model, on_field: int = 0) -> None:
+        """Mirror the tracker onto the model the page draws."""
+        tracker = self.boss_tracker()
+        model.boss_kind = tracker.kind or ""
+        model.boss_manual = self._boss_manual or ""
+        model.cogs_defeated = tracker.defeated if tracker.kind else 0
+        left = tracker.left_in_fight(on_field) if tracker.kind else None
+        model.cogs_left = -1 if left is None else left
 
     def reset_spending(self) -> None:
         """A new fight starts with everything the player says they hold."""

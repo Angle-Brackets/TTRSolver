@@ -129,6 +129,10 @@ def model_json(model: Model) -> str:
         "thinking": model.thinking,
         "allow_level_7": model.allow_level_7,
         "toon_count": model.toon_count,
+        "boss_kind": model.boss_kind,
+        "boss_manual": model.boss_manual,
+        "cogs_defeated": model.cogs_defeated,
+        "cogs_left": model.cogs_left,
         "engine": model.engine,
         "preferred_engine": model.preferred_engine,
         "max_fires": model.max_fires,
@@ -327,6 +331,14 @@ class Api:
         """
         self._worker.set_toon_count(count)
         self._worker.ask_now()
+
+    def set_boss(self, kind) -> None:
+        """Name the boss fight by hand, or "" to use detection."""
+        self._worker.set_boss(str(kind or ""))
+
+    def set_cogs_defeated(self, count) -> None:
+        """Correct the cogs-defeated count."""
+        self._worker.set_cogs_defeated(count)
 
     def set_height(self, height: int) -> None:
         """Size the window to the page, rather than guessing at it.
