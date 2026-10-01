@@ -226,3 +226,25 @@ def pick(state: BattleState, horizon=None, seed: int = 0,
     # Ties keep the scorer's pick, which is first.
     best = max(range(len(cands)), key=lambda i: (means[i], i == 0))
     return Result(cands[best], cands, means, done_k)
+
+
+def pick_in_child(state: BattleState, horizon, budget: float,
+                  reject=None, allow_level_7: bool = True):
+    """`pick` for a panel's child process: (action, note).
+
+    `note` says why there is no action -- "solo only", "unavailable" --
+    so the panel can label the row instead of leaving it thinking. The
+    level-7 switch is a module global, so it is set here, in the process
+    that reads it; the panel's setting would otherwise never arrive.
+    """
+    from .. import state as state_mod
+
+    state_mod.ALLOW_LEVEL_7 = bool(allow_level_7)
+    if len(state.active_toons()) != 1:
+        return None, "solo only"
+    deadline = time.monotonic() + max(0.5, float(budget))
+    result = pick(state, horizon, seed=0, deadline=deadline, reject=reject)
+    if result is None:
+        return None, "unavailable"
+    first = result.plan[0] if result.plan else None
+    return first, ""

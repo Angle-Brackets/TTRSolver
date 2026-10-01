@@ -11,6 +11,8 @@ const EMPTY = {
   incoming: null, survive: null, accuracy: null, reason: '', organic: false, organic_tracks: [], organic_icon: '',
   rl_gag: '', rl_track: '', rl_gag_level: 0, rl_accuracy: null, rl_reason: '', rl_organic: false,
   search_gag: '', search_track: '', search_gag_level: 0, search_accuracy: null, search_reason: '', search_organic: false,
+  playout_gag: '', playout_track: '', playout_gag_level: 0, playout_ready: false, playout_note: '',
+  playout_accuracy: null, playout_reason: '', playout_organic: false, engines: ['rl', 'search', 'playout'],
   zone: '', neighborhood: '', district: '', invasion: '',
   lure_icon: '', map_icon: '', track_icons: {},
   feedback_move: '', feedback_against: '', feedback_problem: '',
@@ -403,9 +405,95 @@ function CogRow({ row, lureIcon, advice, inBattle }) {
   )
 }
 
+// THE ENGINES, in the order their rows are drawn. `rl` is `hybrid.climb`,
+// which is the trained policy -- shown as PPO because that is what a
+// player knows it as.
+const ENGINE_LABEL = { rl: 'PPO', search: 'SEARCH', playout: 'PLAYOUT' }
+const ENGINE_BADGE = {
+  rl: 'bg-emerald-600 text-white border-emerald-700',
+  search: 'bg-sky-600 text-white border-sky-700',
+  playout: 'bg-violet-600 text-white border-violet-700',
+}
+
+function engineAnswer(model, engine) {
+  const pick = (field) => model[`${engine}_${field}`]
+  const ready = engine === 'rl' ? Boolean(model.rl_gag) : Boolean(pick('ready'))
+  return {
+    engine,
+    gag: pick('gag') || '',
+    track: pick('track') || '',
+    level: pick('gag_level') || 0,
+    accuracy: pick('accuracy'),
+    reason: pick('reason') || '',
+    organic: Boolean(pick('organic')),
+    note: engine === 'playout' ? (model.playout_note || '') : '',
+    ready,
+  }
+}
+
+function EngineRow({ answer, model, isStale, hero }) {
+  const art = answer.track && answer.level ? gagArt(answer.track, answer.level) : null
+  const hasAcc = answer.accuracy !== null && answer.accuracy !== undefined
+  const thinking = !answer.ready
+  const same = answer.ready && answer.gag && answer.gag === hero
+  return (
+    <div className={`rounded-xl border-2 border-amber-900/15 bg-amber-50/90 px-2 py-1.5 shadow-xs flex items-center justify-between gap-2 ${
+      isStale ? 'opacity-65 grayscale-[40%] saturate-50' : ''
+    }`}>
+      <div className="flex items-center gap-2 min-w-0 flex-1">
+        <span className={`badge h-[18px] w-[58px] justify-center px-1 text-[8px] font-black uppercase tracking-wider border shadow-2xs shrink-0 ${ENGINE_BADGE[answer.engine]}`}>
+          {ENGINE_LABEL[answer.engine]}
+        </span>
+        {art && !thinking && (
+          <div className="flex size-6 shrink-0 items-center justify-center">
+            <img src={art} alt="" className="size-full object-contain drop-shadow-xs" />
+          </div>
+        )}
+        <div className="min-w-0 flex-1">
+          {thinking ? (
+            <span className="inline-flex items-center gap-1.5 text-[10.5px] font-bold text-sky-700">
+              <span className="loading loading-dots loading-xs text-sky-600" />
+              Thinking...
+            </span>
+          ) : answer.gag ? (
+            <>
+              <div className="flex items-center gap-1 flex-wrap">
+                <span className="text-[11px] font-black text-amber-950 truncate">{answer.gag}</span>
+                {answer.organic && <OrganicLeaf icon={model.organic_icon} size="size-3" />}
+                {same && (
+                  <span className="text-[8px] font-black uppercase text-emerald-700">agrees</span>
+                )}
+              </div>
+              {(answer.reason || hasAcc) && (
+                <div className="text-[9px] font-extrabold italic text-amber-900/80 flex items-center gap-1 flex-wrap">
+                  {answer.reason && <span>{answer.reason}</span>}
+                  {answer.reason && hasAcc && <span>·</span>}
+                  {hasAcc && <span className="text-emerald-800 font-bold not-italic">{answer.accuracy}% acc</span>}
+                </div>
+              )}
+            </>
+          ) : (
+            <span className="text-[10px] font-bold text-amber-900/60">{answer.note || 'no move'}</span>
+          )}
+        </div>
+      </div>
+      {answer.ready && answer.gag && !same && (
+        <button
+          type="button"
+          onMouseDown={stopDrag}
+          onClick={() => call('prefer_engine', answer.engine)}
+          className="shrink-0 btn btn-xs h-[22px] min-h-0 bg-white border border-amber-900/20 text-amber-950 font-black text-[9px] hover:bg-amber-100 toontown-btn-3d px-2 cursor-pointer"
+          title={`Show ${ENGINE_LABEL[answer.engine]}'s move`}
+        >
+          Use ➔
+        </button>
+      )}
+    </div>
+  )
+}
+
 function Advice({ model }) {
   const activeEngine = model.engine || model.preferred_engine || 'rl'
-  const isPrimaryRl = activeEngine === 'rl'
   const showing = Boolean(model.advice) && model.in_battle
   const track = showing && model.track ? model.track : 'none'
   const firing = showing && model.track === 'fire'
@@ -417,28 +505,21 @@ function Advice({ model }) {
   const isStale = Boolean(model.problems && model.problems.length > 0)
 
   // Engine specific primary values
-  const primaryReason = isPrimaryRl ? (model.rl_reason || model.reason) : (model.search_reason || model.reason)
-  const primaryAccuracy = isPrimaryRl
-    ? (model.rl_accuracy !== null && model.rl_accuracy !== undefined ? model.rl_accuracy : model.accuracy)
-    : (model.search_accuracy !== null && model.search_accuracy !== undefined ? model.search_accuracy : model.accuracy)
-  const primaryOrganic = isPrimaryRl ? (model.rl_organic || model.organic) : (model.search_organic || model.organic)
+  const primary = engineAnswer(model, activeEngine)
+  const primaryReason = primary.reason || model.reason
+  const primaryAccuracy = primary.accuracy !== null && primary.accuracy !== undefined
+    ? primary.accuracy : model.accuracy
+  const primaryOrganic = primary.organic || model.organic
 
   const hasWhy = showing && (Boolean(primaryReason) || (primaryAccuracy !== null && primaryAccuracy !== undefined))
   const hasPressure = model.in_battle && (model.incoming !== null || model.survive !== null)
 
-  // Runner-Up Engine calculation
-  const runnerEngine = isPrimaryRl ? 'search' : 'rl'
-  const isRunnerSearch = runnerEngine === 'search'
-  const runnerGag = isRunnerSearch ? model.search_gag : model.rl_gag
-  const runnerTrack = isRunnerSearch ? model.search_track : model.rl_track
-  const runnerLevel = isRunnerSearch ? model.search_gag_level : model.rl_gag_level
-  const runnerAccuracy = isRunnerSearch ? model.search_accuracy : model.rl_accuracy
-  const runnerReason = isRunnerSearch ? model.search_reason : model.rl_reason
-  const runnerOrganic = isRunnerSearch ? model.search_organic : model.rl_organic
-  const runnerReady = isRunnerSearch ? model.search_ready : Boolean(model.rl_gag)
-  const runnerArt = runnerTrack && runnerLevel ? gagArt(runnerTrack, runnerLevel) : null
-
-  const showRunnerUp = model.in_battle && Boolean(runnerGag) && runnerReady && (runnerGag !== model.advice)
+  // EVERY OTHER ENGINE, side by side, each thinking or answered on its
+  // own clock -- PPO in milliseconds, the playouts and the search later.
+  const others = (model.engines || ['rl', 'search', 'playout'])
+    .filter((e) => e !== activeEngine && ENGINE_LABEL[e])
+    .map((e) => engineAnswer(model, e))
+  const showOthers = model.in_battle && others.length > 0
 
   return (
     <div className="space-y-1.5">
@@ -504,6 +585,11 @@ function Advice({ model }) {
               {primaryOrganic && (
                 <OrganicLeaf icon={model.organic_icon} />
               )}
+              {ENGINE_LABEL[activeEngine] && (
+                <span className={`rounded px-1 py-0.2 text-[8px] font-black uppercase tracking-wider border ${ENGINE_BADGE[activeEngine]}`}>
+                  {ENGINE_LABEL[activeEngine]}
+                </span>
+              )}
               {isStale && (
                 <span className="rounded bg-amber-200/90 text-amber-950 border border-amber-400/60 px-1.5 py-0.2 text-[8px] font-black uppercase tracking-wider shadow-2xs">
                   ⚠️ STALE
@@ -546,62 +632,13 @@ function Advice({ model }) {
         </div>
       </div>
 
-      {/* SECOND OPINION / RUNNER-UP CARD */}
-      {showRunnerUp && (
-        <div className={`rounded-xl border-2 border-amber-900/15 bg-amber-50/90 p-2 shadow-xs transition-all flex items-center justify-between gap-2 ${
-          isStale ? 'opacity-65 grayscale-[40%] saturate-50' : ''
-        }`}>
-          <div className="flex items-center gap-2 min-w-0 flex-1">
-            <div className="flex items-center gap-1.5 shrink-0">
-              <span className={`badge h-[18px] px-1.5 text-[8px] font-black uppercase tracking-wider border shadow-2xs ${
-                isRunnerSearch ? 'bg-sky-600 text-white border-sky-700' : 'bg-emerald-600 text-white border-emerald-700'
-              }`}>
-                {runnerEngine.toUpperCase()}
-              </span>
-              {runnerArt && (
-                <div className="flex size-7 shrink-0 items-center justify-center">
-                  <img src={runnerArt} alt="" className="size-full object-contain drop-shadow-xs" />
-                </div>
-              )}
-            </div>
-
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-1 flex-wrap">
-                <span className="text-[11.5px] font-black text-amber-950 truncate">
-                  {runnerGag}
-                </span>
-                {runnerOrganic && (
-                  <OrganicLeaf icon={model.organic_icon} size="size-3" />
-                )}
-                {isStale && (
-                  <span className="rounded bg-amber-200/90 text-amber-950 border border-amber-400/60 px-1 py-0.2 text-[8px] font-black uppercase">
-                    ⚠️ STALE
-                  </span>
-                )}
-              </div>
-              {(runnerReason || (runnerAccuracy !== null && runnerAccuracy !== undefined)) && (
-                <div className="text-[9.5px] font-extrabold italic text-amber-900/80 flex items-center gap-1 flex-wrap">
-                  {runnerReason && <span>{runnerReason}</span>}
-                  {runnerReason && runnerAccuracy !== null && runnerAccuracy !== undefined && <span>·</span>}
-                  {runnerAccuracy !== null && runnerAccuracy !== undefined && (
-                    <span className="text-emerald-800 font-bold not-italic">
-                      {runnerAccuracy}% acc
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onMouseDown={stopDrag}
-            onClick={() => call('prefer_engine', runnerEngine)}
-            className="shrink-0 btn btn-xs h-[24px] min-h-0 bg-white border border-amber-900/20 text-amber-950 font-black text-[9.5px] hover:bg-amber-100 toontown-btn-3d px-2 cursor-pointer"
-            title={`Swap to ${runnerEngine.toUpperCase()} recommendation`}
-          >
-            Use Move ➔
-          </button>
+      {/* THE OTHER ENGINES */}
+      {showOthers && (
+        <div className="space-y-1">
+          {others.map((answer) => (
+            <EngineRow key={answer.engine} answer={answer} model={model}
+              isStale={isStale} hero={model.advice} />
+          ))}
         </div>
       )}
 

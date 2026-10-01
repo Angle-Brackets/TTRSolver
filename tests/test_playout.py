@@ -146,5 +146,99 @@ class PickTest(unittest.TestCase):
         self.assertTrue(0 <= got <= 2)
 
 
+def _worker():
+    import queue
+    import threading
+
+    from solver.live import overlay
+
+    w = overlay.Worker.__new__(overlay.Worker)
+    w.model = overlay.Model()
+    w.outbox = queue.Queue(maxsize=8)
+    w._lock = threading.Lock()
+    w._rejected = set()
+    w.allow_level_7 = True
+    w.objective_name = "balanced"
+    w.budget = 1.0
+    w.toon_count = 1
+    return w
+
+
+class EngineSlotTest(unittest.TestCase):
+    """The third answer rides the same rails as the other two."""
+
+    def _describe(self, action, state):
+        return "Pass", "", 0
+
+    def test_a_delivered_playout_fills_its_own_row(self):
+        from solver.state import Action
+
+        w = _worker()
+        move = Action(track=None)
+        w._deliver_playout(_board(), move, "", self._describe)
+        self.assertTrue(w.model.playout_ready)
+        self.assertEqual("Pass", w.model.playout_gag)
+        self.assertEqual("rl", w.model.preferred_engine)
+        self.assertNotEqual("playout", w.model.engine)
+
+    def test_choosing_it_shows_its_move_and_rejects_it(self):
+        from solver.state import Action
+
+        w = _worker()
+        move = Action(track=None)
+        w._deliver_playout(_board(), move, "", self._describe)
+        w.prefer_engine("playout")
+        self.assertEqual("playout", w.model.engine)
+        self.assertEqual("Pass", w.model.gag)
+        self.assertIs(move, w.displayed_action())
+
+    def test_it_cannot_be_chosen_before_it_answers(self):
+        w = _worker()
+        w.prefer_engine("playout")
+        self.assertEqual("playout", w.model.preferred_engine)
+        self.assertNotEqual("playout", w.model.engine)
+
+    def test_a_note_replaces_thinking_when_there_is_no_move(self):
+        w = _worker()
+        w._deliver_playout(_board(), None, "solo only", self._describe)
+        self.assertTrue(w.model.playout_ready)
+        self.assertEqual("", w.model.playout_gag)
+        self.assertEqual("solo only", w.model.playout_note)
+
+    def test_clearing_puts_the_row_back_to_thinking(self):
+        from solver.state import Action
+
+        w = _worker()
+        w._deliver_playout(_board(), Action(track=None), "", self._describe)
+        w._clear_engine(w.model, "playout")
+        self.assertFalse(w.model.playout_ready)
+        self.assertEqual("", w.model.playout_gag)
+
+    def test_the_page_receives_it(self):
+        import json
+
+        from solver.live import panel
+
+        page = json.loads(panel.model_json(_worker().model))
+        for key in ("playout_gag", "playout_ready", "playout_note", "engines"):
+            self.assertIn(key, page)
+
+
+@unittest.skipUnless(HAVE, "the policy needs numpy")
+class ChildTest(unittest.TestCase):
+
+    def test_a_party_is_labelled_not_left_thinking(self):
+        board = _board()
+        board.toons.append(board.clone().toons[0])
+        action, note = playout.pick_in_child(board, None, 1.0)
+        self.assertIsNone(action)
+        self.assertEqual("solo only", note)
+
+    def test_solo_returns_a_move(self):
+        action, note = playout.pick_in_child(_board(), None, 1.0)
+        self.assertIsNotNone(action)
+        self.assertEqual("", note)
+
+
 if __name__ == "__main__":
     unittest.main()

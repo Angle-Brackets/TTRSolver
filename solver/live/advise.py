@@ -256,9 +256,13 @@ class Thinker:
     """
 
     def __init__(self, on_result: Callable[[list, object, object], None],
-                 on_first_answer: Optional[Callable[[object, str, object], None]] = None):
+                 on_first_answer: Optional[Callable[[object, str, object], None]] = None,
+                 on_playout: Optional[Callable[[object, object, Callable[[], bool]], None]] = None):
         self.on_result = on_result
         self.on_first_answer = on_first_answer
+        # `on_playout(state, horizon, is_current)`: the board is built,
+        # start the third engine on it. The caller owns the process.
+        self.on_playout = on_playout
         self._generation = itertools.count()
         self._current = -1
         self._lock = threading.Lock()
@@ -308,6 +312,18 @@ class Thinker:
             # count cannot move while this thread reads it.
             if boss is not None:
                 boss.apply(state)
+            if self.on_playout:
+                try:
+                    horizon = (boss.horizon(on_field=sum(
+                        1 for c in state.cogs if c.hp > 0))
+                        if boss is not None else None)
+
+                    def _current(token=token):
+                        with self._lock:
+                            return token == self._current
+                    self.on_playout(state.clone(), horizon, _current)
+                except Exception:          # noqa: BLE001 -- never costs the search
+                    pass
 
             if self.on_first_answer:
                 try:

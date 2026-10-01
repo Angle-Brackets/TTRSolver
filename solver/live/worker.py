@@ -49,6 +49,10 @@ from __future__ import annotations
 import threading
 from typing import Optional
 
+# The answers a panel shows side by side. "rl" is `hybrid.climb`, shown
+# as PPO; "search" the expectimax child; "playout" `search.playout`.
+ENGINES = ("rl", "search", "playout")
+
 
 class AdviceWorker(threading.Thread):
     """The half of a panel worker that does not care where state comes from.
@@ -66,6 +70,8 @@ class AdviceWorker(threading.Thread):
     # way a shared `_rejected` set would not be.
     _rl_action = None
     _search_action = None
+    _playout_action = None
+    _playout_executor = None
     # The boss fight, if any. Class-level None for the same reason as the
     # two above; `boss_tracker` builds it on first use.
     _boss = None
@@ -315,23 +321,20 @@ class AdviceWorker(threading.Thread):
         """
         import time
 
-        choice = "search" if str(name).lower() == "search" else "rl"
+        choice = str(name).lower()
+        if choice not in ENGINES:
+            choice = "rl"
         with self._lock:
             model = self.model
             model.preferred_engine = choice
             swapped = False
-            if choice == "search":
-                if model.search_ready:
-                    model.gag = model.search_gag
-                    model.track = model.search_track or None
-                    model.gag_level = model.search_gag_level or None
-                    model.engine = "search"
-                    swapped = True
-            elif model.rl_gag:
-                model.gag = model.rl_gag
-                model.track = model.rl_track or None
-                model.gag_level = model.rl_gag_level or None
-                model.engine = "rl"
+            ready = (bool(model.rl_gag) if choice == "rl"
+                     else getattr(model, choice + "_ready", False))
+            if ready and getattr(model, choice + "_gag", ""):
+                model.gag = getattr(model, choice + "_gag")
+                model.track = getattr(model, choice + "_track") or None
+                model.gag_level = getattr(model, choice + "_gag_level") or None
+                model.engine = choice
                 swapped = True
             # SYNCED ON EVERY PATH, including the refused one. A swap can
             # be declined -- the search has not answered yet -- and then
@@ -404,6 +407,9 @@ class AdviceWorker(threading.Thread):
         setattr(model, engine + "_organic", False)
         if engine == "search":
             model.search_ready = False
+        if engine == "playout":
+            model.playout_ready = False
+            model.playout_note = ""
 
     @staticmethod
     def _sync_explanation(model) -> None:
@@ -438,8 +444,88 @@ class AdviceWorker(threading.Thread):
 
     def displayed_action(self):
         """The action behind the advice currently on screen, or None."""
-        return (self._search_action if self.model.engine == "search"
-                else self._rl_action)
+        engine = self.model.engine
+        if engine == "search":
+            return self._search_action
+        if engine == "playout":
+            return self._playout_action
+        return self._rl_action
+
+    # -- the third engine: play it out ------------------------------------
+
+    def _playout_pool(self):
+        """One child process for playouts, made on first use and kept.
+
+        Its own process, not the search's: the two run side by side, and
+        a playout is pure Python that would otherwise hold the GIL the
+        poll loop needs.
+        """
+        if self._playout_executor is None:
+            from concurrent.futures import ProcessPoolExecutor
+
+            self._playout_executor = ProcessPoolExecutor(max_workers=1)
+        return self._playout_executor
+
+    def _start_playout(self, state, horizon, budget, is_current,
+                       describe) -> None:
+        """Play the top moves out in the background and post the winner.
+
+        `is_current()` says whether the board this was started for is
+        still the one on screen; `describe(action, state)` gives
+        (text, track, level) in the panel's own words. Never raises:
+        a failed playout leaves a note on its row and costs nothing else.
+        """
+        import threading
+
+        from ..search import playout as playout_mod
+
+        with self._lock:
+            self._clear_engine(self.model, "playout")
+            self._playout_action = None
+        reject = frozenset(self._rejected)
+
+        def run():
+            try:
+                future = self._playout_pool().submit(
+                    playout_mod.pick_in_child, state, horizon, float(budget),
+                    reject, bool(self.allow_level_7))
+                action, note = future.result(timeout=float(budget) + 30.0)
+            except Exception as exc:               # noqa: BLE001
+                action, note = None, f"failed: {exc.__class__.__name__}"
+            if not is_current():
+                return
+            self._deliver_playout(state, action, note, describe)
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _deliver_playout(self, state, action, note, describe) -> None:
+        import time
+
+        model = self.model
+        with self._lock:
+            self._clear_engine(model, "playout")
+            self._playout_action = action
+            if action is not None:
+                try:
+                    text, track, level = describe(action, state)
+                    model.playout_gag = text
+                    model.playout_track = track or ""
+                    model.playout_gag_level = level or 0
+                    self._describe_into(model, state, action, "playout")
+                except Exception:                  # noqa: BLE001
+                    self._clear_engine(model, "playout")
+                    self._playout_action = None
+                    note = "could not describe the move"
+            model.playout_ready = True
+            model.playout_note = note or ""
+            if model.preferred_engine == "playout" and model.playout_gag:
+                model.gag = model.playout_gag
+                model.gag_at = time.time()
+                model.track = model.playout_track or None
+                model.gag_level = model.playout_gag_level or None
+                model.engine = "playout"
+            self._sync_explanation(model)
+        self._post()
 
     def reconsider(self, scope: str = "kind") -> None:
         """Turn down the move on screen and ask for another.

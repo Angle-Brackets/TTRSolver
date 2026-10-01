@@ -258,6 +258,21 @@ class Model:
     search_accuracy: Optional[int] = None
     search_reason: str = ""
     search_organic: bool = False
+    # THE THIRD ANSWER: `search.playout`, the top moves played to the end
+    # of the fight. Same shape as the other two. `playout_note` says why
+    # a finished playout has no move ("solo only"), so its row can say
+    # so instead of thinking forever.
+    playout_gag: str = ""
+    playout_track: str = ""
+    playout_gag_level: int = 0
+    playout_ready: bool = False
+    playout_note: str = ""
+    playout_accuracy: Optional[int] = None
+    playout_reason: str = ""
+    playout_organic: bool = False
+    # Which answers this panel is computing at all, so a row for an
+    # engine that is switched off is not drawn as "thinking".
+    engines: List[str] = field(default_factory=lambda: ["rl", "search", "playout"])
     # Whether the DISPLAYED gag's track is organic, and which tracks are.
     # Both come from the Local API rather than the screen: it states
     # organic outright, so nothing has to recognise the sprout on the
@@ -522,7 +537,9 @@ class Worker(AdviceWorker):
         # Held so `name_cog` can reach it: the panel names a plate
         # the readers could not, and the watcher applies it per frame.
         self._watcher = watcher
-        thinker = advise_mod.Thinker(self._on_advice, on_first_answer=self._on_first_answer)
+        thinker = advise_mod.Thinker(self._on_advice,
+                                     on_first_answer=self._on_first_answer,
+                                     on_playout=self._on_playout)
         try:
             while not self._stop.is_set():
                 cycle = time.time()
@@ -677,6 +694,18 @@ class Worker(AdviceWorker):
                     and (not model.thinking or stuck)
                     and model.problems
                     and now - self._last_try >= RETRY_INTERVAL)
+
+    def _on_playout(self, state, horizon, is_current) -> None:
+        """The board is built: play the top moves out beside the search."""
+        from . import advise as advise_mod
+
+        def describe(action, st):
+            track = advise_mod.track_of(action)
+            level = (action.level if (track and track not in ("fire", "sos"))
+                     else (7 if track in ("fire", "sos") else None))
+            return advise_mod._render(action, st), track or "", level or 0
+
+        self._start_playout(state, horizon, self.budget, is_current, describe)
 
     def _on_first_answer(self, action, unite_str, state) -> None:
         from . import advise as advise_mod
@@ -852,12 +881,12 @@ class Worker(AdviceWorker):
         # runner-up row carried the last fight's move into the next one
         # -- the one place the panel shows a gag without the staleness
         # dimming that `problems` drives.
-        for engine in ("rl", "search"):
+        for engine in ("rl", "search", "playout"):
             self._clear_engine(model, engine)
         model.unite = ""
         self._sync_explanation(model)
         model.incoming = model.survive = None
-        self._rl_action = self._search_action = None
+        self._rl_action = self._search_action = self._playout_action = None
         model.problems, model.rows, model.cogs = [], [], []
         model.turn = 0
         model.thinking = False

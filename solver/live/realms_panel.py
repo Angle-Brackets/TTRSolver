@@ -339,6 +339,12 @@ class RealmsWorker(AdviceWorker):
         # panel, not the policy. The owner reports preferring the
         # policy's picks and there is no measurement to contradict them.
         self.engine = engine
+        # Playouts run wherever the search does: they are its company,
+        # not a replacement, until one has been measured against the
+        # other in live play.
+        self.model.engines = {"both": ["rl", "search", "playout"],
+                              "search": ["search", "playout"],
+                              "rl": ["rl"]}.get(engine, [])
         self.record_to = None
         # HUMAN FEEDBACK. `feedback_to` is a path or None; the log is
         # built lazily so an unset flag costs nothing. `_prev_state` is
@@ -373,6 +379,9 @@ class RealmsWorker(AdviceWorker):
         if self._executor is not None:
             self._executor.shutdown(wait=False, cancel_futures=True)
             self._executor = None
+        if self._playout_executor is not None:
+            self._playout_executor.shutdown(wait=False, cancel_futures=True)
+            self._playout_executor = None
 
     # -- the loop ------------------------------------------------------
     def run(self) -> None:              # pragma: no cover - needs a cluster
@@ -1021,6 +1030,21 @@ class RealmsWorker(AdviceWorker):
             if self.engine == "rl":
                 self._record_position(state, _render(quick, state))
                 return              # the policy's answer stands
+
+        # THE THIRD ANSWER, alongside the search rather than after it.
+        # Its own child process; the horizon is what the boss tracker
+        # says is still coming, and nothing about which cogs.
+        def _current(token=token):
+            with self._lock:
+                return token == self._current
+
+        self._start_playout(
+            state,
+            self.boss_tracker().horizon(
+                on_field=sum(1 for c in state.cogs if c.hp > 0)),
+            budget, _current,
+            lambda a, st: (_render(a, st), _track_of(a) or "",
+                           _level_of(a) or 0))
 
         try:
             future = self._pool().submit(
