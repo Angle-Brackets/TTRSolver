@@ -11,7 +11,7 @@ const EMPTY = {
   incoming: null, survive: null, accuracy: null, reason: '', organic: false, organic_tracks: [], organic_icon: '',
   rl_gag: '', rl_track: '', rl_gag_level: 0, rl_accuracy: null, rl_reason: '', rl_organic: false,
   search_gag: '', search_track: '', search_gag_level: 0, search_accuracy: null, search_reason: '', search_organic: false,
-  playout_gag: '', playout_track: '', playout_gag_level: 0, playout_ready: false, playout_note: '',
+  playout_gag: '', playout_track: '', playout_gag_level: 0, playout_ready: false, playout_note: '', playout_rollouts: 0, playout_done: false,
   playout_accuracy: null, playout_reason: '', playout_organic: false, engines: ['rl', 'search', 'playout'],
   zone: '', neighborhood: '', district: '', invasion: '',
   lure_icon: '', map_icon: '', track_icons: {},
@@ -427,8 +427,25 @@ function engineAnswer(model, engine) {
     reason: pick('reason') || '',
     organic: Boolean(pick('organic')),
     note: engine === 'playout' ? (model.playout_note || '') : '',
+    // ANYTIME: the playouts keep refining after the first move is up.
+    refining: engine === 'playout' && ready && !model.playout_done,
+    rollouts: engine === 'playout' ? (model.playout_rollouts || 0) : 0,
     ready,
   }
+}
+
+function Refining({ answer }) {
+  if (!answer.rollouts) return null
+  return answer.refining ? (
+    <span className="inline-flex items-center gap-1 text-[8px] font-black uppercase text-violet-700">
+      <span className="loading loading-dots loading-xs text-violet-500" />
+      refining · {answer.rollouts} playouts
+    </span>
+  ) : (
+    <span className="text-[8px] font-black uppercase text-violet-700/70">
+      {answer.rollouts} playouts
+    </span>
+  )
 }
 
 function EngineRow({ answer, model, isStale, hero }) {
@@ -463,6 +480,7 @@ function EngineRow({ answer, model, isStale, hero }) {
                 {same && (
                   <span className="text-[8px] font-black uppercase text-emerald-700">agrees</span>
                 )}
+                <Refining answer={answer} />
               </div>
               {(answer.reason || hasAcc) && (
                 <div className="text-[9px] font-extrabold italic text-amber-900/80 flex items-center gap-1 flex-wrap">
@@ -590,6 +608,7 @@ function Advice({ model }) {
                   {ENGINE_LABEL[activeEngine]}
                 </span>
               )}
+              <Refining answer={primary} />
               {isStale && (
                 <span className="rounded bg-amber-200/90 text-amber-950 border border-amber-400/60 px-1.5 py-0.2 text-[8px] font-black uppercase tracking-wider shadow-2xs">
                   ⚠️ STALE

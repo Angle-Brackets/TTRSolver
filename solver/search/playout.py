@@ -248,3 +248,62 @@ def pick_in_child(state: BattleState, horizon, budget: float,
         return None, "unavailable"
     first = result.plan[0] if result.plan else None
     return first, ""
+
+
+# ANYTIME. A panel asks for playouts in growing chunks and shows the best
+# so far after each, so a decent move is up in a second or two and gets
+# replaced as better evidence arrives. Cumulative rollouts per candidate
+# after each chunk; the measured setting (8) is reached by chunk three.
+#
+# Chunks are at most four rollouts so a deadline is overshot by one short
+# chunk at worst -- a 16-rollout chunk on a VP opening took five seconds.
+SCHEDULE = (2, 4, 8, 12, 16, 20, 24, 28, 32)
+
+
+def _seed(k: int) -> int:
+    """Rollout k's seed -- what `pick` uses at seed 0, so a chunked run
+    and a single `pick` see the same cogs and dice."""
+    return k * 7919
+
+
+def chunk_in_child(state: BattleState, horizon, reject, allow_level_7: bool,
+                   k_from: int, k_to: int):
+    """Rollouts k_from..k_to-1 for each candidate: (pairs, note).
+
+    `pairs` is [(plan, [cogs defeated, one per rollout])], the scorer's
+    pick first. Per rollout rather than summed, so the caller can pair
+    candidates on the same rollout and tell a lead from noise. Stateless: the candidates are recomputed each
+    call, and `candidates` is deterministic, so every chunk of one board
+    grades the same plans -- the caller checks that by key anyway.
+    """
+    from .. import state as state_mod
+    from . import hybrid
+
+    state_mod.ALLOW_LEVEL_7 = bool(allow_level_7)
+    if len(state.active_toons()) != 1:
+        return None, "solo only"
+    if not hybrid.available() or state.is_terminal():
+        return None, "unavailable"
+    cands = candidates(state, TOP_K, reject)
+    if not cands:
+        return None, "unavailable"
+    if len(cands) == 1:
+        return [(cands[0], [])], ""
+    values = [[] for _ in cands]
+    for k in range(k_from, k_to):
+        for i, plan in enumerate(cands):
+            values[i].append(rollout(state, plan, horizon, _seed(k)))
+    return list(zip(cands, values)), ""
+
+
+def leads(challenger: Sequence[float], incumbent: Sequence[float]) -> bool:
+    """Does `challenger` beat `incumbent` by more than one standard error,
+    paired rollout by rollout? Used only to stop the move on screen
+    swapping on noise while playouts are still arriving."""
+    diffs = [a - b for a, b in zip(challenger, incumbent)]
+    n = len(diffs)
+    if n < 2:
+        return False
+    mean = sum(diffs) / n
+    var = sum((d - mean) ** 2 for d in diffs) / (n - 1)
+    return mean > 0 and mean > (var / n) ** 0.5

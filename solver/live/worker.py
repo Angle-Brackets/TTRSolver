@@ -410,6 +410,8 @@ class AdviceWorker(threading.Thread):
         if engine == "playout":
             model.playout_ready = False
             model.playout_note = ""
+            model.playout_rollouts = 0
+            model.playout_done = False
 
     @staticmethod
     def _sync_explanation(model) -> None:
@@ -485,24 +487,79 @@ class AdviceWorker(threading.Thread):
         reject = frozenset(self._rejected)
 
         def run():
-            try:
-                future = self._playout_pool().submit(
-                    playout_mod.pick_in_child, state, horizon, float(budget),
-                    reject, bool(self.allow_level_7))
-                action, note = future.result(timeout=float(budget) + 30.0)
-            except Exception as exc:               # noqa: BLE001
-                action, note = None, f"failed: {exc.__class__.__name__}"
-            if not is_current():
+            import time
+
+            began = time.monotonic()
+            values, plans, order, done_k = {}, {}, [], 0
+            shown, last_chunk = None, 0.0
+            for upto in playout_mod.SCHEDULE:
+                if not is_current():
+                    return
+                elapsed = time.monotonic() - began
+                # Do not START a chunk that would end past the budget,
+                # judged by how long the last one took.
+                if done_k >= playout_mod.MIN_ROLLOUTS and                         elapsed + last_chunk > float(budget):
+                    break
+                chunk_began = time.monotonic()
+                try:
+                    future = self._playout_pool().submit(
+                        playout_mod.chunk_in_child, state, horizon, reject,
+                        bool(self.allow_level_7), done_k, upto)
+                    pairs, note = future.result(timeout=float(budget) + 30.0)
+                except Exception as exc:           # noqa: BLE001
+                    pairs, note = None, f"failed: {exc.__class__.__name__}"
+                last_chunk = time.monotonic() - chunk_began
+                if not is_current():
+                    return
+                if pairs is None:
+                    if not order:          # nothing shown yet: say why
+                        self._deliver_playout(state, None, note, describe)
+                        return
+                    break                  # keep the best already shown
+                keys = [playout_mod._key(plan) for plan, _v in pairs]
+                if order and keys != order:
+                    break                  # a different menu: keep what we have
+                order = keys
+                for key, (plan, got) in zip(keys, pairs):
+                    plans[key] = plan
+                    values.setdefault(key, []).extend(got)
+                done_k = upto
+                if len(order) == 1:
+                    plan = plans[order[0]]
+                    self._deliver_playout(state, plan[0] if plan else None,
+                                          "", describe)
+                    return                 # nothing to choose between
+                # While refining, the move on screen changes only for a
+                # lead beyond noise; the scorer's pick holds it at first.
+                if shown is None:
+                    shown = order[0]
+                best = max(order, key=lambda k: (sum(values[k]), k == order[0]))
+                if best != shown and playout_mod.leads(values[best], values[shown]):
+                    shown = best
+                plan = plans[shown]
+                self._deliver_playout(state, plan[0] if plan else None, "",
+                                      describe, rollouts=done_k,
+                                      finished=False)
+            if not order or not is_current():
                 return
-            self._deliver_playout(state, action, note, describe)
+            # FINISHED: the measured rule, plain best mean (ties to the
+            # scorer's pick), whatever was on screen while refining.
+            final = max(order, key=lambda k: (sum(values[k]), k == order[0]))
+            plan = plans[final]
+            self._deliver_playout(state, plan[0] if plan else None, "",
+                                  describe, rollouts=done_k, finished=True)
 
         threading.Thread(target=run, daemon=True).start()
 
-    def _deliver_playout(self, state, action, note, describe) -> None:
+    def _deliver_playout(self, state, action, note, describe,
+                         rollouts: int = 0, finished: bool = True) -> None:
+        """Post the playouts' current best. Called after every chunk, so
+        the move on screen improves while the player reads it."""
         import time
 
         model = self.model
         with self._lock:
+            previous = model.playout_gag
             self._clear_engine(model, "playout")
             self._playout_action = action
             if action is not None:
@@ -518,7 +575,11 @@ class AdviceWorker(threading.Thread):
                     note = "could not describe the move"
             model.playout_ready = True
             model.playout_note = note or ""
-            if model.preferred_engine == "playout" and model.playout_gag:
+            model.playout_rollouts = int(rollouts)
+            model.playout_done = bool(finished)
+            changed = model.playout_gag != previous
+            if (model.preferred_engine == "playout" and model.playout_gag
+                    and (changed or model.engine != "playout")):
                 model.gag = model.playout_gag
                 model.gag_at = time.time()
                 model.track = model.playout_track or None

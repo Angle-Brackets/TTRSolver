@@ -267,6 +267,10 @@ class Model:
     playout_gag_level: int = 0
     playout_ready: bool = False
     playout_note: str = ""
+    # ANYTIME: playouts per candidate behind the move shown, and whether
+    # refining has stopped. The move can change while this climbs.
+    playout_rollouts: int = 0
+    playout_done: bool = False
     playout_accuracy: Optional[int] = None
     playout_reason: str = ""
     playout_organic: bool = False

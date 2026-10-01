@@ -240,5 +240,53 @@ class ChildTest(unittest.TestCase):
         self.assertEqual("", note)
 
 
+class SwapRuleTest(unittest.TestCase):
+    """While refining, the move on screen changes only for a real lead."""
+
+    def test_a_steady_lead_replaces_the_move(self):
+        from solver.search.playout import leads
+        self.assertTrue(leads([5, 6, 5, 6], [3, 4, 3, 4]))
+
+    def test_noise_does_not(self):
+        from solver.search.playout import leads
+        self.assertFalse(leads([9, 1, 9, 1], [1, 9, 1, 8]))
+
+    def test_one_rollout_is_never_enough(self):
+        from solver.search.playout import leads
+        self.assertFalse(leads([10], [0]))
+
+    def test_behind_is_never_a_lead(self):
+        from solver.search.playout import leads
+        self.assertFalse(leads([1, 1, 1], [2, 2, 2]))
+
+
+@unittest.skipUnless(HAVE, "the policy needs numpy")
+class ChunkTest(unittest.TestCase):
+
+    def test_chunks_add_up_to_one_uninterrupted_pick(self):
+        """Same cogs and dice for rollout k however it is chunked, so
+        the panel's anytime totals are the batch result."""
+        board = _board(cogs=3)
+        first, _ = playout.chunk_in_child(board, None, None, True, 0, 2)
+        second, _ = playout.chunk_in_child(board, None, None, True, 2, 4)
+        whole = playout.pick(board, None, seed=0, rollouts=4)
+        self.assertEqual([playout._key(p) for p, _v in first],
+                         [playout._key(p) for p in whole.candidates])
+        for (_p, a), (_q, b), mean in zip(first, second, whole.means):
+            self.assertEqual(len(a), 2)
+            self.assertAlmostEqual((sum(a) + sum(b)) / 4.0, mean)
+
+    def test_a_party_chunk_says_why(self):
+        board = _board()
+        board.toons.append(board.clone().toons[0])
+        self.assertEqual((None, "solo only"),
+                         playout.chunk_in_child(board, None, None, True, 0, 2))
+
+    def test_the_schedule_overshoots_by_one_short_chunk_at_most(self):
+        steps = [b - a for a, b in zip((0,) + playout.SCHEDULE, playout.SCHEDULE)]
+        self.assertLessEqual(max(steps), 4)
+        self.assertEqual(playout.MIN_ROLLOUTS, playout.SCHEDULE[0])
+
+
 if __name__ == "__main__":
     unittest.main()
