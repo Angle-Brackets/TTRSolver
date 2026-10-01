@@ -26,7 +26,7 @@ feed it, through `note_defeated` and `set_kind`.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, Optional, Set, Tuple
+from typing import Dict, Iterable, NamedTuple, Optional, Set, Tuple
 
 # Cogs per round, in order. None where unknown.
 BOSS_ROUNDS = {
@@ -63,6 +63,38 @@ TTR_BOSS_ZONES: Dict[str, str] = {}
 def boss_from_location(zone: Optional[str]) -> Optional[str]:
     """The boss fight a TTR zone string names, or None."""
     return TTR_BOSS_ZONES.get((zone or "").strip())
+
+
+# WHO THE UNSEEN COGS ARE, as far as a player knows: the department and
+# each round's level band, both from the fight's own module so there is
+# one source for them. A round with no band is unknown and ends the
+# horizon there -- no partial guess past it.
+DEPARTMENT = {"vp": "sellbot", "ceo": "bossbot"}
+
+
+def _round_bands(kind: str):
+    if kind == "vp":
+        from .. import vp as vp_mod
+        return (vp_mod.COG_LEVELS, vp_mod.SKELECOG_LEVELS)
+    if kind == "ceo":
+        from .. import ceo as ceo_mod
+        # Battle two is the banquet's survivors plus the Big Cheese:
+        # neither its size nor its make-up is known until seen.
+        return (ceo_mod.COG_LEVELS, None)
+    return None
+
+
+class Horizon(NamedTuple):
+    """What a player knows is still coming, and nothing about WHICH cogs.
+
+    `holdout` cogs are still to walk into this round, drawn from `band`;
+    each later round is (count, band). A playout fills these in by
+    drawing from the band -- see `solver.search.playout`.
+    """
+    holdout: int
+    band: Tuple[int, int]
+    later: Tuple[Tuple[int, Tuple[int, int]], ...]
+    department: str
 
 
 # A plate that vanishes this close to empty died; one that vanishes
@@ -162,6 +194,25 @@ class BossTracker:
         if any(size is None for size in later):
             return None
         return sum(later)
+
+    def horizon(self, on_field: int = 0) -> Optional[Horizon]:
+        """Counts and level bands of everything still to come, or None
+        where the current round's size or band is not known."""
+        rounds, index = self.rounds(), self.round_index()
+        bands = _round_bands(self.kind) if self.kind else None
+        if rounds is None or index is None or bands is None:
+            return None
+        size, band = rounds[index], bands[index]
+        if size is None or band is None:
+            return None
+        before = sum(rounds[:index])
+        holdout = max(0, size - (self.defeated - before) - max(0, on_field))
+        later = []
+        for count, later_band in zip(rounds[index + 1:], bands[index + 1:]):
+            if count is None or later_band is None:
+                break
+            later.append((count, later_band))
+        return Horizon(holdout, band, tuple(later), DEPARTMENT[self.kind])
 
     def left_in_fight(self, on_field: int = 0) -> Optional[int]:
         """Every cog still to beat, for the panel. None if unknown."""
