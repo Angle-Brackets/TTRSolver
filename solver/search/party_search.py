@@ -369,8 +369,7 @@ def remaining_hp(cog) -> int:
 def _cog_threat(cog) -> float:
     """Expected damage one cog deals in a round, if it is awake."""
 
-    return sum(p * dmg for p, _name, dmg, hit
-               in outcomes_mod.cog_attack_outcomes(cog) if hit)
+    return outcomes_mod.expected_hit_damage(cog)
 
 
 def latent_incoming(state: BattleState) -> float:

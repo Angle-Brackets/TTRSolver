@@ -212,6 +212,22 @@ def worst_case_damage(cog: CogState) -> int:
     return _worst_damage(cog.department, cog.cog_type, cog.level)
 
 
+def expected_hit_damage(cog: CogState) -> float:
+    """Expected damage of one cog's turn, if it attacks at all.
+
+    The sum over `cog_attack_outcomes`, cached on the same key. The fast
+    scorers ask for it ~290 times per climb for a handful of distinct
+    cogs, so the sum was being redone for nothing.
+    """
+    return _expected_hit_damage(cog.department, cog.cog_type, cog.level)
+
+
+@lru_cache(maxsize=None)
+def _expected_hit_damage(department: str, cog_type: str, level: int) -> float:
+    return sum(p * dmg for p, _name, dmg, hit
+               in _attack_outcomes(department, cog_type, level) if hit)
+
+
 def clear_caches() -> None:
     """Drop every memo derived from the cog tables.
 
@@ -220,6 +236,7 @@ def clear_caches() -> None:
     perturbed numbers are computed once and then ignored.
     """
     _attack_outcomes.cache_clear()
+    _expected_hit_damage.cache_clear()
     _damage_distribution.cache_clear()
     _worst_damage.cache_clear()
     _damage_distribution_shared.cache_clear()

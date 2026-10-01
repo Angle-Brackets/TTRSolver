@@ -92,10 +92,12 @@ never appears here; what ships is the plain-float export.
 """
 from __future__ import annotations
 
+import functools
 import itertools
 import json
 import math
 import random
+import threading
 from pathlib import Path
 from typing import List, Mapping, Optional, Sequence
 
@@ -438,7 +440,48 @@ def _restock_credit(state: BattleState, plan) -> float:
     return LOOKAHEAD_DISCOUNT * max(0.0, after - before)
 
 
+# REPEATED SCORES, CACHED FOR ONE CLIMB. Measured over 221 solo-VP climbs:
+# 33.5 judge calls per climb but only 20.1 distinct (board, plan) pairs --
+# the start plan is re-scored, sweeps revisit a seat's incumbent, and
+# `best_with_unite` re-judges each inner climb's answer. Scoring is
+# deterministic (it enumerates the dice, it does not sample), so a repeat
+# is pure waste.
+#
+# Keyed on the board OBJECT, not its contents, and the entry holds the
+# board: an id is only unique while its object lives, and holding it is
+# what stops a freed Unite probe's id being reused by the next one.
+# Thread-local, because the panels run searches on worker threads.
+_MEMO = threading.local()
+
+
+def _memoised(fn):
+    """Give `fn` -- `climb` -- one judge cache per top-level call."""
+    @functools.wraps(fn)
+    def run(*args, **kwargs):
+        if getattr(_MEMO, "judged", None) is not None:
+            return fn(*args, **kwargs)            # a nested climb shares it
+        _MEMO.judged = {}
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            _MEMO.judged = None
+    return run
+
+
 def _judge(state: BattleState, plan, deep: bool) -> float:
+    memo = getattr(_MEMO, "judged", None)
+    if memo is None:
+        return _judge_uncached(state, plan, deep)
+    key = (id(state), bool(deep), tuple(map(repr, plan)))
+    hit = memo.get(key)
+    if hit is not None and hit[0] is state:
+        return hit[1]
+    value = _judge_uncached(state, plan, deep)
+    memo[key] = (state, value)
+    return value
+
+
+def _judge_uncached(state: BattleState, plan, deep: bool) -> float:
     """Rank a plan. One round, or two.
 
     `_quick_score` scores a single round, which is why a trap scores
@@ -1049,6 +1092,7 @@ def _menu_is_degenerate(order, values) -> bool:
     return len(keys) == 1
 
 
+@_memoised
 def climb(state: BattleState, rng=random,
           # RAISED WITH `width`, and it has to be. `budget` counts judge
           # calls and the scoring loop breaks on `spent >= budget`, so a
