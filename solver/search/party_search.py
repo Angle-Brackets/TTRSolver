@@ -1399,7 +1399,17 @@ def plan_waste(state: BattleState, plan) -> Tuple[float, float]:
         # no track either, and it cannot waste anything. Overkill is the
         # thing this function charges for, and a pink slip removes the
         # cog whatever its hp -- there is no excess to spill.
+        #
+        # AN SOS CALL TOO, which this missed. It has no track and
+        # `is_pass` is False for it, so it reached `calc_toon_damage(None,
+        # 0)` and raised KeyError -- and `hybrid._judge` catches that and
+        # falls back to its one-round score. So on any board where a card
+        # was held, the lookahead silently never ran: `greedy_plan` would
+        # consider calling one, this raised, and every plan was scored as
+        # if nothing came after it. A card is priced by `SOS_PRICE`, not
+        # by overkill, so there is nothing here to charge it for.
         if (action is None or action.is_pass or action.fire
+                or getattr(action, "sos", None)
                 or action.track in (Track.TOON_UP, Track.LURE,
                                     Track.TRAP)):
             continue

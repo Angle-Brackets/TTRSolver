@@ -292,15 +292,24 @@ def toon_from_object(obj, max_fires: int = 0, max_unites: int = 0,
             cards = {name: count for name, count in cards.items()
                      if name in sos_mod.BY_NAME}
         if cards:
+            # EVERY CARD TYPE, each capped at the budget -- not the first
+            # `budget` cards alphabetically. This used to walk the names in
+            # sorted order and stop once the cap was spent, which decided
+            # WHICH cards exist by spelling: at a cap of 3, a deck holding
+            # Barnacle Bessie x2 and Clumsy Ned x28 gave the solver those
+            # two and nothing else, and Professor Pete (Restock All),
+            # Flippy and Daffy Don never reached it. That contradicted the
+            # comment above it, and it is a large part of why the panel
+            # "never uses SOS cards" on Realms: the restock and heal cards
+            # a solo VP turns on were filtered out before scoring began.
+            #
+            # The cap still bounds CALLS: a solo toon calls at most one
+            # card a round, and `AdviceWorker.note_spent` charges each
+            # call against `remaining("sos")`, which feeds this budget, so
+            # the total across a fight never exceeds what the box says.
             budget = int(max_sos)
-            trimmed, spent = {}, 0
-            for name in sorted(cards):
-                if spent >= budget:
-                    break
-                take = min(cards[name], budget - spent)
-                trimmed[name] = take
-                spent += take
-            toon.sos_cards = trimmed
+            toon.sos_cards = {name: min(int(count), budget)
+                              for name, count in cards.items() if count > 0}
     return toon, []
 
 

@@ -643,3 +643,92 @@ class BudgetMustNotStarveTheCardsTest(unittest.TestCase):
         self.assertIn("queue += [(action, False)", src)
         self.assertLess(src.index("for index in order"),
                         src.index("_sos_probes(state, seat)"))
+
+
+class LookaheadSurvivesHoldingACardTest(unittest.TestCase):
+    """`plan_waste` skipped passes and slips but not SOS calls.
+
+    A call has no track and `is_pass` is False for it, so it reached
+    `calc_toon_damage(None, 0)` and raised KeyError -- which `_judge`
+    catches and answers with its one-round score. So whenever a card was
+    held, the two-round judge silently never ran: `greedy_plan` would
+    consider calling one, this raised, and every plan was scored as if
+    nothing came after it.
+    """
+
+    def _state(self):
+        from solver import data
+        from solver.state import BattleState, CogState
+
+        toon = ToonState(laff=90, max_laff=140)
+        for track in (Track.LURE, Track.THROW, Track.SQUIRT):
+            toon.track_exp[track] = 7
+        toon.gag_counts = {(Track.LURE, 4): 6, (Track.THROW, 1): 1}
+        toon.sos_cards = {"Professor Pete": 1, "Flippy": 1}
+        hp = data.cog_max_hp(10)
+        cog = CogState(cog_type="mr_hollywood", department="sellbot",
+                       level=10, hp=hp, max_hp=hp)
+        return BattleState(toons=[toon], cogs=[cog])
+
+    def test_plan_waste_does_not_raise_on_an_sos_call(self):
+        state = self._state()
+        ps.plan_waste(state, [Action(track=None, sos="Flippy")])
+
+    def test_the_two_round_judge_actually_runs_with_cards_held(self):
+        state = self._state()
+        plan = [Action(track=Track.THROW, level=1, target_index=0)]
+        self.assertNotEqual(hybrid._judge(state, plan, deep=False),
+                            hybrid._judge(state, plan, deep=True))
+
+
+class ACardIsAWayBackTest(unittest.TestCase):
+    """`can_still_damage` said cards and unites were "not modelled".
+
+    They are, so a toon down to Lure with a Restock All in hand read as
+    LOST, and every evaluator scored the exact state a solo VP reaches
+    after spending its power gags as a fight already over -- leaving the
+    restock that is the way out looking like a move into a dead position.
+    """
+
+    def _lure_only(self, **kw):
+        from solver import data
+        from solver.state import BattleState, CogState
+
+        toon = ToonState(laff=90, max_laff=140)
+        toon.track_exp = {Track.LURE: 7, Track.THROW: 7}
+        toon.gag_counts = {(Track.LURE, 4): 6}
+        for key, value in kw.items():
+            setattr(toon, key, value)
+        hp = data.cog_max_hp(10)
+        cog = CogState(cog_type="mr_hollywood", department="sellbot",
+                       level=10, hp=hp, max_hp=hp)
+        return BattleState(toons=[toon], cogs=[cog])
+
+    def test_lure_alone_is_still_lost(self):
+        """Unchanged: nothing here can take a hit point off a cog."""
+        self.assertFalse(self._lure_only().can_still_damage())
+
+    def test_a_restock_of_every_track_is_a_way_back(self):
+        state = self._lure_only(sos_cards={"Professor Pete": 1})
+        self.assertTrue(state.can_still_damage())
+
+    def test_a_damage_card_is_a_way_back(self):
+        state = self._lure_only(sos_cards={"Moe Zart": 1})
+        self.assertTrue(state.can_still_damage())
+
+    def test_a_lure_restock_is_not(self):
+        state = self._lure_only(sos_cards={"Doctor Drift": 1})
+        self.assertFalse(state.can_still_damage())
+
+    def test_a_heal_is_not(self):
+        state = self._lure_only(sos_cards={"Flippy": 1})
+        self.assertFalse(state.can_still_damage())
+
+    def test_a_restock_of_an_untrained_track_is_not(self):
+        state = self._lure_only(sos_cards={"Melody Wavers": 1})   # Sound
+        self.assertFalse(state.can_still_damage())
+
+    def test_a_gag_up_unite_on_an_attack_track_is_a_way_back(self):
+        state = self._lure_only(unites_held=1,
+                                unite_stock={("gag_up", Track.THROW): 1})
+        self.assertTrue(state.can_still_damage())

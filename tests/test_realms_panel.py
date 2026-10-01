@@ -957,3 +957,55 @@ class SosNamesMustBeRealCardsTest(unittest.TestCase):
         for action in simulator.legal_actions(state):
             if action.sos:
                 self.assertIn(action.sos, sos.BY_NAME)
+
+
+class TheSosCapNeverDeletesACardTypeTest(unittest.TestCase):
+    """The cap bounds how many CALLS get planned, never which cards exist.
+
+    It used to walk the card names alphabetically and stop once the cap
+    was spent, so spelling decided what the solver could see. At a cap of
+    3, a deck of Barnacle Bessie x2, Clumsy Ned x28, Professor Pete x16
+    and Flippy x18 reached the solver as Barnacle Bessie and Clumsy Ned
+    alone -- no Restock All, no heal. A solo VP that has spent its power
+    gags turns on exactly those two.
+    """
+
+    def _toon(self, deck, cap):
+        from solver.live import realms, realms_session
+
+        ids = {name: npc for npc, name in realms.npc_names().items()}
+
+        class Obj:
+            do_id = 7
+            _f = {"setHp": 90, "setMaxHp": 137, "setPinkSlips": 0,
+                  "setTrackAccess": [1, 1, 1, 1, 1, 1, 1],
+                  "setTrackBonusLevel": [-1] * 7,
+                  "setInventory": _inventory_blob(),
+                  "setNPCFriendsDict": [[ids[n], c] for n, c in deck.items()]}
+
+            def get(self, name):
+                return self._f.get(name)
+
+        toon, why = realms_session.toon_from_object(Obj(), max_sos=cap)
+        self.assertIsNotNone(toon, why)
+        return toon
+
+    DECK = {"Barnacle Bessie": 2, "Clumsy Ned": 28,
+            "Professor Pete": 16, "Flippy": 18}
+
+    def test_every_card_type_survives_a_small_cap(self):
+        toon = self._toon(self.DECK, cap=3)
+        self.assertEqual(set(self.DECK), set(toon.sos_cards))
+
+    def test_the_restock_and_heal_cards_reach_the_solver(self):
+        toon = self._toon(self.DECK, cap=3)
+        self.assertIn("Professor Pete", toon.sos_cards)
+        self.assertIn("Flippy", toon.sos_cards)
+
+    def test_each_type_is_capped_at_the_budget(self):
+        toon = self._toon(self.DECK, cap=3)
+        self.assertEqual({"Barnacle Bessie": 2, "Clumsy Ned": 3,
+                          "Professor Pete": 3, "Flippy": 3}, toon.sos_cards)
+
+    def test_a_cap_of_zero_still_means_no_cards(self):
+        self.assertEqual({}, self._toon(self.DECK, cap=0).sos_cards)

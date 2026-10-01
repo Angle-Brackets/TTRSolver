@@ -667,14 +667,57 @@ class BattleState:
         allies = max(0, int(self.allies_standing))
         return 1.0 / (1.0 + allies)
 
+    def _consumables_can_damage(self) -> bool:
+        """Whether a held SOS card or unite can still lead to damage.
+
+        Counted: a damage card (every cog, or every unlured one -- a lured
+        cog wakes, so that one still lands eventually); a restock of an
+        attack track the toon is trained in, or of every track; a trap
+        card when someone holds a Lure to spring it; a Gag-Up unite on an
+        attack track or on all of them. NOT counted: heals, Lure and
+        Toon-Up restocks, cogs-miss and toons-hit -- each helps, none of
+        them can take a hit point off a cog.
+
+        Finite and strictly spent, like a pink slip, so counting them does
+        not threaten the termination argument in `simulator.legal_actions`.
+        """
+        from . import sos as sos_mod
+
+        attack = (Track.THROW, Track.SQUIRT, Track.SOUND, Track.DROP)
+        lure_held = any(
+            n > 0 and track == Track.LURE
+            for toon in self.active_toons()
+            for (track, _level), n in toon.gag_counts.items())
+        for toon in self.active_toons():
+            trained = {t for t in attack if toon.track_exp.get(t, 0) > 0}
+            for name, count in (getattr(toon, "sos_cards", {}) or {}).items():
+                card = sos_mod.BY_NAME.get(name)
+                if card is None or count <= 0:
+                    continue
+                if card.kind in (sos_mod.DAMAGE_ALL, sos_mod.DAMAGE_UNLURED):
+                    return True
+                if card.kind == sos_mod.RESTOCK and (
+                        (card.track is None and trained)
+                        or card.track in trained):
+                    return True
+                if card.kind == sos_mod.TRAP and lure_held:
+                    return True
+            if getattr(toon, "unites_held", 0) > 0:
+                stock = getattr(toon, "unite_stock", {}) or {}
+                for (kind, track), n in stock.items():
+                    if (kind == "gag_up" and n > 0
+                            and (track is None or track in trained)):
+                        return True
+        return False
+
     def can_still_damage(self) -> bool:
         """Whether any sequence of remaining gags can hurt a cog.
 
         A solo toon that cannot damage cogs cannot win, however much laff
-        or however many gags it is holding -- there is no restocking
-        mid-fight, since SOS cards, Unites and Fires are not modelled. So
-        this is the real losing condition, and "the pouch is empty" is
-        only its most obvious case.
+        or however many gags it is holding. Pink slips, damage and restock
+        SOS cards, and Gag-Up unites all count as a way back -- see
+        `_consumables_can_damage`. So this is the real losing condition,
+        and "the pouch is empty" is only its most obvious case.
 
         Damage is possible from an attack track outright, or from Trap,
         which deals its damage only when a Lure drags a cog onto it. That
@@ -702,6 +745,16 @@ class BattleState:
         # to come before the track check or "eighty Lures and no attacks"
         # would read as lost while a fire sat unused.
         if any(toon.fires > 0 for toon in self.active_toons()):
+            return True
+
+        # CARDS AND UNITES THAT PUT DAMAGE BACK IN REACH. This said they
+        # were "not modelled", and they have been for a while -- so a toon
+        # down to Lure with a Restock All in hand read as LOST, and every
+        # evaluator scored it as a dead position. That is the state a solo
+        # VP reaches after spending its power gags, so the solver could
+        # not even value climbing back out of it: the restock that is the
+        # way out led, as far as it could tell, to a fight already over.
+        if self._consumables_can_damage():
             return True
 
         held = set()
