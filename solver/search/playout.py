@@ -46,8 +46,23 @@ from ..state import Action, BattleState
 # The measured setting. More candidates or rollouts have not been tried.
 TOP_K = 3
 ROLLOUTS = 8
-# The continuation's own budget, as the panels run `climb`.
+# `climb`'s budget when it builds the menu, as the panels run it.
 CLIMB_BUDGET = 24
+# Its budget when it plays out the rest of the fight inside a rollout,
+# if climb is the player. 8 tied 24 on 200 paired solo VPs (72 vs 78
+# wins, +37/-43, p = 0.58; cogs +0.85, se 0.76) at half the cost.
+ROLLOUT_BUDGET = 8
+# WHO plays out the rest of the fight: "net" -- `fastplayer`, a network
+# trained to copy climb -- or "climb". The net is used only if its
+# weights load; otherwise climb plays. Measured on 200 paired solo VPs,
+# wide menu, against climb at 2/4/8 rollouts (71 wins, 3.37 s a move):
+#
+#     net, same 2/4/8 rollouts      63 wins   0.78 s a move   p = 0.42
+#     net, 8/16/32 (about equal time) 111 wins  3.06 s a move
+#     equal time: +60/-20, p < 0.001, +2.83 cogs a fight (se 0.63)
+#
+# Slightly worse per rollout, four times as many in the same time.
+ROLLOUT_PLAYER = "net"
 # Fewest rollouts per candidate before a deadline may cut the playouts
 # short. Below this the means are too noisy to overrule the scorer.
 MIN_ROLLOUTS = 2
@@ -150,9 +165,17 @@ def rollout(state, plan, horizon, seed: int) -> int:
     policy_rng = random.Random(seed + 1)
     done, _info = step_round(env, plan)
     guard = 0
+    use_net = False
+    if ROLLOUT_PLAYER == "net":
+        from . import fastplayer
+        use_net = fastplayer.available()
     while not done and guard < ROUND_CAP:
         guard += 1
-        nxt = hybrid.climb(_view(env.state), policy_rng, budget=CLIMB_BUDGET)
+        if use_net:
+            nxt = fastplayer.act(_view(env.state))
+        else:
+            nxt = hybrid.climb(_view(env.state), policy_rng,
+                               budget=ROLLOUT_BUDGET)
         if nxt is None:
             break
         done, _info = step_round(env, nxt)
@@ -348,7 +371,10 @@ WIDE_POLICY_TOP = 2      # the network's favourites
 WIDE_CAP = 10
 # Successive halving: everyone gets HALVING[0] rollouts, the better half
 # goes on to HALVING[1], and so on -- with the same seeds throughout.
-HALVING = (2, 4, 8)
+#
+# (8, 16, 32): the equal-time measurement above, with the net playing.
+# (2, 4, 8) was the first measured setting, with climb playing.
+HALVING = (8, 16, 32)
 HALVING_KEEP_AT_LEAST = 2
 
 

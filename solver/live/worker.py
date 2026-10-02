@@ -535,9 +535,10 @@ class AdviceWorker(threading.Thread):
                     self._deliver_playout(state, plan[0] if plan else None,
                                           "", describe)
                     return                 # nothing to choose between
-                # SUCCESSIVE HALVING, as measured: after the 2nd and 4th
-                # rollout the weaker half stops being rolled. Survivors
-                # keep refining for as long as the think time allows.
+                # SUCCESSIVE HALVING, at `playout.HALVING`'s points (8 and
+                # 16 rollouts, as measured): the weaker half stops being
+                # rolled, and survivors refine while the think time lasts.
+                # A move is still shown from the first two rollouts.
                 live = alive if alive is not None else list(order)
                 if done_k in playout_mod.HALVING[:-1]:
                     live = sorted(live, key=lambda k: (
