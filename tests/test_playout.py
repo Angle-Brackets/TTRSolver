@@ -307,5 +307,41 @@ class ChunkTest(unittest.TestCase):
         self.assertEqual(playout.MIN_ROLLOUTS, playout.SCHEDULE[0])
 
 
+class _InlinePool:
+    """Runs submitted work at once, so the split-and-merge can be checked
+    without spawning processes."""
+
+    class _Done:
+        def __init__(self, value):
+            self.value = value
+
+        def result(self, timeout=None):
+            return self.value
+
+    def submit(self, fn, *args):
+        return self._Done(fn(*args))
+
+
+@unittest.skipUnless(HAVE, "the policy needs numpy")
+class SplitTest(unittest.TestCase):
+
+    def test_splitting_across_processes_changes_no_number(self):
+        board = _board(cogs=3)
+        w = _worker()
+        w._playout_executor = _InlinePool()
+        split, note = w._playout_chunk(board, None, frozenset(), 0, 2, None, 5.0)
+        whole, _ = playout.chunk_in_child(board, None, frozenset(), True, 0, 2)
+        self.assertEqual("", note)
+        self.assertEqual([playout._key(p) for p, _v in whole],
+                         [playout._key(p) for p, _v in split])
+        self.assertEqual([v for _p, v in whole], [v for _p, v in split])
+
+    def test_the_menu_call_matches_the_chunk_menu(self):
+        board = _board(cogs=3)
+        keys, _ = playout.menu_in_child(board, frozenset(), True)
+        pairs, _ = playout.chunk_in_child(board, None, frozenset(), True, 0, 1)
+        self.assertEqual(keys, [playout._key(p) for p, _v in pairs])
+
+
 if __name__ == "__main__":
     unittest.main()

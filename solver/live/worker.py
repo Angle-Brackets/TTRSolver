@@ -52,6 +52,11 @@ from typing import Optional
 # The answers a panel shows side by side. "rl" is `hybrid.climb`, shown
 # as PPO; "search" the expectimax child; "playout" `search.playout`.
 ENGINES = ("rl", "search", "playout")
+# Processes for the playouts. Rollouts of different candidates are
+# independent, so four processes run a chunk about four times as fast.
+# Four rather than all twelve threads, because the game and the screen
+# reader are running on the same machine.
+PLAYOUT_WORKERS = 4
 
 
 class AdviceWorker(threading.Thread):
@@ -456,16 +461,18 @@ class AdviceWorker(threading.Thread):
     # -- the third engine: play it out ------------------------------------
 
     def _playout_pool(self):
-        """One child process for playouts, made on first use and kept.
+        """Child processes for playouts, made on first use and kept.
 
-        Its own process, not the search's: the two run side by side, and
-        a playout is pure Python that would otherwise hold the GIL the
-        poll loop needs.
+        Their own, not the search's: the two run side by side, and a
+        playout is pure Python that would otherwise hold the GIL the poll
+        loop needs. Several, because rollouts of different candidates are
+        independent -- see PLAYOUT_WORKERS.
         """
         if self._playout_executor is None:
             from concurrent.futures import ProcessPoolExecutor
 
-            self._playout_executor = ProcessPoolExecutor(max_workers=1)
+            self._playout_executor = ProcessPoolExecutor(
+                max_workers=PLAYOUT_WORKERS)
         return self._playout_executor
 
     def _start_playout(self, state, horizon, budget, is_current,
@@ -503,10 +510,8 @@ class AdviceWorker(threading.Thread):
                     break
                 chunk_began = time.monotonic()
                 try:
-                    future = self._playout_pool().submit(
-                        playout_mod.chunk_in_child, state, horizon, reject,
-                        bool(self.allow_level_7), done_k, upto, alive)
-                    pairs, note = future.result(timeout=float(budget) + 30.0)
+                    pairs, note = self._playout_chunk(
+                        state, horizon, reject, done_k, upto, alive, budget)
                 except Exception as exc:           # noqa: BLE001
                     pairs, note = None, f"failed: {exc.__class__.__name__}"
                 last_chunk = time.monotonic() - chunk_began
@@ -566,6 +571,47 @@ class AdviceWorker(threading.Thread):
                                   describe, rollouts=done_k, finished=True)
 
         threading.Thread(target=run, daemon=True).start()
+
+    def _playout_chunk(self, state, horizon, reject, k_from, k_to, alive,
+                       budget):
+        """One chunk of rollouts, the candidates split across processes.
+
+        Every process rebuilds the same menu (it is deterministic) and
+        rolls only its share; the shares are merged by key. A menu that
+        differs between processes is treated as a failed chunk rather
+        than merged, since the keys would no longer line up.
+        """
+        from ..search import playout as playout_mod
+
+        pool = self._playout_pool()
+        allow7 = bool(self.allow_level_7)
+        timeout = float(budget) + 30.0
+        keys = alive
+        if keys is None:
+            keys, note = pool.submit(playout_mod.menu_in_child, state, reject,
+                                     allow7).result(timeout=timeout)
+            if keys is None:
+                return None, note
+        workers = max(1, min(PLAYOUT_WORKERS, len(keys)))
+        parts = [keys[i::workers] for i in range(workers)]
+        futures = [pool.submit(playout_mod.chunk_in_child, state, horizon,
+                               reject, allow7, k_from, k_to, part)
+                   for part in parts]
+        merged, order = None, None
+        for future in futures:
+            pairs, note = future.result(timeout=timeout)
+            if pairs is None:
+                return None, note
+            got = [playout_mod._key(plan) for plan, _v in pairs]
+            if merged is None:
+                merged = [(plan, list(values)) for plan, values in pairs]
+                order = got
+            elif got != order:
+                return None, "menus disagreed"
+            else:
+                for (_plan, into), (_p, values) in zip(merged, pairs):
+                    into.extend(values)
+        return merged, ""
 
     def _deliver_playout(self, state, action, note, describe,
                          rollouts: int = 0, finished: bool = True) -> None:

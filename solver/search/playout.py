@@ -453,3 +453,25 @@ def pick_wide(state: BattleState, horizon=None, seed: int = 0,
     best = max(alive, key=lambda i: (sum(values[i]) / len(values[i]), i == 0))
     means = [sum(values[i]) / len(values[i]) for i in range(len(cands))]
     return Result(cands[best], cands, means, done_k)
+
+
+def menu_in_child(state: BattleState, reject, allow_level_7: bool,
+                  wide: bool = True):
+    """The candidate keys a chunk would roll, in order: (keys, note).
+
+    Cheap -- one climb -- and lets a caller split the first, slowest
+    chunk across processes instead of waiting on one.
+    """
+    from .. import state as state_mod
+    from . import hybrid
+
+    state_mod.ALLOW_LEVEL_7 = bool(allow_level_7)
+    if len(state.active_toons()) != 1:
+        return None, "solo only"
+    if not hybrid.available() or state.is_terminal():
+        return None, "unavailable"
+    cands = (wide_candidates(state, reject) if wide
+             else candidates(state, TOP_K, reject))
+    if not cands:
+        return None, "unavailable"
+    return [_key(plan) for plan in cands], ""
