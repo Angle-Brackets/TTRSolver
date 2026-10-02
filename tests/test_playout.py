@@ -343,5 +343,36 @@ class SplitTest(unittest.TestCase):
         self.assertEqual(keys, [playout._key(p) for p, _v in pairs])
 
 
+def _party_board(seed=2):
+    board = _board(cogs=3, seed=seed)
+    board.toons.append(_board(seed=seed + 50).toons[0])
+    return board
+
+
+@unittest.skipUnless(HAVE, "the policy needs numpy")
+class PartyTest(unittest.TestCase):
+    """Party playouts: joint plans, played on by climb. Off by default."""
+
+    def test_off_by_default(self):
+        self.assertFalse(playout.PARTY_PLAYOUTS)
+        self.assertIsNone(playout.pick_wide(_party_board(), None))
+
+    def test_every_candidate_is_a_whole_joint_plan(self):
+        board = _party_board()
+        for plan in playout.wide_candidates(board):
+            self.assertEqual(len(board.toons), len(plan))
+
+    def test_when_on_it_picks_one_of_them(self):
+        old = playout.PARTY_PLAYOUTS
+        try:
+            playout.PARTY_PLAYOUTS = True
+            board = _party_board()
+            res = playout.pick_wide(board, None, seed=1, stages=(2,))
+            self.assertIn(playout._key(res.plan),
+                          [playout._key(c) for c in res.candidates])
+        finally:
+            playout.PARTY_PLAYOUTS = old
+
+
 if __name__ == "__main__":
     unittest.main()

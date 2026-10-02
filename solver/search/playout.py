@@ -166,7 +166,10 @@ def rollout(state, plan, horizon, seed: int) -> int:
     done, _info = step_round(env, plan)
     guard = 0
     use_net = False
-    if ROLLOUT_PLAYER == "net":
+    # The net knows one seat; a party is played on by climb, which plans
+    # every seat jointly, at the menu's budget.
+    party = len(state.active_toons()) > 1
+    if ROLLOUT_PLAYER == "net" and not party:
         from . import fastplayer
         use_net = fastplayer.available()
     while not done and guard < ROUND_CAP:
@@ -175,7 +178,7 @@ def rollout(state, plan, horizon, seed: int) -> int:
             nxt = fastplayer.act(_view(env.state))
         else:
             nxt = hybrid.climb(_view(env.state), policy_rng,
-                               budget=ROLLOUT_BUDGET)
+                               budget=CLIMB_BUDGET if party else ROLLOUT_BUDGET)
         if nxt is None:
             break
         done, _info = step_round(env, nxt)
@@ -366,6 +369,13 @@ def leads(challenger: Sequence[float], incumbent: Sequence[float]) -> bool:
 #     wide menu, halving 2/4/8    79/200  39.5%
 #     paired +57/-16, p < 0.001; +1.00 cogs a fight (se 0.63)
 
+# Parties: joint plans from climb's menu, played on by climb. OFF: on
+# the CEO (two toons, two leftovers, 200 paired sides) it was neutral --
+# 48 wins against climb's 43, +16/-11, p = 0.44 -- so there is no case
+# yet for the extra time. A party's round sizes are unconfirmed, so its
+# playouts end with the battle on screen; that horizon, not the menu, is
+# the likely reason it does not pay the way the solo VP does.
+PARTY_PLAYOUTS = False
 WIDE_SCORER_TOP = 2      # the scorer's favourites
 WIDE_POLICY_TOP = 2      # the network's favourites
 WIDE_CAP = 10
@@ -374,6 +384,8 @@ WIDE_CAP = 10
 #
 # (8, 16, 32): the equal-time measurement above, with the net playing.
 # (2, 4, 8) was the first measured setting, with climb playing.
+# Doubling to (16, 32, 64) did not pay: 146 vs 139 wins of 200, +36/-29,
+# p = 0.46, cogs -0.14 (se 0.53), at twice the time. Thirty-two stays.
 HALVING = (8, 16, 32)
 HALVING_KEEP_AT_LEAST = 2
 
@@ -427,6 +439,17 @@ def wide_candidates(state: BattleState, reject=None,
     add(chosen)
     for plan in ranked[:WIDE_SCORER_TOP]:
         add(plan)
+    if len(state.active_toons()) > 1:
+        # A PARTY: every candidate is a joint plan from climb's own menu,
+        # kept diverse by what EACH seat does. The network's single-seat
+        # favourites and a lone pass are not whole plans, so they are
+        # left out.
+        best_joint = {}
+        for plan in ranked:
+            best_joint.setdefault(tuple(_kind(a) for a in plan), plan)
+        for plan in best_joint.values():
+            add(plan)
+        return out
     try:
         model = hybrid._load()
         logits = hybrid._logits(model, state, 0, [None] * len(state.toons),
@@ -458,7 +481,7 @@ def pick_wide(state: BattleState, horizon=None, seed: int = 0,
 
     if not hybrid.available() or state.is_terminal():
         return None
-    if len(state.active_toons()) != 1:
+    if len(state.active_toons()) != 1 and not PARTY_PLAYOUTS:
         return None
     cands = wide_candidates(state, reject)
     if not cands:
