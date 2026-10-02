@@ -208,14 +208,28 @@ def _logits(model, state: BattleState, seat: int, pending,
     # A policy exported before the slip feature changed scale must be
     # fed the layout it was fitted to. Absent key means version 1, the
     # `min(fires, 10) / 10` encoding; see `env.OBS_VERSION`.
-    x = np.array(env_mod.encode(state, seat, pending,
-                                obs_version=model.get("obs_version", 1)),
-                 dtype=float)
-    for weight, bias in model["trunk"]:
-        x = np.tanh(x @ weight + bias)
-    out = x @ model["aw"] + model["ab"]
-    mask = env_mod.legal_mask(state, seat)
-    out = np.where(np.array(mask), out, -np.inf)
+    # CACHED FOR ONE CLIMB, like `_judge`: a climb asks for the same
+    # board and seat about three times, and the legal-move list behind
+    # the mask was 10% of its time. Keyed on the board object, holding
+    # it so the id cannot be reused; copied out, because the reject
+    # masking below writes into the array.
+    memo = getattr(_MEMO, "judged", None)
+    key = ("logits", id(state), seat, tuple(map(repr, pending)),
+           model.get("obs_version", 1), id(model))
+    hit = memo.get(key) if memo is not None else None
+    if hit is not None and hit[0] is state:
+        out = hit[1].copy()
+    else:
+        x = np.array(env_mod.encode(state, seat, pending,
+                                    obs_version=model.get("obs_version", 1)),
+                     dtype=float)
+        for weight, bias in model["trunk"]:
+            x = np.tanh(x @ weight + bias)
+        out = x @ model["aw"] + model["ab"]
+        mask = env_mod.legal_mask(state, seat)
+        out = np.where(np.array(mask), out, -np.inf)
+        if memo is not None:
+            memo[key] = (state, out.copy())
     if reject:
         # Masked here rather than filtered afterwards, so a rejected
         # move is invisible to the hill-climb instead of being proposed
