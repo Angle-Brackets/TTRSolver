@@ -492,6 +492,7 @@ class AdviceWorker(threading.Thread):
             began = time.monotonic()
             values, plans, order, done_k = {}, {}, [], 0
             shown, last_chunk = None, 0.0
+            alive = None           # keys still being rolled; None = all
             for upto in playout_mod.SCHEDULE:
                 if not is_current():
                     return
@@ -504,7 +505,7 @@ class AdviceWorker(threading.Thread):
                 try:
                     future = self._playout_pool().submit(
                         playout_mod.chunk_in_child, state, horizon, reject,
-                        bool(self.allow_level_7), done_k, upto)
+                        bool(self.allow_level_7), done_k, upto, alive)
                     pairs, note = future.result(timeout=float(budget) + 30.0)
                 except Exception as exc:           # noqa: BLE001
                     pairs, note = None, f"failed: {exc.__class__.__name__}"
@@ -529,12 +530,26 @@ class AdviceWorker(threading.Thread):
                     self._deliver_playout(state, plan[0] if plan else None,
                                           "", describe)
                     return                 # nothing to choose between
+                # SUCCESSIVE HALVING, as measured: after the 2nd and 4th
+                # rollout the weaker half stops being rolled. Survivors
+                # keep refining for as long as the think time allows.
+                live = alive if alive is not None else list(order)
+                if done_k in playout_mod.HALVING[:-1]:
+                    live = sorted(live, key=lambda k: (
+                        -sum(values[k]) / len(values[k]), order.index(k)))
+                    live = live[:max(playout_mod.HALVING_KEEP_AT_LEAST,
+                                     (len(live) + 1) // 2)]
+                alive = live
                 # While refining, the move on screen changes only for a
                 # lead beyond noise; the scorer's pick holds it at first.
-                if shown is None:
-                    shown = order[0]
-                best = max(order, key=lambda k: (sum(values[k]), k == order[0]))
-                if best != shown and playout_mod.leads(values[best], values[shown]):
+                if shown is None or shown not in alive:
+                    shown = max(alive, key=lambda k: (
+                        sum(values[k]) / len(values[k]), k == order[0]))
+                best = max(alive, key=lambda k: (sum(values[k]) / len(values[k]),
+                                                 k == order[0]))
+                n = min(len(values[best]), len(values[shown]))
+                if best != shown and playout_mod.leads(values[best][:n],
+                                                       values[shown][:n]):
                     shown = best
                 plan = plans[shown]
                 self._deliver_playout(state, plan[0] if plan else None, "",
@@ -544,7 +559,8 @@ class AdviceWorker(threading.Thread):
                 return
             # FINISHED: the measured rule, plain best mean (ties to the
             # scorer's pick), whatever was on screen while refining.
-            final = max(order, key=lambda k: (sum(values[k]), k == order[0]))
+            final = max(alive or order, key=lambda k: (
+                sum(values[k]) / len(values[k]), k == order[0]))
             plan = plans[final]
             self._deliver_playout(state, plan[0] if plan else None, "",
                                   describe, rollouts=done_k, finished=True)

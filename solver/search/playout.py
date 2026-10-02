@@ -267,7 +267,7 @@ def _seed(k: int) -> int:
 
 
 def chunk_in_child(state: BattleState, horizon, reject, allow_level_7: bool,
-                   k_from: int, k_to: int):
+                   k_from: int, k_to: int, only=None, wide: bool = True):
     """Rollouts k_from..k_to-1 for each candidate: (pairs, note).
 
     `pairs` is [(plan, [cogs defeated, one per rollout])], the scorer's
@@ -275,6 +275,13 @@ def chunk_in_child(state: BattleState, horizon, reject, allow_level_7: bool,
     candidates on the same rollout and tell a lead from noise. Stateless: the candidates are recomputed each
     call, and `candidates` is deterministic, so every chunk of one board
     grades the same plans -- the caller checks that by key anyway.
+
+    `wide` builds the menu with `wide_candidates` (the measured winner,
+    see below); `only` restricts the rollouts to the candidates whose
+    keys it lists, which is how the caller runs successive halving
+    across chunks. Pairs come back for every candidate, with an empty
+    list for those not rolled this time, so the menu can still be
+    checked by key.
     """
     from .. import state as state_mod
     from . import hybrid
@@ -284,15 +291,18 @@ def chunk_in_child(state: BattleState, horizon, reject, allow_level_7: bool,
         return None, "solo only"
     if not hybrid.available() or state.is_terminal():
         return None, "unavailable"
-    cands = candidates(state, TOP_K, reject)
+    cands = (wide_candidates(state, reject) if wide
+             else candidates(state, TOP_K, reject))
     if not cands:
         return None, "unavailable"
     if len(cands) == 1:
         return [(cands[0], [])], ""
+    wanted = None if only is None else set(only)
     values = [[] for _ in cands]
     for k in range(k_from, k_to):
         for i, plan in enumerate(cands):
-            values[i].append(rollout(state, plan, horizon, _seed(k)))
+            if wanted is None or _key(plan) in wanted:
+                values[i].append(rollout(state, plan, horizon, _seed(k)))
     return list(zip(cands, values)), ""
 
 
@@ -307,3 +317,139 @@ def leads(challenger: Sequence[float], incumbent: Sequence[float]) -> bool:
     mean = sum(diffs) / n
     var = sum((d - mean) ** 2 for d in diffs) / (n - 1)
     return mean > 0 and mean > (var / n) ** 0.5
+
+
+# ---------------------------------------------------------------------
+# A wider menu, so the one-round scorer does not decide what is tried
+# ---------------------------------------------------------------------
+#
+# WHY. On the wide Monte-Carlo benchmark (797 solo-VP positions, nine
+# candidates each, best chosen on half the rollouts and scored on the
+# other half), gains over the average candidate were:
+#
+#     climb's pick (scorer #1)                    +0.37 cogs
+#     best of the scorer's top 4                  +0.70
+#     best of 4 RANDOM entries from climb's menu  +0.92
+#     best of all nine                            +1.36
+#
+# Four random menu entries beat the scorer's own top four, and the best
+# move lay outside that top four in 49% of positions. `TOP_K` playouts
+# inherit that filter. This builds the menu for diversity instead and
+# lets the rollouts, not the scorer, do the narrowing.
+#
+# MEASURED, solo VP, 200 fresh paired sides, against `pick` (top 3 x 8):
+#
+#     top 3 x 8 rollouts          38/200  19.0%
+#     wide menu, halving 2/4/8    79/200  39.5%
+#     paired +57/-16, p < 0.001; +1.00 cogs a fight (se 0.63)
+
+WIDE_SCORER_TOP = 2      # the scorer's favourites
+WIDE_POLICY_TOP = 2      # the network's favourites
+WIDE_CAP = 10
+# Successive halving: everyone gets HALVING[0] rollouts, the better half
+# goes on to HALVING[1], and so on -- with the same seeds throughout.
+HALVING = (2, 4, 8)
+HALVING_KEEP_AT_LEAST = 2
+
+
+def _kind(action) -> tuple:
+    """What counts as a different KIND of move, for diversity."""
+    if action is None or action.is_pass:
+        return ("pass",)
+    if getattr(action, "sos", None):
+        from .. import sos as sos_mod
+        card = sos_mod.BY_NAME.get(action.sos)
+        return ("sos", getattr(card, "kind", action.sos))
+    if action.fire:
+        return ("fire",)
+    return (action.track, action.target_index is None)
+
+
+def wide_candidates(state: BattleState, reject=None,
+                    cap: int = WIDE_CAP) -> list:
+    """climb's pick, the scorer's and the network's favourites, the best
+    of every kind of move climb considered, and the pass."""
+    from . import hybrid
+    from ..rl import env as env_mod
+
+    scored = {}
+    real = hybrid._judge
+
+    def spy(st, plan, deep):
+        value = real(st, plan, deep)
+        scored.setdefault(_key(plan), (list(plan), value))
+        return value
+
+    probe = state.clone()
+    hybrid._judge = spy
+    try:
+        chosen = hybrid.climb(probe, random.Random(0), budget=CLIMB_BUDGET,
+                              reject=frozenset(reject or ()))
+    finally:
+        hybrid._judge = real
+    if chosen is None:
+        return []
+    ranked = [p for p, _v in sorted(scored.values(), key=lambda pv: -pv[1])]
+
+    out, seen = [], set()
+
+    def add(plan):
+        if plan is not None and _key(plan) not in seen and len(out) < cap:
+            seen.add(_key(plan))
+            out.append(list(plan))
+
+    add(chosen)
+    for plan in ranked[:WIDE_SCORER_TOP]:
+        add(plan)
+    try:
+        model = hybrid._load()
+        logits = hybrid._logits(model, state, 0, [None] * len(state.toons),
+                                frozenset(reject or ()))
+        order = sorted(range(len(logits)), key=lambda i: -logits[i])
+        taken = 0
+        for i in order:
+            if taken >= WIDE_POLICY_TOP or logits[i] == float("-inf"):
+                break
+            entry = env_mod.ACTIONS[i]
+            before = len(out)
+            add([entry if entry is not None else Action(track=None)])
+            taken += len(out) > before
+    except Exception:                      # noqa: BLE001 -- the menu still stands
+        pass
+    best_of_kind = {}
+    for plan in ranked:
+        best_of_kind.setdefault(_kind(plan[0] if plan else None), plan)
+    for plan in best_of_kind.values():
+        add(plan)
+    add([Action(track=None)])
+    return out
+
+
+def pick_wide(state: BattleState, horizon=None, seed: int = 0,
+              reject=None, stages=HALVING) -> Optional[Result]:
+    """Successive halving over `wide_candidates`, common random numbers."""
+    from . import hybrid
+
+    if not hybrid.available() or state.is_terminal():
+        return None
+    if len(state.active_toons()) != 1:
+        return None
+    cands = wide_candidates(state, reject)
+    if not cands:
+        return None
+    if len(cands) == 1:
+        return Result(cands[0], cands, [0.0], 0)
+    values = {i: [] for i in range(len(cands))}
+    alive, done_k = list(range(len(cands))), 0
+    for stage, upto in enumerate(stages):
+        for k in range(done_k, upto):
+            for i in alive:
+                values[i].append(rollout(state, cands[i], horizon,
+                                         seed * 1000003 + k * 7919))
+        done_k = upto
+        if stage + 1 < len(stages):
+            alive.sort(key=lambda i: (-sum(values[i]) / len(values[i]), i))
+            alive = alive[:max(HALVING_KEEP_AT_LEAST, (len(alive) + 1) // 2)]
+    best = max(alive, key=lambda i: (sum(values[i]) / len(values[i]), i == 0))
+    means = [sum(values[i]) / len(values[i]) for i in range(len(cands))]
+    return Result(cands[best], cands, means, done_k)

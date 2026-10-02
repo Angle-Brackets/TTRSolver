@@ -267,14 +267,33 @@ class ChunkTest(unittest.TestCase):
         """Same cogs and dice for rollout k however it is chunked, so
         the panel's anytime totals are the batch result."""
         board = _board(cogs=3)
-        first, _ = playout.chunk_in_child(board, None, None, True, 0, 2)
-        second, _ = playout.chunk_in_child(board, None, None, True, 2, 4)
+        first, _ = playout.chunk_in_child(board, None, None, True, 0, 2, wide=False)
+        second, _ = playout.chunk_in_child(board, None, None, True, 2, 4, wide=False)
         whole = playout.pick(board, None, seed=0, rollouts=4)
         self.assertEqual([playout._key(p) for p, _v in first],
                          [playout._key(p) for p in whole.candidates])
         for (_p, a), (_q, b), mean in zip(first, second, whole.means):
             self.assertEqual(len(a), 2)
             self.assertAlmostEqual((sum(a) + sum(b)) / 4.0, mean)
+
+    def test_only_the_named_candidates_are_rolled(self):
+        board = _board(cogs=3)
+        pairs, _ = playout.chunk_in_child(board, None, None, True, 0, 2)
+        keep = [playout._key(pairs[0][0])]
+        again, _ = playout.chunk_in_child(board, None, None, True, 2, 4, keep)
+        self.assertEqual([playout._key(p) for p, _v in pairs],
+                         [playout._key(p) for p, _v in again])
+        self.assertEqual(2, len(again[0][1]))
+        self.assertTrue(all(v == [] for _p, v in again[1:]))
+
+    def test_the_wide_menu_spans_kinds_and_keeps_climbs_pick(self):
+        board = _board(cogs=3)
+        wide = playout.wide_candidates(board)
+        self.assertEqual(playout._key(wide[0]),
+                         playout._key(playout.candidates(board)[0]))
+        self.assertLessEqual(len(wide), playout.WIDE_CAP)
+        kinds = {playout._kind(p[0]) for p in wide}
+        self.assertGreater(len(kinds), 1)
 
     def test_a_party_chunk_says_why(self):
         board = _board()
