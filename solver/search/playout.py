@@ -336,15 +336,15 @@ def chunk_in_child(state: BattleState, horizon, reject, allow_level_7: bool,
     # theirs from the teammate model inside every rollout.
     if state.toons and state.toons[0].laff <= 0:
         return None, "you are out"
-    party = len(state.toons) > 1
-    menu_board = solo_view(state) if party else state
+    pickup = len(state.toons) > 1 and GROUP_MODE == "pickup"
+    menu_board = solo_view(state) if pickup else state
     cands = (wide_candidates(menu_board, reject) if wide
              else candidates(menu_board, TOP_K, reject))
     if not cands:
         return None, "unavailable"
     if len(cands) == 1:
         return [(cands[0], [])], ""
-    play = rollout_pickup if party else rollout
+    play = rollout_pickup if pickup else rollout
     wanted = None if only is None else set(only)
     values = [[] for _ in cands]
     for k in range(k_from, k_to):
@@ -541,8 +541,8 @@ def menu_in_child(state: BattleState, reject, allow_level_7: bool,
         return None, "unavailable"
     if state.toons and state.toons[0].laff <= 0:
         return None, "you are out"
-    party = len(state.toons) > 1
-    menu_board = solo_view(state) if party else state
+    pickup = len(state.toons) > 1 and GROUP_MODE == "pickup"
+    menu_board = solo_view(state) if pickup else state
     cands = (wide_candidates(menu_board, reject) if wide
              else candidates(menu_board, TOP_K, reject))
     if not cands:
@@ -559,6 +559,17 @@ def menu_in_child(state: BattleState, reject, allow_level_7: bool,
 # play the teammates from `party.DEFAULT_MODEL` -- `SensiblePrior`, a
 # MODEL OF PEOPLE, labelled as a guess in `solver/party.py`. Any number
 # this path produces rests on it.
+
+
+# HOW A BOARD WITH TEAMMATES ON IT IS PLAYED OUT in the panels.
+# "coordinated": candidates are joint plans for the whole party and the
+# rollouts play every seat together with climb -- the teammates are
+# assumed to play their part of the best joint plan. "pickup": your
+# moves only, teammates sampled from the teammate model each round.
+# Coordinated is the live default: in simulation, planning the party
+# together won 23 of 40 party VPs and planning each toon alone won 0,
+# with either teammate model.
+GROUP_MODE = "coordinated"
 
 
 def solo_view(state: BattleState) -> BattleState:

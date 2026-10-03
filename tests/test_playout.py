@@ -295,14 +295,28 @@ class ChunkTest(unittest.TestCase):
         kinds = {playout._kind(p[0]) for p in wide}
         self.assertGreater(len(kinds), 1)
 
-    def test_a_party_chunk_is_pickup(self):
-        """Teammates on the board: your moves only, theirs modelled."""
+    def test_a_party_chunk_is_coordinated_by_default(self):
+        """Teammates on the board: joint plans for everyone, your part
+        first -- the teammates are assumed to play theirs."""
+        self.assertEqual("coordinated", playout.GROUP_MODE)
         board = _party_board()
         pairs, note = playout.chunk_in_child(board, None, None, True, 0, 1)
         self.assertEqual("", note)
         for plan, values in pairs:
-            self.assertEqual(1, len(plan))
+            self.assertEqual(len(board.toons), len(plan))
             self.assertEqual(1, len(values))
+
+    def test_pickup_mode_offers_your_moves_alone(self):
+        old = playout.GROUP_MODE
+        try:
+            playout.GROUP_MODE = "pickup"
+            board = _party_board()
+            pairs, note = playout.chunk_in_child(board, None, None, True, 0, 1)
+            self.assertEqual("", note)
+            for plan, _values in pairs:
+                self.assertEqual(1, len(plan))
+        finally:
+            playout.GROUP_MODE = old
 
     def test_no_advice_once_you_are_out(self):
         board = _party_board()

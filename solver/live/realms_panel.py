@@ -1010,8 +1010,25 @@ class RealmsWorker(AdviceWorker):
         self.model.search_gag_level = 0
         self.model.search_ready = False
 
+        # IN A GROUP, COORDINATED: the board PPO and the playouts plan on
+        # carries the teammates as toons, so they choose the whole party's
+        # moves together -- a Lure for a teammate's Sound, 7s held for the
+        # round that needs them -- and the panel shows YOUR part. It
+        # assumes the teammates play theirs; if they do not, the next
+        # board is read as it really is and the plan is redone. Measured
+        # in simulation on 40 party VPs: planned together 23 wins, each
+        # toon alone 0, whoever the teammate was. The expectimax search
+        # keeps the board with allies as a count.
+        board = state
+        if allies:
+            import copy
+
+            board = state.clone()
+            board.toons = [board.toons[0]] + [copy.deepcopy(a) for a in allies]
+            board.allies_standing = max(0, board.allies_standing - len(allies))
+
         if self.engine != "search":
-            quick = self._first_answer(state)
+            quick = self._first_answer(board)
             if quick is not None:
                 with self._lock:
                     fresh = token == self._current
@@ -1042,16 +1059,6 @@ class RealmsWorker(AdviceWorker):
             with self._lock:
                 return token == self._current
 
-        # IN A GROUP the playouts see the teammates as toons, so the
-        # rollouts can play them from the teammate model (pickup mode);
-        # everything else keeps the board with allies as a count.
-        board = state
-        if allies:
-            import copy
-
-            board = state.clone()
-            board.toons = [board.toons[0]] + [copy.deepcopy(a) for a in allies]
-            board.allies_standing = max(0, board.allies_standing - len(allies))
         self._start_playout(
             board,
             self.boss_tracker().horizon(
