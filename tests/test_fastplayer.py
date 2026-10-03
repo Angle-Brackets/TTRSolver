@@ -77,7 +77,7 @@ class PlayTest(unittest.TestCase):
             playout.ROLLOUT_PLAYER = "net"
             fastplayer.use("does-not-exist.json")
             got = playout.rollout(_board(cogs=2), [None], None, seed=1)
-            self.assertTrue(0 <= got <= 2)
+            self.assertTrue(0 <= got <= 2 + playout.LAFF_WEIGHT)
         finally:
             fastplayer.use(fastplayer.DEFAULT_WEIGHTS)
             playout.ROLLOUT_PLAYER = old

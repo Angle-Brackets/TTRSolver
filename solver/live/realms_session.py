@@ -60,6 +60,12 @@ class RealmsBuild(NamedTuple):
     boss: Optional["BossBattle"] = None
     battle_id: Optional[int] = None
     suit_ids: Tuple[int, ...] = ()
+    # The OTHER toons standing in this battle, read the way the player's
+    # toon is. Only the playouts use them (pickup mode: your move chosen,
+    # theirs modelled); the board everything else sees still counts them
+    # as `allies_standing`. A teammate who cannot be read is left out
+    # rather than guessed at.
+    allies: Tuple[ToonState, ...] = ()
 
     def __bool__(self) -> bool:
         return self.state is not None
@@ -508,12 +514,27 @@ def build_state(listener, player_do_id: Optional[int] = None,
             problems.append("none of the battle's cogs have arrived")
         return RealmsBuild(None, problems)
 
+    allies = []
+    for do_id in members.toons:
+        if do_id == player_do_id:
+            continue
+        obj = listener.store.get(do_id)
+        if obj is None:
+            continue
+        # Their slips, cards and unites are not ours to plan with, and
+        # the teammate model does not use them: zero.
+        ally, why = toon_from_object(obj, max_fires=0, max_unites=0,
+                                     max_sos=0)
+        if ally is not None and not why and ally.laff > 0:
+            allies.append(ally)
+
     return RealmsBuild(
         BattleState(toon=toon, cogs=cogs, round_num=round_num,
                     allies_standing=members.allies_standing), [],
         boss=boss_of(listener, battle),
         battle_id=getattr(battle, "do_id", None),
-        suit_ids=tuple(members.suits))
+        suit_ids=tuple(members.suits),
+        allies=tuple(allies))
 
 
 def describe(state: BattleState) -> str:

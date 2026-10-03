@@ -476,7 +476,7 @@ class AdviceWorker(threading.Thread):
         return self._playout_executor
 
     def _start_playout(self, state, horizon, budget, is_current,
-                       describe) -> None:
+                       describe, shown=None) -> None:
         """Play the top moves out in the background and post the winner.
 
         `is_current()` says whether the board this was started for is
@@ -492,6 +492,9 @@ class AdviceWorker(threading.Thread):
             self._clear_engine(self.model, "playout")
             self._playout_action = None
         reject = frozenset(self._rejected)
+        # The board the row's reasons are worded against: the panel's own,
+        # not a playout board with teammates added for pickup mode.
+        shown = state if shown is None else shown
 
         def run():
             import time
@@ -519,7 +522,7 @@ class AdviceWorker(threading.Thread):
                     return
                 if pairs is None:
                     if not order:          # nothing shown yet: say why
-                        self._deliver_playout(state, None, note, describe)
+                        self._deliver_playout(shown, None, note, describe)
                         return
                     break                  # keep the best already shown
                 keys = [playout_mod._key(plan) for plan, _v in pairs]
@@ -532,7 +535,7 @@ class AdviceWorker(threading.Thread):
                 done_k = upto
                 if len(order) == 1:
                     plan = plans[order[0]]
-                    self._deliver_playout(state, plan[0] if plan else None,
+                    self._deliver_playout(shown, plan[0] if plan else None,
                                           "", describe)
                     return                 # nothing to choose between
                 # SUCCESSIVE HALVING, at `playout.HALVING`'s points (8 and
@@ -558,7 +561,7 @@ class AdviceWorker(threading.Thread):
                                                        values[shown][:n]):
                     shown = best
                 plan = plans[shown]
-                self._deliver_playout(state, plan[0] if plan else None, "",
+                self._deliver_playout(shown, plan[0] if plan else None, "",
                                       describe, rollouts=done_k,
                                       finished=False)
             if not order or not is_current():
@@ -568,7 +571,7 @@ class AdviceWorker(threading.Thread):
             final = max(alive or order, key=lambda k: (
                 sum(values[k]) / len(values[k]), k == order[0]))
             plan = plans[final]
-            self._deliver_playout(state, plan[0] if plan else None, "",
+            self._deliver_playout(shown, plan[0] if plan else None, "",
                                   describe, rollouts=done_k, finished=True)
 
         threading.Thread(target=run, daemon=True).start()

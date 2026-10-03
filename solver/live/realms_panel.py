@@ -323,6 +323,8 @@ class RealmsWorker(AdviceWorker):
     # belongs to, and the last boss battle's (doId, cog ids).
     _boss_obj = None
     _boss_battle = None
+    # The teammates this poll could read, for the playouts' pickup board.
+    _allies = ()
 
     def __init__(self, outbox: "queue.Queue", objective, depth: int,
                  budget: float, listener=None, engine: str = "both"):
@@ -442,6 +444,7 @@ class RealmsWorker(AdviceWorker):
                                             max_unites=self.remaining("unites"),
                                             max_sos=self.remaining("sos"))
         model = self.model
+        self._allies = tuple(getattr(result, "allies", ()) or ())
         self._track_boss(result)
         self._boss_into(model, on_field=len(result.state.cogs)
                         if result.state else 0)
@@ -919,7 +922,7 @@ class RealmsWorker(AdviceWorker):
                                         self.budget)
         threading.Thread(target=self._run_search, daemon=True,
                          args=(token, state, objective, depth,
-                               budget)).start()
+                               budget, self._allies)).start()
 
     def _first_answer(self, state):
         """The trained policy's move, in milliseconds.
@@ -995,7 +998,8 @@ class RealmsWorker(AdviceWorker):
             self._executor = ProcessPoolExecutor(max_workers=1)
         return self._executor
 
-    def _run_search(self, token, state, objective, depth, budget) -> None:
+    def _run_search(self, token, state, objective, depth, budget,
+                    allies=()) -> None:
         # Something on screen straight away. A blank panel for twelve
         # seconds is the complaint that started this.
         # A NEW POSITION INVALIDATES THE STORED SEARCH ANSWER. Leaving
@@ -1038,13 +1042,24 @@ class RealmsWorker(AdviceWorker):
             with self._lock:
                 return token == self._current
 
+        # IN A GROUP the playouts see the teammates as toons, so the
+        # rollouts can play them from the teammate model (pickup mode);
+        # everything else keeps the board with allies as a count.
+        board = state
+        if allies:
+            import copy
+
+            board = state.clone()
+            board.toons = [board.toons[0]] + [copy.deepcopy(a) for a in allies]
+            board.allies_standing = max(0, board.allies_standing - len(allies))
         self._start_playout(
-            state,
+            board,
             self.boss_tracker().horizon(
                 on_field=sum(1 for c in state.cogs if c.hp > 0)),
             budget, _current,
             lambda a, st: (_render(a, st), _track_of(a) or "",
-                           _level_of(a) or 0))
+                           _level_of(a) or 0),
+            shown=state)
 
         try:
             future = self._pool().submit(

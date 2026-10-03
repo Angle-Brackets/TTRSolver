@@ -143,7 +143,7 @@ class PickTest(unittest.TestCase):
     def test_a_rollout_counts_only_what_could_be_defeated(self):
         board = _board(cogs=2)
         got = playout.rollout(board, [None], None, seed=2)
-        self.assertTrue(0 <= got <= 2)
+        self.assertTrue(0 <= got <= 2 + playout.LAFF_WEIGHT)
 
 
 def _worker():
@@ -295,11 +295,20 @@ class ChunkTest(unittest.TestCase):
         kinds = {playout._kind(p[0]) for p in wide}
         self.assertGreater(len(kinds), 1)
 
-    def test_a_party_chunk_says_why(self):
-        board = _board()
-        board.toons.append(board.clone().toons[0])
-        self.assertEqual((None, "solo only"),
-                         playout.chunk_in_child(board, None, None, True, 0, 2))
+    def test_a_party_chunk_is_pickup(self):
+        """Teammates on the board: your moves only, theirs modelled."""
+        board = _party_board()
+        pairs, note = playout.chunk_in_child(board, None, None, True, 0, 1)
+        self.assertEqual("", note)
+        for plan, values in pairs:
+            self.assertEqual(1, len(plan))
+            self.assertEqual(1, len(values))
+
+    def test_no_advice_once_you_are_out(self):
+        board = _party_board()
+        board.toons[0].laff = 0
+        self.assertEqual((None, "you are out"),
+                         playout.chunk_in_child(board, None, None, True, 0, 1))
 
     def test_the_schedule_overshoots_by_one_short_chunk_at_most(self):
         steps = [b - a for a, b in zip((0,) + playout.SCHEDULE, playout.SCHEDULE)]
@@ -347,6 +356,33 @@ def _party_board(seed=2):
     board = _board(cogs=3, seed=seed)
     board.toons.append(_board(seed=seed + 50).toons[0])
     return board
+
+
+@unittest.skipUnless(HAVE, "the policy needs numpy")
+class PickupTest(unittest.TestCase):
+    """Pickup playouts: your move chosen, teammates modelled."""
+
+    def test_the_menu_is_yours_alone_and_stays_small(self):
+        board = _party_board()
+        board.toons.append(_board(seed=77).toons[0])
+        res = playout.pick_pickup(board, None, seed=1, stages=(1,))
+        self.assertLessEqual(len(res.candidates), playout.WIDE_CAP)
+        for plan in res.candidates:
+            self.assertEqual(1, len(plan))
+
+    def test_the_solo_view_counts_the_others(self):
+        board = _party_board()
+        view = playout.solo_view(board)
+        self.assertEqual(1, len(view.toons))
+        self.assertEqual(1, view.allies_standing)
+
+    def test_laff_breaks_a_tie_between_two_wins(self):
+        a, b = _board(cogs=1), _board(cogs=1)
+        for st in (a, b):
+            st.cogs[0].hp = 0
+        b.toons[0].laff = 10
+        self.assertGreater(playout.value(a, 1), playout.value(b, 1))
+        self.assertLess(playout.value(a, 1) - playout.value(b, 1), 1.0)
 
 
 @unittest.skipUnless(HAVE, "the policy needs numpy")

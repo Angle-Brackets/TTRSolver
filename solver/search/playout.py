@@ -123,6 +123,23 @@ def build_env(state: BattleState, horizon, rng):
     return env
 
 
+# WHAT A PLAYOUT IS WORTH: cogs defeated, plus a tiebreak for the laff
+# the team still has at the end. Without it, a playout that ends with the
+# battle on screen -- a building, a party, any fight without a horizon --
+# scores every reasonable move the same (all four cogs die), and the
+# scorer's pick wins by default: on a party VP every candidate read 4.0.
+# Worth at most half a cog, so a cog always outweighs laff. Set to 0 to
+# score cogs alone.
+LAFF_WEIGHT = 0.5
+
+
+def value(state: BattleState, total: int) -> float:
+    toons = [t for t in state.toons if getattr(t, "max_laff", 0)]
+    laff = (sum(max(0, t.laff) for t in toons)
+            / float(sum(t.max_laff for t in toons))) if toons else 0.0
+    return total - _left(state) + LAFF_WEIGHT * laff
+
+
 def _left(state: BattleState) -> int:
     return (sum(1 for c in state.cogs if c.hp > 0) + len(state.holdout)
             + state.cogs_remaining)
@@ -155,8 +172,8 @@ def step_round(env, plan):
     return done, info
 
 
-def rollout(state, plan, horizon, seed: int) -> int:
-    """Cogs defeated by the end of one playout that opens with `plan`."""
+def rollout(state, plan, horizon, seed: int) -> float:
+    """`value` at the end of one playout that opens with `plan`."""
     from . import hybrid
 
     rng = random.Random(seed)
@@ -182,7 +199,7 @@ def rollout(state, plan, horizon, seed: int) -> int:
         if nxt is None:
             break
         done, _info = step_round(env, nxt)
-    return total - _left(env.state)
+    return value(env.state, total)
 
 
 def candidates(state: BattleState, top_k: int = TOP_K, reject=None):
@@ -313,22 +330,27 @@ def chunk_in_child(state: BattleState, horizon, reject, allow_level_7: bool,
     from . import hybrid
 
     state_mod.ALLOW_LEVEL_7 = bool(allow_level_7)
-    if len(state.active_toons()) != 1:
-        return None, "solo only"
     if not hybrid.available() or state.is_terminal():
         return None, "unavailable"
-    cands = (wide_candidates(state, reject) if wide
-             else candidates(state, TOP_K, reject))
+    # A board with teammates on it is PICKUP: your move from the menu,
+    # theirs from the teammate model inside every rollout.
+    if state.toons and state.toons[0].laff <= 0:
+        return None, "you are out"
+    party = len(state.toons) > 1
+    menu_board = solo_view(state) if party else state
+    cands = (wide_candidates(menu_board, reject) if wide
+             else candidates(menu_board, TOP_K, reject))
     if not cands:
         return None, "unavailable"
     if len(cands) == 1:
         return [(cands[0], [])], ""
+    play = rollout_pickup if party else rollout
     wanted = None if only is None else set(only)
     values = [[] for _ in cands]
     for k in range(k_from, k_to):
         for i, plan in enumerate(cands):
             if wanted is None or _key(plan) in wanted:
-                values[i].append(rollout(state, plan, horizon, _seed(k)))
+                values[i].append(play(state, plan, horizon, _seed(k)))
     return list(zip(cands, values)), ""
 
 
@@ -515,12 +537,113 @@ def menu_in_child(state: BattleState, reject, allow_level_7: bool,
     from . import hybrid
 
     state_mod.ALLOW_LEVEL_7 = bool(allow_level_7)
-    if len(state.active_toons()) != 1:
-        return None, "solo only"
     if not hybrid.available() or state.is_terminal():
         return None, "unavailable"
-    cands = (wide_candidates(state, reject) if wide
-             else candidates(state, TOP_K, reject))
+    if state.toons and state.toons[0].laff <= 0:
+        return None, "you are out"
+    party = len(state.toons) > 1
+    menu_board = solo_view(state) if party else state
+    cands = (wide_candidates(menu_board, reject) if wide
+             else candidates(menu_board, TOP_K, reject))
     if not cands:
         return None, "unavailable"
     return [_key(plan) for plan in cands], ""
+
+
+# ---------------------------------------------------------------------
+# Pickup: choose YOUR move; teammates are modelled, not controlled
+# ---------------------------------------------------------------------
+#
+# In a group you control one toon. The candidates are your moves alone,
+# so the menu stays ~10 however many toons there are, and the rollouts
+# play the teammates from `party.DEFAULT_MODEL` -- `SensiblePrior`, a
+# MODEL OF PEOPLE, labelled as a guess in `solver/party.py`. Any number
+# this path produces rests on it.
+
+
+def solo_view(state: BattleState) -> BattleState:
+    """You, with the others reduced to a count -- the shape the live
+    panels build, and the shape the menu and the fast net were made on."""
+    view = state.clone()
+    others = sum(1 for t in view.toons[1:] if t.laff > 0)
+    view.toons = view.toons[:1]
+    view.allies_standing = others + max(0, int(getattr(state, "allies_standing", 0)))
+    view.holdout = []
+    return view
+
+
+def rollout_pickup(state: BattleState, plan, horizon, seed: int) -> float:
+    """One pickup playout: your `plan` now, then the net (or climb) for
+    you and the teammate model for everyone else, to the end."""
+    from . import hybrid
+    from ..rl import env as env_mod
+    from .. import facility
+
+    rng = random.Random(seed)
+    start = state.clone()
+    kind = start.kind
+    start.kind = "street"
+    start.holdout, start.cogs_remaining = [], 0
+    env = env_mod.BattleEnv(rng=rng, sampler=lambda _r: start,
+                            coordinated=False, max_rounds=ROUND_CAP)
+    env.reset()
+    env.state.kind = kind
+    if horizon is not None:
+        make = (env._sellbot_cog if horizon.department == "sellbot"
+                else env._boss_cog)
+        lo, hi = horizon.band
+        env.state.holdout = [make(rng, rng.randint(lo, hi))
+                             for _ in range(horizon.holdout)]
+        floors = [[make(rng, rng.randint(a, b)) for _ in range(n)]
+                  for n, (a, b) in horizon.later]
+        if floors:
+            env.plan = facility.FacilityPlan(floors)
+            env.state.cogs_remaining = env.plan.remaining()
+    total = _left(env.state)
+    use_net = False
+    if ROLLOUT_PLAYER == "net":
+        from . import fastplayer
+        use_net = fastplayer.available()
+    policy_rng = random.Random(seed + 1)
+    done, _info = step_round(env, plan)
+    guard = 0
+    while not done and guard < ROUND_CAP:
+        guard += 1
+        if env.state.toons[0].laff <= 0:
+            nxt = [None]                   # you are out; the others play on
+        else:
+            mine = solo_view(env.state)
+            nxt = (fastplayer.act(mine) if use_net
+                   else hybrid.climb(mine, policy_rng, budget=ROLLOUT_BUDGET))
+        done, _info = step_round(env, nxt)
+    return value(env.state, total)
+
+
+def pick_pickup(state: BattleState, horizon=None, seed: int = 0,
+                reject=None, stages=HALVING) -> Optional[Result]:
+    """Your best move in a group: the wide menu for your seat, judged by
+    pickup playouts with the teammates modelled. Successive halving and
+    common random numbers as in `pick_wide`."""
+    from . import hybrid
+
+    if not hybrid.available() or state.is_terminal() or state.toons[0].laff <= 0:
+        return None
+    cands = wide_candidates(solo_view(state), reject)
+    if not cands:
+        return None
+    if len(cands) == 1:
+        return Result(cands[0], cands, [0.0], 0)
+    values = {i: [] for i in range(len(cands))}
+    alive, done_k = list(range(len(cands))), 0
+    for stage, upto in enumerate(stages):
+        for k in range(done_k, upto):
+            for i in alive:
+                values[i].append(rollout_pickup(state, cands[i], horizon,
+                                                seed * 1000003 + k * 7919))
+        done_k = upto
+        if stage + 1 < len(stages):
+            alive.sort(key=lambda i: (-sum(values[i]) / len(values[i]), i))
+            alive = alive[:max(HALVING_KEEP_AT_LEAST, (len(alive) + 1) // 2)]
+    best = max(alive, key=lambda i: (sum(values[i]) / len(values[i]), i == 0))
+    means = [sum(values[i]) / len(values[i]) for i in range(len(cands))]
+    return Result(cands[best], cands, means, done_k)
