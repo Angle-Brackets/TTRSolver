@@ -1299,6 +1299,10 @@ class RealmsApi:
         so the picker never appears in the first place."""
         return None
 
+    def set_cog_level(self, *_args) -> None:
+        """Inert. Levels come from `setLevelDist`, exactly."""
+        return None
+
     def mark_lured(self, *_args) -> None:
         """Inert. Lure state comes from the battle roster."""
         return None

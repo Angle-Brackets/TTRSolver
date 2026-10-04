@@ -1349,3 +1349,47 @@ class SearchUniteCrossesTheProcessTest(unittest.TestCase):
 
         src = inspect.getsource(advise_mod.Thinker._run)
         self.assertIn("self.on_result(lines, state, action, unite)", src)
+
+
+class CogLevelPickTest(unittest.TestCase):
+    """A level the reader could not settle can be stated by the player."""
+
+    def _worker(self):
+        import queue
+        import threading
+
+        from solver.live import overlay
+
+        w = overlay.Worker.__new__(overlay.Worker)
+        w.model = overlay.Model()
+        w.outbox = queue.Queue(maxsize=8)
+        w._lock = threading.Lock()
+        w.allow_level_7 = True
+        w.objective_name = "balanced"
+        w.budget = 1.0
+        w.toon_count = 1
+
+        class Watcher:
+            def __init__(self):
+                self.told = {}
+
+            def set_level(self, index, level):
+                self.told[int(index)] = level
+
+        w._watcher = Watcher()
+        return w
+
+    def test_the_pick_reaches_the_reader_and_the_row(self):
+        from solver.live.overlay import CogRow
+
+        w = self._worker()
+        w.model.rows = [CogRow(name="Two-Face", level=None, health=1.0)]
+        w.set_cog_level(0, 6)
+        self.assertEqual({0: 6}, w._watcher.told)
+        self.assertEqual(6, w.model.rows[0].level)
+
+    def test_the_other_client_ignores_it(self):
+        from solver.live import realms_panel
+
+        api = realms_panel.RealmsApi.__new__(realms_panel.RealmsApi)
+        self.assertIsNone(api.set_cog_level(0, 6))

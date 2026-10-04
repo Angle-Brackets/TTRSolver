@@ -11,7 +11,7 @@ const EMPTY = {
   incoming: null, survive: null, accuracy: null, reason: '', organic: false, organic_tracks: [], organic_icon: '',
   rl_gag: '', rl_track: '', rl_gag_level: 0, rl_accuracy: null, rl_reason: '', rl_organic: false,
   search_gag: '', search_track: '', search_gag_level: 0, search_accuracy: null, search_reason: '', search_organic: false,
-  playout_gag: '', playout_track: '', playout_gag_level: 0, playout_ready: false, playout_note: '', playout_rollouts: 0, playout_done: false,
+  playout_gag: '', playout_track: '', playout_gag_level: 0, playout_ready: false, playout_note: '', playout_rollouts: 0, playout_done: false, playout_pending: false,
   playout_accuracy: null, playout_reason: '', playout_organic: false, engines: ['rl', 'search', 'playout'],
   zone: '', neighborhood: '', district: '', invasion: '',
   lure_icon: '', map_icon: '', track_icons: {},
@@ -343,10 +343,25 @@ function CogRow({ row, lureIcon, advice, inBattle }) {
         ) : null}
       </div>
 
-      {/* COG LEVEL */}
-      <span className="w-3.5 shrink-0 text-right font-black text-[10.5px] text-amber-950 opacity-80">
-        {row.level ?? '?'}
-      </span>
+      {/* COG LEVEL -- a picker when the reader could not settle it */}
+      {row.level ? (
+        <span className="w-3.5 shrink-0 text-right font-black text-[10.5px] text-amber-950 opacity-80">
+          {row.level}
+        </span>
+      ) : (
+        <select
+          className="w-8 h-[20px] shrink-0 rounded-md border-2 border-amber-500 bg-amber-50 text-[10px] font-black text-amber-950 cursor-pointer focus:outline-none px-0"
+          title="The level could not be read. Pick it from the plate."
+          value=""
+          onMouseDown={stopDrag}
+          onChange={(e) => call('set_cog_level', row.index, Number(e.target.value))}
+        >
+          <option value="" disabled>?</option>
+          {Array.from({ length: 12 }, (_, i) => i + 1).map((n) => (
+            <option key={n} value={n}>{n}</option>
+          ))}
+        </select>
+      )}
 
       {/* COG NAME PICKER */}
       <CogPicker
@@ -451,7 +466,11 @@ function Refining({ answer }) {
 function EngineRow({ answer, model, isStale, hero }) {
   const art = answer.track && answer.level ? gagArt(answer.track, answer.level) : null
   const hasAcc = answer.accuracy !== null && answer.accuracy !== undefined
-  const thinking = !answer.ready
+  // "Thinking" only while that engine is actually working; otherwise say
+  // why there is nothing, rather than spin on a board nobody is solving.
+  const working = answer.engine === 'playout' ? Boolean(model.playout_pending) : Boolean(model.thinking)
+  const thinking = !answer.ready && working
+  const idle = !answer.ready && !working
   const same = answer.ready && answer.gag && answer.gag === hero
   return (
     <div className={`rounded-xl border-2 border-amber-900/15 bg-amber-50/90 px-2 py-1.5 shadow-xs flex items-center justify-between gap-2 ${
@@ -471,6 +490,10 @@ function EngineRow({ answer, model, isStale, hero }) {
             <span className="inline-flex items-center gap-1.5 text-[10.5px] font-bold text-sky-700">
               <span className="loading loading-dots loading-xs text-sky-600" />
               Thinking...
+            </span>
+          ) : idle ? (
+            <span className="text-[10px] font-bold text-amber-900/50">
+              {model.problems && model.problems.length ? 'waiting for a readable board' : '—'}
             </span>
           ) : answer.gag ? (
             <>

@@ -491,6 +491,7 @@ class AdviceWorker(threading.Thread):
         with self._lock:
             self._clear_engine(self.model, "playout")
             self._playout_action = None
+            self.model.playout_pending = True
         reject = frozenset(self._rejected)
         # The board the row's reasons are worded against: the panel's own,
         # not a playout board with teammates added for pickup mode.
@@ -643,6 +644,7 @@ class AdviceWorker(threading.Thread):
             model.playout_note = note or ""
             model.playout_rollouts = int(rollouts)
             model.playout_done = bool(finished)
+            model.playout_pending = not finished
             changed = model.playout_gag != previous
             if (model.preferred_engine == "playout" and model.playout_gag
                     and (changed or model.engine != "playout")):

@@ -167,6 +167,7 @@ def model_json(model: Model) -> str:
         "playout_note": model.playout_note,
         "playout_rollouts": model.playout_rollouts,
         "playout_done": model.playout_done,
+        "playout_pending": model.playout_pending,
         "playout_accuracy": model.playout_accuracy,
         "playout_reason": model.playout_reason,
         "playout_organic": model.playout_organic,
@@ -324,6 +325,11 @@ class Api:
         costs one fight. `read_battle --label` is the way to teach it.
         """
         self._worker.name_cog(slot, cog)
+        self._worker.ask_now()
+
+    def set_cog_level(self, slot, level) -> None:
+        """The player stating a cog's level the reader could not settle."""
+        self._worker.set_cog_level(slot, level)
         self._worker.ask_now()
 
     def set_objective(self, name) -> None:

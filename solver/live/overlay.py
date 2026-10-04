@@ -271,6 +271,10 @@ class Model:
     # refining has stopped. The move can change while this climbs.
     playout_rollouts: int = 0
     playout_done: bool = False
+    # Whether a playout is actually running. The row shows "Thinking"
+    # only while one is: it used to spin whenever there was no answer,
+    # including when the board could not be read and nothing was running.
+    playout_pending: bool = False
     playout_accuracy: Optional[int] = None
     playout_reason: str = ""
     playout_organic: bool = False
@@ -819,6 +823,25 @@ class Worker(AdviceWorker):
             row.trapped = bool(trapped)
         except (TypeError, ValueError, IndexError):
             pass
+
+    def set_cog_level(self, index, level) -> None:
+        """The player reading a plate's level for us, applied at once.
+
+        The reader refuses a level it cannot tell apart from another --
+        a clear "Level 6" behind a faint cog head scored 6 at 0.691 over
+        8 at 0.679 -- and one refused level blocks the whole board. The
+        player can see the plate. Their number overrides the reader for
+        this fight (`BattleWatcher.set_level`); "Fight is over" clears it.
+        """
+        watcher = getattr(self, "_watcher", None)
+        if watcher is not None:
+            watcher.set_level(index, level)
+        try:
+            row = self.model.rows[int(index)]
+            row.level = int(level) if level not in (None, "", 0) else None
+        except (TypeError, ValueError, IndexError):
+            pass
+        self._post()
 
     def name_cog(self, index, cog) -> None:
         """The player naming a plate, applied at once.
