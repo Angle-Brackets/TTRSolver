@@ -205,6 +205,23 @@ class EngineSlotTest(unittest.TestCase):
         self.assertEqual("", w.model.playout_gag)
         self.assertEqual("solo only", w.model.playout_note)
 
+    def test_a_move_that_cannot_be_worded_is_still_shown(self):
+        """Live, wording one playout move failed and the move was thrown
+        away. It must survive in plain words."""
+        import contextlib
+        import io
+
+        from solver.state import Action
+
+        def broken(action, state):
+            raise ValueError("no wording")
+
+        w = _worker()
+        with contextlib.redirect_stderr(io.StringIO()):
+            w._deliver_playout(_board(), Action(track=None), "", broken)
+        self.assertEqual("pass", w.model.playout_gag)
+        self.assertEqual("", w.model.playout_note)
+
     def test_clearing_puts_the_row_back_to_thinking(self):
         from solver.state import Action
 

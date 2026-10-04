@@ -635,11 +635,34 @@ class AdviceWorker(threading.Thread):
                     model.playout_gag = text
                     model.playout_track = track or ""
                     model.playout_gag_level = level or 0
+                except Exception:                  # noqa: BLE001
+                    # THE MOVE STILL STANDS. Failing to word it used to
+                    # throw the move away and show "could not describe
+                    # the move" -- live, on one round of a TTR building,
+                    # not reproducible offline. Plain wording instead, and
+                    # the traceback to the console so the cause is visible
+                    # next time rather than guessed at.
+                    import sys
+                    import traceback
+
+                    print("playout: could not word the move "
+                          f"{action!r}:", file=sys.stderr)
+                    traceback.print_exc()
+                    model.playout_gag = (action.describe()
+                                         if hasattr(action, "describe")
+                                         else repr(action))
+                    track = getattr(action, "track", None)
+                    model.playout_track = (getattr(track, "value", "") or "")
+                    model.playout_gag_level = int(getattr(action, "level", 0) or 0)
+                try:
                     self._describe_into(model, state, action, "playout")
                 except Exception:                  # noqa: BLE001
-                    self._clear_engine(model, "playout")
-                    self._playout_action = None
-                    note = "could not describe the move"
+                    import sys
+                    import traceback
+
+                    print("playout: could not explain the move "
+                          f"{action!r}:", file=sys.stderr)
+                    traceback.print_exc()
             model.playout_ready = True
             model.playout_note = note or ""
             model.playout_rollouts = int(rollouts)
