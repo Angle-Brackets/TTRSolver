@@ -364,3 +364,32 @@ class TestOrganicRowBands(unittest.TestCase):
         row[200:380] = True
         row[900:1080] = True
         self.assertFalse(_qualifies(row, need))
+
+
+class UncheckedReadTest(unittest.TestCase):
+    """With the menu's total unreadable -- a gag hovered, a blurred frame
+    -- the read must not be waved through on faith."""
+
+    def _panel(self, cells, label=None):
+        from solver.live.gagpanel import GagPanel, PanelCell
+        from solver.state import Track
+
+        made = [PanelCell(Track[t], lvl, n, unlocked=True, uncertain=u)
+                for t, lvl, n, u in cells]
+        return GagPanel(cells=made, panel=(0, 0, 0, 0), label=label)
+
+    def test_a_confident_read_with_no_label_still_passes(self):
+        p = self._panel([("THROW", 4, 5, False), ("DROP", 5, 3, False)])
+        self.assertIsNone(p.checksum_problem())
+
+    def test_a_doubtful_cell_with_no_label_is_refused(self):
+        p = self._panel([("THROW", 4, 5, False), ("SQUIRT", 5, 1, True)])
+        self.assertIn("uncertain", p.checksum_problem())
+
+    def test_a_count_no_toon_can_carry_is_refused_even_with_a_label(self):
+        p = self._panel([("THROW", 4, 62, False)], label=(62, 80))
+        self.assertIn("more than can be carried", p.checksum_problem())
+
+    def test_a_doubtful_level_seven_is_outside_the_pouch(self):
+        p = self._panel([("DROP", 7, 1, True)])
+        self.assertIsNone(p.checksum_problem())

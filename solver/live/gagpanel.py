@@ -195,7 +195,36 @@ class GagPanel:
         (`session.build_state`) collects reasons a state cannot be
         built and shows them all at once.
         """
+        from ..data import gags as gags_mod
+
+        # IMPOSSIBLE COUNTS, label or no label. More of a gag than any
+        # toon can carry is a misread -- on a compressed frame a "5" read
+        # as "62" and as "81" -- and needs no total to prove it.
+        for cell in self.cells:
+            if not cell.count:
+                continue
+            try:
+                most = gags_mod.carry_limit(cell.track, cell.level, 7)
+            except Exception:                  # noqa: BLE001
+                continue
+            if cell.count > most:
+                return (f"gag count misread: {cell.track.value} level "
+                        f"{cell.level} reads {cell.count}, more than can be "
+                        f"carried ({most}) -- no advice from it")
         if self.label is None:
+            # NO TOTAL TO CHECK AGAINST. This used to wave everything
+            # through, including cells the digit reader itself flagged as
+            # doubtful -- and those are exactly the misreads the total
+            # exists to catch. With the label unread, a doubtful pouch
+            # cell has nothing behind it, so the read is refused.
+            doubtful = [c for c in self.cells if c.uncertain and c.count
+                        and c.level < gags_mod.POUCH_EXEMPT_LEVEL]
+            if doubtful:
+                names = ", ".join(f"{c.track.value} {c.level}"
+                                  for c in doubtful[:3])
+                return (f"gag counts uncertain ({names}) and the menu's "
+                        f"total could not be read to check them -- no "
+                        f"advice from it")
             return None                  # unread, not disagreeing
         carried, capacity = self.label
         counted = self.pouch_total()
