@@ -469,3 +469,53 @@ class HealthBarAnchorTest(unittest.TestCase):
         self.assertIn("find_plates_by_health", src)
         self.assertLess(src.index("if not plates:"),
                         src.index("find_plates_by_health"))
+
+
+def _mask(rows):
+    return np.array([[c == "#" for c in r] for r in rows], dtype=bool)
+
+
+FIVE = _mask([
+    ".######......", "############.", "############.", "#####.....##.",
+    "####.........", "####.........", "####.........", "#########....",
+    "###########..", "######.#####.", ".........####", "###......####",
+    "###......####", "####....#####", ".####..#####.", "..#########..",
+    "...#######...",
+])
+# A 6 whose hook touches its body only at a pixel corner: one loop or
+# two, depending on whether corners join. Taken from a real misread.
+CORNER_SIX = _mask([
+    "....#####....", "..########...", ".##########..", ".####....###.",
+    "####.....###.", "####.....####", "###.......##.", "###..#####...",
+    "###########..", "############.", "####....####.", "####.....####",
+    "####.....####", "####....#####", "####....####.", ".##########..",
+    "...#######...",
+])
+
+
+class LevelLoopsTest(unittest.TestCase):
+    """Loop counting backs the shape match only when it is unambiguous."""
+
+    def test_a_five_has_no_loop(self):
+        self.assertEqual(0, V.loops(FIVE))
+
+    def test_a_corner_touching_six_is_not_evidence(self):
+        self.assertIsNone(V.loops(CORNER_SIX))
+
+    def test_the_font_templates_count_as_expected(self):
+        got = V.template_loops()
+        self.assertEqual(0, got[5])
+        self.assertEqual(1, got[6])
+        self.assertEqual(2, got[8])
+
+
+class BorderBlobTest(unittest.TestCase):
+    """The plate's border must never be read as the level."""
+
+    def test_a_blob_hanging_below_the_text_is_dropped(self):
+        letters = [(0, 1, 9, 18), (9, 6, 20, 18), (20, 7, 31, 18),
+                   (31, 6, 42, 18), (43, 0, 46, 18), (55, 1, 68, 18)]
+        border = (86, 4, 89, 31)       # 27 tall vs a 17 median: under 1.6x
+        kept = V._drop_tall_outliers(letters + [border])
+        self.assertNotIn(border, kept)
+        self.assertEqual(letters, kept)

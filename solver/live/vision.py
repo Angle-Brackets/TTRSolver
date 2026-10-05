@@ -546,7 +546,16 @@ def _drop_tall_outliers(boxes, limit: float = 1.6):
         return boxes
     heights = sorted(b[3] - b[1] for b in boxes)
     median = heights[len(heights) // 2]
-    kept = [b for b in boxes if (b[3] - b[1]) <= limit * median]
+    # AND BELOW THE LINE. "Level N" has no descenders, so every glyph
+    # ends on one baseline; the border does not. Height alone let one
+    # through: on a 1080p plate whose slot measured a pixel narrow, the
+    # border read 27px against a 17px median -- just inside the 1.6x
+    # limit -- and, as the rightmost blob, was read as the level ("1",
+    # score 0.30) while the real "5" was ignored.
+    baselines = sorted(b[3] for b in boxes)
+    baseline = baselines[len(baselines) // 2]
+    kept = [b for b in boxes if (b[3] - b[1]) <= limit * median
+            and b[3] - baseline <= 0.3 * median]
     return kept if len(kept) >= 2 else boxes
 
 
@@ -625,6 +634,56 @@ def level_templates(levels=range(1, 13)) -> Dict[int, np.ndarray]:
 MIN_LEVEL_MARGIN = 0.05
 
 
+def _holes(mask: np.ndarray, diagonal: bool, min_size: int = 2) -> int:
+    """Closed loops in a binary glyph: background regions that cannot
+    reach the border. `diagonal` lets background leak through pixels
+    that touch only at a corner; specks under `min_size` are ignored."""
+    padded = np.pad(np.asarray(mask, dtype=bool), 1)
+    h, w = padded.shape
+    seen = padded.copy()                 # ink is never background
+    steps = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+    if diagonal:
+        steps += [(1, 1), (1, -1), (-1, 1), (-1, -1)]
+    loops = 0
+    for sy in range(h):
+        for sx in range(w):
+            if seen[sy, sx]:
+                continue
+            stack, size, edge = [(sy, sx)], 0, False
+            seen[sy, sx] = True
+            while stack:
+                y, x = stack.pop()
+                size += 1
+                edge = edge or y in (0, h - 1) or x in (0, w - 1)
+                for dy, dx in steps:
+                    ny, nx = y + dy, x + dx
+                    if 0 <= ny < h and 0 <= nx < w and not seen[ny, nx]:
+                        seen[ny, nx] = True
+                        stack.append((ny, nx))
+            if not edge and size >= min_size:
+                loops += 1
+    return loops
+
+
+def loops(mask: np.ndarray) -> Optional[int]:
+    """The glyph's loop count, or None when it depends on whether pixels
+    touching at a corner are joined -- the count is then not evidence."""
+    if mask is None or mask.size == 0:
+        return None
+    strict, loose = _holes(mask, False), _holes(mask, True)
+    return strict if strict == loose else None
+
+
+_TEMPLATE_LOOPS: Dict[int, Optional[int]] = {}
+
+
+def template_loops() -> Dict[int, Optional[int]]:
+    if not _TEMPLATE_LOOPS:
+        for level, template in level_templates().items():
+            _TEMPLATE_LOOPS[level] = loops(template)
+    return _TEMPLATE_LOOPS
+
+
 def read_level(frame: np.ndarray,
                plate: Plate) -> Tuple[Optional[int], float, float]:
     """The cog's level, how well it matched, and by how much it won.
@@ -655,6 +714,22 @@ def read_level(frame: np.ndarray,
         return None, 0.0, 0.0
     score, best = scored[0]
     runner_up = scored[1][0] if len(scored) > 1 else 0.0
+    # LOOPS AS A SECOND WITNESS. Shape overlap confuses 5/6/8 -- the
+    # confusions this reader has shown -- and a cog showing through the
+    # plate thins the strokes: a clear "Level 5" read 5 at 0.754 over 6
+    # at 0.707. But 5 has no closed loop, 6 one, 8 two. When the glyph's
+    # loop count is UNAMBIGUOUS (the same whether corner-touching pixels
+    # join or not) and AGREES with the best template, rivals with a
+    # different count are ruled out and the margin is taken against the
+    # best that remains. It never overrules the best match; an ambiguous
+    # or disagreeing count leaves the plain margin, and the caller's
+    # threshold still decides. A 6 whose hook touches its body at one
+    # corner pixel is ambiguous by this rule, and stays refused.
+    seen = loops(digits)
+    if seen is not None and template_loops().get(best) == seen:
+        rivals = [s for s, lvl in scored[1:]
+                  if template_loops().get(lvl) == seen]
+        runner_up = rivals[0] if rivals else 0.0
     return best, score, score - runner_up
 
 
