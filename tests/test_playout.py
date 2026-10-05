@@ -376,6 +376,31 @@ class SplitTest(unittest.TestCase):
                          [playout._key(p) for p, _v in split])
         self.assertEqual([v for _p, v in whole], [v for _p, v in split])
 
+    def test_every_delivery_is_worded_against_a_board(self):
+        """The refining loop reused a name for the candidate on screen,
+        so every move after the first was worded against a key tuple and
+        fell back to raw text -- inconsistent with the other two rows."""
+        import time
+
+        from solver.state import BattleState
+
+        got = []
+
+        def describe(action, st):
+            got.append(type(st))
+            return action.describe(), "", 0
+
+        w = _worker()
+        w._post = lambda: None
+        w._playout_executor = _InlinePool()
+        w._start_playout(_board(cogs=3), None, 2.0, lambda: True, describe)
+        t0 = time.time()
+        while not w.model.playout_done and time.time() - t0 < 60:
+            time.sleep(0.05)
+        self.assertTrue(w.model.playout_done)
+        self.assertGreater(len(got), 1)
+        self.assertTrue(all(t is BattleState for t in got), got)
+
     def test_the_menu_call_matches_the_chunk_menu(self):
         board = _board(cogs=3)
         keys, _ = playout.menu_in_child(board, frozenset(), True)
