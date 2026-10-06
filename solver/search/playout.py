@@ -39,7 +39,7 @@ from __future__ import annotations
 import copy
 import random
 import time
-from typing import List, NamedTuple, Optional, Sequence
+from typing import List, NamedTuple, Optional, Sequence, Tuple
 
 from ..state import Action, BattleState
 
@@ -132,12 +132,82 @@ def build_env(state: BattleState, horizon, rng):
 # score cogs alone.
 LAFF_WEIGHT = 0.5
 
+# WHAT THE POUCH IS WORTH when a playout stops before the fight does. In a
+# building the next floor's cogs are unknown, so a playout ends with the
+# floor on screen -- and without this the gags left over were worth
+# nothing, so a Foghorn (95%) beat a Whole Cream Pie (90%) on a lone
+# 32 hp Tightwad, spending one of two Foghorns on a floor that was nearly
+# won. A player knows more floors are coming even without knowing which
+# cogs, and keeps the Foghorn.
+#
+# Measured, not set: the weight, in cogs, for the remaining pouch's value
+# as a fraction of its value when the decision was made, priced as the
+# search prices a throw (`Objective.gag_price`). Keyed by fight kind; a
+# fight with a horizon plays every round, so its pouch value is already
+# in the result and it gets none.
+#
+# Measured with the owner's toon (54 laff, 40-gag pouch, their tracks) in
+# 600 paired Daisy Gardens buildings: weight 0 cleared 413, 3 cleared 422
+# (+18/-9, p = 0.12), 6 cleared 421, 10 cleared 417. On the generic solo
+# buildings, 55 vs 52 at 3 (+4/-7, p = 0.55): no harm. So 3 -- leaning
+# right where gags are scarce, neutral where laff decides. With the group
+# premium below, it flips the lone-Tightwad case to the Cream Pie.
+POUCH_WEIGHT = {"facility": 3.0}
 
-def value(state: BattleState, total: int) -> float:
+
+# SCARCITY BY WHAT IS LEFT, not by what could be carried. The search's
+# price counts a gag dear if few FIT in a pouch; it does not know you are
+# down to your last two Foghorns. So the k-th last copy of a gag is worth
+# its price times (1 + LAST_COPY / k): the last one dearest, then the one
+# before it, and so on -- spending one of two Foghorns costs more than one
+# of three Cream Pies, as a player weighs it.
+LAST_COPY = 1.0
+# A GROUP GAG IS WORTH ITS REACH. [OWNER] "using it on a single cog is
+# inherently wasteful since Foghorn COULD do 50 to all cogs." Kept in the
+# pouch, a group gag will usually hit several cogs; spent on a lone one,
+# that reach is thrown away. So a group gag in the pouch counts as this
+# many single uses.
+GROUP_PREMIUM = 2.0
+
+
+def pouch_value(state: BattleState) -> float:
+    """The gags the party still carries, at the search's prices, with the
+    last copies of each gag worth more."""
+    from .. import data as gags_mod
+    from .objective import Objective
+
+    price = Objective()
+    total = 0.0
+    for toon in state.toons:
+        for (track, level), count in toon.gag_counts.items():
+            if count:
+                unit = price.gag_price(
+                    track, level, unlocked=toon.track_exp.get(track, 6) or 6)
+                try:
+                    if gags_mod.gag(track, level).group:
+                        unit *= GROUP_PREMIUM
+                except Exception:          # noqa: BLE001 -- unknown gag: plain price
+                    pass
+                total += unit * sum(1.0 + LAST_COPY / k
+                                    for k in range(1, count + 1))
+    return total
+
+
+def value(state: BattleState, total: int, pouch_start: float = 0.0,
+          pouch_weight: float = 0.0) -> float:
     toons = [t for t in state.toons if getattr(t, "max_laff", 0)]
     laff = (sum(max(0, t.laff) for t in toons)
             / float(sum(t.max_laff for t in toons))) if toons else 0.0
-    return total - _left(state) + LAFF_WEIGHT * laff
+    score = total - _left(state) + LAFF_WEIGHT * laff
+    if pouch_weight and pouch_start > 0:
+        score += pouch_weight * pouch_value(state) / pouch_start
+    return score
+
+
+def _carry(state: BattleState, horizon) -> Tuple[float, float]:
+    """(pouch value now, its weight) for a playout of `state`."""
+    weight = 0.0 if horizon is not None else POUCH_WEIGHT.get(state.kind, 0.0)
+    return (pouch_value(state) if weight else 0.0), weight
 
 
 def _left(state: BattleState) -> int:
@@ -179,6 +249,7 @@ def rollout(state, plan, horizon, seed: int) -> float:
     rng = random.Random(seed)
     env = build_env(state, horizon, rng)
     total = _left(env.state)
+    pouch_start, pouch_weight = _carry(state, horizon)
     policy_rng = random.Random(seed + 1)
     done, _info = step_round(env, plan)
     guard = 0
@@ -199,7 +270,7 @@ def rollout(state, plan, horizon, seed: int) -> float:
         if nxt is None:
             break
         done, _info = step_round(env, nxt)
-    return value(env.state, total)
+    return value(env.state, total, pouch_start, pouch_weight)
 
 
 def candidates(state: BattleState, top_k: int = TOP_K, reject=None):
@@ -611,6 +682,7 @@ def rollout_pickup(state: BattleState, plan, horizon, seed: int) -> float:
             env.plan = facility.FacilityPlan(floors)
             env.state.cogs_remaining = env.plan.remaining()
     total = _left(env.state)
+    pouch_start, pouch_weight = _carry(state, horizon)
     use_net = False
     if ROLLOUT_PLAYER == "net":
         from . import fastplayer
@@ -627,7 +699,7 @@ def rollout_pickup(state: BattleState, plan, horizon, seed: int) -> float:
             nxt = (fastplayer.act(mine) if use_net
                    else hybrid.climb(mine, policy_rng, budget=ROLLOUT_BUDGET))
         done, _info = step_round(env, nxt)
-    return value(env.state, total)
+    return value(env.state, total, pouch_start, pouch_weight)
 
 
 def pick_pickup(state: BattleState, horizon=None, seed: int = 0,

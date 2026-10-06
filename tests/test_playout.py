@@ -468,3 +468,68 @@ class PartyTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PouchValueTest(unittest.TestCase):
+    """What is left in the pouch when a playout stops before the fight."""
+
+    def _toon(self, counts):
+        from solver.state import ToonState, Track
+
+        exp = {Track.SOUND: 6, Track.THROW: 5, Track.DROP: 7}
+        return ToonState(54, 54, exp, dict(counts), frozenset(), pouch_capacity=40)
+
+    def _value(self, counts):
+        from solver.state import BattleState
+
+        return playout.pouch_value(BattleState(toons=[self._toon(counts)], cogs=[]))
+
+    def test_spending_a_group_gag_costs_more_than_a_single(self):
+        """[OWNER] a Foghorn could hit every cog; on a lone one that is waste."""
+        from solver.state import Track
+
+        start = {(Track.SOUND, 6): 2, (Track.THROW, 5): 3}
+        fog = self._value({(Track.SOUND, 6): 1, (Track.THROW, 5): 3})
+        pie = self._value({(Track.SOUND, 6): 2, (Track.THROW, 5): 2})
+        self.assertLess(fog, pie)
+        self.assertLess(pie, self._value(start))
+
+    def test_the_last_copy_is_dearest(self):
+        from solver.state import Track
+
+        three = self._value({(Track.THROW, 5): 3})
+        two = self._value({(Track.THROW, 5): 2})
+        one = self._value({(Track.THROW, 5): 1})
+        self.assertGreater(one - 0, two - one)
+        self.assertGreater(two - one, three - two)
+
+    def test_only_a_building_without_a_horizon_carries_it(self):
+        from solver.state import BattleState, Track
+
+        board = BattleState(toons=[self._toon({(Track.THROW, 5): 3})], cogs=[],
+                            kind="facility")
+        self.assertGreater(playout._carry(board, None)[1], 0)
+        board.kind = "street"
+        self.assertEqual(0.0, playout._carry(board, None)[1])
+        board.kind = "facility"
+        hz = BossTracker(kind="vp").horizon(on_field=0)
+        self.assertEqual(0.0, playout._carry(board, hz)[1])
+
+
+class FightKindTest(unittest.TestCase):
+
+    def test_ttr_reads_a_building_from_the_zone(self):
+        from solver.live import session
+
+        self.assertEqual("facility", session.fight_kind("Cog Building"))
+        self.assertEqual("street", session.fight_kind("Silly Street"))
+        self.assertEqual("street", session.fight_kind(""))
+
+    def test_the_other_client_reads_it_from_the_battle_class(self):
+        from solver.live import realms_session
+
+        class Battle:
+            dclass = "DistributedBattleBldg"
+        self.assertEqual("facility", realms_session.battle_kind(Battle()))
+        Battle.dclass = "DistributedBattle"
+        self.assertEqual("street", realms_session.battle_kind(Battle()))

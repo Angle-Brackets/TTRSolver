@@ -85,6 +85,20 @@ BOSS_CLASSES = {"DistributedSellbotBoss": "vp",
                 "DistributedBossbotBoss": "ceo"}
 
 
+# Battles that are one floor of several, by the battle object's own class.
+# More floors may follow and their cogs are unknown, so the playouts keep
+# a value on the pouch. Boss rooms are named separately (`boss_of`).
+MULTI_FLOOR_BATTLES = frozenset({
+    "DistributedBattleBldg", "DistributedCogdoBattleBldg",
+    "DistributedLevelBattle", "DistributedBattleFactory",
+    "DistributedCountryClubBattle"})
+
+
+def battle_kind(battle) -> str:
+    return ("facility" if getattr(battle, "dclass", None) in MULTI_FLOOR_BATTLES
+            else "street")
+
+
 class BossBattle(NamedTuple):
     """A boss-room battle, as the stream states it."""
     kind: str
@@ -530,7 +544,8 @@ def build_state(listener, player_do_id: Optional[int] = None,
 
     return RealmsBuild(
         BattleState(toon=toon, cogs=cogs, round_num=round_num,
-                    allies_standing=members.allies_standing), [],
+                    allies_standing=members.allies_standing,
+                    kind=battle_kind(battle)), [],
         boss=boss_of(listener, battle),
         battle_id=getattr(battle, "do_id", None),
         suit_ids=tuple(members.suits),

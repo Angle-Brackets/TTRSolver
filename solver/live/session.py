@@ -221,10 +221,27 @@ def build_state(snapshot=None, panel=None, readings: Sequence = (),
                      track_exp=track_exp, gag_counts=gag_counts,
                      organic_tracks=frozenset(snapshot.organic_tracks()),
                      fires=max(0, int(fires)))
+    zone = (getattr(snapshot, "zone", "") or "").strip()
     return BuildResult(BattleState(toon=toon, cogs=cogs,
                                    round_num=round_num,
-                                   allies_standing=max(0, min(3, int(allies)))),
+                                   allies_standing=max(0, min(3, int(allies))),
+                                   kind=fight_kind(zone)),
                        [])
+
+
+# Zone strings that mean "this battle is one floor of several". OBSERVED
+# from the Local API inside a building on 2026-10-05 ("Cog Building,
+# Daisy Gardens [Blam Canyon]"). Only what has been seen is listed: a
+# facility's or a Field Office's string is unknown until someone stands
+# in one, and a guessed string would just never match.
+BUILDING_ZONES = frozenset({"Cog Building"})
+
+
+def fight_kind(zone: str) -> str:
+    """"facility" inside a building -- more floors may follow, whose cogs
+    are unknown, so the playouts keep a value on the pouch -- else
+    "street"."""
+    return "facility" if zone in BUILDING_ZONES else "street"
 
 
 def describe(state: BattleState) -> str:
