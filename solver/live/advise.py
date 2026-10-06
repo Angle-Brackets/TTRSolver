@@ -263,6 +263,10 @@ class Thinker:
         # `on_playout(state, horizon, is_current)`: the board is built,
         # start the third engine on it. The caller owns the process.
         self.on_playout = on_playout
+        # A `panel_memory.PanelMemory` the caller fills from every poll
+        # while the menu is open; each read is resolved against it. None
+        # reads every frame on its own, as before.
+        self.panel_memory = None
         self._generation = itertools.count()
         self._current = -1
         self._lock = threading.Lock()
@@ -286,6 +290,8 @@ class Thinker:
             pnl = _panel(frame)
             if snap is not None and pnl is not None:
                 pnl = _panel_with_training(frame, snap)
+            if self.panel_memory is not None and pnl is not None:
+                pnl = self.panel_memory.resolve(pnl)
             res = build_state(snapshot=snap, panel=pnl, readings=readings,
                               ignore_checksum=ignore_checksum, allies=allies,
                               fires=fires)

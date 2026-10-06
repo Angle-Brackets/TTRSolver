@@ -548,6 +548,14 @@ class Worker(AdviceWorker):
         thinker = advise_mod.Thinker(self._on_advice,
                                      on_first_answer=self._on_first_answer,
                                      on_playout=self._on_playout)
+        # THE MENU'S MEMORY. Counts cannot change while the menu is open,
+        # so every poll while it is up votes on each cell, and the read a
+        # search uses is resolved against the votes -- the cursor moves,
+        # the digit under it does not. See `panel_memory`.
+        from .panel_memory import PanelMemory
+
+        memory = PanelMemory()
+        thinker.panel_memory = memory
         try:
             while not self._stop.is_set():
                 cycle = time.time()
@@ -580,6 +588,17 @@ class Worker(AdviceWorker):
                 # the most expensive scan in the loop.
                 model.menu_visible = watcher.menu_visible
                 model.detected_battle = watcher.view.active
+                if watcher.menu_visible and watcher.view.active:
+                    try:
+                        snap_now = advise_mod._SESSION.get("snapshot")
+                        memory.observe(
+                            advise_mod._panel_with_training(frame, snap_now)
+                            if snap_now is not None
+                            else advise_mod._panel(frame))
+                    except Exception:          # noqa: BLE001 -- a vote, not a read
+                        pass
+                else:
+                    memory.reset()             # gags are spent while it is shut
                 model.forced = self.forced()
                 model.cogs = [_describe_reading(r) for r in watcher.view.cogs]
                 # Where the toon is, from the cached Local API session.
