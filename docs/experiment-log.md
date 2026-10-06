@@ -1220,3 +1220,24 @@ and because that sweep ran blind to the boss structure, which by
 itself cost 13 -> 5. Worth re-sweeping once live boss state exists.
 ```
 
+### The gag menu's hover card as a third check -- tried, not shipped (2026-10-05)
+
+Hovering a gag replaces "Total gags N / M" with that gag's card, whose
+"N / M" line states the hovered gag's count exactly. The idea was to use
+it as a check on the cell under the cursor, the one most likely misread.
+
+Reading the card's count worked on the recorded building run ("7 / 7",
+"4 / 10", "0 / 20"), once ink was taken by brightness, fragments joined
+by column, and the line split clear of the gag's picture. Identifying
+WHICH cell the card describes did not: matching the card's picture
+against every cell's picture, backgrounds painted out, won by margins of
+0.002-0.11 and named the wrong cell on most frames (the Safe as Throw 5,
+a Throw 1 the toon did not carry). The card's capacity alone is
+ambiguous whenever two gags share a carry limit.
+
+Not shipped: a reader that names the wrong cell would overwrite a good
+count with another gag's. `panel_memory` already resolves the cursor
+case on 42 of 45 recorded menu frames; the rest are a menu's first frame,
+which the panel's retry covers. A future attempt needs a better way to
+name the gag -- reading the card's title text, or the cursor's position.
+

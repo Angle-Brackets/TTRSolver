@@ -5,10 +5,10 @@
         --player solver/rl/fast_player.json          # a DAgger round
     python tools/train_fast_player.py --data climb.pkl dagger1.pkl
 
-climb plays solo fights -- VP (60%), buildings (20%), the env's default
-street mix cut to one toon (20%) -- seen as a rollout sees them (no
-holdout). Each decision is recorded as `fastplayer.features` with climb's
-move as the label.
+climb (or, with `--teacher playout`, the Playout engine) plays solo fights
+-- VP (60%), buildings (20%), the env's default street mix cut to one toon
+(20%) -- seen as a rollout sees them (no holdout). Each decision is
+recorded as `fastplayer.features` with the teacher's move as the label.
 
 `--player` is DAgger: the given network plays and climb only LABELS, so
 the data covers the states the network itself reaches, where its own
@@ -50,8 +50,22 @@ def _sampler(kind):
     return sample
 
 
+def _teach(env, view, seed, rounds, teacher, rng):
+    """The teacher's move for this board."""
+    from solver.search import hybrid, playout
+
+    if teacher == "playout":
+        from sweep import _horizon
+
+        res = playout.pick_wide(view, _horizon(env, env.state),
+                                seed=seed * 1000 + rounds)
+        if res is not None:
+            return res.plan
+    return hybrid.climb(view.clone(), rng, budget=24)
+
+
 def episode(job):
-    seed, kind, player = job
+    seed, kind, player, teacher = job
     from solver.rl import env as env_mod
     from solver.search import fastplayer, hybrid, playout
 
@@ -69,7 +83,7 @@ def episode(job):
     while not done and rounds < 400:
         view = playout._view(env.state)
         try:
-            plan = hybrid.climb(view.clone(), rng, budget=24)
+            plan = _teach(env, view, seed, rounds, teacher, rng)
         except Exception:                # noqa: BLE001
             break
         features, mask = fastplayer.features(view)
@@ -91,13 +105,18 @@ def main() -> int:
     ap.add_argument("--base", type=int, default=100000)
     ap.add_argument("--out", required=True)
     ap.add_argument("--player", default="", help="network weights: DAgger mode")
+    ap.add_argument("--teacher", choices=("climb", "playout"), default="climb",
+                    help="who labels each decision. 'playout' is expert "
+                         "iteration: the network learns the playouts' moves "
+                         "(in a VP, with the boss tracker's horizon), which "
+                         "then play on with it")
     ap.add_argument("--workers", type=int, default=10)
     args = ap.parse_args()
 
     from concurrent.futures import ProcessPoolExecutor
 
     kinds = ["vp"] * 6 + ["building"] * 2 + ["street"] * 2
-    jobs = [(args.base + i, kinds[i % 10], args.player)
+    jobs = [(args.base + i, kinds[i % 10], args.player, args.teacher)
             for i in range(args.episodes)]
     rows = []
     with ProcessPoolExecutor(max_workers=args.workers) as pool:
