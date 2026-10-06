@@ -1241,3 +1241,23 @@ case on 42 of 45 recorded menu frames; the rest are a menu's first frame,
 which the panel's retry covers. A future attempt needs a better way to
 name the gag -- reading the card's title text, or the cursor's position.
 
+
+## Expert iteration, round 2: the fast network learns the playouts' moves
+
+1,000 solo fights (VP, building, street) labelled by the Playout engine
+itself -- 27,449 decisions -- mixed at 3x weight into the shipped
+network's 345,693 climb rows, same architecture (384 hidden, 20 epochs).
+Held-out agreement 70.4%, not comparable with the shipped 79%: the
+held-out rows now include playout labels, which are harder to copy.
+
+Paired solo VPs, playouts played on by each network:
+
+    seeds 100000-100099   shipped 52   candidate 61   +28/-19
+    seeds 100100-100299   shipped 123  candidate 129  +46/-40
+    all 300               shipped 175  candidate 190  +74/-59  p = 0.22
+
+On its own, as an instant answer, neither network is usable (6/100 and
+5/100). Not shipped: a 5-point lead that 300 paired fights cannot
+separate from chance. If tried again, the labels are the lever -- 27k
+playout decisions against 346k climb ones may simply be too few to move
+the network off climb.
