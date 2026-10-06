@@ -382,7 +382,9 @@ the pass) and plays each to the END OF THE FIGHT, with successive halving
 at 8 and 16 rollouts and common random numbers. Measured on the solo VP
 (20 + 20 cogs, live-panel information only): shipped climb ~7%, top-3
 playouts 21-27%, the wide menu ~40%, the fast network playing on with 4x
-the rollouts 55-70%. Each step was a paired sweep; the numbers and p-values
+the rollouts 55-70%. ALL OF THOSE HAD UNITES UNUSABLE (see the unite
+bullet below); with the owner's pouch and five unites -- the owner's own
+test budget -- the same playouts win 94/100 solo and 55/60 duo sides. Each step was a paired sweep; the numbers and p-values
 are in the module and its commits.
 
 Things that hold it together, each measured:

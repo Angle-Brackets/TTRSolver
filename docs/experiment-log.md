@@ -1261,3 +1261,27 @@ On its own, as an instant answer, neither network is usable (6/100 and
 separate from chance. If tried again, the labels are the lever -- 27k
 playout decisions against 346k climb ones may simply be too few to move
 the network off climb.
+
+## Unites were never spent in simulation -- and they decide VPs
+
+`climb` applies its chosen unite to the board it is handed, and every
+playout, sweep and data tool handed it a copy, so the unite was dropped
+and the round played without it (fixed in 9f634a2, 598bfd9). Every VP
+figure before this was measured with unites unusable -- including the
+"solo VP 55-70%" that the playout engine was tuned against.
+
+Paired, playouts, the owner's VP pouch (`vp.OWNER_VP_POUCH`):
+
+    duo VP side, 60 fights    no unites 33   5 unites 55 (92%)   +22/-0
+    solo VP, 100 fights       no unites 57   5 unites 94 (94%)   +38/-1
+
+Five unites is the owner's own solo test budget. The solo regime also
+carries three slips and a ten-card SOS deck. This is the first figure
+back above 90% since the old 12-cog, two-toon, full-information VP, and
+the owner's "a duo VP is trivial" now matches the model.
+
+What the earlier hunt ruled out on the way: the loadout (owner's pouch
+vs the level-first fill, +5 solo, p 0.51) and Lure accuracy (70-95%
+against level 8-12 skelecogs, from the wiki's formula). Laff was always
+the binding constraint -- losses ended with 65-78 gags unthrown -- and
+unites are the laff.
