@@ -192,6 +192,28 @@ if __name__ == "__main__":
     unittest.main()
 
 
+def _draw_seven(patch, value):
+    """A "7" in the count's corner, drawn with a real font.
+
+    These tests used to draw a bar and a stick, which the template matcher
+    accepted as a 7; the learned reader (trained on the game's font)
+    rightly reads that as a 1. They are about dimmed and grey cells, not
+    glyph shapes, so they draw an actual 7.
+    """
+    import numpy as np
+    from PIL import Image, ImageDraw, ImageFont
+
+    try:
+        font = ImageFont.load_default(size=16)
+    except TypeError:                    # older Pillow
+        font = ImageFont.load_default()
+    img = Image.fromarray(np.ascontiguousarray(patch))
+    h, w = patch.shape[:2]
+    ImageDraw.Draw(img).text((int(0.68 * w), int(0.45 * h)), "7", font=font,
+                             fill=(value, value, value))
+    return np.asarray(img).copy()
+
+
 class TestDarkenedTracks(unittest.TestCase):
     """The game dims a whole track when it cannot be used this round.
 
@@ -214,10 +236,7 @@ class TestDarkenedTracks(unittest.TestCase):
         h, w = 38, 46
         p = np.zeros((h, w, 3), dtype=np.uint8)
         p[:, :] = (int(0.25 * bright), int(0.45 * bright), bright)
-        y0, x0 = int(0.45 * h), int(0.60 * w)
-        p[y0 + 2:y0 + 4, x0 + 2:x0 + 12] = digit
-        p[y0 + 4:y0 + 14, x0 + 8:x0 + 10] = digit
-        return p
+        return _draw_seven(p, digit)
 
     def test_a_bright_cell_reads(self):
         from solver.live import gagpanel as gp
@@ -247,9 +266,7 @@ class TestDarkenedTracks(unittest.TestCase):
         h, w = 38, 46
         p = np.full((h, w, 3), 110, dtype=np.uint8)
         if digit is not None:
-            y0, x0 = int(0.45 * h), int(0.60 * w)
-            p[y0 + 2:y0 + 4, x0 + 2:x0 + 12] = digit
-            p[y0 + 4:y0 + 14, x0 + 8:x0 + 10] = digit
+            p = _draw_seven(p, digit)
         return p
 
     def test_a_grey_cell_carrying_gags_reads_its_digit(self):

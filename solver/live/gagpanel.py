@@ -592,7 +592,116 @@ def _read_cell(patch: np.ndarray, track: Track, level: int) -> PanelCell:
                      uncertain=margin < MIN_DIGIT_MARGIN)
 
 
+# Below this brightness a pixel is never a count digit, whatever Otsu
+# says. Low on purpose: a dimmed track draws its digits near 110.
+COUNT_INK_FLOOR = 70
+# How far the brightest pixel must stand above the corner's median before
+# anything in it can be a digit. A plain grey or blue corner has no ink.
+COUNT_MIN_CONTRAST = 40
+
+# A count glyph's height and width as fractions of the row's height. The
+# digits are all drawn at one size (0.205-0.233 tall, at most 0.19 wide,
+# over 168 labelled cells), so a glyph outside this band is something
+# else merged in -- the mouse cursor, a highlight -- and is doubtful.
+COUNT_HEIGHT = (0.17, 0.27)
+COUNT_MAX_WIDTH = 0.30
+
+
+def _count_glyphs(patch: np.ndarray, region=None):
+    """The count's glyphs as (mask, greyscale) crops, left to right.
+
+    BRIGHTNESS, NOT COLOURLESSNESS. Ink used to be "near-white AND barely
+    coloured". Video compression bleeds the cell's blue into thin white
+    strokes, which then fail the colour test: on a recorded frame most of
+    a "5" vanished and the remains read as "62". White digits are far
+    brighter than any cell behind them, so ink is luminance above an Otsu
+    threshold for this corner (and above COUNT_INK_FLOOR).
+
+    RIGHT-ALIGNED. A gag icon's highlights can pass a brightness test too
+    -- a Fog Horn's streaks read as extra "1"s, turning 1 into 111. The
+    count is right-aligned on one baseline, so only the run of glyphs
+    ending at the rightmost one is kept: close together, similar height.
+    """
+    from .digits import otsu
+    from .vision import _components
+
+    height, width = patch.shape[:2]
+    x0, y0, x1, y1 = DIGIT_REGION if region is None else region
+    corner = patch[int(y0 * height):int(y1 * height),
+                   int(x0 * width):int(x1 * width), :3].astype(float)
+    if corner.size == 0:
+        return []
+    luma = (0.299 * corner[..., 0] + 0.587 * corner[..., 1]
+            + 0.114 * corner[..., 2])
+    # RELATIVE TO THE CELL, not an absolute floor. The game dims a whole
+    # track it will not let you use this round, digits and all -- to
+    # ~110 on a ~40 background -- and a fixed floor of 150 erased them
+    # (a live VP once summed 45 against a label of 70 that way). So ink
+    # must stand clear of THIS corner's own background: an Otsu split,
+    # at least halfway from the median to the brightest pixel, and a
+    # corner with too little contrast has no digit at all.
+    peak, middle = float(luma.max()), float(np.median(luma))
+    if peak - middle < COUNT_MIN_CONTRAST:
+        return []
+    ink = luma > max(otsu(luma), middle + 0.5 * (peak - middle),
+                     COUNT_INK_FLOOR)
+    if ink.sum() < 6:
+        return []
+    blobs = [b for b in _components(ink)
+             if (b[3] - b[1]) >= 3 and (b[2] - b[0]) < 0.8 * ink.shape[1]]
+    boxes = [b for b in _merge_columns(blobs)
+             if (b[2] - b[0]) >= 2 and (b[3] - b[1]) >= 5]
+    if not boxes:
+        return []
+    boxes.sort()
+    anchor = boxes[-1]
+    tall = anchor[3] - anchor[1]
+    kept = [anchor]
+    for box in reversed(boxes[:-1]):
+        if (kept[0][0] - box[2] > 0.5 * tall
+                or (box[3] - box[1]) < 0.6 * tall
+                or abs(box[3] - anchor[3]) > 3):
+            break
+        kept.insert(0, box)
+    return [(ink[b[1]:b[3], b[0]:b[2]], luma[b[1]:b[3], b[0]:b[2]])
+            for b in kept]
+
+
 def _read_count(patch: np.ndarray) -> Tuple[Optional[int], float]:
+    """The white number in a cell's lower-right corner, and how clearly.
+
+    The learned reader (`digits.count_classifier`) when its weights are
+    present, the template matcher otherwise. Either way the margin comes
+    back on the template scale, so `margin < MIN_DIGIT_MARGIN` means
+    "doubtful" for both: the classifier's probability margin is mapped so
+    that its own threshold, `digits.NET_DOUBT`, lands on MIN_DIGIT_MARGIN.
+    """
+    from .digits import NET_DOUBT, count_classifier
+
+    net = count_classifier()
+    if net is None:
+        return _read_count_templates(patch)
+    glyphs = _count_glyphs(patch)
+    if not glyphs:
+        return None, 0.0
+    row = float(patch.shape[0])
+    digits, margin = "", 1.0
+    for mask, gray in glyphs:
+        digit, gap = net.classify(gray)
+        digits += str(digit)
+        margin = min(margin, gap)
+        # THE WRONG SIZE IS DOUBT, however confident the read. Every
+        # count is drawn at one size: 0.205-0.233 of the row's height
+        # across 168 labelled cells. The mouse cursor sitting on a "4"
+        # merged into one blob 0.329 tall and 0.48 wide, which the
+        # classifier read as "2" with a margin of 0.85.
+        h, w = mask.shape[0] / row, mask.shape[1] / row
+        if not COUNT_HEIGHT[0] <= h <= COUNT_HEIGHT[1] or w > COUNT_MAX_WIDTH:
+            margin = 0.0
+    return int(digits), margin * (MIN_DIGIT_MARGIN / NET_DOUBT)
+
+
+def _read_count_templates(patch: np.ndarray) -> Tuple[Optional[int], float]:
     """The white number in a cell's lower-right corner, and how clearly.
 
     Returns (value, margin), where margin is the smallest gap between a
