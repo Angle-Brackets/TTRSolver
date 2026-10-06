@@ -114,6 +114,47 @@ def climb_with_unite(state, rng, **kwargs):
     return with_unite(plan, hybrid.LAST_UNITE)
 
 
+def playable(state: BattleState, plan) -> bool:
+    """Can `plan` be played on `state` -- its unite first, if it has one?
+
+    climb scores plans on boards a unite has already changed, so its
+    menu holds plans that throw gags only a Gag-Up restocks. Played
+    without that unite they ask for gags the toon does not hold.
+    """
+    from collections import Counter
+    from .. import unites as unites_mod
+
+    board = state
+    unite = unite_of(plan)
+    if unite is not None:
+        if not state.toons:
+            return False
+        board = state.clone()
+        toon = board.toons[0]
+        if not (unites_mod.available(toon) and unites_mod.in_stock(toon, unite)):
+            return False
+        unites_mod.apply(toon, unite)
+    need = Counter()
+    for seat, action in enumerate(plan):
+        if action is None or seat >= len(board.toons):
+            continue
+        toon = board.toons[seat]
+        if action.sos is not None:
+            need[(seat, "sos", action.sos)] += 1
+            if need[(seat, "sos", action.sos)] > toon.sos_cards.get(action.sos, 0):
+                return False
+        elif action.fire:
+            need[(seat, "fire")] += 1
+            if need[(seat, "fire")] > toon.fires:
+                return False
+        elif action.track is not None:
+            gag = (action.track, action.level)
+            need[(seat,) + gag] += 1
+            if need[(seat,) + gag] > toon.gag_counts.get(gag, 0):
+                return False
+    return True
+
+
 def _key(plan) -> tuple:
     key = tuple(repr(a) for a in plan)
     unite = unite_of(plan)
@@ -378,7 +419,7 @@ def candidates(state: BattleState, top_k: int = TOP_K, reject=None):
     for plan, _value in sorted(scored.values(), key=lambda pv: -pv[1]):
         if len(out) >= top_k:
             break
-        if _key(plan) not in seen:
+        if _key(plan) not in seen and playable(state, plan):
             seen.add(_key(plan))
             out.append(plan)
     return out
@@ -598,7 +639,8 @@ def wide_candidates(state: BattleState, reject=None,
     out, seen = [], set()
 
     def add(plan):
-        if plan is not None and _key(plan) not in seen and len(out) < cap:
+        if (plan is not None and _key(plan) not in seen and len(out) < cap
+                and playable(state, plan)):
             seen.add(_key(plan))
             out.append(plan if isinstance(plan, Plan) else list(plan))
 

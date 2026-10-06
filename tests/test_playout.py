@@ -610,3 +610,31 @@ class UniteTest(unittest.TestCase):
         self.assertEqual(w.model.playout_unite, w.model.unite)
         w.prefer_engine("rl")
         self.assertEqual("35 Toon-Up unite", w.model.unite)
+
+
+@unittest.skipUnless(HAVE, "the policy needs numpy")
+class PlayableTest(unittest.TestCase):
+    """climb scores plans on boards a unite already changed."""
+
+    def test_a_gag_only_a_gag_up_restocks_needs_the_gag_up(self):
+        from solver.data.types import Track
+        from solver.state import Action
+
+        board = _board(cogs=2, seed=4)
+        toon = board.toons[0]
+        toon.unites_held = 1
+        toon.gag_counts = {k: v for k, v in toon.gag_counts.items()
+                           if k != (Track.THROW, 6)}
+        cake = [Action(track=Track.THROW, level=6, target_index=0)]
+        self.assertFalse(playout.playable(board, cake))
+        self.assertTrue(playout.playable(board, playout.with_unite(cake, ("gag_up", Track.THROW))))
+        toon.unites_held = 0
+        self.assertFalse(playout.playable(board, playout.with_unite(cake, ("gag_up", Track.THROW))))
+
+    def test_a_held_card_is_playable(self):
+        from solver.state import Action
+
+        board = _board(cogs=2, seed=4)
+        board.toons[0].sos_cards = {"Flippy": 1}
+        call = Action(track=None, sos="Flippy")
+        self.assertTrue(playout.playable(board, [call]))
