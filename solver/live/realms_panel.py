@@ -968,10 +968,10 @@ class RealmsWorker(AdviceWorker):
             # module global that the next call overwrites.
             chosen = hybrid.LAST_UNITE
             if chosen is None:
-                self.model.unite = ""
+                self._advise_unite(self.model, "")
             else:
                 from .. import unites as unites_mod
-                self.model.unite = unites_mod.describe(chosen)
+                self._advise_unite(self.model, unites_mod.describe(chosen))
 
             # The same numbers the screen-reading panel shows, from the
             # same helper: the two front ends must not explain a move

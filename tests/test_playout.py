@@ -541,3 +541,72 @@ class FightKindTest(unittest.TestCase):
         self.assertEqual("facility", realms_session.battle_kind(Battle()))
         Battle.dclass = "DistributedBattle"
         self.assertEqual("street", realms_session.battle_kind(Battle()))
+
+
+@unittest.skipUnless(HAVE, "the policy needs numpy")
+class UniteTest(unittest.TestCase):
+    """climb applies its unite to the board it is handed, and playouts
+    hand it a copy -- so the unite has to ride on the plan."""
+
+    def _hurt(self):
+        board = _board(cogs=4, laff=137, seed=3)
+        board.toons[0].laff = 30
+        board.toons[0].unites_held = 2
+        return playout.build_env(board, None, random.Random(3))
+
+    def test_a_carried_unite_is_spent_in_the_round(self):
+        from solver.state import Action
+
+        env = self._hurt()
+        plan = playout.with_unite([Action(track=None)], ("toon_up", 80))
+        before = env.state.toons[0].laff
+        playout.step_round(env, plan)
+        self.assertGreater(env.state.toons[0].laff, before)
+        self.assertEqual(1, env.state.toons[0].unites_held)
+
+    def test_none_held_means_none_spent(self):
+        from solver.state import Action
+
+        env = self._hurt()
+        env.state.toons[0].unites_held = 0
+        playout.step_round(env, playout.with_unite([Action(track=None)],
+                                                    ("toon_up", 80)))
+        self.assertEqual(0, env.state.toons[0].unites_held)
+
+    def test_the_menu_offers_the_move_with_and_without_it(self):
+        menu = playout.wide_candidates(self._hurt().state)
+        first = menu[0]
+        self.assertIsNotNone(playout.unite_of(first))
+        twins = [p for p in menu if list(p) == list(first)]
+        self.assertEqual({True, False},
+                         {playout.unite_of(p) is not None for p in twins})
+
+    def test_keys_tell_them_apart(self):
+        from solver.state import Action
+
+        plain = [Action(track=None)]
+        self.assertNotEqual(playout._key(plain),
+                            playout._key(playout.with_unite(plain, ("toon_up", 80))))
+        self.assertEqual(playout._key(plain),
+                         playout._key(playout.with_unite(plain, None)))
+
+    def test_a_plan_keeps_its_unite_through_a_pickle(self):
+        import pickle
+        from solver.state import Action
+
+        plan = playout.with_unite([Action(track=None)], ("toon_up", 80))
+        self.assertEqual(("toon_up", 80), playout.unite_of(pickle.loads(pickle.dumps(plan))))
+
+    def test_the_panel_shows_the_playouts_unite_with_its_move(self):
+        from solver.state import Action
+
+        w = _worker()
+        w.model.rl_gag = "Pass"
+        w._advise_unite(w.model, "35 Toon-Up unite")
+        w._deliver_playout(_board(), Action(track=None), "",
+                           lambda a, s: ("Pass", "", 0), unite=("toon_up", 80))
+        self.assertTrue(w.model.playout_unite)
+        w.prefer_engine("playout")
+        self.assertEqual(w.model.playout_unite, w.model.unite)
+        w.prefer_engine("rl")
+        self.assertEqual("35 Toon-Up unite", w.model.unite)

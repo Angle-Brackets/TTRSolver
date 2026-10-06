@@ -166,6 +166,7 @@ def model_json(model: Model) -> str:
         "playout_gag_level": model.playout_gag_level,
         "playout_ready": model.playout_ready,
         "playout_note": model.playout_note,
+        "playout_unite": model.playout_unite,
         "playout_rollouts": model.playout_rollouts,
         "playout_done": model.playout_done,
         "playout_pending": model.playout_pending,

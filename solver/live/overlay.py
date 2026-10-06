@@ -269,6 +269,8 @@ class Model:
     playout_gag_level: int = 0
     playout_ready: bool = False
     playout_note: str = ""
+    # The unite the playouts' move is planned on, as a phrase, or "".
+    playout_unite: str = ""
     # ANYTIME: playouts per candidate behind the move shown, and whether
     # refining has stopped. The move can change while this climbs.
     playout_rollouts: int = 0
@@ -749,7 +751,7 @@ class Worker(AdviceWorker):
                 model.rl_track = track or ""
                 model.rl_gag_level = level or 0
                 if unite_str:
-                    model.unite = unite_str
+                    self._advise_unite(model, unite_str)
                 if model.preferred_engine == "rl" or not model.search_ready:
                     model.gag = text
                     model.gag_at = time.time()
@@ -816,7 +818,7 @@ class Worker(AdviceWorker):
                     # there is. Assigning only on the `is not None` side
                     # left the previous round's unite on screen beside a
                     # move that does not use one.
-                    model.unite = unite_text
+                    self._advise_unite(model, unite_text)
 
                     # The reasons behind the move, read off the same
                     # functions the scorer used rather than re-derived.
@@ -931,7 +933,7 @@ class Worker(AdviceWorker):
         # dimming that `problems` drives.
         for engine in ("rl", "search", "playout"):
             self._clear_engine(model, engine)
-        model.unite = ""
+        model.unite = self._advised_unite = ""
         self._sync_explanation(model)
         model.incoming = model.survive = None
         self._rl_action = self._search_action = self._playout_action = None

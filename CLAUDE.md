@@ -398,6 +398,13 @@ Things that hold it together, each measured:
   trained to copy climb (two DAgger rounds, 79% agreement). Slightly worse
   per rollout, four times as many in the same time. Solo only: groups are
   played on by climb, which plans every seat.
+- **A unite rides on the plan** (`playout.Plan`, `climb_with_unite`).
+  `climb` applies its unite to the board it is handed, and every playout
+  hands it a copy -- so until this the unite was thrown away and the gag
+  played without it. No simulated fight had ever spent one, and the
+  Playout row could not advise one. `step_round` now applies it, and
+  the menu offers climb's move both with and without it. The fast
+  network still never uses one inside a rollout.
 - **More than 32 rollouts per move did not pay** (146 vs 139/200, p 0.46).
 - **No peeking.** Unseen cogs are redrawn from the level band in each
   rollout, in the numbers `boss.Horizon` gives. Without a horizon the

@@ -334,6 +334,17 @@ class AdviceWorker(threading.Thread):
 
     # -- the two engines -------------------------------------------------
 
+    # The unite PPO / the search advised, kept while the playouts' move
+    # (and so the playouts' unite) is the one on screen.
+    _advised_unite = ""
+
+    def _advise_unite(self, model, text) -> None:
+        """PPO's or the search's unite. `model.unite` is the one beside
+        the move on screen, so it follows only while that move is theirs."""
+        self._advised_unite = text or ""
+        if model.engine != "playout":
+            model.unite = self._advised_unite
+
     def prefer_engine(self, name) -> None:
         """Swap which engine's answer is on screen.
 
@@ -356,6 +367,8 @@ class AdviceWorker(threading.Thread):
                 model.track = getattr(model, choice + "_track") or None
                 model.gag_level = getattr(model, choice + "_gag_level") or None
                 model.engine = choice
+                model.unite = (model.playout_unite if choice == "playout"
+                               else self._advised_unite)
                 swapped = True
             # SYNCED ON EVERY PATH, including the refused one. A swap can
             # be declined -- the search has not answered yet -- and then
@@ -431,6 +444,7 @@ class AdviceWorker(threading.Thread):
         if engine == "playout":
             model.playout_ready = False
             model.playout_note = ""
+            model.playout_unite = ""
             model.playout_rollouts = 0
             model.playout_done = False
 
@@ -556,7 +570,8 @@ class AdviceWorker(threading.Thread):
                 if len(order) == 1:
                     plan = plans[order[0]]
                     self._deliver_playout(worded_on, plan[0] if plan else None,
-                                          "", describe)
+                                          "", describe,
+                                          unite=playout_mod.unite_of(plan))
                     return                 # nothing to choose between
                 # SUCCESSIVE HALVING, at `playout.HALVING`'s points (8 and
                 # 16 rollouts, as measured): the weaker half stops being
@@ -583,7 +598,8 @@ class AdviceWorker(threading.Thread):
                 plan = plans[shown]
                 self._deliver_playout(worded_on, plan[0] if plan else None, "",
                                       describe, rollouts=done_k,
-                                      finished=False)
+                                      finished=False,
+                                      unite=playout_mod.unite_of(plan))
             if not order or not is_current():
                 return
             # FINISHED: the measured rule, plain best mean (ties to the
@@ -592,7 +608,8 @@ class AdviceWorker(threading.Thread):
                 sum(values[k]) / len(values[k]), k == order[0]))
             plan = plans[final]
             self._deliver_playout(worded_on, plan[0] if plan else None, "",
-                                  describe, rollouts=done_k, finished=True)
+                                  describe, rollouts=done_k, finished=True,
+                                  unite=playout_mod.unite_of(plan))
 
         threading.Thread(target=run, daemon=True).start()
 
@@ -638,7 +655,8 @@ class AdviceWorker(threading.Thread):
         return merged, ""
 
     def _deliver_playout(self, state, action, note, describe,
-                         rollouts: int = 0, finished: bool = True) -> None:
+                         rollouts: int = 0, finished: bool = True,
+                         unite=None) -> None:
         """Post the playouts' current best. Called after every chunk, so
         the move on screen improves while the player reads it."""
         import time
@@ -682,6 +700,11 @@ class AdviceWorker(threading.Thread):
                     print("playout: could not explain the move "
                           f"{action!r}:", file=sys.stderr)
                     traceback.print_exc()
+            model.playout_unite = ""
+            if action is not None and unite is not None:
+                from .. import unites as unites_mod
+
+                model.playout_unite = unites_mod.describe(unite)
             model.playout_ready = True
             model.playout_note = note or ""
             model.playout_rollouts = int(rollouts)
@@ -694,6 +717,7 @@ class AdviceWorker(threading.Thread):
                 model.gag_at = time.time()
                 model.track = model.playout_track or None
                 model.gag_level = model.playout_gag_level or None
+                model.unite = model.playout_unite
                 model.engine = "playout"
             self._sync_explanation(model)
         self._post()

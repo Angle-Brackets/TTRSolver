@@ -30,6 +30,7 @@ ARMS  (`name` or `name:key=value,key=value`)
       keys: stages=8/16/32  pouch=<weight>  player=net|climb  rollouts=<n>
             net=<weights.json>  (the fast network's weights, default shipped)
             kit=owner  (restock every toon with `vp.OWNER_VP_POUCH` first)
+            unites=<n>  (every toon holds n unites, of any kind)
 
 Each board is shown to the engine as the live panel would see it: no
 holdout, and in a boss fight the horizon the boss tracker would give.
@@ -162,6 +163,9 @@ def play(job):
         from solver import vp as vp_mod
         for toon in env.state.toons:
             vp_mod.owner_vp_pouch(toon)
+    if "unites" in opts:
+        for toon in env.state.toons:
+            toon.unites_held = int(opts["unites"])
     rng = random.Random(seed)
     done, info, rounds, spent = False, {}, 0, 0.0
     while not done and rounds < 400:
@@ -187,7 +191,7 @@ def play(job):
                 raise ValueError(f"unknown arm {name!r}")
             spent += time.perf_counter() - t0
             if plan is None:
-                plan = hybrid.climb(view, rng, budget=24)
+                plan = playout.climb_with_unite(view, rng, budget=24)
         done, info = playout.step_round(env, plan)
         rounds += 1
     return seed, spec, bool(info.get("win")), rounds, spent / max(1, rounds)

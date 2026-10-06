@@ -78,8 +78,46 @@ class Result(NamedTuple):
     rollouts: int
 
 
+class Plan(list):
+    """A round's actions, plus the unite used before them, if any.
+
+    A unite is not an action -- it is applied in the planning phase,
+    before the gag is chosen -- so `climb` returns it beside the plan
+    (`hybrid.LAST_UNITE`) and applies it to the board it was handed.
+    Every playout hands it a COPY, so until this existed the unite was
+    discarded and the gag played without it: no simulated fight through
+    `step_round` ever spent one, and the live Playout row could not
+    advise one. Carrying it on the plan is what lets the round use it.
+    """
+    unite = None
+
+
+def with_unite(plan, unite):
+    """`plan` as a `Plan` carrying `unite` (None for none)."""
+    if plan is None:
+        return None
+    out = Plan(plan)
+    out.unite = unite
+    return out
+
+
+def unite_of(plan):
+    return getattr(plan, "unite", None)
+
+
+def climb_with_unite(state, rng, **kwargs):
+    """`hybrid.climb` on `state`, its unite carried on the returned plan."""
+    from . import hybrid
+
+    hybrid.LAST_UNITE = None
+    plan = hybrid.climb(state, rng, **kwargs)
+    return with_unite(plan, hybrid.LAST_UNITE)
+
+
 def _key(plan) -> tuple:
-    return tuple(repr(a) for a in plan)
+    key = tuple(repr(a) for a in plan)
+    unite = unite_of(plan)
+    return key if unite is None else key + (("unite",) + tuple(map(repr, unite)),)
 
 
 def _view(state: BattleState) -> BattleState:
@@ -256,6 +294,13 @@ def step_round(env, plan):
 
     start = env.rounds
     done, info = False, {}
+    unite = unite_of(plan)
+    if unite is not None and env.state.toons:
+        from .. import unites as unites_mod
+
+        toon = env.state.toons[0]
+        if unites_mod.available(toon) and unites_mod.in_stock(toon, unite):
+            unites_mod.apply(toon, unite)
     while not done and env.rounds == start:
         action = plan[env.actor] if plan and env.actor < len(plan) else None
         index, through = env_mod.PASS_INDEX, None
@@ -300,8 +345,8 @@ def rollout(state, plan, horizon, seed: int) -> float:
         if use_net:
             nxt = fastplayer.act(_view(env.state))
         else:
-            nxt = hybrid.climb(_view(env.state), policy_rng,
-                               budget=CLIMB_BUDGET if party else ROLLOUT_BUDGET)
+            nxt = climb_with_unite(_view(env.state), policy_rng,
+                                   budget=CLIMB_BUDGET if party else ROLLOUT_BUDGET)
         if nxt is None:
             break
         done, _info = step_round(env, nxt)
@@ -323,13 +368,13 @@ def candidates(state: BattleState, top_k: int = TOP_K, reject=None):
     probe = state.clone()             # climb may apply a unite in place
     hybrid._judge = spy
     try:
-        chosen = hybrid.climb(probe, random.Random(0), budget=CLIMB_BUDGET,
-                              reject=frozenset(reject or ()))
+        chosen = climb_with_unite(probe, random.Random(0), budget=CLIMB_BUDGET,
+                                  reject=frozenset(reject or ()))
     finally:
         hybrid._judge = real
     if chosen is None:
         return []
-    out, seen = [list(chosen)], {_key(chosen)}
+    out, seen = [chosen], {_key(chosen)}
     for plan, _value in sorted(scored.values(), key=lambda pv: -pv[1]):
         if len(out) >= top_k:
             break
@@ -542,8 +587,8 @@ def wide_candidates(state: BattleState, reject=None,
     probe = state.clone()
     hybrid._judge = spy
     try:
-        chosen = hybrid.climb(probe, random.Random(0), budget=CLIMB_BUDGET,
-                              reject=frozenset(reject or ()))
+        chosen = climb_with_unite(probe, random.Random(0), budget=CLIMB_BUDGET,
+                                  reject=frozenset(reject or ()))
     finally:
         hybrid._judge = real
     if chosen is None:
@@ -555,9 +600,11 @@ def wide_candidates(state: BattleState, reject=None,
     def add(plan):
         if plan is not None and _key(plan) not in seen and len(out) < cap:
             seen.add(_key(plan))
-            out.append(list(plan))
+            out.append(plan if isinstance(plan, Plan) else list(plan))
 
     add(chosen)
+    if unite_of(chosen) is not None:
+        add(list(chosen))      # the same gags without it: the unite must earn its use
     for plan in ranked[:WIDE_SCORER_TOP]:
         add(plan)
     if len(state.active_toons()) > 1:
@@ -735,7 +782,7 @@ def rollout_pickup(state: BattleState, plan, horizon, seed: int) -> float:
         else:
             mine = solo_view(env.state)
             nxt = (fastplayer.act(mine) if use_net
-                   else hybrid.climb(mine, policy_rng, budget=ROLLOUT_BUDGET))
+                   else climb_with_unite(mine, policy_rng, budget=ROLLOUT_BUDGET))
         done, _info = step_round(env, nxt)
     return value(env.state, total, pouch_start, pouch_weight)
 
