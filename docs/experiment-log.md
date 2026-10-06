@@ -1114,3 +1114,109 @@ be carried into new comparisons unexamined.
 and this file's own rule is that a shipped value does not move on a
 wash. But there is now no positive case for v3 beyond the argument that
 a linear layer cannot multiply a ratio by a ceiling.
+
+---
+
+## From solver/search/hybrid.py (code removed 2026-10-05)
+
+Both of these were switched off for measured reasons and their code was
+removed in the consolidation pass. The text below is what the code
+said, verbatim.
+
+### `rollout_judge` -- PPO rollouts as climb's judge
+
+```
+Play the plan, then let PPO play on, and total the real reward.
+
+The horizon `_quick_score` does not have. It scores ONE round --
+expected over the accuracy rolls, not all-hit; this said all-hit
+long after that changed -- with a hand-weighted sum whose weights turn out not to
+matter -- four random weight vectors finish 62.5-65.0% of the same
+buildings, and zeroing every term costs five points. So the terms
+matter and their sizes do not, which is what a flat proxy looks
+like.
+
+This scores the future with `round_reward` instead: the objective
+the environment actually pays, over several rounds of PPO's own
+play. It is Bertsekas's rollout with the learned policy as the base,
+which is what makes the guarantee interesting -- a rollout policy is
+no worse than its base when the evaluation is sound.
+
+NOT the two-ply judge that failed earlier. That one let
+`greedy_plan` answer for the next round, and greedy is a myopic
+proxy, so it added a guess about the future to a real reading of the
+present and weighted the guess at 0.7. It cost nearly three points.
+PPO is a considerably better base policy than greedy, and it is fast
+enough to run several rounds.
+
+COMMON RANDOM NUMBERS. Every candidate plan is rolled out from the
+same `seed`, so the accuracy rolls and cog attacks are identical
+across candidates and the comparison is paired. Without that the
+climb would reliably pick whichever plan drew the luckiest dice,
+which with eight candidates is most of them.
+
+IT IS OFF, AND THE REASON IS THE USEFUL PART. Over 180 held-out
+buildings, climb at budget 8:
+
+    `_quick_score`, one round      64.4%   0.76 ms
+    PPO rollout, two rounds        61.1%   2.50 ms
+    PPO rollout, four rounds       60.6%   3.23 ms
+
+Deeper is monotonically worse, and cost is not the issue at three
+milliseconds. The judge is: scoring a plan by what happens when PPO
+PLAYS ON measures how well PPO exploits the resulting position, not
+how good the position is. A strong plan leading somewhere PPO
+handles badly is marked down. It is circular.
+
+Third time that has been established here. PPO's own critic ranking
+PPO's samples: 57.8-58.3% against 58.9% for plain argmax. A two-ply
+lookahead played by `greedy_plan`: nearly three points worse. This:
+three to four points worse. The only judge that has ever helped is
+`_quick_score`, which shares none of the proposer's blind spots and
+is worth 58.9% to 64.4%.
+
+It is also why the SEARCH works: `rollout_value` plays forward with
+`greedy_plan`, a different policy from the plans it grades.
+
+The horizon idea is not refuted, only this way of getting one --
+Toon-Up use does rise 4.1% to 5.3% with rollouts on, so the longer
+view pushes where it should. What is refuted is asking the policy to
+grade itself.
+
+```
+
+Superseded by `solver/search/playout.py`, which fixes the three things
+that sank this one: it plays to the end of the fight rather than 2-4
+rounds, scores cogs defeated rather than a reward with no credit for
+damage, and averages 8-32 rollouts with common random numbers rather
+than one seed. Solo VP 7% -> 55-70% (see `playout.py`).
+
+### `RESTOCK_LOOKAHEAD` -- crediting a restock SOS with next round
+
+```
+A RESTOCK IS JUDGED ON WHAT IT ENABLES NEXT ROUND -- the one exception
+to scoring a single round, and a narrow one on purpose.
+
+`_quick_score` sees a round. A restock SOS call deals nothing and
+prevents nothing in the round it is played, so it scored exactly
+`SOS_PRICE` below a pass, and on a solo VP that had spent its power
+gags "wait for the lure to lapse, re-lure, wait" beat climbing out of
+the hole forever. Measured on that board: pass 672.7, Restock All 422.7.
+
+NOT the general two-round judge, which is off for a measured reason:
+it adds a guess about next round to EVERY plan and cost buildings three
+points. This touches only plans that call a restock, and credits only
+the DIFFERENCE between next round with the restock and next round
+without it (the same plan with the call replaced by a pass). With a
+full pouch that difference is near zero, so a restock stays the bad
+move it is; with an empty one it is large.
+
+SWEPT, AND NULL. Solo VP, realistic loadout, 100 paired sides with
+common random numbers: 13/100 off, 14/100 on, +4/-3, sign test
+p = 1.00. It did make restocks happen (0.00 -> 0.63 a side) and cards
+get spent a little more, but clears did not move. Kept, off, so the
+next attempt starts from a measured baseline rather than from zero --
+and because that sweep ran blind to the boss structure, which by
+itself cost 13 -> 5. Worth re-sweeping once live boss state exists.
+```
+

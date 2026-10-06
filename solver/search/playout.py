@@ -497,13 +497,6 @@ def leads(challenger: Sequence[float], incumbent: Sequence[float]) -> bool:
 #     wide menu, halving 2/4/8    79/200  39.5%
 #     paired +57/-16, p < 0.001; +1.00 cogs a fight (se 0.63)
 
-# Parties: joint plans from climb's menu, played on by climb. OFF: on
-# the CEO (two toons, two leftovers, 200 paired sides) it was neutral --
-# 48 wins against climb's 43, +16/-11, p = 0.44 -- so there is no case
-# yet for the extra time. A party's round sizes are unconfirmed, so its
-# playouts end with the battle on screen; that horizon, not the menu, is
-# the likely reason it does not pay the way the solo VP does.
-PARTY_PLAYOUTS = False
 WIDE_SCORER_TOP = 2      # the scorer's favourites
 WIDE_POLICY_TOP = 2      # the network's favourites
 WIDE_CAP = 10
@@ -603,17 +596,27 @@ def wide_candidates(state: BattleState, reject=None,
 
 
 def pick_wide(state: BattleState, horizon=None, seed: int = 0,
-              reject=None, stages=HALVING) -> Optional[Result]:
-    """Successive halving over `wide_candidates`, common random numbers."""
+              reject=None, stages=HALVING,
+              mode: Optional[str] = None) -> Optional[Result]:
+    """Successive halving over `wide_candidates`, common random numbers.
+
+    A board with teammates on it is handled as `mode` says -- default
+    `GROUP_MODE`, exactly as the panels' chunked playouts handle it:
+    "coordinated" chooses among joint plans, "pickup" chooses your move
+    with the teammates modelled. On the CEO, coordinated party playouts
+    were neutral (48 vs 43 of 200, p = 0.44) for want of a horizon.
+    """
     from . import hybrid
 
     if not hybrid.available() or state.is_terminal():
         return None
-    if len(state.active_toons()) != 1 and not PARTY_PLAYOUTS:
+    if state.toons and state.toons[0].laff <= 0:
         return None
-    cands = wide_candidates(state, reject)
+    pickup = len(state.toons) > 1 and (mode or GROUP_MODE) == "pickup"
+    cands = wide_candidates(solo_view(state) if pickup else state, reject)
     if not cands:
         return None
+    play = rollout_pickup if pickup else rollout
     if len(cands) == 1:
         return Result(cands[0], cands, [0.0], 0)
     values = {i: [] for i in range(len(cands))}
@@ -621,8 +624,8 @@ def pick_wide(state: BattleState, horizon=None, seed: int = 0,
     for stage, upto in enumerate(stages):
         for k in range(done_k, upto):
             for i in alive:
-                values[i].append(rollout(state, cands[i], horizon,
-                                         seed * 1000003 + k * 7919))
+                values[i].append(play(state, cands[i], horizon,
+                                      seed * 1000003 + k * 7919))
         done_k = upto
         if stage + 1 < len(stages):
             alive.sort(key=lambda i: (-sum(values[i]) / len(values[i]), i))
@@ -739,29 +742,6 @@ def rollout_pickup(state: BattleState, plan, horizon, seed: int) -> float:
 
 def pick_pickup(state: BattleState, horizon=None, seed: int = 0,
                 reject=None, stages=HALVING) -> Optional[Result]:
-    """Your best move in a group: the wide menu for your seat, judged by
-    pickup playouts with the teammates modelled. Successive halving and
-    common random numbers as in `pick_wide`."""
-    from . import hybrid
-
-    if not hybrid.available() or state.is_terminal() or state.toons[0].laff <= 0:
-        return None
-    cands = wide_candidates(solo_view(state), reject)
-    if not cands:
-        return None
-    if len(cands) == 1:
-        return Result(cands[0], cands, [0.0], 0)
-    values = {i: [] for i in range(len(cands))}
-    alive, done_k = list(range(len(cands))), 0
-    for stage, upto in enumerate(stages):
-        for k in range(done_k, upto):
-            for i in alive:
-                values[i].append(rollout_pickup(state, cands[i], horizon,
-                                                seed * 1000003 + k * 7919))
-        done_k = upto
-        if stage + 1 < len(stages):
-            alive.sort(key=lambda i: (-sum(values[i]) / len(values[i]), i))
-            alive = alive[:max(HALVING_KEEP_AT_LEAST, (len(alive) + 1) // 2)]
-    best = max(alive, key=lambda i: (sum(values[i]) / len(values[i]), i == 0))
-    means = [sum(values[i]) / len(values[i]) for i in range(len(cands))]
-    return Result(cands[best], cands, means, done_k)
+    """Your best move in a group, the teammates modelled: `pick_wide` in
+    pickup mode."""
+    return pick_wide(state, horizon, seed, reject, stages, mode="pickup")

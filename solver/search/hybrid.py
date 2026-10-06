@@ -103,7 +103,6 @@ from typing import List, Mapping, Optional, Sequence
 
 from .. import data
 from .. import mechanics
-from .. import party as party_mod
 from .. import sos as sos_mod
 from .. import unites as unites_mod
 from ..rl import env as env_mod
@@ -115,11 +114,6 @@ from . import party_search
 # one because the second round is played by a greedy stand-in rather
 # than by whatever will really happen.
 LOOKAHEAD_DISCOUNT = 0.7
-
-# Per-round discount for `rollout_judge`. Near one because a building is
-# long and a gag saved on floor one is spent on floor four; the reward
-# function already prices the horizon through `cogs_remaining`.
-ROLLOUT_DISCOUNT = 0.95
 
 _EXPORT = Path(__file__).resolve().parents[1] / "rl" / "ppo_facility.json"
 _MODEL: Optional[dict] = None
@@ -297,163 +291,6 @@ def propose(state: BattleState, rng, sample: bool = True,
     return pending
 
 
-def rollout_judge(state: BattleState, plan, seed: int, depth: int = 3,
-                  objective=None) -> float:
-    """Play the plan, then let PPO play on, and total the real reward.
-
-    The horizon `_quick_score` does not have. It scores ONE round --
-    expected over the accuracy rolls, not all-hit; this said all-hit
-    long after that changed -- with a hand-weighted sum whose weights turn out not to
-    matter -- four random weight vectors finish 62.5-65.0% of the same
-    buildings, and zeroing every term costs five points. So the terms
-    matter and their sizes do not, which is what a flat proxy looks
-    like.
-
-    This scores the future with `round_reward` instead: the objective
-    the environment actually pays, over several rounds of PPO's own
-    play. It is Bertsekas's rollout with the learned policy as the base,
-    which is what makes the guarantee interesting -- a rollout policy is
-    no worse than its base when the evaluation is sound.
-
-    NOT the two-ply judge that failed earlier. That one let
-    `greedy_plan` answer for the next round, and greedy is a myopic
-    proxy, so it added a guess about the future to a real reading of the
-    present and weighted the guess at 0.7. It cost nearly three points.
-    PPO is a considerably better base policy than greedy, and it is fast
-    enough to run several rounds.
-
-    COMMON RANDOM NUMBERS. Every candidate plan is rolled out from the
-    same `seed`, so the accuracy rolls and cog attacks are identical
-    across candidates and the comparison is paired. Without that the
-    climb would reliably pick whichever plan drew the luckiest dice,
-    which with eight candidates is most of them.
-
-    IT IS OFF, AND THE REASON IS THE USEFUL PART. Over 180 held-out
-    buildings, climb at budget 8:
-
-        `_quick_score`, one round      64.4%   0.76 ms
-        PPO rollout, two rounds        61.1%   2.50 ms
-        PPO rollout, four rounds       60.6%   3.23 ms
-
-    Deeper is monotonically worse, and cost is not the issue at three
-    milliseconds. The judge is: scoring a plan by what happens when PPO
-    PLAYS ON measures how well PPO exploits the resulting position, not
-    how good the position is. A strong plan leading somewhere PPO
-    handles badly is marked down. It is circular.
-
-    Third time that has been established here. PPO's own critic ranking
-    PPO's samples: 57.8-58.3% against 58.9% for plain argmax. A two-ply
-    lookahead played by `greedy_plan`: nearly three points worse. This:
-    three to four points worse. The only judge that has ever helped is
-    `_quick_score`, which shares none of the proposer's blind spots and
-    is worth 58.9% to 64.4%.
-
-    It is also why the SEARCH works: `rollout_value` plays forward with
-    `greedy_plan`, a different policy from the plans it grades.
-
-    The horizon idea is not refuted, only this way of getting one --
-    Toon-Up use does rise 4.1% to 5.3% with rollouts on, so the longer
-    view pushes where it should. What is refuted is asking the policy to
-    grade itself.
-    """
-    from . import party_search as ps
-
-    objective = objective or objective_mod.BALANCED
-    rng = random.Random(seed)
-    total, current, live = 0.0, state, list(plan)
-    for step in range(max(1, depth)):
-        if current.is_terminal():
-            break
-        try:
-            nxt, _healed, _done = party_mod.step(
-                current, live[0], mode=party_mod.Mode.COORDINATED,
-                joint=live, rng=rng)
-        except (NotImplementedError, ValueError, KeyError):
-            break
-        laff_lost = sum(max(0, b.laff - a.laff)
-                        for b, a in zip(current.toons, nxt.toons))
-        went_sad = sum(1 for b, a in zip(current.toons, nxt.toons)
-                       if b.laff > 0 and a.laff <= 0)
-        total += (ROLLOUT_DISCOUNT ** step) * ps.round_reward(
-            objective, laff_lost, ps._spent(current, nxt),
-            won=nxt.is_win(),
-            lost=nxt.is_terminal() and not nxt.is_win(),
-            toons_lost=went_sad,
-            cogs_remaining=current.cogs_remaining)
-        current = nxt
-        if current.is_terminal():
-            break
-        live = propose(current, rng, sample=False)
-    return total
-
-
-# A RESTOCK IS JUDGED ON WHAT IT ENABLES NEXT ROUND -- the one exception
-# to scoring a single round, and a narrow one on purpose.
-#
-# `_quick_score` sees a round. A restock SOS call deals nothing and
-# prevents nothing in the round it is played, so it scored exactly
-# `SOS_PRICE` below a pass, and on a solo VP that had spent its power
-# gags "wait for the lure to lapse, re-lure, wait" beat climbing out of
-# the hole forever. Measured on that board: pass 672.7, Restock All 422.7.
-#
-# NOT the general two-round judge, which is off for a measured reason:
-# it adds a guess about next round to EVERY plan and cost buildings three
-# points. This touches only plans that call a restock, and credits only
-# the DIFFERENCE between next round with the restock and next round
-# without it (the same plan with the call replaced by a pass). With a
-# full pouch that difference is near zero, so a restock stays the bad
-# move it is; with an empty one it is large.
-#
-# SWEPT, AND NULL. Solo VP, realistic loadout, 100 paired sides with
-# common random numbers: 13/100 off, 14/100 on, +4/-3, sign test
-# p = 1.00. It did make restocks happen (0.00 -> 0.63 a side) and cards
-# get spent a little more, but clears did not move. Kept, off, so the
-# next attempt starts from a measured baseline rather than from zero --
-# and because that sweep ran blind to the boss structure, which by
-# itself cost 13 -> 5. Worth re-sweeping once live boss state exists.
-RESTOCK_LOOKAHEAD = False
-
-
-def _is_restock(action) -> bool:
-    name = getattr(action, "sos", None) if action is not None else None
-    if not name:
-        return False
-    card = sos_mod.BY_NAME.get(name)
-    return card is not None and card.kind == sos_mod.RESTOCK
-
-
-def _next_round_value(state: BattleState, plan) -> Optional[float]:
-    """Best one-round score available after `plan` resolves, or None."""
-    from . import party_search as ps
-
-    probe = state.clone()
-    try:
-        ps.simulator.apply_party_round(
-            probe, list(plan), hits=[a is not None and not a.is_pass
-                                     for a in plan])
-        if probe.is_terminal():
-            return None
-        follow = ps.greedy_plan(probe, objective_mod.BALANCED)
-        return ps._quick_score(probe, follow)
-    except (NotImplementedError, ValueError, KeyError):
-        return None
-
-
-def _restock_credit(state: BattleState, plan) -> float:
-    """What the restock calls in `plan` add to next round, discounted.
-
-    Never negative: a restock that enables nothing is worth nothing
-    beyond its own round, which already charges `SOS_PRICE` for it.
-    """
-    if not any(_is_restock(a) for a in plan):
-        return 0.0
-    without = [None if _is_restock(a) else a for a in plan]
-    after, before = _next_round_value(state, plan), _next_round_value(state, without)
-    if after is None or before is None:
-        return 0.0
-    return LOOKAHEAD_DISCOUNT * max(0.0, after - before)
-
-
 # REPEATED SCORES, CACHED FOR ONE CLIMB. Measured over 221 solo-VP climbs:
 # 33.5 judge calls per climb but only 20.1 distinct (board, plan) pairs --
 # the start plan is re-scored, sweeps revisit a seat's incumbent, and
@@ -535,8 +372,6 @@ def _judge_uncached(state: BattleState, plan, deep: bool) -> float:
     from . import party_search as ps
 
     first = ps._quick_score(state, plan)
-    if RESTOCK_LOOKAHEAD:
-        first += _restock_credit(state, plan)
     if not deep:
         return first
     probe = state.clone()
@@ -1173,7 +1008,7 @@ def climb(state: BattleState, rng=random,
           # module docstring records for budget. 16 fits inside the
           # panel's 24; anything wider needs the budget raised with it.
           width: int = 16, probe_tracks: Optional[bool] = None,
-          deep: bool = False, rollout: int = 0,
+          deep: bool = False,
           fixed: Optional[Mapping[int, Optional[Action]]] = None,
           pairs: bool = True, pair_width: int = 7, reject=None,
           allow_unites: bool = True
@@ -1403,8 +1238,7 @@ def climb(state: BattleState, rng=random,
     # One seed for every candidate this call compares, so the rollouts
     # are paired rather than a lottery.
     seed = rng.randrange(1 << 30)
-    judge = ((lambda st, pl: rollout_judge(st, pl, seed, rollout))
-             if rollout else (lambda st, pl: _judge(st, pl, deep)))
+    judge = (lambda st, pl: _judge(st, pl, deep))
 
     fixed = dict(fixed or {})
 
@@ -1419,7 +1253,7 @@ def climb(state: BattleState, rng=random,
         def _value_of(st):
             inner = climb(st, rng, budget=budget, width=width,
                           probe_tracks=probe_tracks, deep=deep,
-                          rollout=rollout, pairs=pairs,
+                          pairs=pairs,
                           pair_width=pair_width, reject=reject,
                           allow_unites=False)
             if inner is None:

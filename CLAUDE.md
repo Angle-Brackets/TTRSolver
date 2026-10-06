@@ -288,9 +288,11 @@ Still solo and **must not be quietly generalised**:
   ATTACK, not of the cog throwing it, which is why it is one set rather
   than a column per department. The categories are fetched with
   `action=query&list=categorymembers`, not a page parse.
-- The live readers see one toon: the Local API reports the client's own
-  laff and training, and nothing reads a teammate's laff meter off the
-  screen.
+- TTR's live readers see one toon: the Local API reports the client's
+  own laff and training, and nothing reads a teammate's laff meter off
+  the screen. The Realms stream DOES carry teammates
+  (`RealmsBuild.allies`), and only the playouts and the PPO row use them
+  -- the board everything else sees still counts allies as a number.
 
 **Accuracy is rolled per track per target, not per gag.** Gags of the
 same track aimed at the same cog share one roll, so they all land or
@@ -369,3 +371,107 @@ failure: it stays silent instead of raising a false alarm.
 
 `TTRGame.vlt` (the game's Python) is encrypted, 8.0 bits/byte. The
 `phase_*.mf` files are plain Panda3D multifiles and are readable.
+
+## The Playout engine
+
+`solver/search/playout.py` is the strong engine, shown as the panel's
+third row beside PPO (`hybrid.climb`) and the expectimax Search. It takes
+about ten candidate moves (`wide_candidates`: climb's pick, the scorer's
+and the network's top two, the best move of every kind climb considered,
+the pass) and plays each to the END OF THE FIGHT, with successive halving
+at 8 and 16 rollouts and common random numbers. Measured on the solo VP
+(20 + 20 cogs, live-panel information only): shipped climb ~7%, top-3
+playouts 21-27%, the wide menu ~40%, the fast network playing on with 4x
+the rollouts 55-70%. Each step was a paired sweep; the numbers and p-values
+are in the module and its commits.
+
+Things that hold it together, each measured:
+
+- **The one-round scorer must not choose what gets played out.** On a
+  playout-labelled benchmark it was barely better than random among its
+  own top four, and four random menu entries beat its top four.
+- **Formulas fitted to playout labels fail in play** (7% -> 3.6%, 0.4%):
+  a one-decision label holds only while the old player plays on. The
+  playouts themselves are the judge. Do not try a third fit without a new
+  idea about why.
+- **`fastplayer` plays out the rest of each fight** -- a small network
+  trained to copy climb (two DAgger rounds, 79% agreement). Slightly worse
+  per rollout, four times as many in the same time. Solo only: groups are
+  played on by climb, which plans every seat.
+- **More than 32 rollouts per move did not pay** (146 vs 139/200, p 0.46).
+- **No peeking.** Unseen cogs are redrawn from the level band in each
+  rollout, in the numbers `boss.Horizon` gives. Without a horizon the
+  playout ends with the battle on screen.
+- **A laff tiebreak (half a cog)** separates moves that all win the
+  battle; without it every candidate scored the same in buildings.
+- **In a building, the pouch is worth something** when a playout stops at
+  the floor: worth = damage x reach (1, or `GROUP_REACH` 2.5 -- [OWNER])
+  with the last copies of a gag dearer, weighted `POUCH_WEIGHT` 2 cogs.
+  It changes no measurable outcome (buildings are decided by laff) and
+  makes the advice spend the gag an expert would; at 6 it hoards and loses.
+- **Groups** follow `GROUP_MODE`: "coordinated" (default; your part of the
+  party's best joint plan, the teammates assumed to play theirs) or
+  "pickup" (your move, teammates from `SensiblePrior`). On the same 40
+  party VPs, planning together won 23 and each toon alone won 0.
+
+The panel runs it anytime: chunks of rollouts across `PLAYOUT_WORKERS`
+processes, the best move posted after each chunk, a challenger replacing
+it only when it leads by a paired standard error.
+
+## Boss fights and buildings
+
+`solver/live/boss.py` knows the published structure of the four boss
+fights -- [OWNER] solo VP 20 + 20, CEO round one 20 per side; CFO, CJ,
+CEO round two and any party count are [TODO] -- and counts cogs defeated
+against it. That is information a player has, signed off by the owner;
+a building's next floor is not, and stays unknown. Realms names the boss
+from the battle object; TTR has no boss zone string yet
+(`boss.TTR_BOSS_ZONES` is empty until one is observed) and uses the
+panel's picker.
+
+A building is detected so the playouts value the pouch: TTR from the
+Local API zone (`session.BUILDING_ZONES` -- only "Cog Building",
+observed), Realms from the battle class (`realms_session.battle_kind`).
+
+## Reading digits
+
+Gag counts and cog-plate levels go through small classifiers
+(`solver/live/digits.py`, numpy at play time) trained on SYNTHETIC digits
+in the game's own font, distorted the way real frames are and cut by the
+live cropping itself. `tools/train_digits.py` (`--kind count|level`)
+rebuilds them. Without the weights the template matchers are used.
+
+- **Counts are cropped by brightness against the cell's own background**
+  (video colour bleed erased white strokes under the old colour test),
+  keeping only the right-aligned run of glyphs (gag-icon highlights read
+  as extra 1s). A glyph outside the counts' fixed size band is doubtful
+  -- that is the mouse cursor sitting on a digit.
+- **The menu is remembered while it is open** (`panel_memory`): counts
+  cannot change until the round resolves, so every poll votes on each
+  cell and a doubtful read takes the cell's clean value.
+- **With the "Total gags" label unreadable** (it is replaced by the gag's
+  card while one is hovered) a doubtful pouch cell is refused, and a
+  count above the gag's carry limit is refused always.
+- Hand-labelled benchmark, 168 cells: old reader 151, now 167. A recorded
+  building run: 42 of 45 menu frames accepted, none found wrong.
+
+Never commit game frames: the tests draw digits with PIL's own font or
+plain arrays.
+
+## Tools for measuring
+
+- `tools/sweep.py` -- paired sweeps over the same simulated fights
+  (`--regime solo-vp|solo-building|my-building|party-building|party-vp|ceo`,
+  `--arms climb playout top3 playout:pouch=0 ...`). The harness behind the
+  playout figures.
+- `tools/ground_truth.py` -- the playout-labelled benchmark (`build`) and
+  a split-half score for any judge (`score`).
+- `tools/video_scan.py` -- the screen readers over a recording; needs an
+  ffmpeg with HEVC (`winget install Gyan.FFmpeg`).
+- `tools/gen_fast_player_data.py` + `tools/train_fast_player.py` -- the
+  fast rollout player, with DAgger rounds.
+
+Pool workers are REUSED across jobs: a script that sets a module global
+for one arm must set it for every arm, every job, or it leaks. That bug
+once made two "different" arms play mostly the same.
+

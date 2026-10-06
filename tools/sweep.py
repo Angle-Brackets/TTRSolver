@@ -1,0 +1,205 @@
+"""Paired sweeps: the same simulated fights, played by different engines.
+
+    python tools/sweep.py --regime solo-vp --n 200 --arms climb playout
+    python tools/sweep.py --regime my-building --arms playout playout:pouch=0
+    python tools/sweep.py --regime solo-vp --arms playout:stages=16/32/64 playout
+
+Every arm plays the SAME seeds, so the fights and dice match and only the
+engine differs; results are compared on discordant seeds with a sign test.
+This is the harness behind the figures in the playout, reader and pouch
+commits -- see docs/experiment-log.md.
+
+REGIMES
+  solo-vp       a solo VP, 20 + 20 cogs, every track but Toon-Up, 140 laff,
+                three slips and a ten-card SOS deck
+  solo-building a solo toon in a building, drawn street-first
+  my-building   the owner's toon (54 laff, 40-gag pouch, Toon-Up 5, Sound 6,
+                Throw 5, Squirt 5, Drop 7 organic) in Daisy Gardens buildings
+  party-building  a 2-4 toon building, you choosing, teammates modelled
+  party-vp      a two-toon VP planned together
+  ceo           the two-toon CEO side, two leftovers
+
+ARMS  (`name` or `name:key=value,key=value`)
+  climb         the PPO row: `hybrid.climb`, budget 24
+  playout       the Playout row: `playout.pick_wide` with shipped settings
+  top3          `playout.pick` -- the scorer's top three, played out
+      keys: stages=8/16/32  pouch=<weight>  player=net|climb  rollouts=<n>
+
+Each board is shown to the engine as the live panel would see it: no
+holdout, and in a boss fight the horizon the boss tracker would give.
+"""
+from __future__ import annotations
+
+import argparse
+import random
+import statistics
+import sys
+import time
+from math import comb
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+DECK = {"Professor Pete": 2, "Flippy": 2, "Daffy Don": 2, "Moe Zart": 1,
+        "Barnacle Bessie": 1, "Julius Wheezer": 1, "Sticky Lou": 1}
+REGIMES = ("solo-vp", "solo-building", "my-building", "party-building",
+           "party-vp", "ceo")
+
+
+def _sampler(regime):
+    from solver import ceo as ceo_mod, facility, sos as sos_mod, vp as vp_mod
+    from solver.data.types import Track
+    from solver.rl import env as env_mod
+    from solver.state import BattleState, ToonState
+
+    if regime == "solo-vp":
+        def sample(rng):
+            st = vp_mod.vp_position(rng)
+            have = [t for t in Track if t is not Track.TOON_UP]
+            toon = vp_mod.maxed_toon(rng, tracks=have, laff=140)
+            toon.fires = 3
+            toon.sos_cards = {k: v for k, v in DECK.items() if k in sos_mod.BY_NAME}
+            st.toons = [toon]
+            return st
+        return sample, True, 400
+    if regime == "solo-building":
+        def sample(rng):
+            st = env_mod.facility_position(rng)
+            st.toons = st.toons[:1]
+            return st
+        return sample, True, 20
+    if regime == "my-building":
+        def sample(rng):
+            street = rng.choice([s for s in facility.STREETS if s[1] == "Daisy Gardens"])
+            exp = {Track.TOON_UP: 5, Track.SOUND: 6, Track.THROW: 5,
+                   Track.SQUIRT: 5, Track.DROP: 7}
+            toon = ToonState(54, 54, exp, {}, frozenset({Track.DROP}),
+                             pouch_capacity=40)
+            env_mod.restock(toon, rng)
+            return BattleState(toons=[toon], cogs=[], kind="facility",
+                               street=street[0])
+        return sample, True, 20
+    if regime == "party-building":
+        return env_mod.facility_position, False, 20
+    if regime == "party-vp":
+        return vp_mod.vp_position, True, 400
+    if regime == "ceo":
+        def sample(rng):
+            ceo_mod.LEFTOVERS = 2
+            return ceo_mod.ceo_position(rng)
+        return sample, True, 400
+    raise ValueError(regime)
+
+
+def _parse_arm(spec):
+    name, _, rest = spec.partition(":")
+    opts = {}
+    for item in filter(None, rest.split(",")):
+        key, _, value = item.partition("=")
+        opts[key] = value
+    return name, opts
+
+
+def _horizon(env, state):
+    """What the boss tracker would say, for a solo VP; None otherwise."""
+    from solver.live.boss import BossTracker
+
+    if state.kind != "vp" or len(state.toons) != 1:
+        return None
+    alive = sum(1 for c in state.cogs if c.hp > 0)
+    total = 40
+    defeated = total - alive - len(state.holdout) - state.cogs_remaining
+    tracker = BossTracker(kind="vp")
+    tracker.correct(defeated)
+    return tracker.horizon(on_field=alive)
+
+
+def play(job):
+    regime, seed, spec = job
+    from solver import ceo as ceo_mod
+    from solver.rl import env as env_mod
+    from solver.search import hybrid, playout
+
+    if regime == "ceo":
+        ceo_mod.enable_big_cheese()
+    name, opts = _parse_arm(spec)
+    # Settings are module globals and pool workers are REUSED: set every
+    # one each job, or one arm's setting leaks into the next arm's fights.
+    playout.ROLLOUT_PLAYER = opts.get("player", "net")
+    playout.POUCH_WEIGHT["facility"] = float(opts.get("pouch", 2.0))
+    stages = tuple(int(x) for x in opts.get("stages", "8/16/32").split("/"))
+
+    sample, coordinated, cap = _sampler(regime)
+    env = env_mod.BattleEnv(rng=random.Random(seed), sampler=sample,
+                            coordinated=coordinated, max_rounds=cap)
+    env.reset()
+    rng = random.Random(seed)
+    done, info, rounds, spent = False, {}, 0, 0.0
+    while not done and rounds < 400:
+        state = env.state
+        if state.toons[0].laff <= 0 and not coordinated:
+            plan = [None]
+        else:
+            view = (playout.solo_view(state) if not coordinated
+                    else playout._view(state))
+            plan, t0 = None, time.perf_counter()
+            if name == "playout":
+                res = playout.pick_wide(state if not coordinated else view,
+                                        _horizon(env, state), seed=seed * 1000 + rounds,
+                                        stages=stages)
+                plan = res.plan if res else None
+            elif name == "top3":
+                res = playout.pick(view, _horizon(env, state), seed=seed * 1000 + rounds,
+                                   rollouts=int(opts.get("rollouts", 8)))
+                plan = res.plan if res else None
+            elif name != "climb":
+                raise ValueError(f"unknown arm {name!r}")
+            spent += time.perf_counter() - t0
+            if plan is None:
+                plan = hybrid.climb(view, rng, budget=24)
+        done, info = playout.step_round(env, plan)
+        rounds += 1
+    return seed, spec, bool(info.get("win")), rounds, spent / max(1, rounds)
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--regime", choices=REGIMES, default="solo-vp")
+    ap.add_argument("--n", type=int, default=200, help="paired seeds")
+    ap.add_argument("--base", type=int, default=100000, help="first seed")
+    ap.add_argument("--arms", nargs="+", default=["climb", "playout"])
+    ap.add_argument("--workers", type=int, default=10)
+    args = ap.parse_args()
+
+    from concurrent.futures import ProcessPoolExecutor
+
+    jobs = [(args.regime, args.base + i, arm)
+            for arm in args.arms for i in range(args.n)]
+    wins = {arm: {} for arm in args.arms}
+    cost = {arm: [] for arm in args.arms}
+    t0 = time.time()
+    with ProcessPoolExecutor(max_workers=args.workers) as pool:
+        for seed, arm, won, _rounds, per in pool.map(play, jobs, chunksize=2):
+            wins[arm][seed] = won
+            cost[arm].append(per)
+    seeds = sorted(set.intersection(*(set(v) for v in wins.values())))
+    print(f"{args.regime}: {len(seeds)} paired seeds from {args.base}, "
+          f"{time.time() - t0:.0f}s")
+    first = args.arms[0]
+    for arm in args.arms:
+        w = sum(wins[arm][s] for s in seeds)
+        line = (f"  {arm:28s} {w:4d}/{len(seeds)}  {100.0 * w / len(seeds):5.1f}%"
+                f"   {statistics.mean(cost[arm]):.2f}s a decision")
+        if arm != first:
+            up = sum(1 for s in seeds if wins[arm][s] and not wins[first][s])
+            dn = sum(1 for s in seeds if wins[first][s] and not wins[arm][s])
+            d = up + dn
+            p = (sum(comb(d, i) for i in range(min(up, dn) + 1)) / 2.0 ** d * 2
+                 if d else 1.0)
+            line += f"   vs {first}: +{up}/-{dn} p={min(1.0, p):.3f}"
+        print(line)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

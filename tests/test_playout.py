@@ -443,27 +443,24 @@ class PickupTest(unittest.TestCase):
 
 @unittest.skipUnless(HAVE, "the policy needs numpy")
 class PartyTest(unittest.TestCase):
-    """Party playouts: joint plans, played on by climb. Off by default."""
+    """A party board in `pick_wide`: coordinated by default, as live."""
 
-    def test_off_by_default(self):
-        self.assertFalse(playout.PARTY_PLAYOUTS)
-        self.assertIsNone(playout.pick_wide(_party_board(), None))
+    def test_coordinated_by_default(self):
+        board = _party_board()
+        res = playout.pick_wide(board, None, seed=1, stages=(2,))
+        self.assertEqual(len(board.toons), len(res.plan))
+        self.assertIn(playout._key(res.plan),
+                      [playout._key(c) for c in res.candidates])
 
     def test_every_candidate_is_a_whole_joint_plan(self):
         board = _party_board()
         for plan in playout.wide_candidates(board):
             self.assertEqual(len(board.toons), len(plan))
 
-    def test_when_on_it_picks_one_of_them(self):
-        old = playout.PARTY_PLAYOUTS
-        try:
-            playout.PARTY_PLAYOUTS = True
-            board = _party_board()
-            res = playout.pick_wide(board, None, seed=1, stages=(2,))
-            self.assertIn(playout._key(res.plan),
-                          [playout._key(c) for c in res.candidates])
-        finally:
-            playout.PARTY_PLAYOUTS = old
+    def test_pickup_mode_chooses_your_move_alone(self):
+        res = playout.pick_wide(_party_board(), None, seed=1, stages=(2,),
+                                mode="pickup")
+        self.assertEqual(1, len(res.plan))
 
 
 if __name__ == "__main__":
