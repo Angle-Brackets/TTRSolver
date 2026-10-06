@@ -494,6 +494,17 @@ class PouchValueTest(unittest.TestCase):
         self.assertLess(fog, pie)
         self.assertLess(pie, self._value(start))
 
+    def test_a_weak_group_gag_is_cheaper_than_a_strong_single(self):
+        """[OWNER] on a cog with 1 hp you spend the cheapest kill: an
+        Aoogah, not a Safe. Worth is damage x reach, so a group gag is not
+        dear just for being a group gag."""
+        from solver.state import Track
+
+        start = {(Track.SOUND, 4): 3, (Track.DROP, 5): 3}
+        aoogah = self._value({(Track.SOUND, 4): 2, (Track.DROP, 5): 3})
+        safe = self._value({(Track.SOUND, 4): 3, (Track.DROP, 5): 2})
+        self.assertGreater(aoogah, safe)     # spending the Aoogah keeps more
+
     def test_the_last_copy_is_dearest(self):
         from solver.state import Track
 

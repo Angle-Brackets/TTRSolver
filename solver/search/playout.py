@@ -140,56 +140,91 @@ LAFF_WEIGHT = 0.5
 # won. A player knows more floors are coming even without knowing which
 # cogs, and keeps the Foghorn.
 #
-# Measured, not set: the weight, in cogs, for the remaining pouch's value
-# as a fraction of its value when the decision was made, priced as the
-# search prices a throw (`Objective.gag_price`). Keyed by fight kind; a
-# fight with a horizon plays every round, so its pouch value is already
-# in the result and it gets none.
+# The weight, in cogs, on the remaining pouch's worth as a fraction of its
+# worth when the decision was made (see `pouch_value`). Keyed by fight
+# kind; a fight with a horizon plays every round, so its pouch's worth is
+# already in the result and it gets none.
 #
 # Measured with the owner's toon (54 laff, 40-gag pouch, their tracks) in
-# 600 paired Daisy Gardens buildings: weight 0 cleared 413, 3 cleared 422
-# (+18/-9, p = 0.12), 6 cleared 421, 10 cleared 417. On the generic solo
-# buildings, 55 vs 52 at 3 (+4/-7, p = 0.55): no harm. So 3 -- leaning
-# right where gags are scarce, neutral where laff decides. With the group
-# premium below, it flips the lone-Tightwad case to the Cream Pie.
-POUCH_WEIGHT = {"facility": 3.0}
+# 600 paired Daisy Gardens buildings, against 413 cleared at weight 0:
+# 1 -> 412, 1.5 -> 414, 2 -> 411, 3 -> 407 (all p > 0.5), 6 -> 378
+# (+25/-60, p < 0.001: it hoards). Generic solo buildings at 3: 54 vs 55.
+# So it changes outcomes by nothing measurable up to 3 and harms at 6.
+# Set at 2: just past the ~1.7 that turns the lone-Tightwad Foghorn into
+# a Whole Cream Pie, well inside the harmless range. What it buys is
+# advice that spends the gag an expert would, not more clears in a
+# simulator whose buildings are decided by laff.
+POUCH_WEIGHT = {"facility": 2.0}
 
 
-# SCARCITY BY WHAT IS LEFT, not by what could be carried. The search's
-# price counts a gag dear if few FIT in a pouch; it does not know you are
-# down to your last two Foghorns. So the k-th last copy of a gag is worth
-# its price times (1 + LAST_COPY / k): the last one dearest, then the one
-# before it, and so on -- spending one of two Foghorns costs more than one
-# of three Cream Pies, as a player weighs it.
+# WHAT A GAG IS WORTH LATER: the damage it could still deal.
+#
+#     worth = damage per cog x the cogs it can expect to hit
+#
+# A single-target gag hits 1. A group gag hits GROUP_REACH, the cogs
+# typically standing when one is thrown. So the group advantage scales
+# with how hard the gag hits, which is what the owner's cases need:
+# a Foghorn (~38 x 2.5) is worth far more than a Whole Cream Pie (~38),
+# so a lone 32 hp cog gets the pie; an Aoogah (~15 x 2.5) is worth less
+# than a Safe (~65), so a cog on 1 hp gets the Aoogah, not the Safe; and
+# Aoogah vs Seltzer is close, as it should be. A flat "group = x2" got
+# the second case backwards. Damage is the middle of the gag's range in
+# the wiki-sourced tables (organic where the toon has it): the board
+# knows a track's training level, not the points within it.
+#
+# [OWNER] 2.5 -- the owner's figure for how many cogs a group gag
+# typically hits. Not measured.
+GROUP_REACH = 2.5
+# SCARCITY BY WHAT IS LEFT, not by what could be carried: the k-th last
+# copy of a gag counts (1 + LAST_COPY / k) times -- spending one of two
+# Foghorns costs more than one of three Cream Pies.
 LAST_COPY = 1.0
-# A GROUP GAG IS WORTH ITS REACH. [OWNER] "using it on a single cog is
-# inherently wasteful since Foghorn COULD do 50 to all cogs." Kept in the
-# pouch, a group gag will usually hit several cogs; spent on a lone one,
-# that reach is thrown away. So a group gag in the pouch counts as this
-# many single uses.
-GROUP_PREMIUM = 2.0
+
+
+def _worth(track, level, toon) -> Optional[float]:
+    """Damage the gag could deal later, or None if it deals none."""
+    from .. import data as gags_mod
+
+    try:
+        gag = gags_mod.gag(track, level)
+        if not gag.damage:
+            return None
+        organic = bool(getattr(toon, "is_organic", lambda t: False)(track))
+        damage = gag.damage_at(0.5, organic=organic)
+    except Exception:                       # noqa: BLE001 -- no table entry
+        return None
+    return float(damage) * (GROUP_REACH if gag.group else 1.0)
 
 
 def pouch_value(state: BattleState) -> float:
-    """The gags the party still carries, at the search's prices, with the
-    last copies of each gag worth more."""
-    from .. import data as gags_mod
+    """What the party's remaining gags could still do, in damage.
+
+    Gags that deal none (Toon-Up, Lure) are priced as the search prices
+    a throw, converted to damage at the rate the same toon's damage gags
+    give -- one scale, without inventing a value for a heal or a lure.
+    """
     from .objective import Objective
 
     price = Objective()
     total = 0.0
     for toon in state.toons:
-        for (track, level), count in toon.gag_counts.items():
-            if count:
-                unit = price.gag_price(
-                    track, level, unlocked=toon.track_exp.get(track, 6) or 6)
-                try:
-                    if gags_mod.gag(track, level).group:
-                        unit *= GROUP_PREMIUM
-                except Exception:          # noqa: BLE001 -- unknown gag: plain price
-                    pass
-                total += unit * sum(1.0 + LAST_COPY / k
-                                    for k in range(1, count + 1))
+        held = [(track, level, count)
+                for (track, level), count in toon.gag_counts.items() if count]
+        units, worths, rate_num, rate_den = [], [], 0.0, 0.0
+        for track, level, count in held:
+            unit = price.gag_price(track, level,
+                                   unlocked=toon.track_exp.get(track, 6) or 6)
+            worth = _worth(track, level, toon)
+            units.append(unit)
+            worths.append(worth)
+            if worth is not None and unit > 0:
+                rate_num += worth
+                rate_den += unit
+        rate = rate_num / rate_den if rate_den else 1.0
+        for (track, level, count), unit, worth in zip(held, units, worths):
+            each = worth if worth is not None else unit * rate
+            total += each * sum(1.0 + LAST_COPY / k
+                                for k in range(1, count + 1))
     return total
 
 
