@@ -82,6 +82,10 @@ class AdviceWorker(threading.Thread):
     _boss = None
     # What the player picked by hand, or None for "whatever is detected".
     _boss_manual = None
+    # Toons in the whole boss fight as the player states it. One toon in
+    # your battle cannot tell a solo VP from one side of a two-player VP,
+    # and the two meet different counts (`boss.rounds_for`).
+    _boss_players = 1
 
     def __init__(self, outbox, objective, depth: int, budget: float):
         super().__init__(daemon=True)
@@ -258,6 +262,17 @@ class AdviceWorker(threading.Thread):
             self.boss_tracker().set_kind(kind)
         self._settings_changed()
 
+    def set_boss_players(self, count) -> None:
+        """The player saying how many toons are in the fight, both sides."""
+        try:
+            value = max(1, min(8, int(count)))
+        except (TypeError, ValueError):
+            return
+        with self._lock:
+            self._boss_players = value
+            self.boss_tracker().party_size = value
+        self._settings_changed()
+
     def set_cogs_defeated(self, count) -> None:
         """The player correcting the count. They can see the fight."""
         try:
@@ -279,6 +294,7 @@ class AdviceWorker(threading.Thread):
         tracker = self.boss_tracker()
         model.boss_kind = tracker.kind or ""
         model.boss_manual = self._boss_manual or ""
+        model.boss_players = max(1, tracker.party_size)
         model.cogs_defeated = tracker.defeated if tracker.kind else 0
         left = tracker.left_in_fight(on_field) if tracker.kind else None
         model.cogs_left = -1 if left is None else left

@@ -78,12 +78,30 @@ class VPStructureTest(unittest.TestCase):
         plan.take_floor()
         self.assertEqual(plan.remaining(), BossTracker(kind="vp").later_rounds())
 
-    def test_a_party_vp_has_no_confirmed_count(self):
-        """Twenty and twenty was observed solo. Applying it to a party
-        would be the guess the no-guessing rule forbids."""
-        tracker = BossTracker(kind="vp", party_size=2)
-        self.assertIsNone(tracker.later_rounds())
-        self.assertIsNone(tracker.left_in_fight())
+    def test_a_party_vp_side_meets_ten_a_round(self):
+        """[OWNER] twenty a round in all, split across the two sides."""
+        for players in (2, 3, 4):
+            tracker = BossTracker(kind="vp", party_size=players)
+            self.assertEqual(10, tracker.later_rounds())
+            self.assertEqual(20, tracker.left_in_fight())
+
+    def test_a_solo_ceo_faces_both_sides(self):
+        self.assertEqual((40, None), BossTracker(kind="ceo").rounds())
+        self.assertEqual((20, None), BossTracker(kind="ceo", party_size=2).rounds())
+
+    def test_the_simulator_builds_what_the_tracker_expects(self):
+        import random
+
+        from solver import vp as vp_mod
+        from solver.rl import env as env_mod
+
+        for players in (1, 2):
+            e = env_mod.BattleEnv(rng=random.Random(5), sampler=vp_mod.vp_position)
+            e.boss_players = players
+            e.reset()
+            side = len(e.state.cogs) + len(e.state.holdout)
+            expect = BossTracker(kind="vp", party_size=players).rounds()
+            self.assertEqual(expect, (side, e.state.cogs_remaining))
 
 
 class UnknownSizesTest(unittest.TestCase):
@@ -211,6 +229,16 @@ class RealmsDetectionTest(unittest.TestCase):
                                            _boss_battle(9, _members([11])))
             self.assertEqual(kind, found.kind)
             self.assertEqual(500, found.boss_id)
+
+    def test_the_boss_says_how_many_toons_came(self):
+        from solver.live import realms_session
+        from tests.test_realms_panel import FakeListener
+
+        boss = _boss_obj()
+        battle = _boss_battle(9, _members([11]))
+        self.assertIsNone(realms_session.boss_of(FakeListener([], [boss]), battle).players)
+        boss.fields["setToonIds"] = ([11, 12], [11], [12])
+        self.assertEqual(2, realms_session.boss_of(FakeListener([], [boss]), battle).players)
 
     def test_a_street_battle_is_not_a_boss_fight(self):
         from solver.live import realms_session
@@ -349,12 +377,24 @@ class ScreenCountingTest(unittest.TestCase):
         w._track_boss(w.model, [], [], [])
         self.assertEqual("", w.model.boss_kind)
 
-    def test_a_party_size_withholds_the_total(self):
+    def test_a_party_side_counts_its_share(self):
         w = self._worker()
         w.set_boss("vp")
         w.toon_count = 2
         w._track_boss(w.model, [], [], [])
-        self.assertEqual(-1, w.model.cogs_left)
+        self.assertEqual(20, w.model.cogs_left)
+
+    def test_alone_on_screen_is_not_alone_in_the_fight(self):
+        """One toon in your battle may be one side of a two-player VP;
+        only the player can say which."""
+        w = self._worker()
+        w.set_boss("vp")
+        w._track_boss(w.model, [], [], [])
+        self.assertEqual(40, w.model.cogs_left)
+        w.set_boss_players(2)
+        w._track_boss(w.model, [], [], [])
+        self.assertEqual(20, w.model.cogs_left)
+        self.assertEqual(2, w.model.boss_players)
 
     def test_no_boss_zone_is_known_yet(self):
         """Filled only from an observed string, never a plausible one."""

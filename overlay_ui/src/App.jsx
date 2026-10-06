@@ -18,7 +18,7 @@ const EMPTY = {
   feedback_move: '', feedback_against: '', feedback_problem: '',
   feedback_fixable: false, feedback_needs_target: false, feedback_showing: false,
   feedback_stated: false, pouch: [],
-  boss_kind: '', boss_manual: '', cogs_defeated: 0, cogs_left: -1,
+  boss_kind: '', boss_manual: '', boss_players: 1, cogs_defeated: 0, cogs_left: -1,
 }
 
 const BOSSES = [
@@ -1063,6 +1063,15 @@ export default function App() {
               value={model.cogs_defeated}
               onChange={(val) => call('set_cogs_defeated', val)}
               title="Cogs defeated this boss fight. Counted automatically; correct it if it drifts."
+            />
+          )}
+          {model.boss_kind && (
+            <StepperRow
+              label="Toons in Fight"
+              subtitle={model.boss_players > 1 ? 'Both sides together' : 'Solo'}
+              value={model.boss_players}
+              onChange={(val) => call('set_boss_players', Math.max(1, val))}
+              title="Everyone in the boss fight, both sides. Alone you face every cog; with company each side faces its share."
             />
           )}
           <StepperRow

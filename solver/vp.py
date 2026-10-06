@@ -85,7 +85,7 @@ everywhere in this project rather than a choice made for the VP.
 from __future__ import annotations
 
 import random
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from . import facility
 from .data import gags as gags_mod
@@ -109,6 +109,23 @@ from .state import BattleState, CogState, ToonState, Track
 # computed for a position it has already written off.
 COG_ROUND = 20
 SKELECOG_ROUND = 20
+
+# [OWNER, from play] A VP is twenty cogs a round IN ALL. Alone you face
+# all twenty; with company the toons split evenly across the two sides
+# and each side faces half -- two players one a side, four players two
+# a side, ten cogs a round either way. So a solo VP and a party VP are
+# not the same fight scaled: a party side meets half the cogs.
+PARTY_COG_ROUND = 10
+PARTY_SKELECOG_ROUND = 10
+
+
+def side_rounds(players: int) -> Tuple[int, int]:
+    """(cog round, skelecog round) one side faces, for a VP of `players`
+    toons in all -- not the toons on that side, which cannot tell a solo
+    VP from one side of a two-player VP."""
+    if players <= 1:
+        return COG_ROUND, SKELECOG_ROUND
+    return PARTY_COG_ROUND, PARTY_SKELECOG_ROUND
 
 # [CONFIRMED] wiki: the two rounds' level bands.
 COG_LEVELS = (1, 12)

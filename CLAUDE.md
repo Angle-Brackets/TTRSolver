@@ -412,7 +412,13 @@ Things that hold it together, each measured:
 - **Groups** follow `GROUP_MODE`: "coordinated" (default; your part of the
   party's best joint plan, the teammates assumed to play theirs) or
   "pickup" (your move, teammates from `SensiblePrior`). On the same 40
-  party VPs, planning together won 23 and each toon alone won 0.
+  party VPs, planning together won 23 and each toon alone won 0 -- but
+  that was at the solo count, 20 + 20 a side. At the owner's 10 + 10 a
+  two-toon side wins 40/40 with either engine. One toon at 10 + 10 (a
+  duo VP's side, light SOS, no slips or Unites) is NOT easy in the model:
+  climb 6/60, playouts 33/60, every traced loss dying to the skelecogs
+  with most of the pouch unthrown. The owner calls that fight trivial,
+  so the gap points at cog damage or attack rate, not at the search.
 
 The panel runs it anytime: chunks of rollouts across `PLAYOUT_WORKERS`
 processes, the best move posted after each chunk, a challenger replacing
@@ -421,9 +427,13 @@ it only when it leads by a paired standard error.
 ## Boss fights and buildings
 
 `solver/live/boss.py` knows the published structure of the four boss
-fights -- [OWNER] solo VP 20 + 20, CEO round one 20 per side; CFO, CJ,
-CEO round two and any party count are [TODO] -- and counts cogs defeated
-against it. That is information a player has, signed off by the owner;
+fights -- [OWNER] a VP is 20 cogs a round in all, so solo 20 + 20 and,
+with company, 10 + 10 per side; CEO round one is 20 per side, so 40
+solo (the owner's "I think"); CFO, CJ and CEO round two are [TODO] --
+and counts cogs defeated against it. Round sizes depend on the toons in
+the WHOLE fight, which one battle cannot see: alone on screen is a solo
+VP or one side of a duo. TTR's panel asks ("Toons in Fight"); Realms
+reads the boss's `setToonIds` where present. That is information a player has, signed off by the owner;
 a building's next floor is not, and stays unknown. Realms names the boss
 from the battle object; TTR has no boss zone string yet
 (`boss.TTR_BOSS_ZONES` is empty until one is observed) and uses the
@@ -461,7 +471,7 @@ plain arrays.
 ## Tools for measuring
 
 - `tools/sweep.py` -- paired sweeps over the same simulated fights
-  (`--regime solo-vp|solo-building|my-building|party-building|party-vp|ceo`,
+  (`--regime solo-vp|solo-building|my-building|party-building|duo-vp|party-vp|ceo`,
   `--arms climb playout top3 playout:pouch=0 ...`). The harness behind the
   playout figures.
 - `tools/ground_truth.py` -- the playout-labelled benchmark (`build`) and

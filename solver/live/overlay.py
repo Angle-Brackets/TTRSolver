@@ -213,6 +213,8 @@ class Model:
     # count still shows, the total is not invented.
     boss_kind: str = ""
     boss_manual: str = ""
+    # Toons in the whole fight, both sides -- see `boss.BossTracker`.
+    boss_players: int = 1
     cogs_defeated: int = 0
     cogs_left: int = -1
     # Which engine produced the advice on screen: "rl", "search", or ""
@@ -688,7 +690,7 @@ class Worker(AdviceWorker):
             self._observe_boss(boss_mod.boss_from_location(zone))
         if any(e.kind in ("cog_defeated", "battle_ended") for e in events):
             tracker.note_defeated(boss_mod.died_plates(before, after))
-        tracker.party_size = self.toon_count
+        tracker.party_size = max(self.toon_count, self._boss_players)
         self._boss_into(model, on_field=len(after))
 
     def _should_retry(self, model, now: float) -> bool:

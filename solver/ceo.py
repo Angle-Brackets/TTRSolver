@@ -68,6 +68,14 @@ V2_FRACTION = 0.20
 # available for it.
 ROUND_ONE = 20
 
+# [OWNER, "I think"] Alone you face BOTH sides' cogs: forty in battle
+# one. With company the toons split across the sides and each faces its
+# own twenty. Battle two has no count either way (see LEFTOVERS).
+def round_one_for(players: int) -> int:
+    """Battle one's cogs on one side, for a CEO of `players` toons in all.
+    Reads ROUND_ONE at call time, so a sweep of it still applies."""
+    return 2 * ROUND_ONE if players <= 1 else ROUND_ONE
+
 # Banquet survivors carried into battle two. Swept, not guessed.
 LEFTOVERS = 10
 

@@ -28,28 +28,33 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, NamedTuple, Optional, Set, Tuple
 
-# Cogs per round, in order. None where unknown.
-BOSS_ROUNDS = {
-    # [OWNER, from play] twenty a round for a SOLO VP -- see `vp.COG_ROUND`.
-    # A party VP's count has not been reported, which `remaining` honours
-    # through PARTY_COUNTS_KNOWN below.
-    "vp": (20, 20),
-    # [OWNER, verified in game] twenty in battle one, PER SIDE -- see
-    # `ceo.ROUND_ONE`. Battle two is whoever survived the banquet plus
-    # the Big Cheese: it varies by play, so it is unknown until seen.
-    "ceo": (20, None),
-    # [TODO] neither published source gives a count and none has been
-    # observed. Left unknown rather than filled with something plausible.
-    "cfo": None,
-    "cj": None,
-}
+BOSS_KINDS = ("vp", "ceo", "cfo", "cj")
 
-BOSS_KINDS = tuple(BOSS_ROUNDS)
 
-# Fights whose counts were reported for a party as well as solo. Empty:
-# the VP's twenty-and-twenty is a solo observation, and applying it to a
-# party would be the guess the no-guessing rule forbids.
-PARTY_COUNTS_KNOWN: Set[str] = set()
+def rounds_for(kind: Optional[str], players: int) -> Optional[Tuple]:
+    """Each round's cogs ON ONE SIDE, in order, for a fight of `players`
+    toons in all. None where the fight's sizes are unknown, and None for
+    a round whose size is. The sizes come from the fights' own modules,
+    so the simulator and the tracker cannot disagree.
+    """
+    if kind == "vp":
+        # [OWNER, from play] twenty a round in all. Alone you face all of
+        # it; with company the toons split across the two sides and each
+        # side faces ten -- see `vp.side_rounds`.
+        from .. import vp as vp_mod
+        return vp_mod.side_rounds(players)
+    if kind == "ceo":
+        # [OWNER, verified in game] twenty in battle one PER SIDE, so
+        # alone you face forty (the solo figure is the owner's "I think",
+        # not a count). Battle two is the banquet's survivors plus the Big
+        # Cheese: it varies by play, so it is unknown until seen.
+        from .. import ceo as ceo_mod
+        return (ceo_mod.round_one_for(players), None)
+    # cfo, cj: [TODO] neither published source gives a count and none has
+    # been observed. Left unknown rather than filled with something
+    # plausible.
+    return None
+
 
 # WHERE TTR'S LOCAL API PUTS YOU IN A BOSS ROOM. [TODO] Empty on purpose:
 # `location.zone` inside the four boss rooms has never been observed, and
@@ -109,6 +114,9 @@ class BossTracker:
 
     kind: Optional[str] = None
     defeated: int = 0
+    # Toons in the WHOLE fight, both sides -- not the toons in your
+    # battle. One toon on screen is a solo VP or one side of a two-player
+    # one, and those meet twenty a round and ten.
     party_size: int = 1
     _dead_ids: Set[int] = field(default_factory=set)
 
@@ -119,7 +127,7 @@ class BossTracker:
         the count, because a count against the wrong structure is
         worse than none."""
         kind = kind or None
-        if kind is not None and kind not in BOSS_ROUNDS:
+        if kind is not None and kind not in BOSS_KINDS:
             raise ValueError("not a boss fight: %r (one of %s)"
                              % (kind, ", ".join(BOSS_KINDS)))
         if kind != self.kind:
@@ -162,12 +170,7 @@ class BossTracker:
     # -- what is left -----------------------------------------------------
 
     def rounds(self) -> Optional[Tuple]:
-        rounds = BOSS_ROUNDS.get(self.kind) if self.kind else None
-        if rounds is None:
-            return None
-        if self.party_size > 1 and self.kind not in PARTY_COUNTS_KNOWN:
-            return None
-        return rounds
+        return rounds_for(self.kind, self.party_size)
 
     def round_index(self) -> Optional[int]:
         """Which round the count says we are in, 0-based, or None."""

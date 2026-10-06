@@ -16,14 +16,19 @@ REGIMES
   my-building   the owner's toon (54 laff, 40-gag pouch, Toon-Up 5, Sound 6,
                 Throw 5, Squirt 5, Drop 7 organic) in Daisy Gardens buildings
   party-building  a 2-4 toon building, you choosing, teammates modelled
-  party-vp      a two-toon VP planned together
-  ceo           the two-toon CEO side, two leftovers
+  duo-vp        one side of a two-player VP: one toon, 10 + 10 cogs, two
+                Restock All SOS and two Toon-Up SOS, no slips or Unites
+  party-vp      one side of a four-player VP: two toons planned together,
+                10 + 10 cogs
+  ceo           the two-toon CEO side, 20 cogs then two leftovers
 
 ARMS  (`name` or `name:key=value,key=value`)
   climb         the PPO row: `hybrid.climb`, budget 24
   playout       the Playout row: `playout.pick_wide` with shipped settings
   top3          `playout.pick` -- the scorer's top three, played out
+  net           the fast network alone, one forward pass a decision (solo)
       keys: stages=8/16/32  pouch=<weight>  player=net|climb  rollouts=<n>
+            net=<weights.json>  (the fast network's weights, default shipped)
 
 Each board is shown to the engine as the live panel would see it: no
 holdout, and in a boss fight the horizon the boss tracker would give.
@@ -43,7 +48,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 DECK = {"Professor Pete": 2, "Flippy": 2, "Daffy Don": 2, "Moe Zart": 1,
         "Barnacle Bessie": 1, "Julius Wheezer": 1, "Sticky Lou": 1}
 REGIMES = ("solo-vp", "solo-building", "my-building", "party-building",
-           "party-vp", "ceo")
+           "duo-vp", "party-vp", "ceo")
+# Toons in the whole boss fight where this side is not everyone.
+PLAYERS = {"duo-vp": 2}
 
 
 def _sampler(regime):
@@ -81,6 +88,16 @@ def _sampler(regime):
         return sample, True, 20
     if regime == "party-building":
         return env_mod.facility_position, False, 20
+    if regime == "duo-vp":
+        # One side of a two-player VP: one toon, ten cogs a round, and the
+        # owner's "a few SOS restocks and/or Toon-Up" -- no slips, no Unites.
+        def sample(rng):
+            st = vp_mod.vp_position(rng)
+            st.toons = st.toons[:1]
+            st.toons[0].fires = 0
+            st.toons[0].sos_cards = {"Professor Pete": 2, "Flippy": 1, "Daffy Don": 1}
+            return st
+        return sample, True, 400
     if regime == "party-vp":
         return vp_mod.vp_position, True, 400
     if regime == "ceo":
@@ -101,15 +118,20 @@ def _parse_arm(spec):
 
 
 def _horizon(env, state):
-    """What the boss tracker would say, for a solo VP; None otherwise."""
+    """What the boss tracker would say in a boss fight; None otherwise."""
     from solver.live.boss import BossTracker
 
-    if state.kind != "vp" or len(state.toons) != 1:
+    if state.kind not in ("vp", "ceo"):
         return None
+    tracker = BossTracker(kind=state.kind,
+                          party_size=getattr(env, "boss_players", None)
+                          or len(state.toons))
+    rounds = tracker.rounds()
+    floor = getattr(env, "floor", 1)
     alive = sum(1 for c in state.cogs if c.hp > 0)
-    total = 40
-    defeated = total - alive - len(state.holdout) - state.cogs_remaining
-    tracker = BossTracker(kind="vp")
+    defeated = sum(rounds[:floor - 1])
+    if rounds[floor - 1] is not None:
+        defeated += rounds[floor - 1] - alive - len(state.holdout)
     tracker.correct(defeated)
     return tracker.horizon(on_field=alive)
 
@@ -118,7 +140,7 @@ def play(job):
     regime, seed, spec = job
     from solver import ceo as ceo_mod
     from solver.rl import env as env_mod
-    from solver.search import hybrid, playout
+    from solver.search import fastplayer, hybrid, playout
 
     if regime == "ceo":
         ceo_mod.enable_big_cheese()
@@ -127,11 +149,13 @@ def play(job):
     # one each job, or one arm's setting leaks into the next arm's fights.
     playout.ROLLOUT_PLAYER = opts.get("player", "net")
     playout.POUCH_WEIGHT["facility"] = float(opts.get("pouch", 2.0))
+    fastplayer.use(opts.get("net") or fastplayer.DEFAULT_WEIGHTS)
     stages = tuple(int(x) for x in opts.get("stages", "8/16/32").split("/"))
 
     sample, coordinated, cap = _sampler(regime)
     env = env_mod.BattleEnv(rng=random.Random(seed), sampler=sample,
                             coordinated=coordinated, max_rounds=cap)
+    env.boss_players = PLAYERS.get(regime)
     env.reset()
     rng = random.Random(seed)
     done, info, rounds, spent = False, {}, 0, 0.0
@@ -152,6 +176,8 @@ def play(job):
                 res = playout.pick(view, _horizon(env, state), seed=seed * 1000 + rounds,
                                    rollouts=int(opts.get("rollouts", 8)))
                 plan = res.plan if res else None
+            elif name == "net":
+                plan = fastplayer.act(view) if len(view.toons) == 1 else None
             elif name != "climb":
                 raise ValueError(f"unknown arm {name!r}")
             spent += time.perf_counter() - t0

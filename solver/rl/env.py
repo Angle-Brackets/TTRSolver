@@ -664,6 +664,11 @@ class BattleEnv:
         self.gamma = gamma
         self.sampler = sampler or default_position
         self.coordinated = coordinated
+        # Toons in the whole boss fight, where that differs from the toons
+        # on this side: one toon here may be a solo VP or one side of a
+        # two-player VP, and the two meet different counts. None means
+        # this side is everyone (`vp.side_rounds`, `ceo.round_one_for`).
+        self.boss_players: Optional[int] = None
         self.state: Optional[BattleState] = None
         self.rounds = 0
         self.actor = 0
@@ -786,6 +791,9 @@ class BattleEnv:
         self.floor += 1
         return nxt
 
+    def _players(self) -> int:
+        return self.boss_players or len(self.state.toons)
+
     def reset(self) -> Tuple[List[float], List[bool]]:
         while True:
             self.state = self.sampler(self.rng)
@@ -796,7 +804,9 @@ class BattleEnv:
                 # 14, which only the Bossbot Clubhouse cogs cover, so it
                 # uses its own factory rather than `_facility_cog`.
                 from .. import ceo as ceo_mod
-                self.plan = ceo_mod.ceo_plan(self.rng, self._boss_cog)
+                self.plan = ceo_mod.ceo_plan(
+                    self.rng, self._boss_cog,
+                    round_one=ceo_mod.round_one_for(self._players()))
                 first, holdout = self.plan.take_floor()
                 self.state.cogs = first
                 self.state.holdout = holdout
@@ -808,7 +818,8 @@ class BattleEnv:
                 # cogs_remaining, one pouch across both rounds -- is the
                 # ordinary facility machinery.
                 from .. import vp as vp_mod
-                self.plan = vp_mod.vp_plan(self.rng, self._sellbot_cog)
+                self.plan = vp_mod.vp_plan(self.rng, self._sellbot_cog,
+                                           *vp_mod.side_rounds(self._players()))
                 first, holdout = self.plan.take_floor()
                 self.state.cogs = first
                 self.state.holdout = holdout

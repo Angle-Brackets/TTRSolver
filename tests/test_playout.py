@@ -62,7 +62,7 @@ class HorizonTest(unittest.TestCase):
         self.assertIsNone(BossTracker(kind="cfo").horizon())
         self.assertIsNone(BossTracker(kind="cj").horizon())
         self.assertIsNone(BossTracker().horizon())
-        self.assertIsNone(BossTracker(kind="vp", party_size=2).horizon())
+        self.assertEqual(10, BossTracker(kind="vp", party_size=2).horizon().holdout)
 
 
 @unittest.skipUnless(HAVE, "the policy needs numpy")

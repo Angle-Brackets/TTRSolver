@@ -546,7 +546,9 @@ class RealmsWorker(AdviceWorker):
             # The largest party seen this fight: a toon going sad does
             # not change how many cogs the fight was built with.
             tracker.party_size = max(tracker.party_size,
-                                     result.state.allies_standing + 1)
+                                     result.state.allies_standing + 1,
+                                     getattr(boss, "players", None) or 0,
+                                     self._boss_players)
         tracker.apply(result.state)
 
     def _record_feedback(self, now_state) -> None:
@@ -1329,6 +1331,11 @@ class RealmsApi:
     def set_cogs_defeated(self, count) -> None:
         """Correct the cogs-defeated count."""
         self._worker.set_cogs_defeated(count)
+
+    def set_boss_players(self, count) -> None:
+        """The player's count of toons in the boss fight. A floor, not an
+        override: where the server names more, the server wins."""
+        self._worker.set_boss_players(count)
 
     def ask_now(self) -> None:
         """Recompute now. The page's "Work it out" button."""

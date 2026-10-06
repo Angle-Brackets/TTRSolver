@@ -24,8 +24,8 @@ from solver.state import ToonState, Track
 
 
 def _party_board(seed=990000, laff=60, size=12):
-    old = vp_mod.COG_ROUND, vp_mod.SKELECOG_ROUND
-    vp_mod.COG_ROUND = vp_mod.SKELECOG_ROUND = size
+    old = vp_mod.PARTY_COG_ROUND, vp_mod.PARTY_SKELECOG_ROUND
+    vp_mod.PARTY_COG_ROUND = vp_mod.PARTY_SKELECOG_ROUND = size
 
     def sampler(rng):
         st = env_mod.facility_position(rng)
@@ -47,7 +47,7 @@ def _party_board(seed=990000, laff=60, size=12):
         e.reset()
         return e.state
     finally:
-        vp_mod.COG_ROUND, vp_mod.SKELECOG_ROUND = old
+        vp_mod.PARTY_COG_ROUND, vp_mod.PARTY_SKELECOG_ROUND = old
 
 
 class ConstantAcrossTheMenuTest(unittest.TestCase):

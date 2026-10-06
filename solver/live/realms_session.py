@@ -110,6 +110,13 @@ class BossBattle(NamedTuple):
     # from cogs defeated instead. Kept so the first real fight shows it.
     battle_number: Optional[int]
     side: Optional[int]
+    # Toons in the whole fight, both sides, or None if the boss does not
+    # say. [OPEN TOONTOWN SOURCE] `DistributedBossCog.setToonIds(toonIds,
+    # battleA, battleB)` -- not yet seen on this stream, so it is read
+    # where present and nothing is assumed where it is not. It matters
+    # because one toon in your battle may be a solo VP or one side of a
+    # two-player one, which meet twenty cogs a round and ten.
+    players: Optional[int] = None
 
 
 def boss_of(listener, battle) -> Optional[BossBattle]:
@@ -133,7 +140,17 @@ def boss_of(listener, battle) -> Optional[BossBattle]:
         return value
 
     return BossBattle(kind, boss_id, _scalar("setBattleNumber"),
-                      _scalar("setBattleSide"))
+                      _scalar("setBattleSide"), _players(boss_obj))
+
+
+def _players(boss_obj) -> Optional[int]:
+    """Toons in the boss fight from `setToonIds`, or None."""
+    value = boss_obj.get("setToonIds") if boss_obj is not None else None
+    if isinstance(value, (list, tuple)) and value:
+        toons = value[0]
+        if isinstance(toons, (list, tuple)) and toons:
+            return len(toons)
+    return None
 
 
 def cog_from_object(obj, lured: bool = False,
