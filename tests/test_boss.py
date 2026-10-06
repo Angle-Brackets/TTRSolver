@@ -414,3 +414,33 @@ class StaysStdlibTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OwnerPouchTest(unittest.TestCase):
+
+    def test_fills_the_pouch_exactly_with_magnets_last(self):
+        import random
+
+        from solver import vp
+        from solver.data import gags
+        from solver.data.types import Track
+
+        toon = vp.maxed_toon(random.Random(1), laff=120,
+                             tracks=[t for t in Track if t is not Track.TOON_UP])
+        vp.owner_vp_pouch(toon)
+        self.assertEqual(80, gags.pouch_total(toon.gag_counts))
+        self.assertEqual(10, toon.gag_counts[(Track.LURE, 4)])
+        self.assertEqual(3, toon.gag_counts[(Track.LURE, 6)])
+        self.assertNotIn((Track.TRAP, 4), toon.gag_counts)
+
+    def test_skips_tracks_the_toon_lacks(self):
+        import random
+
+        from solver import vp
+        from solver.data.types import Track
+
+        toon = vp.maxed_toon(random.Random(1), laff=120,
+                             tracks=[Track.THROW, Track.SQUIRT, Track.DROP])
+        vp.owner_vp_pouch(toon)
+        self.assertTrue(all(t in (Track.THROW, Track.SQUIRT, Track.DROP)
+                            for t, _ in toon.gag_counts))

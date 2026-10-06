@@ -29,6 +29,7 @@ ARMS  (`name` or `name:key=value,key=value`)
   net           the fast network alone, one forward pass a decision (solo)
       keys: stages=8/16/32  pouch=<weight>  player=net|climb  rollouts=<n>
             net=<weights.json>  (the fast network's weights, default shipped)
+            kit=owner  (restock every toon with `vp.OWNER_VP_POUCH` first)
 
 Each board is shown to the engine as the live panel would see it: no
 holdout, and in a boss fight the horizon the boss tracker would give.
@@ -157,6 +158,10 @@ def play(job):
                             coordinated=coordinated, max_rounds=cap)
     env.boss_players = PLAYERS.get(regime)
     env.reset()
+    if opts.get("kit") == "owner":
+        from solver import vp as vp_mod
+        for toon in env.state.toons:
+            vp_mod.owner_vp_pouch(toon)
     rng = random.Random(seed)
     done, info, rounds, spent = False, {}, 0, 0.0
     while not done and rounds < 400:

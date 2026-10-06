@@ -187,6 +187,43 @@ def maxed_toon(rng, tracks: Optional[Dict[Track, int]] = None,
     return toon
 
 
+# [OWNER] The owner's solo VP pouch, Toon-Up-less, as (track, level):
+# count. MAX is the game's carry limit -- TNT, Trunk and Foghorn are
+# maxed "across both" games, whose Sound and Trap limits differ. Magnets
+# are listed as 7-10 and take whatever room is left, up to 10. Level 7s
+# are pouch-exempt and carried one each, as `maxed_toon` already does.
+#
+# It replaces `maxed_toon`'s top-down fill, which packs by LEVEL: a
+# third of that pouch was Trap and it ran out of room before Big Magnet,
+# so the toon could lure all four skelecogs on few rounds.
+MAX = None
+OWNER_VP_POUCH = {
+    (Track.TRAP, 6): MAX, (Track.TRAP, 5): 7,
+    (Track.LURE, 6): 3, (Track.LURE, 5): 7,
+    (Track.SOUND, 6): MAX, (Track.SOUND, 5): MAX, (Track.SOUND, 4): 5,
+    (Track.THROW, 6): 3, (Track.THROW, 5): 7, (Track.THROW, 4): 4,
+    (Track.SQUIRT, 6): 3, (Track.SQUIRT, 5): 7, (Track.SQUIRT, 4): 4,
+    (Track.DROP, 6): 3, (Track.DROP, 5): 7,
+}
+OWNER_MAGNETS = (7, 10)
+
+
+def owner_vp_pouch(toon: ToonState) -> ToonState:
+    """Restock `toon` with the owner's VP pouch, for the tracks it has."""
+    counts: Dict = {}
+    for track in toon.track_exp:
+        counts[(track, 7)] = gags_mod.carry_limit(track, 7, 7)
+    for (track, level), want in OWNER_VP_POUCH.items():
+        if toon.track_exp.get(track, 0) >= level:
+            limit = gags_mod.carry_limit(track, level, 7)
+            counts[(track, level)] = limit if want is MAX else min(want, limit)
+    if toon.track_exp.get(Track.LURE, 0) >= 4:
+        room = toon.pouch_capacity - gags_mod.pouch_total(counts)
+        counts[(Track.LURE, 4)] = max(0, min(OWNER_MAGNETS[1], room))
+    toon.gag_counts = {k: v for k, v in counts.items() if v > 0}
+    return toon
+
+
 def vp_plan(rng, cog_factory,
             cog_round: Optional[int] = None,
             skelecog_round: Optional[int] = None) -> facility.FacilityPlan:
