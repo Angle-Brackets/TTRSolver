@@ -38,6 +38,7 @@ from typing import List, Optional, Tuple
 import numpy as np
 
 COUNT_WEIGHTS = Path(__file__).resolve().with_name("count_digits.json")
+LEVEL_WEIGHTS = Path(__file__).resolve().with_name("level_digits.json")
 
 # The classifier's input: a glyph scaled into a 20x14 box, intensities
 # stretched to 0-1, plus its width/height ratio.
@@ -131,3 +132,16 @@ def count_classifier() -> Optional[Classifier]:
         _TRIED = True
         _COUNT = Classifier.load(COUNT_WEIGHTS)
     return _COUNT
+
+
+_LEVEL: Optional[Classifier] = None
+_LEVEL_TRIED = False
+
+
+def level_classifier() -> Optional[Classifier]:
+    """The cog-plate level digit reader, or None if its weights are missing."""
+    global _LEVEL, _LEVEL_TRIED
+    if not _LEVEL_TRIED:
+        _LEVEL_TRIED = True
+        _LEVEL = Classifier.load(LEVEL_WEIGHTS)
+    return _LEVEL

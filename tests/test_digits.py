@@ -80,3 +80,39 @@ class CountCroppingTest(unittest.TestCase):
         a = self._corner([])
         a[8:24, 28:33] = (205, 225, 255)  # bright but tinted
         self.assertEqual(1, len(gp._count_glyphs(a, region=(0, 0, 1, 1))))
+
+
+@unittest.skipUnless(HAVE, "needs numpy")
+class LevelGlyphsTest(unittest.TestCase):
+    """The plate's number, cut from "Level N" and read."""
+
+    def _plate(self, text, size=22):
+        from PIL import Image, ImageDraw, ImageFont
+
+        try:
+            font = ImageFont.load_default(size=size)
+        except TypeError:
+            self.skipTest("Pillow too old for a sized default font")
+        img = Image.new("RGB", (120, 44), (200, 200, 205))
+        ImageDraw.Draw(img).text((2, 8), text, font=font, fill=(25, 25, 30))
+        return np.asarray(img).astype(np.int16)
+
+    def test_one_digit_level_gives_one_glyph(self):
+        self.assertEqual(1, len(V.level_glyphs(self._plate("Level 6"))))
+
+    def test_two_digit_level_gives_two_glyphs(self):
+        self.assertEqual(2, len(V.level_glyphs(self._plate("Level 12"))))
+
+    def test_the_plates_frame_is_not_a_digit(self):
+        a = self._plate("Level 5").copy()
+        a[:, -4:-1] = 40                      # the frame, full height
+        self.assertEqual(1, len(V.level_glyphs(a)))
+
+    def test_the_shipped_level_weights_load(self):
+        self.assertIsNotNone(digits.level_classifier())
+
+
+try:
+    from solver.live import vision as V
+except ImportError:                           # pragma: no cover
+    V = None

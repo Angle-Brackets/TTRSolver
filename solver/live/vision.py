@@ -559,6 +559,44 @@ def _drop_tall_outliers(boxes, limit: float = 1.6):
     return kept if len(kept) >= 2 else boxes
 
 
+def level_glyphs(patch: np.ndarray):
+    """The level number's glyphs as (mask, darkness) crops, left to right.
+
+    The same split as `_digits_only` -- "Level" and the number, parted at
+    the widest gap, the plate's border dropped -- but returning each digit
+    of the number separately, with its greyscale (inverted, so ink is
+    bright) for `digits.level_classifier`. `patch` is the plate's level
+    region, RGB.
+    """
+    gray = np.asarray(patch, dtype=float)[..., :3].mean(axis=2)
+    full = _denoise(gray < 110)
+    if not full.any():
+        return []
+    ys, xs = np.nonzero(full)
+    oy, ox = ys.min(), xs.min()
+    mask = full[oy:ys.max() + 1, ox:xs.max() + 1]
+    gray = gray[oy:ys.max() + 1, ox:xs.max() + 1]
+    boxes = _drop_tall_outliers(_components(mask))
+    if len(boxes) < 2:
+        return []
+    gaps = [(boxes[i + 1][0] - boxes[i][2], i) for i in range(len(boxes) - 1)]
+    widest, at = max(gaps)
+    typical = sorted(g for g, _ in gaps)[len(gaps) // 2]
+    if widest <= typical:
+        return []
+    number = boxes[at + 1:]
+    # One glyph per digit: blobs overlapping in x are one glyph.
+    merged = []
+    for b in number:
+        if merged and b[0] < merged[-1][2]:
+            m = merged[-1]
+            merged[-1] = (m[0], min(m[1], b[1]), max(m[2], b[2]), max(m[3], b[3]))
+        else:
+            merged.append(b)
+    return [(mask[y0:y1, x0:x1], 255.0 - gray[y0:y1, x0:x1])
+            for x0, y0, x1, y1 in merged]
+
+
 def _digits_only(mask: np.ndarray):
     """Split "Level 6" and keep the "6".
 
@@ -699,6 +737,29 @@ def read_level(frame: np.ndarray,
     patch = frame[max(0, y0):y1, max(0, x0):x1, :3]
     if patch.size == 0:
         return None, 0.0, 0.0
+    from .digits import NET_DOUBT, level_classifier
+
+    net = level_classifier()
+    if net is not None:
+        # THE LEARNED READER, when its weights are present. Same return
+        # scales as the template path below, so the callers' gates hold:
+        # score is the least confident digit's probability, and the
+        # probability margin is mapped so that NET_DOUBT lands on
+        # MIN_LEVEL_MARGIN. A number outside 1-12 is not a cog level.
+        glyphs = level_glyphs(patch)
+        if not glyphs:
+            return None, 0.0, 0.0
+        text, score, margin = "", 1.0, 1.0
+        for _mask, darkness in glyphs:
+            probs = net.probabilities(darkness)
+            order = np.argsort(probs)[::-1]
+            text += str(int(order[0]))
+            score = min(score, float(probs[order[0]]))
+            margin = min(margin, float(probs[order[0]] - probs[order[1]]))
+        level = int(text)
+        if not 1 <= level <= 12:
+            return None, 0.0, 0.0
+        return level, score, margin * (MIN_LEVEL_MARGIN / NET_DOUBT)
     mask = _ink(patch.mean(axis=2))
     if mask is None or mask.shape[0] < 4:
         return None, 0.0, 0.0

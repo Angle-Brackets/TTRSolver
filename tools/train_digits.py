@@ -1,6 +1,11 @@
-"""Train the gag-count digit reader on synthetic digits.
+"""Train the on-screen digit readers on synthetic digits.
 
-    python tools/train_digits.py            # writes solver/live/count_digits.json
+    python tools/train_digits.py                 # solver/live/count_digits.json
+    python tools/train_digits.py --kind level    # solver/live/level_digits.json
+
+`--kind level` does the same for cog-plate levels: "Level N" in near-black
+on light plate metal, with the cog showing faintly through and sometimes
+the plate's frame, cut by `vision.level_glyphs`.
 
 Renders counts 0-30 in the game's interface font (read from the player's
 own install by `ttr_assets`, never shipped) as white digits on cells like
@@ -90,6 +95,82 @@ def corner(rng, number, font_path):
     return np.asarray(img).astype(np.int16)
 
 
+def plate(rng, level, font_path):
+    """One synthetic cog-plate level region ("Level N"), int16 RGB.
+
+    Near-black text on light brushed metal, with the cog showing faintly
+    through the plate -- skin, suit, the teal of the glasses -- which is
+    what thins the strokes on real plates; sometimes the plate's dark
+    frame at the right edge, which the cropping must drop.
+    """
+    import numpy as np
+    from PIL import Image, ImageDraw, ImageFilter, ImageFont
+
+    digit_h = rng.randint(11, 28)
+    up = 4
+    H = int(digit_h * rng.uniform(2.2, 2.7))
+    W = int(digit_h * rng.uniform(5.3, 6.2))
+    g = rng.randint(170, 220)
+    img = Image.new("RGB", (W * up, H * up), (g, g, g + rng.randint(-5, 8)))
+    draw = ImageDraw.Draw(img, "RGBA")
+    for _ in range(rng.randint(0, 5)):
+        col = rng.choice([(235, 190, 180), (120, 60, 40), (90, 50, 40),
+                          (70, 190, 200), (200, 200, 200), (60, 60, 70)])
+        alpha = rng.randint(20, 90)
+        x = rng.randint(-W // 2, W) * up
+        y = rng.randint(-H // 2, H) * up
+        w, h = rng.randint(4, W) * up, rng.randint(4, H) * up
+        draw.ellipse((x, y, x + w, y + h), fill=col + (alpha,))
+    font = ImageFont.truetype(font_path, int(digit_h * up * 1.38))
+    text = f"Level {level}"
+    box = draw.textbbox((0, 0), text, font=font)
+    x = rng.randint(0, 3) * up - box[0]
+    y = (H * up - (box[3] - box[1])) // 2 - box[1] + rng.randint(-2, 2) * up
+    ink = rng.randint(10, 60)
+    draw.text((x, y), text, font=font, fill=(ink, ink, ink + rng.randint(0, 10)))
+    if rng.random() < 0.35:                     # the plate's frame
+        bar = rng.randint(2, 4) * up
+        edge = W * up - rng.randint(0, 3) * up
+        draw.rectangle((edge - bar, rng.randint(0, H // 3) * up, edge,
+                        H * up), fill=(rng.randint(30, 70),) * 3 + (255,))
+    img = img.resize((W, H), Image.LANCZOS)
+    if rng.random() < 0.6:
+        img = img.filter(ImageFilter.GaussianBlur(rng.uniform(0.1, 0.8)))
+    if rng.random() < 0.4:
+        y_, cb, cr = img.convert("YCbCr").split()
+        half = (max(1, W // 2), max(1, H // 2))
+        cb = cb.resize(half, Image.BILINEAR).resize((W, H), Image.BILINEAR)
+        cr = cr.resize(half, Image.BILINEAR).resize((W, H), Image.BILINEAR)
+        img = Image.merge("YCbCr", (y_, cb, cr)).convert("RGB")
+    if rng.random() < 0.4:
+        buf = io.BytesIO()
+        img.save(buf, "JPEG", quality=rng.randint(40, 95))
+        img = Image.open(buf).convert("RGB")
+    return np.asarray(img).astype(np.int16)
+
+
+def level_samples(job):
+    """`n` labelled level-digit glyph vectors from seed `seed`."""
+    n, seed = job
+    import numpy as np
+
+    from solver.live import digits, ttr_assets, vision
+
+    font_path = str(ttr_assets.interface_font())
+    rng = random.Random(seed)
+    X, Y = [], []
+    while len(Y) < n:
+        level = rng.choice(list(range(1, 10)) * 2 + [10, 11, 12] * 3)
+        glyphs = vision.level_glyphs(plate(rng, level, font_path))
+        text = str(level)
+        if len(glyphs) != len(text):
+            continue
+        for (_mask, gray), ch in zip(glyphs, text):
+            X.append(digits.glyph_vector(gray))
+            Y.append(int(ch))
+    return np.array(X[:n], dtype=np.float32), np.array(Y[:n])
+
+
 def samples(job):
     """`n` labelled glyph vectors from seed `seed`."""
     n, seed = job
@@ -115,10 +196,16 @@ def samples(job):
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--kind", choices=("count", "level"), default="count",
+                    help="gag-menu counts (white on blue) or cog-plate "
+                         "levels (dark on light metal)")
     ap.add_argument("--samples", type=int, default=60000)
     ap.add_argument("--epochs", type=int, default=30)
-    ap.add_argument("--export", default="solver/live/count_digits.json")
+    ap.add_argument("--export", default=None)
     args = ap.parse_args()
+    if args.export is None:
+        args.export = f"solver/live/{args.kind}_digits.json"
+    make = samples if args.kind == "count" else level_samples
 
     from concurrent.futures import ProcessPoolExecutor
 
@@ -129,8 +216,8 @@ def main() -> int:
 
     chunks = 20
     with ProcessPoolExecutor() as pool:
-        parts = list(pool.map(samples, [(args.samples // chunks, s)
-                                        for s in range(chunks)]))
+        parts = list(pool.map(make, [(args.samples // chunks, s)
+                                     for s in range(chunks)]))
     X = np.concatenate([p[0] for p in parts])
     Y = np.concatenate([p[1] for p in parts])
     print(f"  {len(Y)} synthetic digits, per digit {np.bincount(Y).tolist()}")
