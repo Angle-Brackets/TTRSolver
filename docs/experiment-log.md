@@ -1285,3 +1285,25 @@ vs the level-first fill, +5 solo, p 0.51) and Lure accuracy (70-95%
 against level 8-12 skelecogs, from the wiki's formula). Laff was always
 the binding constraint -- losses ended with 65-78 gags unthrown -- and
 unites are the laff.
+
+## A unite-aware fast network: stronger alone, no better in the playouts
+
+2731e4e gave the rollout network unite inputs and a unite head. Trained
+on 354k new climb-labelled decisions with unites in hand (one DAgger
+round) plus the old 345k rows padded with "no unites": gag agreement
+with climb 82.8% (shipped 79%), unite agreement 96% (about 80% is "none").
+
+Paired, the owner's pouch and five unites:
+
+                            shipped net    unite-aware net
+    solo VP, playouts       94/100         93/100   +6/-7   p 1.00
+    duo VP side, playouts   55/60          49/60    +2/-8   p 0.11
+    solo VP, net alone       6/100         22/100
+    duo VP side, net alone   9/60          24/60
+
+Alone it is far stronger -- it heals itself -- but as the playouts'
+rollout player it is no better and 40% slower (the unite head, and a
+board clone whenever it uses one). Not shipped. A guess at why: the
+playouts' job is to RANK first moves, and a continuation that spends
+unites on every candidate's behalf narrows the differences the ranking
+reads. The code stays: weights without a unite head never use one.
