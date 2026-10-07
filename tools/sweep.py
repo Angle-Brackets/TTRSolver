@@ -31,6 +31,9 @@ ARMS  (`name` or `name:key=value,key=value`)
             net=<weights.json>  (the fast network's weights, default shipped)
             kit=owner  (restock every toon with `vp.OWNER_VP_POUCH` first)
             unites=<n>  (every toon holds n unites, of any kind)
+            mates=off  (the ENGINE assumes teammates never use their unites;
+                        in the fight itself they always do)
+            mode=coordinated|pickup  (`playout.GROUP_MODE`)
 
 Each board is shown to the engine as the live panel would see it: no
 holdout, and in a boss fight the horizon the boss tracker would give.
@@ -152,6 +155,11 @@ def play(job):
     playout.ROLLOUT_PLAYER = opts.get("player", "net")
     playout.POUCH_WEIGHT["facility"] = float(opts.get("pouch", 2.0))
     fastplayer.use(opts.get("net") or fastplayer.DEFAULT_WEIGHTS)
+    # `mates=off` changes what the ENGINE assumes, never the fight: the
+    # real round always lets teammates use what they hold (the game), and
+    # only the engine's own rollouts drop them.
+    model_mates = opts.get("mates", "on") != "off"
+    playout.GROUP_MODE = opts.get("mode", "coordinated")
     stages = tuple(int(x) for x in opts.get("stages", "8/16/32").split("/"))
 
     sample, coordinated, cap = _sampler(regime)
@@ -176,6 +184,7 @@ def play(job):
             view = (playout.solo_view(state) if not coordinated
                     else playout._view(state))
             plan, t0 = None, time.perf_counter()
+            playout.TEAMMATE_UNITES = model_mates
             if name == "playout":
                 res = playout.pick_wide(state if not coordinated else view,
                                         _horizon(env, state), seed=seed * 1000 + rounds,
@@ -192,6 +201,7 @@ def play(job):
             spent += time.perf_counter() - t0
             if plan is None:
                 plan = playout.climb_with_unite(view, rng, budget=24)
+        playout.TEAMMATE_UNITES = True
         done, info = playout.step_round(env, plan)
         rounds += 1
     return seed, spec, bool(info.get("win")), rounds, spent / max(1, rounds)

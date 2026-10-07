@@ -638,3 +638,67 @@ class PlayableTest(unittest.TestCase):
         board.toons[0].sos_cards = {"Flippy": 1}
         call = Action(track=None, sos="Flippy")
         self.assertTrue(playout.playable(board, [call]))
+
+
+@unittest.skipUnless(HAVE, "the policy needs numpy")
+class TeammateUniteTest(unittest.TestCase):
+    """A unite costs no turn, so a teammate holding one uses it."""
+
+    def setUp(self):
+        import json
+        import os
+        import tempfile
+        from solver.search import fastplayer
+
+        n_in, n_out = len(fastplayer.features_dim_probe()), fastplayer.n_outputs()
+        bias = [0.0] * len(fastplayer.unite_slots())
+        bias[5] = 5.0                      # the fifth Toon-Up value: 80 on TTR
+        payload = {"layers": [[[[0.0] * 4] * n_in, [0.0] * 4],
+                              [[[0.0] * n_out] * 4, [0.0] * n_out]],
+                   "unite": [[[0.0] * len(bias)] * 4, bias]}
+        path = os.path.join(tempfile.mkdtemp(), "w.json")
+        with open(path, "w") as fh:
+            json.dump(payload, fh)
+        self.assertTrue(fastplayer.use(path))
+
+    def tearDown(self):
+        from solver.search import fastplayer
+
+        fastplayer._MODEL = fastplayer._UNITE = fastplayer._PATH = None
+        playout.TEAMMATE_UNITES = True
+
+    def _party(self, held):
+        import copy
+
+        board = _board(cogs=3, laff=137, seed=5)
+        mate = copy.deepcopy(board.toons[0])
+        mate.laff, mate.unites_held = 20, held
+        board.toons.append(mate)
+        return playout.build_env(board, None, random.Random(5))
+
+    def _round(self, env):
+        from solver.state import Action
+
+        playout.step_round(env, [Action(track=None), Action(track=None)])
+        return env.state.toons[1]
+
+    def test_a_teammate_holding_one_heals_themselves(self):
+        mate = self._round(self._party(held=2))
+        self.assertEqual(1, mate.unites_held)
+        self.assertGreater(mate.laff, 20)
+
+    def test_none_held_none_used(self):
+        mate = self._round(self._party(held=0))
+        self.assertEqual(0, mate.unites_held)
+
+    def test_the_switch_turns_it_off(self):
+        playout.TEAMMATE_UNITES = False
+        mate = self._round(self._party(held=2))
+        self.assertEqual(2, mate.unites_held)
+
+    def test_the_seat_view_puts_that_toon_first(self):
+        env = self._party(held=2)
+        view = playout.seat_view(env.state, 1)
+        self.assertEqual(1, len(view.toons))
+        self.assertEqual(20, view.toons[0].laff)
+        self.assertEqual(1, view.allies_standing)

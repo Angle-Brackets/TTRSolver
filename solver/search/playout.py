@@ -342,6 +342,8 @@ def step_round(env, plan):
         toon = env.state.toons[0]
         if unites_mod.available(toon) and unites_mod.in_stock(toon, unite):
             unites_mod.apply(toon, unite)
+    if TEAMMATE_UNITES and len(env.state.toons) > 1:
+        _teammate_unites(env.state)
     while not done and env.rounds == start:
         action = plan[env.actor] if plan and env.actor < len(plan) else None
         index, through = env_mod.PASS_INDEX, None
@@ -768,6 +770,46 @@ def menu_in_child(state: BattleState, reject, allow_level_7: bool,
 # together won 23 of 40 party VPs and planning each toon alone won 0,
 # with either teammate model.
 GROUP_MODE = "coordinated"
+
+
+# TEAMMATES USE UNITES TOO, in both group modes. A unite costs no turn --
+# it opens the round beside the gag -- so a teammate holding one uses it
+# whatever they throw. Each standing teammate's unite is chosen from
+# THEIR seat by the fast network's unite head (`fastplayer.choose_unite`,
+# which copies climb's unite choice, 96% held out). In coordinated mode
+# that is the team's plan; in pickup mode it is a model of what a
+# stranger does with a unite, a guess in the same way `SensiblePrior` is.
+# Nothing is invented: a teammate uses only unites they are recorded as
+# holding, and the live readers record none for anyone but you.
+TEAMMATE_UNITES = True
+
+
+def seat_view(state: BattleState, seat: int) -> BattleState:
+    """The board from `seat`'s chair: that toon first, the others a count."""
+    view = state.clone()
+    me = view.toons[seat]
+    others = sum(1 for i, t in enumerate(view.toons) if i != seat and t.laff > 0)
+    view.toons = [me]
+    view.allies_standing = others + max(0, int(getattr(state, "allies_standing", 0)))
+    view.holdout = []
+    return view
+
+
+def _teammate_unites(state: BattleState) -> None:
+    """Every standing teammate opens the round with the unite their seat
+    calls for, if they hold one. In place, on the real fight."""
+    from .. import unites as unites_mod
+    from . import fastplayer
+
+    if not fastplayer.available():
+        return
+    for seat in range(1, len(state.toons)):
+        toon = state.toons[seat]
+        if toon.laff <= 0 or not unites_mod.available(toon):
+            continue
+        choice = fastplayer.choose_unite(seat_view(state, seat))
+        if choice is not None and unites_mod.in_stock(toon, choice):
+            unites_mod.apply(toon, choice)
 
 
 def solo_view(state: BattleState) -> BattleState:
