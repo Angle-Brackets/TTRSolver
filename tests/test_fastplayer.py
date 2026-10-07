@@ -85,3 +85,83 @@ class PlayTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(HAVE, "needs numpy and the shipped weights")
+class UniteHeadTest(unittest.TestCase):
+    """The network sees every unite; the loadout decides what it may use."""
+
+    def tearDown(self):
+        fastplayer._MODEL = fastplayer._UNITE = fastplayer._PATH = None
+
+    def test_every_unite_option_has_a_slot_and_back(self):
+        from solver import unites as unites_mod
+
+        toon = _board().toons[0]
+        toon.laff, toon.unites_held = 20, 3
+        for choice in unites_mod.candidates(toon):
+            slot = fastplayer._slot_of(toon, choice)
+            self.assertGreater(slot, 0, choice)
+            self.assertEqual(choice, fastplayer._choice_of(toon, slot))
+
+    def test_none_held_or_cooling_down_masks_every_unite(self):
+        board = _board()
+        board.toons[0].laff = 20
+        self.assertEqual([True] + [False] * (len(fastplayer.unite_slots()) - 1),
+                         fastplayer.unite_mask(board))
+        board.toons[0].unites_held, board.toons[0].unite_cooldown = 3, 2
+        self.assertFalse(any(fastplayer.unite_mask(board)[1:]))
+        board.toons[0].unite_cooldown = 0
+        self.assertTrue(any(fastplayer.unite_mask(board)[1:]))
+
+    def test_it_sees_unites_held_and_the_cooldown(self):
+        board = _board()
+        before, _ = fastplayer.features(board)
+        board.toons[0].unites_held, board.toons[0].unite_cooldown = 5, 3
+        after, _ = fastplayer.features(board)
+        self.assertEqual([1.0, 1.0], after[-2:])
+        self.assertEqual([0.0, 0.0], before[-2:])
+
+    def _weights(self, unite_slot=None):
+        n_in, n_out = len(fastplayer.features_dim_probe()), fastplayer.n_outputs()
+        payload = {"layers": [[[[0.0] * 4] * n_in, [0.0] * 4],
+                              [[[0.0] * n_out] * 4, [0.0] * n_out]]}
+        if unite_slot is not None:
+            bias = [0.0] * len(fastplayer.unite_slots())
+            bias[unite_slot] = 5.0
+            payload["unite"] = [[[0.0] * len(bias)] * 4, bias]
+        path = os.path.join(tempfile.mkdtemp(), "w.json")
+        with open(path, "w") as fh:
+            json.dump(payload, fh)
+        return path
+
+    def test_a_chosen_unite_rides_on_the_plan_and_spares_the_board(self):
+        board = _board()
+        toon = board.toons[0]
+        toon.laff, toon.unites_held = 20, 2
+        slot = fastplayer._slot_of(toon, ("toon_up", 80))
+        self.assertTrue(fastplayer.use(self._weights(slot)))
+        plan = fastplayer.act(board)
+        self.assertEqual(("toon_up", 80), playout.unite_of(plan))
+        self.assertEqual(20, toon.laff)
+        self.assertEqual(2, toon.unites_held)
+
+    def test_it_never_picks_a_unite_it_does_not_hold(self):
+        board = _board()
+        board.toons[0].laff = 20
+        slot = fastplayer._slot_of(board.toons[0], ("toon_up", 80))
+        self.assertTrue(fastplayer.use(self._weights(slot)))
+        self.assertIsNone(playout.unite_of(fastplayer.act(board)))
+
+    def test_weights_from_before_unites_still_load_and_never_unite(self):
+        n_in = len(fastplayer.features_dim_probe()) - 2
+        n_out = fastplayer.n_outputs()
+        payload = {"layers": [[[[0.0] * 4] * n_in, [0.0] * 4],
+                              [[[0.0] * n_out] * 4, [0.0] * n_out]]}
+        path = os.path.join(tempfile.mkdtemp(), "old.json")
+        with open(path, "w") as fh:
+            json.dump(payload, fh)
+        self.assertTrue(fastplayer.use(path))
+        board = _board()
+        board.toons[0].laff, board.toons[0].unites_held = 20, 2
+        self.assertIsNone(playout.unite_of(fastplayer.act(board)))

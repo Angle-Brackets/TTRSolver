@@ -41,11 +41,20 @@ def main() -> int:
     import torch.nn as nn
     import torch.nn.functional as F
 
-    rows = []
+    rows, unite_rows = [], []
     for path in args.data:
-        rows += pickle.load(open(path, "rb"))
+        for row in pickle.load(open(path, "rb")):
+            if len(row) == 3:
+                # From before the unite inputs: those fights held no
+                # unites, so "0 held, no cooldown" is exactly right.
+                features, mask, label = row
+                rows.append((list(features) + [0.0, 0.0], mask, label))
+            elif row[0] == "act":
+                rows.append(row[1:])
+            elif row[0] == "unite":
+                unite_rows.append(row[1:])
     random.Random(0).shuffle(rows)
-    cut = int(len(rows) * (1 - args.holdout))
+    random.Random(1).shuffle(unite_rows)
     dev = "cuda" if torch.cuda.is_available() else "cpu"
 
     def tensors(part):
@@ -54,41 +63,64 @@ def main() -> int:
         Y = torch.tensor([r[2] for r in part], device=dev)
         return X, M, Y
 
-    X, M, Y = tensors(rows[:cut])
-    Xv, Mv, Yv = tensors(rows[cut:])
-    n_in, n_out = X.shape[1], M.shape[1]
-    print(f"  device {dev}  {len(X)} train / {len(Xv)} held out  "
-          f"inputs {n_in}  outputs {n_out}")
+    def split(part):
+        cut = int(len(part) * (1 - args.holdout))
+        return tensors(part[:cut]), tensors(part[cut:])
 
-    net = nn.Sequential(nn.Linear(n_in, args.hidden), nn.Tanh(),
-                        nn.Linear(args.hidden, args.hidden), nn.Tanh(),
-                        nn.Linear(args.hidden, n_out)).to(dev)
-    opt = torch.optim.Adam(net.parameters(), lr=args.lr)
+    (X, M, Y), (Xv, Mv, Yv) = split(rows)
+    have_unites = len(unite_rows) >= 20
+    if have_unites:
+        (XU, MU, YU), (XUv, MUv, YUv) = split(unite_rows)
+    n_in, n_out = X.shape[1], M.shape[1]
+    print(f"  device {dev}  {len(X)} gag rows / {len(Xv)} held out, "
+          f"{len(unite_rows)} unite rows  inputs {n_in}  outputs {n_out}")
+
+    trunk = nn.Sequential(nn.Linear(n_in, args.hidden), nn.Tanh(),
+                          nn.Linear(args.hidden, args.hidden), nn.Tanh()).to(dev)
+    act_head = nn.Linear(args.hidden, n_out).to(dev)
+    unite_head = (nn.Linear(args.hidden, MU.shape[1]).to(dev)
+                  if have_unites else None)
+    params = list(trunk.parameters()) + list(act_head.parameters())
+    if unite_head is not None:
+        params += list(unite_head.parameters())
+    opt = torch.optim.Adam(params, lr=args.lr)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, args.epochs)
 
-    def evaluate():
+    def match(head, Xs, Ms, Ys):
         with torch.no_grad():
-            out = net(Xv).masked_fill(~Mv, -1e9)
-            return (out.argmax(-1) == Yv).float().mean().item()
+            out = head(trunk(Xs)).masked_fill(~Ms, -1e9)
+            return (out.argmax(-1) == Ys).float().mean().item()
 
     for epoch in range(args.epochs):
         perm = torch.randperm(len(X), device=dev)
         for s in range(0, len(X), args.batch):
             idx = perm[s:s + args.batch]
-            out = net(X[idx]).masked_fill(~M[idx], -1e9)
+            out = act_head(trunk(X[idx])).masked_fill(~M[idx], -1e9)
             loss = F.cross_entropy(out, Y[idx])
+            if unite_head is not None:
+                uidx = torch.randint(0, len(XU), (min(args.batch, len(XU)),), device=dev)
+                uout = unite_head(trunk(XU[uidx])).masked_fill(~MU[uidx], -1e9)
+                loss = loss + F.cross_entropy(uout, YU[uidx])
             opt.zero_grad()
             loss.backward()
             opt.step()
         sched.step()
-        print(f"  epoch {epoch + 1:2d}  loss {loss.item():.3f}  "
-              f"held-out match with climb {100 * evaluate():.1f}%", flush=True)
+        line = (f"  epoch {epoch + 1:2d}  loss {loss.item():.3f}  "
+                f"held-out gag match {100 * match(act_head, Xv, Mv, Yv):.1f}%")
+        if unite_head is not None:
+            line += f"  unite match {100 * match(unite_head, XUv, MUv, YUv):.1f}%"
+        print(line, flush=True)
 
-    layers = [m for m in net if isinstance(m, nn.Linear)]
+    layers = [m for m in trunk if isinstance(m, nn.Linear)] + [act_head]
     payload = {"layers": [[m.weight.detach().cpu().T.tolist(),
                            m.bias.detach().cpu().tolist()] for m in layers],
-               "match": evaluate(), "rows": len(rows),
+               "match": match(act_head, Xv, Mv, Yv), "rows": len(rows),
+               "unite_rows": len(unite_rows),
                "hidden": args.hidden, "epochs": args.epochs}
+    if unite_head is not None:
+        payload["unite"] = [unite_head.weight.detach().cpu().T.tolist(),
+                            unite_head.bias.detach().cpu().tolist()]
+        payload["unite_match"] = match(unite_head, XUv, MUv, YUv)
     Path(args.export).write_text(json.dumps(payload), encoding="utf-8")
     print(f"  exported to {args.export}")
     return 0

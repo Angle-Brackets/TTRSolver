@@ -14,6 +14,13 @@ recorded as `fastplayer.features` with the teacher's move as the label.
 the data covers the states the network itself reaches, where its own
 mistakes take it. Two rounds took the shipped network from 68% to 79%
 agreement with climb and from 7/300 to 16/300 solo VP wins on its own.
+
+UNITES. Toons carry 0-5 unites (`--unites`). Where one is usable, the
+teacher's unite (or none) is recorded on the board BEFORE it -- a
+("unite", features, mask, slot) row -- and its gag on the board AFTER
+it, as the game orders them. Gag rows are ("act", features, mask, label);
+older pickles hold bare (features, mask, label) gag rows from before the
+unite inputs, which `train_fast_player.py` pads.
 """
 from __future__ import annotations
 
@@ -26,13 +33,24 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
-def _sampler(kind):
+def _sampler(kind, unites=5):
     from solver import sos as sos_mod
     from solver.rl import env as env_mod
 
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from sweep import DECK, _sampler as regime
 
+    base = _base_sampler(kind, sos_mod, env_mod, DECK, regime)
+
+    def sample(rng):
+        st = base(rng)
+        if unites and rng.random() < 0.7:
+            st.toons[0].unites_held = rng.randint(1, unites)
+        return st
+    return sample
+
+
+def _base_sampler(kind, sos_mod, env_mod, DECK, regime):
     if kind == "vp":
         return regime("solo-vp")[0]
 
@@ -51,8 +69,9 @@ def _sampler(kind):
 
 
 def _teach(env, view, seed, rounds, teacher, rng):
-    """The teacher's move for this board."""
-    from solver.search import hybrid, playout
+    """The teacher's move for this board, its unite carried on the plan.
+    `view` is not changed."""
+    from solver.search import playout
 
     if teacher == "playout":
         from sweep import _horizon
@@ -61,18 +80,19 @@ def _teach(env, view, seed, rounds, teacher, rng):
                                 seed=seed * 1000 + rounds)
         if res is not None:
             return res.plan
-    return hybrid.climb(view.clone(), rng, budget=24)
+    return playout.climb_with_unite(view.clone(), rng, budget=24)
 
 
 def episode(job):
-    seed, kind, player, teacher = job
+    seed, kind, player, teacher, unites = job
+    from solver import unites as unites_mod
     from solver.rl import env as env_mod
-    from solver.search import fastplayer, hybrid, playout
+    from solver.search import fastplayer, playout
 
     if player:
         fastplayer.use(player)
-    env = env_mod.BattleEnv(rng=random.Random(seed), sampler=_sampler(kind),
-                            coordinated=True,
+    env = env_mod.BattleEnv(rng=random.Random(seed),
+                            sampler=_sampler(kind, unites), coordinated=True,
                             max_rounds=400 if kind == "vp" else 20)
     try:
         env.reset()
@@ -86,10 +106,20 @@ def episode(job):
             plan = _teach(env, view, seed, rounds, teacher, rng)
         except Exception:                # noqa: BLE001
             break
-        features, mask = fastplayer.features(view)
+        unite = playout.unite_of(plan)
+        umask = fastplayer.unite_mask(view)
+        if any(umask[1:]):
+            slot = fastplayer._slot_of(view.toons[0], unite)
+            if slot >= 0 and umask[slot]:
+                rows.append(("unite", fastplayer.features(view)[0], umask, slot))
+        after = view
+        if unite is not None:
+            after = view.clone()
+            unites_mod.apply(after.toons[0], unite)
+        features, mask = fastplayer.features(after)
         label = fastplayer.index_of(plan[0] if plan else None)
         if label >= 0 and mask[label]:
-            rows.append((features, mask, label))
+            rows.append(("act", features, mask, label))
         move = fastplayer.act(view) if player else plan
         try:
             done, _ = playout.step_round(env, move)
@@ -110,14 +140,16 @@ def main() -> int:
                          "iteration: the network learns the playouts' moves "
                          "(in a VP, with the boss tracker's horizon), which "
                          "then play on with it")
+    ap.add_argument("--unites", type=int, default=5,
+                    help="most unites a toon carries (0 for none)")
     ap.add_argument("--workers", type=int, default=10)
     args = ap.parse_args()
 
     from concurrent.futures import ProcessPoolExecutor
 
     kinds = ["vp"] * 6 + ["building"] * 2 + ["street"] * 2
-    jobs = [(args.base + i, kinds[i % 10], args.player, args.teacher)
-            for i in range(args.episodes)]
+    jobs = [(args.base + i, kinds[i % 10], args.player, args.teacher,
+             args.unites) for i in range(args.episodes)]
     rows = []
     with ProcessPoolExecutor(max_workers=args.workers) as pool:
         for got in pool.map(episode, jobs, chunksize=4):
