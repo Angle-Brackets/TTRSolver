@@ -1307,3 +1307,26 @@ board clone whenever it uses one). Not shipped. A guess at why: the
 playouts' job is to RANK first moves, and a continuation that spends
 unites on every candidate's behalf narrows the differences the ranking
 reads. The code stays: weights without a unite head never use one.
+
+## Groups with unites, and the shipped network re-checked
+
+Every toon holding five unites; in the fight teammates always use what
+they hold, and the arms differ only in whether the ENGINE assumes so.
+
+    CEO side, coordinated, 40       engine ignores mates' unites 37   models them 37   +3/-3
+    party building, pickup, 100     ignores 64                       models them 68   +5/-1  p 0.22
+
+The CEO side was 11/30 for the playouts before unites could be spent at
+all; with them it is 37/40 either way. Modelling the teammates' unites
+changes the engine's choices little -- it is the unites themselves that
+decide group fights, as they did solo.
+
+The unite-aware network (shipped in d3c18f4 on realism, against a
+non-significant dip) on 200 fresh duo VP sides:
+
+    old network 167/200   unite-aware 163/200   +18/-22  p 0.64
+    with the first 60:  old 222/260  new 212/260  +20/-30  p 0.20
+
+Still within noise, still slightly behind, and 55% slower a decision
+(1.88 s vs 1.21 s). Kept, on the owner's reasoning; if a later sweep
+makes the gap significant, the old weights are in git (2731e4e^).
