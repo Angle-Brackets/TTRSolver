@@ -388,8 +388,18 @@ def rollout(state, plan, horizon, seed: int) -> float:
         if use_net:
             nxt = fastplayer.act(_view(env.state))
         else:
-            nxt = climb_with_unite(_view(env.state), policy_rng,
-                                   budget=CLIMB_BUDGET if party else ROLLOUT_BUDGET)
+            view = _view(env.state)
+            if party:
+                # Gags from climb, the unite from the network's unite
+                # head -- as the teammates choose theirs. climb's own
+                # unite check re-plans the whole round once per option
+                # (up to 13), which took a CEO side from 4 s to 25 s a
+                # decision. The first move keeps climb's full check.
+                nxt = with_unite(hybrid.climb(view, policy_rng, budget=CLIMB_BUDGET,
+                                              allow_unites=False),
+                                 _net_unite(view))
+            else:
+                nxt = climb_with_unite(view, policy_rng, budget=ROLLOUT_BUDGET)
         if nxt is None:
             break
         done, _info = step_round(env, nxt)
@@ -793,6 +803,15 @@ def seat_view(state: BattleState, seat: int) -> BattleState:
     view.allies_standing = others + max(0, int(getattr(state, "allies_standing", 0)))
     view.holdout = []
     return view
+
+
+def _net_unite(view: BattleState):
+    """The fast network's unite for seat 0 of `view`, or None."""
+    from . import fastplayer
+
+    if not view.toons or not fastplayer.available():
+        return None
+    return fastplayer.choose_unite(seat_view(view, 0))
 
 
 def _teammate_unites(state: BattleState) -> None:
