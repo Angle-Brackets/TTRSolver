@@ -64,12 +64,16 @@ class ToonState:
     # gag_counts[(track, level)] = number of that gag left in the pouch
     gag_counts: Dict[Tuple[Track, int], int] = field(default_factory=dict)
 
-    # Tracks whose gags are organic. A property of the whole track, not
-    # an individual gag -- a toon earns an organic track from a ToonTask
-    # and every gag in it is organic thereafter. Raises damage for every
-    # track, and accuracy for Lure specifically (see Gag.prop_accuracy).
-    # Fixed for the battle, so `clone` shares it rather than copying.
+    # Tracks with organic gags. Raises damage for every track, and
+    # accuracy for Lure (see Gag.prop_accuracy). Fixed for the battle, so
+    # `clone` shares it rather than copying.
     organic_tracks: FrozenSet[Track] = frozenset()
+
+    # The highest organic LEVEL per track, where known. [CONFIRMED] wiki
+    # (Gag trees): trees are planted in order of level and each makes its
+    # own gag organic, so levels 1..N are organic and the rest are not.
+    # A track in `organic_tracks` with no entry here counts whole.
+    organic_levels: Dict[Track, int] = field(default_factory=dict)
 
     # How many gags (levels 1-6; level 7 is exempt) this toon can carry.
     # A property of the TOON, earned by ToonTask -- see
@@ -154,8 +158,12 @@ class ToonState:
     # They come from the CEO, two to six a run, cap 200.
     fires: int = 0
 
-    def is_organic(self, track: Track) -> bool:
-        return track in self.organic_tracks
+    def is_organic(self, track: Track, level: Optional[int] = None) -> bool:
+        """Is this gag organic? Without a level, is any of the track."""
+        if track not in self.organic_tracks:
+            return False
+        top = self.organic_levels.get(track)
+        return top is None or level is None or level <= top
 
     def has_gag(self, track: Track, level: int) -> bool:
         return self.gag_counts.get((track, level), 0) > 0
@@ -532,6 +540,7 @@ class BattleState:
                 track_exp=t.track_exp,
                 gag_counts=t.gag_counts,
                 organic_tracks=t.organic_tracks,
+                organic_levels=t.organic_levels,
                 pouch_capacity=t.pouch_capacity,
                 fire_capacity=t.fire_capacity,
                 unite_cooldown=t.unite_cooldown,

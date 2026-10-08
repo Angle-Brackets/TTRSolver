@@ -69,7 +69,8 @@ def describe(state, action, actor: int = 0) -> Dict:
     try:
         track = getattr(action, "track", None)
         if track is not None:
-            out["organic"] = bool(state.toons[actor].is_organic(track))
+            out["organic"] = bool(state.toons[actor].is_organic(
+                track, getattr(action, "level", None)))
     except Exception:                   # noqa: BLE001
         pass
 

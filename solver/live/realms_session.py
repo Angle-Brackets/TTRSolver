@@ -136,7 +136,8 @@ def cog_from_object(obj, lured: bool = False,
                     lure_level: Optional[int] = None,
                     rounds_elapsed: Optional[int] = None,
                     trap_level: Optional[int] = None,
-                    trap_organic: bool = False
+                    trap_organic: bool = False,
+                    lure_organic: bool = False
                     ) -> Tuple[Optional[CogState], List[str]]:
     """One suit object as a `CogState`, or why it cannot be."""
     problems: List[str] = []
@@ -220,7 +221,7 @@ def cog_from_object(obj, lured: bool = False,
             except (TypeError, ValueError):
                 remaining = 1
 
-        cog.status.apply_lure(gag.prop_accuracy(organic=False), remaining,
+        cog.status.apply_lure(gag.prop_accuracy(organic=lure_organic), remaining,
                               level=lure_level)
 
     return cog, []
@@ -241,6 +242,7 @@ def toon_from_object(obj, max_fires: int = 0, max_unites: int = 0,
     counts = realms_mod.parse_inventory(obj.get("setInventory"))
     tracks = realms_mod.parse_track_access(obj.get("setTrackAccess"))
     organic = realms_mod.parse_organic(obj.get("setTrackBonusLevel"))
+    organic_levels = realms_mod.parse_organic_levels(obj.get("setTrackBonusLevel"))
 
     if laff is None or max_laff is None:
         problems.append(f"toon {obj.do_id}: no laff yet")
@@ -259,7 +261,8 @@ def toon_from_object(obj, max_fires: int = 0, max_unites: int = 0,
 
     toon = ToonState(laff=int(laff), max_laff=int(max_laff),
                      track_exp=track_exp, gag_counts=counts,
-                     organic_tracks=organic or frozenset())
+                     organic_tracks=organic or frozenset(),
+                     organic_levels=organic_levels or {})
 
     # PINK SLIPS. `setPinkSlips(uint8) required ownrecv db` -- same
     # ownrecv shape as `setInventory`, so only a query ever delivers it.
@@ -410,18 +413,21 @@ def build_state(listener, player_do_id: Optional[int] = None,
 
     lured = set(members.lured_suits())
 
-    # Trap damage depends on whether the TOON's Trap track is organic,
-    # which is a property of the thrower rather than of the cog, so it
-    # has to be read before the cogs are built.
-    trap_is_organic = False
+    # A Trap's damage and a Lure's stored accuracy depend on whether THAT
+    # gag was organic -- the thrower's trees, up to the level planted --
+    # so the player's organic levels are read before the cogs are built.
+    # Taken as the player's: who threw a teammate's gag is not tracked.
+    from ..state import Track
+
+    organic_top: dict = {}
     player_obj = listener.store.get(
         player_do_id if player_do_id is not None else members.toons[0])
     if player_obj is not None:
-        from ..state import Track
+        organic_top = realms_mod.parse_organic_levels(
+            player_obj.get("setTrackBonusLevel")) or {}
 
-        organic = realms_mod.parse_organic(
-            player_obj.get("setTrackBonusLevel"))
-        trap_is_organic = bool(organic and Track.TRAP in organic)
+    def _organic(track, level):
+        return level is not None and level <= organic_top.get(track, 0)
     cogs: List[CogState] = []
     for do_id in members.suits:
         obj = listener.store.get(do_id)
@@ -438,7 +444,8 @@ def build_state(listener, player_do_id: Optional[int] = None,
             obj, lured=do_id in lured,
             lure_level=None if age is None else age[0],
             rounds_elapsed=None if age is None else age[1],
-            trap_level=trap, trap_organic=trap_is_organic)
+            trap_level=trap, trap_organic=_organic(Track.TRAP, trap),
+            lure_organic=_organic(Track.LURE, None if age is None else age[0]))
         problems.extend(why)
         if cog is not None:
             cogs.append(cog)

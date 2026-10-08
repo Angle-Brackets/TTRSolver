@@ -58,6 +58,24 @@ class ParseSnapshotTest(unittest.TestCase):
         self.assertEqual(snap.organic_tracks(), [Track.LURE])
         self.assertFalse(snap.tracks[Track.TRAP][1])
 
+    def test_organic_stops_at_the_top_organic_gag(self):
+        """[CONFIRMED] wiki: trees are planted in order of level, so the
+        API's organic gag is the highest one; nothing above it is."""
+        body = payload()
+        body["gags"]["Throw"] = {"gag": {"level": 7, "name": "Wedding Cake"},
+                                 "organic": {"level": 4, "name": "Whole Fruit Pie"},
+                                 "experience": {}}
+        snap = parse_snapshot(body)
+        self.assertEqual({Track.LURE: 5, Track.THROW: 4}, snap.organic_levels())
+        from solver.live import session
+        toon = session.ToonState(100, 100, {Track.THROW: 7}, {},
+                                 frozenset(snap.organic_tracks()),
+                                 organic_levels=snap.organic_levels())
+        self.assertTrue(toon.is_organic(Track.THROW, 4))
+        self.assertFalse(toon.is_organic(Track.THROW, 5))
+        self.assertFalse(toon.is_organic(Track.THROW, 7))
+        self.assertTrue(toon.is_organic(Track.THROW))
+
     def test_available_gags_expands_every_level_below_the_top(self):
         snap = parse_snapshot(payload())
         self.assertEqual(snap.available_gags(),
@@ -96,7 +114,7 @@ class ParseSnapshotTest(unittest.TestCase):
         text = parse_snapshot(payload()).describe()
         self.assertIn("locked", text)
         self.assertIn("to level 7", text)
-        self.assertIn("(organic)", text)
+        self.assertIn("(organic to 5)", text)
 
 
 class TransitionTest(unittest.TestCase):

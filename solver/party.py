@@ -193,7 +193,7 @@ class SensiblePrior(TeammateModel):
 
             try:
                 damage = data.gag(track, level).damage_at(
-                    1.0, organic=toon.is_organic(track))
+                    1.0, organic=toon.is_organic(track, level))
             except (NotImplementedError, ValueError):
                 continue
             if not damage:

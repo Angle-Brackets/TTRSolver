@@ -122,7 +122,7 @@ def _damage_budget(state: BattleState) -> int:
                 continue
             try:
                 damage = data.gag(track, level).damage_at(
-                    1.0, organic=toon.is_organic(track))
+                    1.0, organic=toon.is_organic(track, level))
             except (NotImplementedError, ValueError):
                 continue
             if not damage:
@@ -149,7 +149,7 @@ def _best_damage(state: BattleState) -> int:
                 continue
             try:
                 damage = data.gag(track, level).damage_at(
-                    1.0, organic=toon.is_organic(track))
+                    1.0, organic=toon.is_organic(track, level))
             except (NotImplementedError, ValueError):
                 continue
             if damage and damage > best:

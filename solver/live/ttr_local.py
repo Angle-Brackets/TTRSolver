@@ -104,8 +104,10 @@ class Snapshot:
     # module notes.
     instance_id: Optional[str] = None
     invasion: Optional[Tuple[str, int, bool]] = None
-    # track -> (highest level unlocked, organic?)
-    tracks: Dict[Track, Tuple[int, bool]] = field(default_factory=dict)
+    # track -> (highest level unlocked, highest ORGANIC level, 0 for none).
+    # The API names the top organic gag; trees are planted in order, so
+    # every level up to it is organic and none above (wiki, Gag trees).
+    tracks: Dict[Track, Tuple[int, int]] = field(default_factory=dict)
     # Progress on the *toon's own* cog disguises -- nothing to do with the
     # cogs being fought. Department key ("c"/"l"/"m"/"s") -> (merits
     # earned, merits needed) for each suit owned. See `merits_gained`.
@@ -170,7 +172,12 @@ class Snapshot:
 
     def organic_tracks(self) -> List[Track]:
         return [track for track in Track
-                if self.tracks.get(track, (0, False))[1]]
+                if self.tracks.get(track, (0, 0))[1]]
+
+    def organic_levels(self) -> Dict[Track, int]:
+        """The highest organic level per organic track."""
+        return {track: organic for track, (_top, organic) in self.tracks.items()
+                if organic}
 
     @property
     def invasion_text(self) -> str:
@@ -202,7 +209,7 @@ class Snapshot:
             else:
                 top, organic = entry
                 lines.append(f"    {track.value:8s} to level {top}"
-                             f"{'  (organic)' if organic else ''}")
+                             f"{f'  (organic to {organic})' if organic else ''}")
         return "\n".join(lines)
 
 
@@ -267,7 +274,7 @@ def parse_snapshot(payload: dict) -> Snapshot:
     laff = payload.get("laff") or {}
     location = payload.get("location") or {}
 
-    tracks: Dict[Track, Tuple[int, bool]] = {}
+    tracks: Dict[Track, Tuple[int, int]] = {}
     for name, entry in (payload.get("gags") or {}).items():
         track = TRACK_NAMES.get(name)
         if track is None:
@@ -281,7 +288,14 @@ def parse_snapshot(payload: dict) -> Snapshot:
         top = (entry.get("gag") or {}).get("level")
         if top is None:
             continue
-        tracks[track] = (int(top), entry.get("organic") is not None)
+        organic = entry.get("organic")
+        if isinstance(organic, dict):
+            # The top organic gag. No level (never observed) counts the
+            # whole track, as every organic track did before.
+            organic = int(organic.get("level") or top)
+        else:
+            organic = top if organic else 0
+        tracks[track] = (int(top), organic)
 
     # Only departments with a suit carry a promotion block.
     merits: Dict[str, Tuple[int, int]] = {}

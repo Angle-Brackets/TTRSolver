@@ -179,6 +179,7 @@ def build_state(snapshot=None, panel=None, readings: Sequence = (),
     toon = ToonState(laff=snapshot.laff, max_laff=snapshot.max_laff,
                      track_exp=track_exp, gag_counts=gag_counts,
                      organic_tracks=frozenset(snapshot.organic_tracks()),
+                     organic_levels=snapshot.organic_levels(),
                      fires=max(0, int(fires)))
     zone = (getattr(snapshot, "zone", "") or "").strip()
     return BuildResult(BattleState(toon=toon, cogs=cogs,

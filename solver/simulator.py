@@ -291,7 +291,7 @@ def toon_action_accuracy(state: BattleState, action: Action,
     return mechanics.calc_toon_accuracy(
         action.track, action.level, toon,
         _targets_for(state, action), all_cogs=state.cogs,
-        lure_tree_planted=toon.is_organic(action.track),
+        lure_tree_planted=toon.is_organic(action.track, action.level),
         toons_hit=state.toons_hit_rounds > 0)
 
 
@@ -432,7 +432,7 @@ def apply_toon_action(state: BattleState, action: Action,
             cog.status.trapped = True
             cog.status.trap_track = action.track
             cog.status.trap_level = action.level
-            cog.status.trap_organic = toon.is_organic(action.track)
+            cog.status.trap_organic = toon.is_organic(action.track, action.level)
 
     elif action.track == Track.LURE:
         # Snapshot the accuracy this Lure landed with, BEFORE any bonus and
@@ -468,7 +468,7 @@ def apply_toon_action(state: BattleState, action: Action,
 
             base = mechanics.calc_toon_damage(
                 action.track, action.level,
-                organic=toon.is_organic(action.track))
+                organic=toon.is_organic(action.track, action.level))
             # Damage instances in source order: gag damage, then hpBonus
             # (always 0 solo), then kbBonus (Throw/Squirt on a lured cog).
             total = (base
@@ -983,7 +983,7 @@ def _apply_track_group(state: BattleState, track: Track, resolved,
             cog.status.trap_track = action.track
             cog.status.trap_level = action.level
             cog.status.trap_organic = state.toons[toon_index].is_organic(
-                action.track)
+                action.track, action.level)
         return
 
     if track == Track.LURE:
@@ -1042,7 +1042,7 @@ def _apply_track_group(state: BattleState, track: Track, resolved,
             # -- the latter hardcodes a fully-trained toon and bypasses
             # `mechanics.DAMAGE_TRAINED_FRACTION`.
             damage = mechanics.calc_toon_damage(
-                track, action.level, organic=toon.is_organic(track))
+                track, action.level, organic=toon.is_organic(track, action.level))
             per_target.setdefault(cog_index, []).append((toon_index, damage))
 
     for cog_index, contributions in per_target.items():

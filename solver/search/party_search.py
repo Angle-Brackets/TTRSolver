@@ -1296,7 +1296,7 @@ def plan_waste(state: BattleState, plan) -> Tuple[float, float]:
         try:
             dmg = mechanics.calc_toon_damage(
                 action.track, action.level,
-                organic=toon.is_organic(action.track))
+                organic=toon.is_organic(action.track, action.level))
         except (NotImplementedError, ValueError):
             continue
         if action.target_index is None:
@@ -1617,7 +1617,7 @@ def _cheap_score(state: BattleState, index: int, action: Action) -> float:
                       if i != index and other.laff > 0)
         try:
             heal = data.gag(action.track, action.level).heal_at(
-                1.0, organic=toon.is_organic(action.track))
+                1.0, organic=toon.is_organic(action.track, action.level))
         except (NotImplementedError, ValueError, KeyError, TypeError):
             return float("-inf")
         # Laff is worth more than a point of cog damage -- the objective
@@ -1667,7 +1667,7 @@ def _cheap_score(state: BattleState, index: int, action: Action) -> float:
         try:
             damage = mechanics.calc_toon_damage(
                 action.track, action.level,
-                organic=toon.is_organic(action.track))
+                organic=toon.is_organic(action.track, action.level))
         except (NotImplementedError, ValueError):
             return 20.0 - price
         target = (state.cogs[action.target_index]
@@ -1696,7 +1696,7 @@ def _cheap_score(state: BattleState, index: int, action: Action) -> float:
 
     try:
         damage = mechanics.calc_toon_damage(
-            action.track, action.level, organic=toon.is_organic(action.track))
+            action.track, action.level, organic=toon.is_organic(action.track, action.level))
     except (NotImplementedError, ValueError):
         return float("-inf")
 

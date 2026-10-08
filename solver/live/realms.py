@@ -673,10 +673,9 @@ def parse_organic(values) -> Optional[frozenset]:
     Seven entries in `DC_TRACK_ORDER`, -1 for "not organic" and
     otherwise the level the bonus reaches -- 0-based, and 6 means the
     WHOLE TRACK [OWNER], confirmed by a real toon reading
-    [-1, -1, -1, -1, 6, -1, -1] (Throw organic, all seven levels). This
-    project treats organic as a property of the whole track
-    (`ToonState.organic_tracks`), so any non-negative entry qualifies
-    and the level is dropped.
+    [-1, -1, -1, -1, 6, -1, -1] (Throw organic, all seven levels). Any
+    non-negative entry makes the track organic; `parse_organic_levels`
+    keeps how far up it goes.
 
     Realms' organic bonus is NOT TTR's (flat +10% damage there vs. a
     per-track bonus that also raises Lure accuracy here,
@@ -692,6 +691,14 @@ def parse_organic(values) -> Optional[frozenset]:
     return frozenset(_track(name) for name, level
                      in zip(DC_TRACK_ORDER, values)
                      if isinstance(level, int) and level >= 0)
+
+
+def parse_organic_levels(values) -> Optional[dict]:
+    """`setTrackBonusLevel` as {track: highest organic level, 1-7}."""
+    if not isinstance(values, (list, tuple)) or len(values) != len(DC_TRACK_ORDER):
+        return None
+    return {_track(name): level + 1 for name, level in zip(DC_TRACK_ORDER, values)
+            if isinstance(level, int) and level >= 0}
 
 
 # ---------------------------------------------------------------------

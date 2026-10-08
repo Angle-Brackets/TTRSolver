@@ -279,6 +279,35 @@ class BuildStateTest(unittest.TestCase):
         state = realms_session.build_state(organic_trap).state
         self.assertTrue(state.cogs[0].status.trap_organic)
 
+    def test_a_trap_above_the_top_organic_level_is_not_organic(self):
+        """setTrackBonusLevel is 0-based: 3 is organic up to level 4."""
+        listener = FakeListener(
+            [battle(SOLO_MEMBERS)],
+            [cog(11, "sdt" + NUL + "l", 2, 20, 20),
+             toon(setTrackBonusLevel=[-1, 3, -1, -1, -1, -1, -1])])
+        listener.chosen_traps = {11: (6, 0)}
+        self.assertFalse(realms_session.build_state(listener).state.cogs[0].status.trap_organic)
+        listener.chosen_traps = {11: (4, 0)}
+        self.assertTrue(realms_session.build_state(listener).state.cogs[0].status.trap_organic)
+
+    def test_the_toon_knows_how_far_up_each_track_is_organic(self):
+        built, _ = realms_session.toon_from_object(
+            toon(setTrackBonusLevel=[-1, -1, 4, -1, 6, -1, -1]))
+        self.assertEqual({Track.LURE: 5, Track.THROW: 7}, built.organic_levels)
+        self.assertFalse(built.is_organic(Track.LURE, 6))
+
+    def test_an_organic_lure_stores_the_organic_accuracy(self):
+        from solver.data import gags
+
+        obj = cog(11, "sdt" + NUL + "l", 2, 20, 20)
+        plain, _ = realms_session.cog_from_object(obj, lured=True, lure_level=5,
+                                                  rounds_elapsed=0)
+        grown, _ = realms_session.cog_from_object(obj, lured=True, lure_level=5,
+                                                  rounds_elapsed=0, lure_organic=True)
+        gag = gags.gag(Track.LURE, 5)
+        self.assertEqual(gag.prop_accuracy(organic=False), plain.status.lure_acc_before_bonus)
+        self.assertEqual(gag.prop_accuracy(organic=True), grown.status.lure_acc_before_bonus)
+
     def test_it_finds_our_battle_among_several(self):
         """THE VP SPLITS FOUR TOONS TWO AND TWO, so a boss fight has two
         battle objects, and refusing whenever there is more than one --

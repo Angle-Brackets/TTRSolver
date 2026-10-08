@@ -628,7 +628,7 @@ def _cheapest_kills(state, seat: int, legal=None):
             try:
                 dmg = mechanics.calc_toon_damage(
                     entry.track, entry.level,
-                    organic=toon.is_organic(entry.track))
+                    organic=toon.is_organic(entry.track, entry.level))
             except Exception:           # noqa: BLE001 - unpriced gag
                 continue
             if dmg < cog.hp:

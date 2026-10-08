@@ -1,8 +1,9 @@
 """Organic gags.
 
-Organic is a property of a whole track, not of one gag: a toon earns an
-organic track from a ToonTask and every gag in it is organic after that.
-It raises damage for every track and accuracy for Lure specifically.
+Organic comes from gag trees, [CONFIRMED] wiki: planted in order of level,
+each making its own gag organic -- so a track is organic from level 1 up
+to its highest tree and not above. It raises damage for every track and
+accuracy for Lure specifically.
 
 The data tables have carried organic values all along; nothing set the
 flag, so every organic gag was resolved at its non-organic value.
@@ -38,6 +39,41 @@ class OrganicStateTest(unittest.TestCase):
     def test_clone_carries_it(self):
         st = fight(organic=frozenset({Track.THROW}))
         self.assertEqual(st.clone().toon.organic_tracks, frozenset({Track.THROW}))
+
+
+class OrganicLevelTest(unittest.TestCase):
+    """Only the gags up to the highest tree are organic."""
+
+    def _throw(self, level, top):
+        st = fight(organic=frozenset({Track.THROW}),
+                   gags={(Track.THROW, level): 1}, level=12)
+        st.toon.organic_levels = {Track.THROW: top}
+        _healed, dealt = apply_toon_action(st, Action(Track.THROW, level, 0), hit=True)
+        return dealt
+
+    def test_a_gag_at_or_below_the_top_tree_is_organic(self):
+        self.assertEqual(data.gag(Track.THROW, 4).damage_at(1.0, organic=True),
+                         self._throw(4, top=4))
+
+    def test_a_gag_above_it_is_not(self):
+        self.assertEqual(data.gag(Track.THROW, 6).damage_at(1.0),
+                         self._throw(6, top=4))
+
+    def test_no_level_recorded_counts_the_whole_track(self):
+        st = fight(organic=frozenset({Track.THROW}))
+        self.assertTrue(st.toon.is_organic(Track.THROW, 7))
+
+    def test_a_lure_above_the_top_tree_gets_no_accuracy_bonus(self):
+        lure7 = {(Track.LURE, 6): 1}
+        plain = toon_action_accuracy(fight(gags=lure7, level=12), Action(Track.LURE, 6, 0))
+        capped = fight(organic=frozenset({Track.LURE}), gags=lure7, level=12)
+        capped.toon.organic_levels = {Track.LURE: 5}
+        self.assertEqual(plain, toon_action_accuracy(capped, Action(Track.LURE, 6, 0)))
+
+    def test_clone_carries_the_levels(self):
+        st = fight(organic=frozenset({Track.THROW}))
+        st.toon.organic_levels = {Track.THROW: 3}
+        self.assertEqual({Track.THROW: 3}, st.clone().toon.organic_levels)
 
 
 class OrganicDamageTest(unittest.TestCase):
