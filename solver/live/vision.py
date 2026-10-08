@@ -1,39 +1,25 @@
 """Reading a Toontown battle off the screen.
 
 The Local API knows the toon and nothing about the fight (see
-`ttr_local`), so the cogs have to be read from the rendered frame. This
-module finds the cog plates -- the metal signs TTR draws above each cog
-when `show-cog-levels` is on -- and returns their geometry. Interpreting
-what is inside them is the caller's job.
+`ttr_local`), so the cogs are read from the rendered frame. This module
+finds the cog plates -- the metal signs TTR draws above each cog when
+`show-cog-levels` is on -- and returns their geometry; interpreting
+what's inside is the caller's job.
 
-FINDING THE PLATES
-------------------
-The anchor is the flat teal square behind each cog's head render. Three
-things were tried and two rejected:
+FINDING THE PLATES. The anchor is the flat teal square behind each cog's
+head render -- not fixed coordinates (the plate floats in 3D and moves
+with the camera) and not the metal plate itself (poor contrast against
+cobblestone and Cog HQ interiors). The teal slot isn't unique to plates,
+though: standing in Donald's Dreamland, 2.1% of a 1440p frame matched
+the mask and two blobs cleared the size and aspect filters too. So
+`find_plates` finds plate-*shaped* teal and nothing more; deciding
+whether a frame is a battle needs a second signal and belongs to the
+caller -- `watch.BattleWatcher.in_battle` requires the gag menu too.
 
-- Fixed coordinates. The plate is drawn in 3D above the cog, so it moves
-  with the camera, the cog's position, and how many cogs are present.
-- The metal plate itself. Brushed grey has poor contrast against
-  cobblestone, pavement and Cog HQ interiors, which is most of the game.
-- The teal slot. A desaturated blue-green, and the best anchor of the
-  three. It is *not* unique to plates, though this said so for a long
-  time: the claim was checked against battle screenshots, where it
-  holds, and not against the rest of the game, where it does not.
-  Standing in Donald's Dreamland, 2.1% of a 1440p frame matched the
-  mask and two blobs cleared both the size and the aspect filter.
-
-  So `find_plates` finds plate-*shaped* teal and nothing more. Deciding
-  whether a frame is a battle needs a second signal and belongs to the
-  caller -- `watch.BattleWatcher.in_battle` requires the gag menu too.
-
-NOTHING HERE IS IN ABSOLUTE PIXELS
-----------------------------------
-Every threshold is a fraction of the frame and every sub-region of a
-plate is a multiple of its own slot. The same battle may be rendered
-anywhere from 480p to 4K, and the plate is drawn larger when the camera
-is closer, so a constant tuned at 1080p is a constant that breaks
-everywhere else. Verified to find both plates in a two-cog battle at
-854x480, 720p, 900p, 1080p, 1440p and 2160p.
+NOTHING HERE IS IN ABSOLUTE PIXELS. Every threshold is a fraction of the
+frame, and every sub-region of a plate a multiple of its own slot, since
+a constant tuned at 1080p breaks everywhere else. Verified to find both
+plates in a two-cog battle at 854x480 through 2160p.
 """
 from __future__ import annotations
 
@@ -52,25 +38,19 @@ TOLERANCE = 34
 MIN_FRAGMENT_FRAC = 0.000058     # of frame area
 MERGE_GAP_FRAC = 0.021           # of frame width
 # Measured against a live rejection: a 65x45 slot held 1110 teal pixels
-# on a 1921x1081 frame and was refused for wanting 1204. The colour was
-# right -- the probe read rgb(87,139,155) against a TEAL of (90,141,158)
-# -- there was simply less backdrop showing, because that cog's head
-# covers more of its own slot than the one this was calibrated on.
-#
-# 0.00046 puts the floor under that reading with room, and stays well
-# above the largest rejected non-plate seen in the same frames (359).
+# on a 1921x1081 frame but was refused for wanting 1204 -- the colour
+# was right (rgb(87,139,155) vs TEAL (90,141,158)), just less backdrop
+# showing, since that cog's head covers more of its slot. 0.00046 puts
+# the floor under that reading with room, well above the largest
+# rejected non-plate seen in the same frames (359).
 MIN_SLOT_FRAC = 0.00046          # of frame area
 
-# And a ceiling, of frame WIDTH. The aspect and minimum-size filters both
-# pass on large teal scenery: a grey-blue machine in the background of a
-# Lullaby Lane street matched as a 629x391 "plate", aspect 1.61, in a
-# frame whose real plates were 69x47 and 65x45.
-#
-# A plate is drawn at a fixed scale by a battle camera that barely moves,
-# and measured at 3.4-3.6% of frame width across every capture so far.
-# This is more than three times that, so a genuine plate has room to be
-# much closer than any yet seen while a third of the screen is still
-# refused.
+# And a ceiling, of frame WIDTH. The aspect and minimum-size filters
+# both pass large teal scenery too: a grey-blue machine in a Lullaby
+# Lane street matched as a 629x391 "plate" (aspect 1.61) in a frame
+# whose real plates were 69x47 and 65x45. A plate is drawn at a fixed
+# scale and measured at 3.4-3.6% of frame width across every capture so
+# far; this is more than three times that.
 MAX_SLOT_WIDTH_FRAC = 0.12
 
 # The slot is a fixed-aspect rectangle. Measured 1.44-1.52 across six
@@ -83,12 +63,12 @@ ASPECT_RANGE = (1.15, 1.85)
 # land correctly on both plates of a two-cog battle.
 PARTS: Dict[str, Tuple[float, float, float, float]] = {
     "level": (1.15, 0.05, 2.55, 0.95),
-    # The emblem is a circle, and the box has to be the circle rather
-    # than a rectangle near it. An earlier guess sat 0.15 slot widths too
-    # far left, catching plate metal on one side while clipping the disc
-    # on the other; resized against a square template that mismatch
-    # dropped correlation to noise and picked the wrong department.
-    # Measured: 43x43px on a 66x45 slot, i.e. square, as a disc should be.
+    # The emblem is a circle; the box must BE the circle, not a
+    # rectangle near it. An earlier guess sat 0.15 slot widths too far
+    # left, clipping the disc on one side and catching plate metal on
+    # the other, which dropped correlation to noise and picked the
+    # wrong department. Measured: 43x43px on a 66x45 slot -- square, as
+    # a disc should be.
     "medallion": (0.20, 1.16, 0.85, 2.11),
     # Calibrated to the meter's *track*, not a box drawn around it. Both
     # cogs in the reference frame were at full health, so the extent of
@@ -142,25 +122,14 @@ class Plate:
 def teal_mask(frame: np.ndarray) -> np.ndarray:
     """Boolean mask of pixels close to the portrait backdrop colour.
 
-    A REFUTED WIDENING IS RECORDED HERE, because the reasoning was
-    plausible and the evidence was not.
-
-    Lawbot HQ lights its courtroom sepia, and a live grab there found no
-    plates. The theory was that a scene tint moves every channel and
-    breaks a +/-34 box around one sampled triple, so the mask gained a
-    second clause matching teal by channel ORDER -- blue over green over
-    red -- which a tint leaves intact.
-
-    The frame had no cogs in it. The owner was standing around and the
-    reader was correctly reporting nothing. Read twice on a real Lawbot
-    HQ battle afterwards, with the clause and with the box alone, both
-    found the same single plate at the same coordinates: the box was
-    always sufficient and the clause was carrying nothing.
-
-    So it is gone. A wider mask is not free -- at the loosest thresholds
+    A REFUTED WIDENING IS RECORDED HERE: Lawbot HQ's sepia courtroom
+    light seemed to need a looser mask (matching teal by channel ORDER
+    rather than a fixed +/-34 box, since a tint leaves order intact),
+    but the test frame actually had no cogs in it -- on a real Lawbot HQ
+    battle, the box alone and the widened version found the same single
+    plate. A wider mask isn't free either: at the loosest thresholds
     tried it invented a third plate on a two-plate frame and dropped a
-    department margin to 0.28 -- and widening on no evidence is how that
-    cost gets paid for nothing. `tools/teal_ab.py` is the check, if a
+    department margin to 0.28. `tools/teal_ab.py` is the check, if a
     zone ever does defeat the box.
     """
     delta = np.abs(frame[:, :, :3].astype(np.int16) - np.array(TEAL))
@@ -265,43 +234,35 @@ def _reject(log, x0, y0, x1, y1, filled, why: str) -> None:
                     "filled": filled, "why": why})
 
 
-# A SECOND WAY TO FIND A PLATE, for zones where the colour cannot.
+# A SECOND WAY TO FIND A PLATE, for zones where colour cannot.
 #
-# `teal_mask` is a box around one sampled triple, and it works because
-# the portrait backdrop is an unusual colour. In Bossbot HQ's icy
-# cobblestone it is not: the mortar between the stones reads
-# rgb(87,137,160) against a TEAL of (90,141,158), so the mask matched
-# 19.7% OF THE WHOLE FRAME as one connected web and both plates were
-# swallowed into a 1721x1081 blob that the width filter then threw away.
-#
-# Neither knob helps. Capping run length changes nothing (the mortar is
-# wide, not thin) and an opening at radius 4 moved coverage 19.75% ->
-# 18.86%. Measured, on the frame that failed.
+# `teal_mask` is a box around one sampled triple, which works because the
+# portrait backdrop is an unusual colour -- except in Bossbot HQ's icy
+# cobblestone, where the mortar reads rgb(87,137,160) against a TEAL of
+# (90,141,158): the mask matched 19.7% of the whole frame as one
+# connected web, swallowing both plates into a blob the width filter
+# then rejected. Neither capping run length nor an opening at radius 4
+# helped (coverage only moved 19.75% -> 18.86%).
 #
 # So this anchors on the HEALTH BAR instead: saturated green, which the
-# scenery does not have. `PARTS["health"]` already gives the bar's box
-# in slot-relative units, so finding the bar gives the slot by inverting
-# it -- on the failing frame a 75x18 bar at (948,185) predicts a slot at
-# (881,123) 65x44, and the slot really there is 53% teal.
-#
-# THE TEAL TEST DOES NOT GO AWAY, it changes job: from searching the
-# frame, where it is ambiguous, to confirming one small box, where it is
-# decisive. Both cues have to agree before a plate is reported.
+# scenery lacks. `PARTS["health"]` gives the bar's box in slot-relative
+# units, so inverting it gives the slot -- on the failing frame a 75x18
+# bar at (948,185) predicts a slot at (881,123) 65x44, which really is
+# 53% teal. The teal test still runs, just to CONFIRM one small box
+# instead of searching the whole frame -- both cues must agree.
 HEALTH_GREEN_MIN = 150           # the bar is bright, the scenery is not
 HEALTH_GREEN_MARGIN = 60         # green over BOTH red and blue
 # Bar aspect follows from `PARTS`: 1.15 slot widths by 0.41 slot
-# heights on a slot near 1.48:1, so about 4.15. Measured on the frame
-# this was built against: a 75x18 bar, aspect 4.17.
+# heights on a slot near 1.48:1, so about 4.15 -- measured on the
+# building frame as 75x18, aspect 4.17.
 #
-# KNOWN LIMIT, AND DELIBERATELY NOT "FIXED" ON GUESSWORK.
-# `PARTS["health"]` was calibrated on two FULL-health cogs -- its own
-# comment says so -- so inverting through the bar's width is only right
-# while the bar is fullish, and a badly hurt cog draws too short a bar
-# to pass the aspect band. Deriving the slot from the bar's HEIGHT
-# instead would be fill-independent, and was tried: it admits far more
-# candidates and needs a stronger verifier than teal, which is useless
-# in exactly the zone this exists for. That is a real change needing
-# real frames to settle, not a constant to nudge.
+# KNOWN LIMIT: `PARTS["health"]` was calibrated on two FULL-health cogs,
+# so inverting through the bar's width only holds while the bar is
+# fairly full; a badly hurt cog draws too short a bar to pass the
+# aspect band. Deriving the slot from the bar's HEIGHT instead would be
+# fill-independent but admits far more candidates and needs a stronger
+# verifier than teal -- useless in exactly the zone this exists for. A
+# real change needing real frames to settle, not a constant to nudge.
 HEALTH_ASPECT = (2.6, 6.0)
 HEALTH_WIDTH_FRAC = (0.015, 0.14)
 # How much of the predicted slot must actually be teal. The plate's own
@@ -407,17 +368,15 @@ def find_plates(frame: np.ndarray,
                     f"aspect {box_w / box_h:.2f} outside "
                     f"{ASPECT_RANGE[0]}-{ASPECT_RANGE[1]}")
             continue
-        # NOT FLUSH WITH THE FRAME EDGE. A cog plate floats above the
-        # cog and always has game behind it on every side; a blob that
-        # runs into the border is the window chrome, a letterboxing bar,
-        # or something clipped by the capture. Measured live: a 58x48
-        # box at (793, 0) passed every test above and read level score
-        # 0.00 with 0% health, which is the documented scenery
-        # signature, while the real second plate went unfound.
-        #
-        # A genuinely clipped plate is rejected too, and should be: the
-        # level and health regions are offsets from this box, so a
-        # truncated one reads garbage rather than nothing.
+        # NOT FLUSH WITH THE FRAME EDGE: a cog plate always has game
+        # behind it on every side, so a blob touching the border is
+        # window chrome, letterboxing, or a capture clip. Measured
+        # live: a 58x48 box at (793, 0) passed every filter above and
+        # read level score 0.00 with 0% health -- the documented
+        # scenery signature -- while the real second plate went
+        # unfound. A genuinely clipped plate is rejected too, correctly:
+        # its level and health regions are offsets from this box, so a
+        # truncated one reads garbage, not nothing.
         if x0 <= 0 or y0 <= 0 or x1 >= width or y1 >= height:
             _reject(rejects, x0, y0, x1, y1, filled, "touches the frame edge")
             continue
@@ -435,13 +394,12 @@ def find_plates(frame: np.ndarray,
 def _denoise(mask: np.ndarray, keep_frac: float = 0.10) -> np.ndarray:
     """Drop blobs far smaller than the largest one.
 
-    A single stray dark pixel -- a rivet edge, a compression artefact,
-    the cog's body showing through the plate -- is enough to stretch the
-    ink's bounding box well past the text. Since the box is what the
-    normalisation scales by, one speck shrinks the glyphs relative to the
-    templates and every comparison then fails. Observed: a speck below
-    the text turned an 18px-tall "Level 6" into a 32px box and dropped
-    the correct match to IoU 0.08.
+    A single stray dark pixel (a rivet edge, compression artefact, the
+    cog's body showing through) is enough to stretch the ink's bounding
+    box well past the text, which shrinks every glyph relative to the
+    templates it's normalised against and fails the comparison.
+    Observed: a speck below the text turned an 18px-tall "Level 6" into
+    a 32px box and dropped the correct match to IoU 0.08.
 
     Letters of "Level N" are all within an order of magnitude of each
     other, so a tenth of the largest blob separates text from grit.
@@ -488,21 +446,17 @@ def _normalise(mask: np.ndarray, height: int = 24) -> np.ndarray:
 def _overlap(a: np.ndarray, b: np.ndarray) -> float:
     """Intersection over union of two binary masks, centred and padded.
 
-    CENTRED, WHICH IT WAS NOT. Both masks used to be pinned to the top
-    left of the padded box, so a glyph 13 pixels wide compared against a
-    15-pixel template was offset by two -- and these glyphs are 13 to 18
-    pixels tall, so two pixels is most of a stroke.
+    CENTRED, not pinned to the top-left as both masks once were: a
+    13px-wide glyph compared against a 15px template was offset by two,
+    which is most of a stroke at these sizes (13-18px tall). It read as
+    a template problem and was an alignment one -- "Level 8" scored 6 at
+    0.701 over 8 at 0.689, twice, on different frames, every confusion
+    being 6 vs 8 (which differ chiefly top-left, where misalignment hits
+    hardest). Centring reads all six labelled samples correctly and
+    takes the worst correct margin from 0.012 to 0.073.
 
-    It read as a template problem and was an alignment problem. A plate
-    saying "Level 8" scored 6 at 0.701 over 8 at 0.689, twice, on
-    different frames; every confusion in the sample was 6 against 8,
-    which differ chiefly in the top left -- exactly where a horizontal
-    misalignment does its damage. Centring the pad reads all six
-    labelled samples correctly and takes the worst correct margin from
-    0.012 to 0.073.
-
-    A grayscale comparison also fixes them, and separates less well
-    (0.026-0.065 against 0.073-0.407), so this stays binary.
+    Grayscale also fixes it but separates less well (0.026-0.065 vs
+    0.073-0.407), so this stays binary.
     """
     h, w = max(a.shape[0], b.shape[0]), max(a.shape[1], b.shape[1])
 
@@ -534,24 +488,22 @@ def _components(mask: np.ndarray) -> List[Tuple[int, int, int, int]]:
 def _drop_tall_outliers(boxes, limit: float = 1.6):
     """Discard blobs far taller than the text they sit among.
 
-    The level region reaches close enough to the edge of the plate to
-    catch its border, which thresholds as a thin vertical bar spanning
-    the full height. Being the rightmost blob, it was stealing the role
-    of the digit: at 1440p a 4x40 sliver beat the real "8", which is why
-    the reader returned a confident-looking level with a score of 0.07.
-
-    Glyphs in one line of text share a height band; the border does not.
+    The level region reaches close enough to the plate's edge to catch
+    its border, which thresholds as a thin vertical bar spanning the
+    full height -- at 1440p a 4x40 sliver beat the real "8" as rightmost
+    blob, returning a confident-looking level with score 0.07. Glyphs in
+    one line of text share a height band; the border does not.
     """
     if len(boxes) < 3:
         return boxes
     heights = sorted(b[3] - b[1] for b in boxes)
     median = heights[len(heights) // 2]
-    # AND BELOW THE LINE. "Level N" has no descenders, so every glyph
-    # ends on one baseline; the border does not. Height alone let one
-    # through: on a 1080p plate whose slot measured a pixel narrow, the
-    # border read 27px against a 17px median -- just inside the 1.6x
-    # limit -- and, as the rightmost blob, was read as the level ("1",
-    # score 0.30) while the real "5" was ignored.
+    # AND BELOW THE LINE: "Level N" has no descenders, so glyphs share a
+    # baseline and the border does not. Height alone let one through --
+    # on a plate with a pixel-narrow slot, the border read 27px against
+    # a 17px median (just inside the 1.6x limit) and, being rightmost,
+    # was read as the level ("1", score 0.30) while the real "5" was
+    # ignored.
     baselines = sorted(b[3] for b in boxes)
     baseline = baselines[len(baselines) // 2]
     kept = [b for b in boxes if (b[3] - b[1]) <= limit * median
@@ -649,26 +601,22 @@ def level_templates(levels=range(1, 13)) -> Dict[int, np.ndarray]:
     return _LEVEL_TEMPLATES
 
 
-# How far the best level template must beat the runner-up. Same idea and
-# same value as MIN_DEPARTMENT_MARGIN, and it exists for the same reason:
-# an absolute score says the region holds a legible digit, and says
-# nothing about whether it is *this* digit.
+# How far the best level template must beat the runner-up -- same idea
+# as MIN_DEPARTMENT_MARGIN: a high score says the region holds a
+# legible digit, not that it's THIS digit.
 #
-# The evidence, from three reads of plates whose levels are legible in
-# the image:
+# Evidence, from three reads of legible plate levels:
 #
 #     truth  read  score  runner-up  margin
 #       6      6   0.793   8 @0.720   0.073
 #       8      8   0.832   6 @0.726   0.106
 #       8      6   0.709   8 @0.670   0.039   <- wrong
 #
-# The wrong one cleared MIN_LEVEL_SCORE comfortably; what it did not do
-# is beat its runner-up by anything. Every confusion in the set is 6
-# against 8, which are the two that survive `_normalise` looking most
-# alike. Three samples is thin, so this is set to reject the observed
-# failure with room and no more -- and it fails towards "unreadable",
-# which blocks a state, rather than towards a confident wrong level,
-# which produces a plan for a different cog with different HP.
+# The wrong read cleared MIN_LEVEL_SCORE but barely beat its runner-up.
+# Every confusion here is 6 vs 8, the two `_normalise` makes look most
+# alike. Three samples is thin, so this rejects the observed failure
+# with little margin to spare -- failing towards "unreadable" (blocks a
+# state) rather than a confident wrong level (plans for the wrong cog).
 MIN_LEVEL_MARGIN = 0.05
 
 
@@ -775,17 +723,16 @@ def read_level(frame: np.ndarray,
         return None, 0.0, 0.0
     score, best = scored[0]
     runner_up = scored[1][0] if len(scored) > 1 else 0.0
-    # LOOPS AS A SECOND WITNESS. Shape overlap confuses 5/6/8 -- the
-    # confusions this reader has shown -- and a cog showing through the
-    # plate thins the strokes: a clear "Level 5" read 5 at 0.754 over 6
-    # at 0.707. But 5 has no closed loop, 6 one, 8 two. When the glyph's
-    # loop count is UNAMBIGUOUS (the same whether corner-touching pixels
-    # join or not) and AGREES with the best template, rivals with a
-    # different count are ruled out and the margin is taken against the
-    # best that remains. It never overrules the best match; an ambiguous
-    # or disagreeing count leaves the plain margin, and the caller's
-    # threshold still decides. A 6 whose hook touches its body at one
-    # corner pixel is ambiguous by this rule, and stays refused.
+    # LOOPS AS A SECOND WITNESS: shape overlap confuses 5/6/8, and a cog
+    # showing through the plate thins the strokes -- a clear "Level 5"
+    # once read 5 at 0.754 over 6 at 0.707. But 5 has no closed loop, 6
+    # has one, 8 has two. When the glyph's loop count is UNAMBIGUOUS
+    # (same whether corner-touching pixels join or not) and AGREES with
+    # the best template, rivals with a different count are ruled out and
+    # the margin taken against whichever remains. It never overrules the
+    # best match -- an ambiguous or disagreeing count (e.g. a 6 whose
+    # hook touches its body at one corner pixel) just leaves the plain
+    # margin for the caller's threshold to judge.
     seen = loops(digits)
     if seen is not None and template_loops().get(best) == seen:
         rivals = [s for s, lvl in scored[1:]
@@ -839,12 +786,11 @@ def emblem_templates() -> Dict[str, Tuple[np.ndarray, np.ndarray]]:
 # How far the best emblem must beat the runner-up to be believed.
 #
 # With colour in the score the winning margin runs 0.21-0.61 across
-# 854x480 to 4K, and the right department wins at every one of them. On
-# shape alone it was 0.07-0.22 and 720p picked the wrong department at a
-# margin of 0.01, which is what this floor was originally sized to
-# catch. It is left where it is: the floor costs nothing when the reads
-# are clean, and it is the only thing standing between an unreadable
-# emblem and a candidate list narrowed to the wrong five cogs.
+# 854x480 to 4K, correct every time. On shape alone it was 0.07-0.22,
+# and 720p picked the wrong department at a margin of 0.01 -- what this
+# floor was sized to catch. It costs nothing when reads are clean, and
+# is the only thing between an unreadable emblem and a candidate list
+# narrowed to the wrong five cogs.
 MIN_DEPARTMENT_MARGIN = 0.05
 
 
