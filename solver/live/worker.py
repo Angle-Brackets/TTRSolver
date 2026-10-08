@@ -1,48 +1,25 @@
 """What both panels do with an answer, once something has produced one.
 
-There are two front ends over the same solver. They differ in ONE thing:
-where a `BattleState` comes from. The screen panel infers it from pixels
--- plates, the gag menu, a checksum, and a row of player overrides for
-what the readers cannot see. The other is handed it by a client that
-already knows. Everything after that point -- which engine's answer is
-displayed, what "no, not that" rejects, how a setting reaches the
-search, when the model is shipped to the page -- is the same problem
-twice, and was solved twice.
-
-IT DRIFTED IN BOTH DIRECTIONS, which is the argument for this module
-rather than a tidiness one:
-
-* Reconsider. One panel rebuilt the reject key from the displayed track
-  and level and got a usable key; the other added the RENDERED ENGLISH
-  ("Grand Piano on cog 1 (Number Cruncher, 110/110 hp)") to the same
-  set, and a string never equals a tuple, so its button did nothing at
-  all. Both had a "the button appears to do nothing" bug, from
-  unrelated causes, found months apart.
-* The why-line. One panel grew `incoming`, `survive`, `accuracy` and a
-  reason; the other never did, so the same solver explained itself in
-  one window and not the other.
-
-So the rule this module exists to enforce: a DECISION ABOUT AN ANSWER
-lives here and is written once. Anything about where the answer came
+Two front ends share one solver and differ in ONE thing: where a
+`BattleState` comes from -- the screen panel infers it from pixels, the
+other is handed it by a client that already knows. Everything after
+that (which engine's answer is displayed, what "no, not that" rejects,
+how a setting reaches the search, when the model ships to the page) is
+the same problem, solved twice before this module existed and drifting
+apart each time it was touched -- Reconsider broke in each panel from an
+unrelated bug months apart, and only one panel grew a why-line. So a
+DECISION ABOUT AN ANSWER lives here, written once; where the answer came
 from stays in the subclass.
 
-WHAT IS DELIBERATELY NOT HERE
------------------------------
-`run`. The two loops are not the same problem: one polls a screen at a
-fixed cadence and must survive unreadable frames, the other reacts to a
-client's updates. Folding them together would mean one flow of control
-pretending to be two, and only half of it can be tested on a developer's
-machine -- the other needs a live server. It stays where it can be read
-beside the thing it drives.
-
-`_post` is abstract for the same reason: what a subclass has to refresh
-on the model before shipping it differs.
+NOT HERE ON PURPOSE: `run` (one loop polls a screen and must survive
+unreadable frames, the other reacts to a live client -- different
+problems, and only one is testable without a server) and `_post` (what
+a subclass refreshes on the model before shipping it differs).
 
 Nothing here imports either backend, and nothing here may: this module
-is shared by a Toontown Rewritten panel and by one for a different game
-whose data must never reach `solver/data`, a fitted weight, or a policy
-score. It deals in `Model`, `Action` and the search, and names no source
-of either.
+is shared by a Toontown Rewritten panel and one for a different game
+whose data must never reach `solver/data`, a fitted weight or a policy
+score. It deals only in `Model`, `Action` and the search.
 """
 from __future__ import annotations
 
@@ -216,14 +193,10 @@ class AdviceWorker(threading.Thread):
 
         Called once per ROUND, not once per recomputation -- the same
         move is re-scored several times while the player thinks, and
-        charging on every score would empty the pouch without a gag
-        being thrown.
-
-        It is an ASSUMPTION that the player took the advice, and a
-        correctable one: the box stays a control, so anybody who ignored
-        a suggestion can put the number back. That is better than the
-        alternative, which is a panel confidently offering a sixth slip
-        out of five.
+        charging every score would empty the pouch with nothing thrown.
+        It's an ASSUMPTION that the player took the advice, but a
+        correctable one: the box stays a control the player can put a
+        number back into.
         """
         if unite is not None:
             self.spent_unites += 1
@@ -419,19 +392,13 @@ class AdviceWorker(threading.Thread):
     def _clear_engine(model, engine: str) -> None:
         """Drop one engine's whole answer -- label AND explanation.
 
-        THE PAIR IS THE UNIT. A gag name and the numbers under it are
-        one statement about one move, and the panel had no way to write
-        only half of it deliberately -- but several ways to do it by
-        accident, because the label was assigned first and the reason
-        several statements later. Anything raising in between (and the
-        block between them calls into the unite tables) left the new
-        gag on screen under the previous round's numbers: a plausible
-        move beside damage that belongs to a move you are not being
-        shown, which is far worse than showing nothing.
-
-        Reported from live play as a single-target level 4 Throw
-        claiming "147 damage across 4 cogs" -- a group gag's total from
-        an earlier round, still on screen under a fresh label.
+        THE PAIR IS THE UNIT: a gag name and the numbers under it are one
+        statement about one move. Writing the label first and the reason
+        several statements later (with unite-table calls in between)
+        let a raise in between leave a fresh gag on screen under the
+        previous round's numbers -- seen live as a level 4 Throw still
+        showing a group gag's "147 damage across 4 cogs" from the round
+        before.
         """
         setattr(model, engine + "_gag", "")
         setattr(model, engine + "_track", "")
@@ -543,7 +510,8 @@ class AdviceWorker(threading.Thread):
                 elapsed = time.monotonic() - began
                 # Do not START a chunk that would end past the budget,
                 # judged by how long the last one took.
-                if done_k >= playout_mod.MIN_ROLLOUTS and                         elapsed + last_chunk > float(budget):
+                if (done_k >= playout_mod.MIN_ROLLOUTS
+                        and elapsed + last_chunk > float(budget)):
                     break
                 chunk_began = time.monotonic()
                 try:
@@ -673,12 +641,10 @@ class AdviceWorker(threading.Thread):
                     model.playout_track = track or ""
                     model.playout_gag_level = level or 0
                 except Exception:                  # noqa: BLE001
-                    # THE MOVE STILL STANDS. Failing to word it used to
-                    # throw the move away and show "could not describe
-                    # the move" -- live, on one round of a TTR building,
-                    # not reproducible offline. Plain wording instead, and
-                    # the traceback to the console so the cause is visible
-                    # next time rather than guessed at.
+                    # THE MOVE STILL STANDS even if wording it fails --
+                    # falling back to plain wording rather than dropping
+                    # the move. Traceback goes to the console so the
+                    # cause is visible rather than guessed at.
                     import sys
                     import traceback
 
@@ -725,18 +691,14 @@ class AdviceWorker(threading.Thread):
     def reconsider(self, scope: str = "kind") -> None:
         """Turn down the move on screen and ask for another.
 
-        Rejects a KEY rather than the exact action, and that is the
-        design: every fire shares one, so dismissing "pink slip on cog 2"
-        dismisses spending a slip at all -- rather than offering the same
-        move against cog 3, then cog 1, then cog 4, which is exactly how
-        this control becomes useless.
+        Rejects a KEY, not the exact action: every fire shares one, so
+        dismissing "pink slip on cog 2" dismisses spending a slip at all,
+        rather than cycling the same move across every other cog.
 
-        `scope` sets how wide the "no" is, because only the player knows
-        which they mean: "gag" turns down this gag alone (the Piano is
-        overkill on a 56 hp cog, the Safe is still fine), "track" turns
-        down the track entirely (the cog is lured, so no Drop at any
-        level), and the default keeps the middle width -- single-target
-        Drops, leaving the group one available.
+        `scope` sets how wide the "no" is: "gag" turns down this gag
+        alone, "track" turns down the track entirely (the cog is lured,
+        so no Drop at any level), and the default is the middle width --
+        single-target Drops, leaving the group one available.
 
         Rejections last for THIS BOARD only, dropped as soon as it
         changes, so they cannot quietly narrow the rest of the fight.
