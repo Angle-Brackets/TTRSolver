@@ -1,29 +1,19 @@
 """A learned reader for the small digits on screen.
 
-WHY. The digit readers matched each glyph against ONE clean rendering of
-the game's font, and that fails the moment a frame is less than perfect:
-a "5" read as 4, 7, 1 or "62" on a recorded building run. Most of that was
-the cropping (see `gagpanel._count_glyphs`); what remained was shape
-confusion -- 5/6, 4/3 -- that one template per digit cannot settle.
+Matching each glyph against one clean font rendering fails once a frame
+isn't perfect -- a "5" read as 4, 7, 1 or "62" on a recorded run. Most of
+that was cropping (see `gagpanel._count_glyphs`); the rest was shape
+confusion (5/6, 4/3) a single template can't settle.
 
-This is a small network trained on SYNTHETIC digits: the game's own font
-(loaded from the player's install, as the templates were) rendered at the
-on-screen sizes, distorted the way real frames are -- blur, the colour
-bleed of video compression, JPEG blocks, icon clutter, a pixel or two of
-shift -- and cut out by the SAME cropping code the live reader uses, so
-it learns what that code actually hands it. `tools/train_digits.py`
-regenerates the data and the weights.
+Trained on SYNTHETIC digits: the game's own font rendered at on-screen
+sizes, distorted like real frames (blur, compression bleed, JPEG blocks,
+icon clutter, pixel shift), and cut out by the same cropping the live
+reader uses. `tools/train_digits.py` regenerates the data and weights.
 
-Measured on a hand-labelled benchmark (2 lossless screenshots and 4
-recorded frames, 168 numbered cells):
-
-    template matcher, old cropping     151 / 168
-    template matcher, new cropping     166 / 168
-    this classifier, new cropping      167 / 168
-
-The one miss had a confidence margin of 0.145; the lowest CORRECT read
-was 0.882 -- so a doubt threshold of 0.5 flags exactly the wrong one and
-lets the pouch label repair or refuse it.
+Hand-labelled benchmark (168 cells): template matcher 151/168 (old
+cropping) -> 166/168 (new cropping); this classifier 167/168. The one
+miss scored a margin of 0.145; the lowest correct read was 0.882, so the
+0.5 doubt threshold below flags only the miss.
 
 numpy only at play time, like the rest of `solver.live.vision`. Without
 the weights file, `count_classifier()` is None and callers keep the

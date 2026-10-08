@@ -1,30 +1,25 @@
 """Remember the gag menu while it stays open, and vote on every cell.
 
-WHY. One frame of the menu can be wrong in ways no single frame can
-detect. The mouse cursor sitting on a digit is the common case: on a
-recorded building run it turned a "4" into nothing and a "5" into a "1",
-and while a gag is hovered the "Total gags" label is replaced by the
-gag's card, so there is no total to catch it either. The learned reader
-flags most of these as doubtful, which refuses the board -- a round with
-no advice -- and the rest it cannot flag at all.
+A single frame can be wrong in ways no single frame can catch: the mouse
+cursor sitting on a digit turned a "4" into nothing and a "5" into a "1"
+on a recorded run, and while a gag is hovered its card replaces the
+"Total gags" label, so there is no checksum to catch it either.
 
-But counts CANNOT CHANGE while the menu is open: gags are spent when the
-round resolves, and the menu is gone while that happens. So every frame
-the panel polls during one opening of the menu is another look at the
-same numbers. The cursor moves; the digit under it does not.
+But counts CANNOT CHANGE while the menu is open -- gags are spent only
+when the round resolves, and the menu is gone when that happens. So every
+poll during one opening is another look at the same numbers: the cursor
+moves, the digit under it does not.
 
-This keeps, per cell, the confident reads seen since the menu opened,
-and resolves each new read against them:
+This keeps, per cell, the confident reads seen since the menu opened:
 
-* a DOUBTFUL cell takes the cell's most common confident value, if it
-  has been seen at all and leads outright;
+* a DOUBTFUL cell takes the most common confident value seen, if it
+  leads outright;
 * a confident cell that DISAGREES with a value seen at least twice more
-  often than its own is overruled the same way -- the "5" read as "1"
-  under the cursor.
+  often is overruled the same way.
 
-Anything else is left exactly as read, doubts included, so the label
-check and `build_state`'s refusal still apply. `reset()` whenever the
-menu closes or the battle ends: that is when counts may really change.
+Everything else is left exactly as read, doubts included, so the label
+check and `build_state`'s refusal still apply. `reset()` on menu close or
+battle end -- that is when counts may really change.
 """
 from __future__ import annotations
 
