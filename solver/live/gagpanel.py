@@ -1,40 +1,30 @@
 """Reading gag counts off the in-battle gag menu.
 
-The Local API reports which gags a toon has *unlocked* and whether a
-track is organic, but never how many of each it is carrying -- the whole
-of `/gags.json` is seven tracks by three fields, and none of them is a
-count. The gag menu shows them, so they are read from the screen.
+The Local API states which gags are unlocked and whether a track is
+organic, but never how many of each is carried -- `/gags.json` has no
+count field. The gag menu shows it, so it's read from the screen. That
+covers every solver input: laff and training from the API, counts from
+here, cogs from `vision`.
 
-That leaves every solver input covered without typing: laff and track
-training from the API, counts from here, cogs from `vision`.
+FINDING THE PANEL. Each track's row is backed by its own colour (the
+same seven TTR has always used), spanning the panel's full width.
+Matching colour alone is too loose -- a purple cog or green lawn would
+match too -- so what identifies a row is a *long contiguous run* of it;
+seven such runs at a consistent left edge and even spacing is a gag
+panel and nothing else. The rows then give the panel's geometry
+directly.
 
-FINDING THE PANEL
------------------
-Each track's row is backed by its own colour -- the same seven Toontown
-has always used -- and each spans the panel's full width. Matching those
-colours anywhere in the frame is far too loose, since a purple cog or a
-green lawn will match too; what identifies a row is a *long contiguous
-run* of the colour. Seven such runs, at a consistent left edge and even
-spacing, is a gag panel and nothing else is.
+CELL STATES, not to be confused:
 
-The rows then give the panel's geometry directly: left edge, width, and
-one y per track, with no separate search for the panel's frame.
-
-CELL STATES
------------
-Three, and they must not be confused:
-
-* greyed -- usually unlocked with none carried, but NOT always: a track
-  the game will not let you use this round is greyed too, digits and
-  all (Toon-Up in a solo fight). The digit decides, never the colour.
+* greyed -- usually unlocked-but-empty, but NOT always: a track the
+  game won't let you use this round (Toon-Up in a solo fight) greys
+  too, digits and all. The digit decides, never the colour.
 * blue with a white digit -- carried, and the digit is the count
-* blank -- the gag is not unlocked at that level at all, which is not
-  the same as carrying none of it
+* blank -- not unlocked at that level, which is not the same as zero
 
-The third looked like a bug when Drop, trained to 6, produced a seventh
-cell with no digit in it. Reporting that as 0 would be wrong in a way
-the solver would act on, since a level-7 Drop is not a gag this toon can
-ever be holding.
+The third looked like a bug once: Drop trained to 6 produced a seventh
+cell with no digit, and reporting that as 0 would tell the solver this
+toon could hold a level-7 Drop it never can.
 """
 from __future__ import annotations
 
@@ -104,15 +94,14 @@ WHITE_FLOOR_MIN = 70
 MIN_DIGIT_SCORE = 0.30
 
 # How far the winning digit must beat the runner-up. A score says the
-# blob is a digit; only the margin says which. Measured over all 41
-# digits on a real panel: the median margin is 0.128, the worst *correct*
-# read is 0.063, and the single wrong read -- a 6 misread as a 5 -- sits
-# at 0.011, with the true digit not even second. So this separates the
-# one bad read from every good one with a 5.7x gap on either side.
+# blob is a digit; only the margin says which. Measured over 41 digits
+# on a real panel: median margin 0.128, worst correct read 0.063, the
+# one wrong read (a 6 misread as 5, true digit not even second) 0.011 --
+# a 5.7x gap on either side.
 #
-# It cannot fix the read. What it does is turn a confident wrong number
-# into a known-doubtful one, which is what lets the pouch label repair it
-# -- see `_repair_with_label`.
+# This cannot fix the read; it turns a confident wrong number into a
+# known-doubtful one, which lets the pouch label repair it -- see
+# `_repair_with_label`.
 MIN_DIGIT_MARGIN = 0.04
 
 
@@ -181,18 +170,15 @@ class GagPanel:
     def checksum_problem(self) -> Optional[str]:
         """Why this read cannot be trusted, or None if it adds up.
 
-        The menu prints its own total, and the cells have to sum to it.
-        For a long time this was described as a free checksum and never
-        actually taken: `pouch_total` existed, nothing read the label,
-        and nothing compared them. The first real frame the suite ever
-        saw was off by one -- a Trap cell holding 6 read as 5 -- which
-        is exactly the failure the check is for and exactly the kind
-        that is invisible without it. A misread count does not look
-        wrong downstream; it looks like a toon with one fewer gag, and
-        the solver plans confidently around it.
+        The menu prints its own total, and the cells must sum to it. The
+        first real frame the suite ever saw was off by one -- a Trap
+        cell holding 6 read as 5 -- exactly the failure this is for: a
+        misread count doesn't look wrong downstream, it looks like a
+        toon with one fewer gag, and the solver plans confidently
+        around it.
 
         Returns a message rather than raising, because the caller
-        (`session.build_state`) collects reasons a state cannot be
+        (`session.build_state`) collects every reason a state cannot be
         built and shows them all at once.
         """
         from ..data import gags as gags_mod
@@ -212,11 +198,9 @@ class GagPanel:
                         f"{cell.level} reads {cell.count}, more than can be "
                         f"carried ({most}) -- no advice from it")
         if self.label is None:
-            # NO TOTAL TO CHECK AGAINST. This used to wave everything
-            # through, including cells the digit reader itself flagged as
-            # doubtful -- and those are exactly the misreads the total
-            # exists to catch. With the label unread, a doubtful pouch
-            # cell has nothing behind it, so the read is refused.
+            # No total to check against: a doubtful cell has nothing
+            # behind it, so refuse rather than wave it through -- that
+            # includes cells the digit reader itself flagged doubtful.
             doubtful = [c for c in self.cells if c.uncertain and c.count
                         and c.level < gags_mod.POUCH_EXEMPT_LEVEL]
             if doubtful:
@@ -257,21 +241,19 @@ def _qualifies(row: np.ndarray, need: int) -> bool:
     """Does this row of the mask look like a panel band?
 
     An unbroken run of `need` is the clean case. A row whose cells carry
-    ORGANIC SPROUTS is the other one: the colour is all still there, cut
-    into pieces by the badge on each cell. Live, an organic TRAP row read
-    a longest run of 247px against a 288px requirement while the other
+    organic sprouts is the other: the colour is all there, cut into
+    pieces by the badge on each cell. Live, an organic TRAP row's
+    longest run was 247px against a 288px requirement while the other
     six ran 862px -- and `find_panel` returns None the moment one row is
-    missing, so a battle went undetected with the menu wide open.
+    missing, so a battle with the menu wide open went undetected.
 
-    Organic is not a corner case. It is a permanent property of a track,
-    so a toon with an organic track would have had every battle in that
-    zone go unnoticed, forever, for as long as they kept the track.
+    Organic is a permanent property of a track, so an affected toon
+    would have every battle in that zone go unnoticed for as long as
+    they kept it.
 
-    So a broken row also qualifies, on a stricter test than mere pixel
-    count: it must SPAN at least `need`, and fill most of what it spans.
-    That is what a decorated line looks like and what a patch of scenery
-    does not -- scenery matches these colours in blobs, which neither
-    span far nor fill what they span.
+    So a broken row also qualifies, on a stricter test: it must SPAN at
+    least `need` and fill most of what it spans -- what a decorated line
+    looks like and a patch of scenery does not.
     """
     if _longest_run(row) >= need:
         return True
@@ -279,16 +261,12 @@ def _qualifies(row: np.ndarray, need: int) -> bool:
     if lit.size == 0:
         return False
 
-    # MERGED ACROSS SMALL GAPS ONLY. Measuring first-lit to last-lit made
-    # the span the distance to anything else on screen wearing the same
-    # colour: TRAP spanned 1152px because the Shticky Notes page is a
-    # pale yellow close enough to match, so the band and the notepad were
-    # treated as one thing with a hole between them, and the fill came
-    # out at 62% against a 65% floor.
-    #
-    # A badge interrupts a band by tens of pixels. Anything further apart
-    # is a different object, so the merge stops there and each group is
-    # judged on its own.
+    # Merged across small gaps only. Measuring first-lit to last-lit let
+    # TRAP's span reach 1152px, because the Shticky Notes page is a pale
+    # yellow close enough to match -- band and notepad treated as one
+    # object with a hole between them, filling 62% against a 65% floor.
+    # A badge interrupts a band by tens of pixels; anything further is a
+    # different object, so the merge stops there.
     breaks = np.flatnonzero(np.diff(lit) > MAX_BADGE_GAP)
     starts = np.concatenate(([0], breaks + 1))
     ends = np.concatenate((breaks, [lit.size - 1]))
@@ -399,24 +377,21 @@ def _repair_with_label(cells: List[PanelCell],
                        label: Optional[Tuple[int, int]]) -> List[PanelCell]:
     """Recover a single doubtful count from the menu's own total.
 
-    The checksum was built to *detect* a misread. It can also fix one,
-    in the case where the answer is forced rather than guessed: if
-    exactly one pouch cell is uncertain, every other cell is confident,
-    and the label says the pouch holds N, then that cell holds N minus
-    the rest. There is nothing to choose.
+    The checksum detects a misread; this fixes one where the answer is
+    forced, not guessed: if exactly one pouch cell is uncertain, every
+    other cell is confident, and the label gives the pouch's total, that
+    cell holds the total minus the rest -- nothing to choose.
 
-    This is worth doing because the digit reader cannot be fixed by
-    thresholds alone. On the frame this was built from, the misread 6
-    scored 0.594 as a 5 with an 8 second at 0.583 -- the correct digit
-    did not place at all, so no tightening of the match recovers it.
-    The label does, exactly.
+    Worth doing because thresholds alone can't fix the digit reader: on
+    the frame this was built from, a misread 6 scored 0.594 as a 5 with
+    an 8 second at 0.583 -- the correct digit never placed, so no
+    tightening recovers it. The label does, exactly.
 
-    Deliberately narrow. Two uncertain cells make the split ambiguous
-    and it declines; a difference that is negative or larger than the
-    gag's carry limit means something else is wrong and it declines. In
-    every declining case the checksum still fails afterwards and the
-    state is still refused, which is the behaviour this replaces rather
-    than weakens.
+    Deliberately narrow: two uncertain cells make the split ambiguous,
+    and a negative or over-capacity result means something else is
+    wrong -- either way it declines, and the checksum still fails
+    afterwards and the state is still refused, same as before this
+    existed.
 
     Level 7 gags are outside the pouch and absent from the label, so an
     uncertain level-7 cell can never be solved this way.
@@ -563,20 +538,17 @@ def _read_cell(patch: np.ndarray, track: Track, level: int) -> PanelCell:
     blue = ((patch[:, :, 2] > 60)
             & (patch[:, :, 2] - patch[:, :, 0] > 25)).mean()
     if blue <= MIN_BLUE_FRAC:
-        # Greyed. Usually unlocked-but-empty -- BUT READ THE DIGIT ANYWAY,
-        # because grey does not mean empty. The game greys a whole track
-        # it will not let you use this round, and Toon-Up in a solo fight
-        # is the standing case: it heals teammates, so with nobody to heal
-        # a Megaphone and a Lipstick carried five apiece were drawn in the
-        # same grey as an empty cell. Returning 0 on colour alone dropped
-        # all ten, the cells summed to 20 against a menu label of 30, and
-        # the checksum refused the state -- blaming a misread digit when
-        # the digit had never been looked at.
+        # Greyed usually means unlocked-but-empty, but READ THE DIGIT
+        # ANYWAY: the game greys a whole track it won't let you use this
+        # round. Toon-Up in a solo fight is the standing case -- a
+        # Megaphone and a Lipstick carried five apiece once drew in the
+        # same grey as empty cells; colour alone dropped all ten, summing
+        # to 20 against a label of 30, and the checksum blamed a misread
+        # digit that had never been looked at.
         #
         # Every grey cell prints its count, zeros included, so reading it
-        # costs nothing. A grey cell that reads 0, or reads nothing, is
-        # the certain zero it always was, so a true empty cannot pick up
-        # doubt it did not have before and crowd out `_repair_with_label`.
+        # costs nothing, and a true empty can't pick up doubt it didn't
+        # have before.
         count, margin = _read_count(patch)
         if not count:
             return PanelCell(track, level, 0, unlocked=True)
@@ -610,17 +582,17 @@ COUNT_MAX_WIDTH = 0.30
 def _count_glyphs(patch: np.ndarray, region=None):
     """The count's glyphs as (mask, greyscale) crops, left to right.
 
-    BRIGHTNESS, NOT COLOURLESSNESS. Ink used to be "near-white AND barely
-    coloured". Video compression bleeds the cell's blue into thin white
-    strokes, which then fail the colour test: on a recorded frame most of
+    BRIGHTNESS, NOT COLOUR. Ink used to mean "near-white and barely
+    coloured", but video compression bleeds the cell's blue into thin
+    white strokes that fail a colour test -- on a recorded frame most of
     a "5" vanished and the remains read as "62". White digits are far
-    brighter than any cell behind them, so ink is luminance above an Otsu
-    threshold for this corner (and above COUNT_INK_FLOOR).
+    brighter than any cell behind them, so ink is luminance above an
+    Otsu threshold for this corner (and above COUNT_INK_FLOOR).
 
-    RIGHT-ALIGNED. A gag icon's highlights can pass a brightness test too
-    -- a Fog Horn's streaks read as extra "1"s, turning 1 into 111. The
-    count is right-aligned on one baseline, so only the run of glyphs
-    ending at the rightmost one is kept: close together, similar height.
+    RIGHT-ALIGNED. A gag icon's highlight can pass the brightness test
+    too -- a Fog Horn's streaks read as extra "1"s, turning 1 into 111.
+    The count is right-aligned on one baseline, so only the run of
+    glyphs ending at the rightmost one is kept.
     """
     from .digits import otsu
     from .vision import _components
@@ -633,13 +605,11 @@ def _count_glyphs(patch: np.ndarray, region=None):
         return []
     luma = (0.299 * corner[..., 0] + 0.587 * corner[..., 1]
             + 0.114 * corner[..., 2])
-    # RELATIVE TO THE CELL, not an absolute floor. The game dims a whole
-    # track it will not let you use this round, digits and all -- to
-    # ~110 on a ~40 background -- and a fixed floor of 150 erased them
-    # (a live VP once summed 45 against a label of 70 that way). So ink
-    # must stand clear of THIS corner's own background: an Otsu split,
-    # at least halfway from the median to the brightest pixel, and a
-    # corner with too little contrast has no digit at all.
+    # RELATIVE TO THE CELL: a dimmed track draws digits near 110 on a
+    # ~40 background, and a fixed floor of 150 erased them (once summing
+    # 45 against a label of 70). So ink must clear THIS corner's own
+    # background: an Otsu split, at least halfway from the median to the
+    # brightest pixel, with too little contrast meaning no digit at all.
     peak, middle = float(luma.max()), float(np.median(luma))
     if peak - middle < COUNT_MIN_CONTRAST:
         return []
@@ -690,11 +660,10 @@ def _read_count(patch: np.ndarray) -> Tuple[Optional[int], float]:
         digit, gap = net.classify(gray)
         digits += str(digit)
         margin = min(margin, gap)
-        # THE WRONG SIZE IS DOUBT, however confident the read. Every
-        # count is drawn at one size: 0.205-0.233 of the row's height
-        # across 168 labelled cells. The mouse cursor sitting on a "4"
-        # merged into one blob 0.329 tall and 0.48 wide, which the
-        # classifier read as "2" with a margin of 0.85.
+        # Wrong size means doubt regardless of confidence: counts are
+        # drawn at one size (0.205-0.233 of row height, over 168 cells).
+        # A cursor sitting on a "4" once merged into a blob 0.329 tall,
+        # 0.48 wide, read as "2" at margin 0.85.
         h, w = mask.shape[0] / row, mask.shape[1] / row
         if not COUNT_HEIGHT[0] <= h <= COUNT_HEIGHT[1] or w > COUNT_MAX_WIDTH:
             margin = 0.0
@@ -717,17 +686,12 @@ def _read_count_templates(patch: np.ndarray) -> Tuple[Optional[int], float]:
     if corner.size == 0:
         return None, 0.0
     hi, lo = corner.max(axis=2), corner.min(axis=2)
-    # RELATIVE TO THIS CELL, not an absolute white. The game dims whole
-    # tracks -- a row you cannot use this round is drawn darkened -- and
-    # the digit dims with it. A fixed floor of 150 then finds no ink at
-    # all and the count reads as nothing: on a live VP panel the cells
-    # summed to 45 against a menu label of 70, with the darkened TRAP,
-    # LURE and SOUND rows contributing none of their gags.
-    #
-    # The digit is the brightest near-grey in its corner whatever the
-    # cell's brightness, so the floor scales with what is actually there.
-    # The absolute floor stays as a lower bound: without it, an empty
-    # dark cell would find "ink" in its own noise.
+    # RELATIVE TO THIS CELL: a darkened row's digit dims with it, and a
+    # fixed floor of 150 finds no ink at all (once summing 45 against a
+    # label of 70, with the darkened TRAP, LURE and SOUND rows
+    # contributing nothing). So the floor is the brightest near-grey in
+    # the cell's own corner, with WHITE_FLOOR_MIN as a lower bound so an
+    # empty dark cell can't find ink in its own noise.
     peak = int(lo.max()) if lo.size else 0
     floor = max(WHITE_FLOOR_MIN, min(WHITE_FLOOR, int(peak * WHITE_FLOOR_FRAC)))
     ink = (lo > floor) & ((hi - lo) < 45)
