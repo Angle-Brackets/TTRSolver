@@ -1384,3 +1384,24 @@ its top 4 moves. The sweep separates how teammates play in the fight
 What the engine assumes makes no measurable difference; network
 teammates simply play a little better. `SensiblePrior` stays the default
 (it is also ~45% faster a decision); `NetTeammate` is available.
+
+### MCTS with more budget: budget is not what it lacks
+
+Same 100 duo VP sides, owner pouch, no unites, each method given 1x, 2x
+and 4x the playouts (flat: stages 8/16/32, 16/32/64, 32/64/128 =
+168/336/672; MCTS: iters to match):
+
+                1x     2x     4x
+    flat        52     63     60
+    MCTS        49     51     49    (vs flat 2x: p 0.05 and 0.02)
+
+MCTS stays near 50 whatever its budget while flat improves, so the tree
+is not underfed. The likely cause is structural: below the root, PUCT
+picks among the network's top 4 by design, so the in-tree follow-up is
+deliberately worse than the network's own play, and the open-loop tree
+blends divergent dice into one node. A retry needs chance nodes and
+the network's argmax below the root until a node is well visited.
+
+The other finding: flat playouts gained 11 wins from 2x budget on duo
+VPs, so cheaper playouts are strength -- which is what a value network
+that truncates rollouts would buy.
