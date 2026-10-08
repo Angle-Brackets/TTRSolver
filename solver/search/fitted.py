@@ -39,94 +39,32 @@ from . import features
 # Set by tools/fit_heuristic.py. None means "not fitted yet", and
 # `value` falls back to the hand-written heuristic so the solver always
 # has something to score with.
-# Fitted by tools/fit_heuristic.py on 5,000 positions labelled with exact
-# solve(), validated against 406 larger hold-out positions:
+#
+# Fitted on 5,000 positions labelled with exact solve(), validated on
+# 406 hold-out positions:
 #
 #                       bias     MAE      r   ordering
 #     hand-written     -51.2    94.3   0.07       53%
 #     fitted            +4.5    24.3   0.78       89%
 #
-# Refitted with `trap_damage_ratio`, an 18th feature giving the model
-# HOW BIG an armed trap is rather than only that one exists. A Banana
-# Peel and a Railroad were previously identical inputs, and the
-# evaluator's error on trap-and-lure positions ran to 176-212 points --
-# about the span of trap damage itself. An MLP and an explicit
-# conjunction feature were both tried first and neither helped, because
-# neither added information.
+# Includes `trap_damage_ratio` (18th feature: HOW BIG an armed trap is,
+# not just that one exists -- a Banana Peel and a Railroad were
+# previously identical inputs).
 #
-# WATCH THIS PAIR. `trap_damage_ratio` fitted NEGATIVE (-32.6) while
-# `trapped_with_lure` jumped from ~31 to +90.6. A bigger trap scoring
-# worse is backwards, and the two fire under nearly the same condition
-# -- an armed trap with a lure in hand -- so they are collinear and
-# least squares will split them arbitrarily. Their SUM may be right
-# while neither is, which is fine for prediction and misleading to read.
-# Before trusting either number, check the pair jointly on trap+lure
-# positions with scratchpad/evaltest.py, which scores worst-case error
-# rather than MAE.
+# WATCH THIS PAIR: `trap_damage_ratio` fits NEGATIVE while
+# `trapped_with_lure` is large and positive. Both fire under nearly the
+# same condition (armed trap + lure in hand), so they are collinear and
+# least squares splits them arbitrarily -- trust their SUM, not either
+# number alone. Check jointly on trap+lure positions with
+# scratchpad/evaltest.py (worst-case error, not MAE) before relying on
+# either.
 #
-# Refitted a third time, after the Lure Bonus went in. Same result as
-# the two before it: on identical fresh labels the old and new weights
-# are indistinguishable for accuracy (hold-out MAE 26.8 against 26.9,
-# ordering 91% both) and the new fit is better centred (+1.3 to -0.4).
-#
-# THREE FOR THREE. Every rule change flagged as invalidating this
-# evaluator has moved it almost not at all. That is worth knowing when
-# judging how urgent the next refit is -- but not worth skipping one
-# over, because the harmlessness is only visible afterwards.
-#
-# Refitted again after `turn_cost` became nonzero for every objective
-# (it was 0.0 outside SPEEDRUN, which let a party stall through a lure
-# window for free). That changes `step_reward`, so it changes what an
-# exact label is.
-#
-# Same shape of result as the Toon-Up refit: on the SAME fresh labels
-# the old and new weights are indistinguishable for accuracy -- train
-# MAE 20.8 both, hold-out 27.0 against 27.1, r and ordering identical.
-# What did move is BIAS, from +1.4 to -0.4 on hold-out, so the new fit
-# is the better centred of two otherwise equal models. That, plus
-# keeping provenance honest, is the whole case for shipping it.
-#
-# Refitted again after Toon-Up was corrected: it heals other toons and
-# never the thrower ([CONFIRMED] TTR wiki), so solo Toon-Up heals zero,
-# and the heal is capped before the cogs attack instead of sharing one
-# clamp with their damage. Both change what an exact label means, which
-# is why the cache digest over solver/simulator.py forced a re-label.
-#
-# THE REFIT BARELY MOVED, and that is the useful result. Only 3 of 17
-# weights shifted by more than 1.0, the largest being gags_ratio at
-# -1.40; laff_ratio moved 0.20 and trapped_with_lure 0.37. Scored on the
-# SAME fresh labels, the old and new weights are indistinguishable --
-# train MAE 20.9 for both, hold-out 27.3 for both, ordering within a
-# point. The staleness was real in principle and negligible in practice.
-#
-# The apparent regression from 25.5 to 27.3 is the hold-out SAMPLE, not
-# the model: 406 positions here against 526 before, drawn under changed
-# rules. Both weight sets score 27.3 on this one, which is what makes
-# that readable at all -- comparing a new model's MAE against a number
-# computed on different labels says nothing.
-#
-# Refitted after two rule changes that alter what an exact label means:
-# Trap's +10 accuracy bonus to Lure (calc_prev_hits_bonus, which used to
-# return 0 for a solo toon and should not have) and BALANCED gaining a
-# scarcity term. The fit barely moved -- hold-out MAE 25.6 -> 25.5 --
-# but `trapped_with_lure` rose from 30.49 to 31.85, which is the model
-# noticing that a placed Trap now helps the Lure that springs it land.
-#
-# These replace a set fitted before `can_still_damage` existed, when a
-# line that ran the pouch dry was scored by the heuristic instead of
-# being a loss -- so those weights were fitted partly to their own
-# output. Re-solving 400 positions under three different evaluators
-# (including a deliberately absurd one) now moves 0% of the labels,
-# where it moved 83% before, so these are fitted to ground truth.
-#
-# Two things worth reading off the numbers. `trapped_with_lure` at 30.49
-# against `trapped_without_lure` at -2.00 -- the conjunction was learned
-# from data rather than asserted. And `gags_ratio` fell from 244.15 to
-# 12.75 when `damage_budget_ratio` and `cannot_finish` were added: a raw
-# gag count had been standing in for "can this pouch actually finish the
-# fight", which it cannot answer, and was being leaned on hard because
-# nothing else could. Hold-out MAE went 50.6 -> 25.6 on that change
-# alone.
+# Refit whenever a rule change alters what an exact label means
+# (accuracy, damage, Toon-Up, turn_cost, scarcity, ...) -- gags_ratio
+# and trapped_with_lure/trapped_without_lure are the conjunction and
+# proxy features most worth re-checking after one. In practice each
+# refit so far has moved hold-out MAE by about a point; that is only
+# visible after refitting, not a reason to skip one.
 WEIGHTS: Optional[List[float]] = [
         17.07794,   # bias
        160.14802,   # laff_ratio
@@ -189,18 +127,13 @@ def value(state: BattleState) -> float:
 
     from .expectimax import LOSS_VALUE, WIN_VALUE
 
-    # Terminal states are not estimated, they are known. The fitted form
-    # dropped this at first and scored a *lost* battle at +72, because
-    # nothing in the feature set says "already over" and a linear model
-    # will happily extrapolate a position with plenty of gags left. The
-    # search itself returns 0 for terminal nodes before ever asking, so
-    # this only bites callers scoring a position directly -- which is
-    # exactly what makes it easy to miss.
+    # Terminal states are not estimated, they are known: nothing in the
+    # feature set says "already over", so a linear model will happily
+    # extrapolate a *lost* battle at +72. The search itself returns 0 for
+    # terminal nodes, so this only bites a caller scoring a state directly.
     #
-    # `is_terminal` and not `laff <= 0`: a toon with no way left to
-    # damage a cog has also lost, and that is the case a linear model
-    # extrapolates worst -- it still has laff, and may still have a
-    # pocketful of Lures, so every feature here reads healthy.
+    # `is_terminal`, not `laff <= 0`: a toon with no way left to damage a
+    # cog has also lost, and still reads healthy on every other feature.
     if state.is_win():
         return WIN_VALUE
     if state.is_terminal():

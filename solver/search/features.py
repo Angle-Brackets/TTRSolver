@@ -1,64 +1,41 @@
 """Features for scoring a position at the search's depth cutoff.
 
-Everything here is pure standard library on purpose. The heuristic is
-called ~81,000 times in a single three-cog depth-2 search, and it lives
-in the core solver, which does not depend on numpy -- so the fitting is
-done offline with numpy and only the resulting weights come back, as
-plain floats. See `fitted.py`.
+Pure standard library on purpose: the heuristic runs ~81,000 times in a
+three-cog depth-2 search, inside the core solver, which must not depend
+on numpy. Fitting happens offline with numpy; only the resulting weights
+come back as plain floats -- see `fitted.py`.
 
 WHAT THE OLD HEURISTIC MISSED
------------------------------
-Measured against exact `solve()` values on 45 random positions, the
-hand-written `100 * cog_progress - 100 * (1 - laff_kept)` carried a
-systematic bias of **-100 points**: it averaged -6.5 where the truth
-averaged 93.7. It scores a position relative to "full laff, untouched
-cogs = 0", while the true value of a winnable position includes the
-+100 the battle is on track to pay. A constant term fixes that, and it
-is the single biggest thing on this list.
+------------------------------
+Against exact `solve()` values on 45 positions, the hand-written
+`100 * cog_progress - 100 * (1 - laff_kept)` had a systematic bias of
+-100 points (averaged -6.5 vs. a true 93.7): it scores relative to
+"full laff, untouched cogs = 0" and ignores the +100 a winnable fight
+is on track to pay. A constant term fixes most of that.
 
-After that come the distinctions it could not express at all:
-
-- Cog HP was summed, so where the damage went was invisible. What
-  matters is how many cogs the pouch can still *kill*, which is a
-  threshold and not a ratio.
-- Gags remaining did not appear, so a toon that cannot finish the fight
-  scored the same as one that can.
-- Lure and trap did not appear.
+It also couldn't express which cogs the pouch can actually *kill* (a
+threshold, not cog HP summed), whether gags remaining can finish the
+fight, or lure/trap at all.
 
 CONJUNCTIONS
 ------------
-Several features are only worth anything in combination, and a linear
-model cannot discover that on its own -- the product has to be written
-out. `trapped_with_lure` is the clearest: a trap does nothing until a
-cog is lured onto it, so an armed trap is a stored gain with Lure in the
-pouch and dead weight without it. Those two states differ only in a gag
-count unrelated to the trap.
+Some features only mean something as a product, which a linear model
+can't discover on its own: `trapped_with_lure` (a trap is a stored gain
+only with a Lure left to spring it) and `one_hit_from_death` (laff is a
+smooth slide until one round of damage can end the fight, which is a
+step).
 
-`one_hit_from_death` is the other kind of thing a ratio cannot say: laff
-is a smooth slide right up until one round of incoming damage can end
-the fight, which is a step.
-
-WHAT A PROXY LOOKS LIKE WHEN YOU FIND ONE
------------------------------------------
-`gags_ratio` -- gags carried over 20 -- came back from the first fit on
-exact labels with a weight of **244** on a scale where winning is 100.
-A feature that has to shout is usually standing in for a question it
-cannot answer, and this one was: "will this pouch finish this fight?"
-depends on how hard the gags hit and how much cog is left, neither of
-which a count knows.
-
-`damage_budget_ratio` and `cannot_finish` ask it directly. Adding them
-took hold-out MAE from 50.6 to 25.6 and correlation from 0.69 to 0.86,
-and `gags_ratio` fell to 12.75 -- it had been carrying the other two on
-its back. They exist because running out of usable gags is now a *loss*
-(`BattleState.can_still_damage`) rather than a position the search would
-guess at, so the continuous version of that question is worth asking a
-few rounds before it becomes terminal.
-
-It is also the feature that cost something. A model that can say "full
-laff, but doomed" returns large negative values where the hand-written
-form cannot go below zero, which broke the depth-aware pruning floor
-that assumed otherwise -- see `expectimax.heuristic_floor`.
+PROXIES
+-------
+`gags_ratio` alone pulled a fit weight of 244 (vs. +/-100 for a win) --
+a feature forced to stand in for a question it can't answer: will this
+pouch finish the fight? Adding `damage_budget_ratio` and `cannot_finish`
+to ask that directly took hold-out MAE from 50.6 to 25.6 (correlation
+0.69 to 0.86) and let `gags_ratio` fall to 12.75. They also cost
+something: a model that can say "full laff, but doomed" returns large
+negatives where the hand-written form couldn't go below zero, which
+broke the pruning floor's old assumption -- see
+`expectimax.heuristic_floor`.
 """
 from typing import Dict, List
 
@@ -106,28 +83,17 @@ def _fighting(state: BattleState):
 def _damage_budget(state: BattleState) -> int:
     """Total damage the whole pouch can still deal, if every gag lands.
 
-    Deliberately optimistic -- every gag hits, every group gag hits
-    every cog -- because it is a *budget*, and the useful thing to know
-    is whether the ceiling clears the remaining cog HP at all. A toon
-    whose entire pouch cannot out-damage what is left on the field has
-    lost; that is now a terminal condition rather than a value judgement
-    (`BattleState.can_still_damage`), and this is the continuous version
-    of the same question, for positions a few rounds short of it.
+    Deliberately optimistic (every gag hits, group gags hit every cog) --
+    this is a ceiling, and the useful question is whether it clears the
+    remaining cog HP at all, matching the terminal rule in
+    `BattleState.can_still_damage`. Trap counts only with a Lure carried,
+    same as that rule.
 
-    Trap counts only when a Lure is carried, matching the terminal rule:
-    a trap with nothing to spring it deals nothing.
-
-    ARMED traps count too, and leaving them out was a real bug. A trap
-    that has been laid is no longer in `gag_counts` -- it is sitting on
-    the cog -- so the budget fell to ZERO the moment the setup move was
-    played. An armed Trapdoor and a Lure in hand read as 85 damage
-    before laying it and 0 after, which then lit `cannot_finish`
-    (weight -79) on a position that is winning.
-
-    That also contradicted the terminal rule this claims to match:
-    `BattleState.can_still_damage` knows an armed trap plus a Lure is
-    not a loss. The continuous version disagreed with the discrete one
-    on precisely the case both exist to judge.
+    ARMED traps must count too: a laid trap leaves `gag_counts` and sits
+    on the cog instead, so omitting it dropped the budget to zero the
+    instant the setup move was played (an armed Trapdoor + Lure in hand:
+    85 damage before laying it, 0 after), wrongly lighting
+    `cannot_finish` on a winning position.
     """
     n_alive = len(state.active_cogs()) or 1
     toons = _fighting(state)
@@ -169,19 +135,12 @@ def _damage_budget(state: BattleState) -> int:
 def _best_damage(state: BattleState) -> int:
     """Most damage a single gag in the pouch can do to one cog.
 
-    Uses `trained_fraction=1.0` and the toon's organic tracks -- that is,
-    exactly what `simulator.apply_toon_action` will actually deal. This
-    read `damage_at(0.0)`, the low end of the range, on the reasoning
-    that a conservative estimate never over-promises. That was wrong: the
-    simulator does not roll within the range, it always deals the maxed
-    value, so the "conservative" figure was simply a different number
-    from the one the game uses -- 36 against 40 for a Whole Cream Pie,
-    75 against 85 for a Trapdoor.
-
-    It matters because this feeds `killable_ratio`, and a kill is a
-    threshold. Undercounting damage by a tenth turns "this gag removes
-    that cog" into "it does not", which is the single distinction the
-    feature exists to capture.
+    Uses `trained_fraction=1.0`, matching what
+    `simulator.apply_toon_action` actually deals -- the simulator never
+    rolls within the damage range, so using the low end undercounted
+    every gag (36 vs 40 for a Whole Cream Pie, 75 vs 85 for a Trapdoor)
+    and could wrongly flip `killable_ratio`'s threshold on a cog the
+    real gag does remove.
     """
     best = 0
     for toon in _fighting(state):
@@ -220,16 +179,10 @@ def _trap_damage_ratio(alive) -> float:
 
 def extract(state: BattleState) -> List[float]:
     """The feature vector for `state`, in `FEATURE_NAMES` order."""
-    # Pooled over the toons still standing. With one toon every sum
-    # below is that toon's own number, so a solo feature vector is
-    # unchanged to the bit -- which matters, because the fitted weights
-    # were trained on solo positions and nothing has retrained them.
-    #
-    # PARTY VALUES ARE DEFINED HERE, NOT VALIDATED. Exact solve cannot
-    # reach a party position, so there are no labels to fit or check
-    # against; what these give is a vector that means something sensible
-    # instead of one that silently describes toons[0] and calls it the
-    # team. Treat any party number the evaluator produces as untested.
+    # Pooled over toons still standing; with one toon, bit-identical to
+    # the solo vector the fitted weights were trained on. Party values
+    # are DEFINED, not VALIDATED -- exact solve can't reach a party
+    # position to check against, so treat any party score as untested.
     fighters = _fighting(state)
     max_laff = float(sum(t.max_laff for t in fighters)) or 1.0
     team_laff = float(sum(t.laff for t in fighters))
@@ -289,28 +242,19 @@ def extract(state: BattleState) -> List[float]:
         # Lure remains to spring it.
         float(trapped) if lure_gags > 0 else 0.0,
         float(trapped) if lure_gags == 0 else 0.0,
-        # HOW BIG the armed traps are, relative to the health they are
-        # sitting on. The two flags above say only THAT a trap exists,
-        # so a Banana Peel (10 damage) and a Railroad (200) were
-        # identical to the model -- and the fitted evaluator's error on
-        # trap-and-lure positions runs to 176-212 points, which is that
-        # range. No amount of capacity recovers a number absent from the
-        # input; an MLP and an explicit conjunction feature were both
-        # tried first and neither helped, because neither added
-        # information.
-        #
-        # An armed trap is stored damage: the cog WILL lose this the
-        # moment a lure lands. As a ratio of remaining hp it answers the
-        # question that decides the position, which is whether it kills.
+        # How big the armed trap is relative to remaining HP -- the two
+        # flags above say only THAT a trap exists, so a Banana Peel (10
+        # damage) and a Railroad (200) looked identical, and the fitted
+        # evaluator's error on trap+lure positions ran to 176-212 points
+        # (that range). No model capacity recovers information missing
+        # from the input; an MLP and an explicit conjunction both failed
+        # to help.
         _trap_damage_ratio(alive) if lure_gags > 0 else 0.0,
         1.0 if group else 0.0,
         max(0.0, (team_laff - incoming)) / max_laff,
         cog_hp_ratio * laff_ratio,
-        # What `gags_ratio` was standing in for. A raw gag count knows
-        # nothing about how hard the gags hit or how much cog is left,
-        # and the fit leaned on it hard enough (weight 244 on a +/-100
-        # scale) to suggest it was carrying a question it could not
-        # actually answer.
+        # What `gags_ratio` stood in for (weight 244 on a +/-100 scale,
+        # see module docstring): does the budget clear what's left.
         min(2.0, budget / remaining_hp) if remaining_hp else 2.0,
         # The threshold, stated separately, because losing is a step and
         # not a slope: below 1.0 the pouch cannot finish the fight.
