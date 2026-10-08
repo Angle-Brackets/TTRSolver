@@ -4,8 +4,6 @@ Every gag in the game, one `Gag` object each.
 Damage, heals, organic values, accuracy, group flag, and (for Lure)
 duration in rounds -- all on one object per (track, level), so finding
 out what a gag does is one lookup instead of six parallel dicts.
-Lure used to live in data/lure.py purely because it was the first table
-rewritten from the wiki; there was never a reason for it to be separate.
 
 [CONFIRMED] from the Toontown Rewritten wiki, except for the two cells
 explicitly left None below. Sources, all cross-checked against each other:
@@ -19,59 +17,38 @@ explicitly left None below. Sources, all cross-checked against each other:
   (Cupcake, Banana Peel, Toontanic, ...), which carry mindamage/maxdamage
   (or minheal/maxheal) and organic fields of their own.
 
-SOURCE NOTE -- READ THIS BEFORE ADDING TO data/
------------------------------------------------
-This module is now TTR wiki data. It previously came from the QED1224
-strategy guide, which describes *Toontown Online* and predates TTR's
-rebalancing passes; that transcription was wrong about Sound (shifted a
-whole level -- see below), about the level-7 Trap and Drop gags (renamed
-*and* renumbered in TTR), and about which levels are group gags for Sound
-and Toon-Up. See docs/data-confidence.md.
-
-The wiki blocks ordinary fetches (403) but serves its MediaWiki API:
+SOURCE NOTE -- READ BEFORE ADDING TO data/: this module is TTR wiki
+data, not the QED1224 strategy guide, which describes *Toontown Online*
+and predates TTR's rebalancing. See docs/data-confidence.md. The wiki
+blocks ordinary fetches (403) but serves its MediaWiki API:
 
     curl "https://toontownrewritten.wiki/api.php?action=parse\\
           &page=Throw&prop=wikitext&format=json"
 
-WHAT THE GUIDE HAD WRONG (corrected here)
------------------------------------------
-  * Sound was off by one level. The guide's table started at Whistle
-    (5-7) and had no Bike Horn, so every Sound level was shifted down
-    one and level 6 was missing entirely.
-  * Trap level 7 is Railroad at 200, not "Train Tracks" at 195. 195 was
-    the pre-3.0.0 value; 3.0.0 raised it to 200.
-  * Drop level 7 is Toontanic at 180, not "Ocean Liner". Damage is
-    unchanged, only the name -- "Ocean Liner" and "Train Tracks" are TTO
-    names and do not exist on the TTR wiki at all.
-  * Throw level 6 "48-100" and Sound level 5 "25-50" had been rejected as
-    internally inconsistent. Both are REAL, and both were misfiled.
-    48-100 is Birthday Cake (Throw 6) and is correct as written; the
-    wide range is deliberate. 25-50 is Foghorn, which is Sound level
-    *6*, not 5 -- it looked like a broken progression only because of the
-    off-by-one above. Every level-6 gag in the game has a wide range
-    (Birthday Cake 48-100, Storm Cloud 36-80, Foghorn 25-50, Grand Piano
-    85-170, TNT 90-180, Juggling Cubes 75-105).
+WHAT THE GUIDE HAD WRONG (corrected here): Sound was off by one level
+(the guide's table started at Whistle, missing Bike Horn and level 6
+entirely); Trap level 7 is Railroad at 200, not "Train Tracks" at 195
+(the pre-3.0.0 value); Drop level 7 is Toontanic at 180, not "Ocean
+Liner" (name only, damage unchanged -- both TTO names are absent from
+the TTR wiki); and Throw 6 "48-100" / Sound 5 "25-50" had been rejected
+as inconsistent but are both real -- 48-100 is Birthday Cake (Throw 6)
+correctly, and 25-50 is Foghorn, which is Sound level *6* not 5 (an
+artifact of the off-by-one above). Every level-6 gag has a wide range
+(Birthday Cake 48-100, Storm Cloud 36-80, Foghorn 25-50, Grand Piano
+85-170, TNT 90-180, Juggling Cubes 75-105).
 
-WHERE THE GUIDE WAS RIGHT
--------------------------
-Of the 14 damage cells the guide had actually populated, 12 survive the
-wiki check unchanged: Throw 1-5 and 7, Squirt 1 and 7, Sound 7 (Opera
-Singer, 90) and Drop 7 (180 -- right number under the wrong name). Only
-two populated cells were wrong: Trap 7 (195, now 200) and the whole
-Sound column below level 7, via the off-by-one above.
+WHERE THE GUIDE WAS RIGHT: of 14 populated damage cells, 12 survive the
+wiki check unchanged (Throw 1-5 and 7, Squirt 1 and 7, Sound 7 and Drop
+7); only Trap 7 and the Sound column below level 7 were wrong.
 
-TTR REBALANCING HISTORY captured here (from each page's own changelog):
-  Throw   -- no rebalancing section on the page.
-  Squirt  -- no rebalancing section on the page.
+TTR REBALANCING HISTORY (from each page's own changelog):
   Sound   -- 4.0.0: carry capacity reduced to Trap's pre-3.0.0 capacity;
-             exp thresholds for Whistle/Aoogah/Elephant Trunk/Foghorn
-             lowered. No damage change.
+             several exp thresholds lowered. No damage change.
   Drop    -- 3.0.0: Safe given a damage *range* (like Grand Piano).
-             4.0.0: accuracy re-described "low" -> "very low"; organic
-             Drop bonus raised 10% -> 15%.
-  Trap    -- 3.0.0: Trapdoor 60-70 -> 75-85 (organic 66-77 -> "83-93");
-             Railroad 195 -> 200 (organic 214 -> 220); Trap put on the
-             same carry capacity as other tracks.
+             4.0.0: organic Drop bonus raised 10% -> 15%.
+  Trap    -- 3.0.0: Trapdoor 60-70 -> 75-85 (organic "83-93"); Railroad
+             195 -> 200 (organic 220); put on the standard carry
+             capacity.
              4.0.0: Trap grants +10% accuracy to Lure against a Trapped
              cog; Quicksand exp threshold 800 -> 500.
              4.0.5: Trap activation stun bonus 30% -> 50%; the passive
@@ -79,17 +56,16 @@ TTR REBALANCING HISTORY captured here (from each page's own changelog):
   Toon-Up -- 3.0.0: Pixie Dust 60-70 -> 50-60; Juggling Cubes 90-120 ->
              75-105.
              4.0.0: organic Toon-Up bonus raised 10% -> 20%.
-  Lure    -- 3.0.0: Presentation 15 -> 8 rounds; "Removed the Lure Stacking
-             Rounds mechanic that allowed the accumulation of Lure rounds
-             ... if multiple Lure Gags are used simultaneously". (Re-luring
-             across rounds doesn't refresh the counter either, but that is
-             play knowledge, not something the wiki states -- see
-             CogStatus.apply_lure.)
-             3.3.0: Lure gags with base accuracy below 50% no longer have a
-             chance to expire early. No gag is under 50%, so in practice
-             lures now always run their full duration.
-             4.0.0: dollar-bill accuracy +10%, multi-Lure +5%, Presentation
-             settled at 90%.
+  Lure    -- 3.0.0: Presentation 15 -> 8 rounds; Lure Stacking Rounds
+             removed (simultaneous Lures no longer accumulate rounds --
+             re-luring across rounds also doesn't refresh the counter,
+             but that's play knowledge, not wiki-stated; see
+             CogStatus.apply_lure).
+             3.3.0: Lure gags under 50% base accuracy no longer expire
+             early; no current gag is under 50%, so lures always run
+             full duration.
+             4.0.0: dollar-bill accuracy +10%, multi-Lure +5%,
+             Presentation settled at 90%.
 """
 from typing import Dict, Tuple
 
@@ -173,69 +149,35 @@ GAGS: Tuple[Gag, ...] = (
 )
 
 # Trap 5 (Trapdoor) organic damage: 84-94. The wiki states it three ways
-# -- Trap page table 83-94, Organic gags page and Trapdoor infobox 84-94,
-# Trap page 3.0.0 changelog 83-93 -- on an agreed base of 75-85.
-#
-# The maximum is not in doubt: 94 is given by three of the four sources
-# and by the organic rule below, and it is the only end the solver reads,
-# since damage_at defaults to trained_fraction=1.0.
-#
-# The minimum took two attempts. Deriving it from
-# ceil(base * (100 + ORGANIC_BONUS_PCT)/100) gives 83, and that rule
-# reproduces 67 of the 68 organic damage values here, so 83 looked
-# settled. It is not. The single exception is Squirt 4 (Seltzer Bottle),
-# where the rule gives 21 and all three wiki sources say 22 -- the rule
-# under-reading a MINIMUM by exactly one. Trapdoor is that same shape:
-# rule 83, two current sources 84. Having found a demonstrated failure
-# mode of precisely this kind, the rule is no longer good evidence for
-# preferring 83 over the two pages that say 84.
-#
-# So the transcription wins over the derivation: 84-94, matching the
-# Organic gags table and the Trapdoor infobox. The Trap page's 83 and the
-# changelog's 93 are the outliers.
-#
-# Independent check on the maximum: the Organic gags page states that "a
-# level 8 Cog can be defeated with an organic Trapdoor". A level 8 has 90
-# hp; 94 clears it and organic Safe at 81 does not.
+# on an agreed base of 75-85 (Trap page table 83-94, Organic gags page
+# and Trapdoor infobox 84-94, Trap page 3.0.0 changelog 83-93). The max
+# (94) is undisputed by three of four sources. The min took two
+# attempts: deriving it via ceil(base * (100+pct)/100) gives 83 and
+# matches 67 of 68 organic values here, but the one exception (Squirt 4
+# below) shows that same formula under-reading a minimum by exactly one
+# -- so the derivation isn't trusted over two sources saying 84.
+# Transcription wins: 84-94. Cross-check: the Organic gags page says "a
+# level 8 Cog can be defeated with an organic Trapdoor" (90 hp); 94
+# clears it, 83 would not have.
 
-# Toon-Up 3 (Lipstick) heal = (25, 30). [CONFIRMED] -- the Lipstick
-# page's own infobox says `minheal=25 | maxheal=30 | organic=30-36`.
-#
-# This cell sat open for a long time on an apparent conflict: the
-# Toon-Up and Organic gags SUMMARY tables say 27-30. They are simply
-# wrong; the gag's own page is unambiguous and agrees with the organic
-# figure everything else agrees on.
-#
-# Worth recording how it was nearly closed instead. It is derivable --
-# within Toon-Up, `organic = ceil(1.2 x base)` holds exactly across all
-# six other gags, and inverting that on the agreed organic (30, 36)
-# gives (25, 30) uniquely. That reasoning reached the right answer from
-# a premise that was overstated on the way (organic is NOT a flat +20%:
-# Throw converges on x1.1, Squirt and Drop on x1.15-1.2), and it was
-# unnecessary, because the number was written down one page away.
-# Check the specific page before deriving from the summary table.
-#
-# Lure 7 (Presentation) organic accuracy: 100, and the Organic gags page
-# contradicts ITSELF about it. Its prose says Lure gains "a flat increase
-# of 10% (except for Presentation, which increases by 5%)", which would
-# make it 95 -- while the table further down that same page, and the
-# Presentation infobox, both say 100. Two statements to one, and the
-# project's standing rule is that tables win, so 100 stands.
-#
-# It is also moot in play. A maxed toon reaches the 95 accuracy cap on
-# Presentation before organic is applied at all -- 90 base + 60 trackExp
-# - 55 tgtDef against a level 12 cog is already 95 -- so 95 and 100 give
-# an identical hit chance at every cog level checked. Recorded because
-# the prose carve-out is specific enough that somebody will read it and
-# assume this table is wrong.
+# Toon-Up 3 (Lipstick) heal = (25, 30). [CONFIRMED] by the Lipstick
+# page's own infobox (`minheal=25 | maxheal=30 | organic=30-36`), though
+# the Toon-Up and Organic gags SUMMARY tables wrongly say 27-30. (It's
+# also derivable: `organic = ceil(1.2 x base)` holds for the other six
+# Toon-Up gags and inverts (30, 36) to (25, 30) uniquely -- but check the
+# gag's own page before trusting a summary table.)
 
-# Squirt 4 (Seltzer Bottle) is a real exception to the organic rule, not a
-# transcription slip: base 18-21 -> organic 22-25 is stated identically by
-# the Seltzer infobox, the Squirt page table and the Organic gags table,
-# while the 15% rule gives 21-25. Every other Squirt gag follows the rule
-# exactly. Kept as the wiki states it -- and treated as evidence that the
-# rule is a good approximation rather than a law, which is what settled
-# Trapdoor above.
+# Lure 7 (Presentation) organic accuracy: 100. The Organic gags page
+# contradicts itself -- prose says Lure gains "a flat increase of 10%
+# (except Presentation, which increases by 5%)" (=95), but its own table
+# and the Presentation infobox both say 100. Tables win per project
+# convention. Moot in play either way: a maxed toon hits the 95 cap on
+# Presentation before organic applies at all.
+
+# Squirt 4 (Seltzer Bottle) is a real exception to the organic rule:
+# base 18-21 -> organic 22-25 per three sources, while the 15% rule
+# gives 21-25. Kept as stated -- evidence the formula is an
+# approximation, not a law (what settled Trapdoor above).
 
 _BY_KEY: Dict[Tuple[Track, int], Gag] = {g.key: g for g in GAGS}
 
@@ -320,13 +262,9 @@ MAX_POUCH = max(POUCH_CAPACITIES.values())
 
 # Level 7 gags are carried outside the pouch and do not count towards its
 # total. [CONFIRMED] three ways: the wiki gives level 7s their own limit
-# ("Toons can only carry one of each level 7 gag but can unlock the
-# ability to carry one additional level 7 gag by speaking to Ripley",
-# with a ToonTask literally titled "Change +1 level 7 gag carry
-# capacity"); a live gag menu showing 75 carried gags displayed "Total
-# gags 70 / 70", and the difference was exactly the five level 7s held;
-# and the player confirmed the rule directly.
-#
+# (one each, +1 more via a Ripley ToonTask); a live gag menu showing 75
+# carried gags displayed "Total gags 70 / 70", the difference being
+# exactly the five level 7s held; and the player confirmed it directly.
 # Counting them in was rejecting legal loadouts: a full 80-gag pouch plus
 # one level 7 per track came back as "86 gags, but the largest pouch
 # holds 80".
@@ -337,27 +275,23 @@ POUCH_EXEMPT_LEVEL = 7
 # Per-gag carry limits, by how far the track is trained
 # ---------------------------------------------------------------------
 # A gag's carry limit is not fixed: it rises as you unlock LATER gags in
-# the same track. `Gag.min_carry`/`max_carry` are only the two endpoints
-# of this table, and until now nothing interpolated between them -- every
-# consumer read `max_carry` and so treated every toon as fully upgraded.
+# the same track. `Gag.min_carry`/`max_carry` are only the two endpoints;
+# this table interpolates between them.
 #
-# [OPEN TOONTOWN SOURCE] `ToontownBattleGlobals.CarryLimits`, which is
-# the algorithm rather than a description of one. Tagged as source, never
-# [CONFIRMED] -- but the wiki corroborates it unusually strongly, and the
-# check is worth stating because it is 12 independent numbers per track:
-# each table's DIAGONAL reproduces the repo's `min_carry` values and its
-# BOTTOM ROW reproduces `max_carry`, both read from the gags' own wiki
-# infoboxes. Six tracks match on all 12; see tests/test_carry_limits.py,
-# which asserts it rather than trusting this comment.
+# [OPEN TOONTOWN SOURCE] `ToontownBattleGlobals.CarryLimits` -- the
+# algorithm rather than a description of one, never [CONFIRMED], but the
+# wiki corroborates it strongly: each table's DIAGONAL reproduces the
+# repo's `min_carry` values and its BOTTOM ROW reproduces `max_carry`,
+# both read from the gags' own wiki infoboxes, for all six tracks. See
+# tests/test_carry_limits.py, which asserts it rather than trusting this
+# comment.
 #
-# NOTE ON MEASURING A CHANGE LIKE THIS. Threading these limits through
+# NOTE ON MEASURING A CHANGE LIKE THIS: threading these limits through
 # the samplers changes which loadouts toons get, so it changes the
-# BUILDINGS -- the benchmark before and after is not the same population
-# and clear rates across it are not comparable. Set 36000 moved 60.8% ->
-# 67.5% and three held-out sets moved -0.3 on the same measurement. The
-# first was read as a gain and was not one. What justifies this table is
-# that it is right, not that it scores better; a data correction that
-# moves the benchmark cannot be validated by the benchmark.
+# BUILDINGS -- clear rates before and after are not the same population
+# and are not comparable (one set moved 60.8% -> 67.5% and read as a
+# gain; it wasn't one). What justifies this table is that it's right,
+# not that it scores better on a benchmark it has itself invalidated.
 #
 # Rows are the highest gag unlocked in the track (1-6), columns are the
 # gag's own level (1-6). Unlocking level 7 does not raise the others --
@@ -372,12 +306,11 @@ _CARRY_STANDARD = (
 )
 
 # TTR rebalanced two tracks in opposite directions, and the wiki records
-# both. Trap was BUFFED onto the standard table -- "Trap now shares the
-# same carry capacity with other gag tracks" (Trap, rebalancing update),
-# which its infoboxes confirm on all six levels, so Trap is not listed
-# here. Sound was NERFED onto Trap's OLD numbers, and took the whole row
-# rather than only the levels usually quoted: 5 Elephant Trunks and 2
-# Foghorns at the top, and 20/15/15/10 below them.
+# both. Trap was BUFFED onto the standard table ("Trap now shares the
+# same carry capacity with other gag tracks"), confirmed on all six
+# levels, so Trap is not listed here. Sound was NERFED onto Trap's OLD
+# numbers, across the whole row: 5 Elephant Trunks and 2 Foghorns at the
+# top, 20/15/15/10 below them.
 _CARRY_SOUND = (
     ( 5,  0,  0,  0, 0, 0),
     ( 7,  3,  0,  0, 0, 0),
@@ -458,35 +391,24 @@ EARLY_EXPIRY_ACCURACY_FLOOR = 50
 #
 # [CONFIRMED] TTR wiki (Skill points, "Required skill points"). A track
 # is fully maxed at 10,000 skill points, which is also the level 7
-# threshold -- so the last gag unlocks exactly as the bar fills.
+# threshold -- the last gag unlocks exactly as the bar fills.
 #
-# This is `minE` in `mechanics.gag_damage_from_exp`, the experience at
-# which a gag becomes available and from which its damage starts
-# climbing. It is transcribed here because damage in the real game is a
-# deterministic step function of track experience, not the linear
-# interpolation `mechanics.DAMAGE_TRAINED_FRACTION` stands in for.
+# This is `minE` in `mechanics.gag_damage_from_exp`: the experience at
+# which a gag becomes available and its damage starts climbing.
+# Transcribed here because damage in the real game is a deterministic
+# step function of track experience, not the linear interpolation
+# `mechanics.DAMAGE_TRAINED_FRACTION` stands in for.
 #
 # `maxE`, where a gag's damage stops climbing, is the NEXT gag's
-# threshold. [CONFIRMED] -- every gag infobox carries `prevexp` and
-# `nextexp`, and `nextexp` IS this number. Checked on Cupcake (0 ->
-# 10), Whole Cream Pie (2,000 -> 6,000), Big Magnet (800 -> 2,000),
-# Foghorn and Grand Piano (6,000 -> 10,000): `prevexp` matches
-# GAG_UNLOCK_EXP for that gag and `nextexp` matches the next gag's,
-# across four tracks.
+# threshold. [CONFIRMED] -- every gag infobox carries `prevexp`/`nextexp`
+# and `nextexp` IS this number; checked on four tracks (Cupcake, Whole
+# Cream Pie, Big Magnet, Foghorn/Grand Piano). Level 7 needs no window:
+# those gags have a single fixed damage (min equals max), so the
+# zero-width window at 10,000 is harmless.
 #
-# Wedding Cake reads `prevexp=10,000 | nextexp=500 to Go!`, which is the
-# level 7 repeat cycle the Skill points page describes rather than a
-# window -- consistent with level 7 damage being a single fixed value.
-#
-# Level 7 needs no window: those gags have a single fixed damage
-# (Wedding Cake 120, Opera Singer 90, Toontanic 180 -- min equals max),
-# so there is nothing to interpolate and the zero-width window at
-# 10,000 is harmless rather than a division by nearly nothing.
-#
-# The widest windows are at level 6 -- Birthday Cake spans 48-100,
-# Grand Piano 85-170 -- so that is where training actually decides the
-# damage, and where a stand-in of 1.0 flatters an under-trained toon
-# most.
+# The widest windows are at level 6 -- Birthday Cake spans 48-100, Grand
+# Piano 85-170 -- so that's where training actually decides the damage,
+# and where a stand-in of 1.0 flatters an under-trained toon most.
 GAG_UNLOCK_EXP = {
     Track.TOON_UP: (
              0,   # 1  Feather
@@ -570,20 +492,17 @@ def gag_exp_window(track: Track, level: int):
     correct rather than degenerate: those gags have one fixed damage.
 
     Feeds `mechanics.gag_damage_from_exp`. Nothing calls it in the
-    damage path, and that is a DECISION rather than unfinished work.
-
-    Wiring it up means `ToonState.track_exp` holding real experience
+    damage path, and that is a DECISION rather than unfinished work:
+    wiring it up means `ToonState.track_exp` holding real experience
     instead of a 0-7 training level, which reaches into the live
-    readers. The payoff is only in LIVE analysis -- advising a specific
-    toon whose actual bar is mid-window -- and there it is niche, since
-    most toons being advised are maxed or near it. For testing and
-    strategy work `DAMAGE_TRAINED_FRACTION` is the better tool anyway,
-    because sweeping one number answers "how much does this answer
-    depend on being maxed" directly, which per-toon experience would
-    make harder rather than easier.
+    readers, for a payoff that's niche (advising a toon whose bar is
+    mid-window) when most toons advised are maxed or near it. For
+    testing and strategy work, `DAMAGE_TRAINED_FRACTION` is the better
+    tool anyway -- sweeping one number answers "how much does this
+    depend on being maxed" directly.
 
-    So this is transcribed and correct and deliberately unused. Do not
-    "finish" it without a live case that needs it.
+    Transcribed, correct, and deliberately unused. Do not "finish" it
+    without a live case that needs it.
     """
     low = gag_unlock_exp(track, level)
     if level >= 7:
