@@ -68,22 +68,6 @@ from . import policy
 from . import weights
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 # ---------------------------------------------------------------------
 # Enumerating candidate plans
 # ---------------------------------------------------------------------
@@ -418,87 +402,21 @@ def expected_incoming(state: BattleState) -> float:
     return total
 
 
-
-
-"""Stagger the lure horizon per sleeper instead of one number for all.
-
-`reach` gives every sleeper `asleep / standing` rounds of credit. You
-do not reach them all at once: the first is woken next round and the
-last after all of them. Ordered by remaining health, since that is the
-order they get worked through -- finish the cheap ones, leave the
-Mr. Hollywood asleep.
-
-Measured below alongside `LURE_IS_SPENT_ON_SLEEPERS`.
-"""
-
-
-"""Whether a lure's value is capped by when you would wake the cog.
-
-True caps it at `reach`: quiet you are going to spend yourself is not
-quiet you can bank. That reasoning describes a plan which works through
-the sleepers.
-
-THE OWNER SAYS THAT IS NOT THE PLAN A SOLO VP IS WON WITH, and they are
-right about the game. You lure the field with a Presentation, LEAVE the
-sleepers alone, and fight the cogs that walk in to replace the ones you
-kill -- three cogs simply out of the fight for the whole duration.
-Under that plan the lure delivers every round it promises and `reach`
-prices it at about a quarter.
-
-VALUING IT IN FULL STILL PLAYS WORSE. Solo VP, 200 runs a cell, five
-slips, paired:
-
-    cogs a round   capped    full     paired
-               8    81.5%   67.0%   +13/-42  p<0.001
-              12    20.0%   16.5%   +15/-22  p=0.32
-              20     0.0%    0.0%   +0/-0
-
-Fourteen points worse where there is signal. So the cap stays, and what
-was refuted is this crude removal of it rather than the strategy.
-
-WHY THEY DO NOT CONTRADICT. `reach = inf` values EVERY lure at its full
-duration, including the cogs the plan is about to attack -- and it
-lures with about half its actions at every size measured. The strategy
-depends on a distinction this scorer cannot draw: which sleepers are
-being left alone and which are next. A one-round scorer sees no such
-intent, so "full duration" here means "always over-credit" rather than
-"credit the ones you will not touch".
-
-Drawing that distinction properly is the open problem. It wants the
-plan's own targets -- a cog nobody in the plan attacks is left asleep,
-one being hit is woken this round -- which is knowable from the plan
-and is not what either setting does.
-"""
-
-
-"""Whether killing an already-lured cog credits `prevented` nothing.
-
-It should, and the flag exists to measure it rather than to leave the
-choice open. See the branch in `prevented`.
-"""
-
-
 def prevented(before: BattleState, after: BattleState) -> float:
     """Incoming damage a round removed, by luring or by killing.
 
-    REMODELLED, because the rule underneath it changed. A landed attack
-    wakes a lured cog -- see `mechanics.LURE_ENDS_ON_DAMAGE` -- so a Lure
-    does not buy `lure_rounds_remaining` rounds of quiet. It buys quiet
-    on the cogs the party does not get round to hitting, for as long as
-    it does not get round to them.
+    REMODELLED because the rule underneath it changed: a landed attack
+    wakes a lured cog (`mechanics.LURE_ENDS_ON_DAMAGE`), so a Lure buys
+    quiet only on the cogs the party does not get round to hitting, not
+    `lure_rounds_remaining` rounds on all of them. The old version
+    multiplied the whole difference by one mean `lure_rounds_remaining`,
+    defensible only while a lured cog stayed asleep through damage.
 
-    The old version multiplied the whole difference by one mean
-    `lure_rounds_remaining`, which was defensible only while a lured cog
-    stayed asleep through damage. It does not.
-
-    WHY THE OLD REFUTATIONS DO NOT APPLY. This docstring used to record
-    three corrections, all mechanically right and all losing 2-3 points,
-    and concluded the term should stay wrong until somebody refit the
-    evaluator as a whole. Every one of those was measured under the old
-    lure rule, where the multiplier was roughly correct and a correction
-    really was noise. That evidence is void. This change is made
-    together with a retrain and a refit, which is the condition the old
-    note set.
+    (Three earlier corrections to the old version were measured under
+    that stale lure rule, where the mean multiplier was roughly right
+    and each correction really was noise -- that evidence is void now;
+    this remodel ships together with a retrain and refit, which is what
+    the old note required before trying again.)
 
     THREE PARTS, EACH COUNTED FOR WHAT IT ACTUALLY BUYS:
 
@@ -521,17 +439,13 @@ def prevented(before: BattleState, after: BattleState) -> float:
     asleep = sum(1 for c in after.active_cogs() if c.status.lured)
     # How many rounds before the party gets round to any given sleeper.
     reach = max(1.0, asleep / float(standing))
-    # PER-COG HORIZON. `reach` is one number for every sleeper, but you
-    # do not reach them all at the same time: the first is woken next
-    # round, the last after `asleep / standing` rounds. Staggering it
-    # credits a four-cog lure for 1 + 2 + 3 + 4 rounds of quiet rather
-    # than 4 + 4 + 4 + 4, which is both less generous in total and
-    # better shaped -- the cog you are about to kill was never going to
-    # stay asleep, and the one at the back was.
-    #
-    # Ordered by remaining health, because that is the order a player
-    # works through them: finish the cheap ones, leave the Mr.
-    # Hollywood asleep. `SLEEPERS_WAKE_IN_TURN` turns it off.
+    # PER-COG HORIZON: `reach` is one number for every sleeper, but the
+    # first is woken next round and the last after `asleep / standing`
+    # rounds. Staggering credits a four-cog lure for 1+2+3+4 rounds of
+    # quiet rather than 4+4+4+4 -- less generous in total and better
+    # shaped, since the cog about to die was never staying asleep.
+    # Ordered by remaining health (finish the cheap ones, leave the Mr.
+    # Hollywood asleep). `SLEEPERS_WAKE_IN_TURN` turns it off.
     order = {}
     if weights.SLEEPERS_WAKE_IN_TURN:
         sleepers = sorted(
@@ -542,16 +456,23 @@ def prevented(before: BattleState, after: BattleState) -> float:
 
     if not weights.LURE_IS_SPENT_ON_SLEEPERS:
         # LEAVING THEM ASLEEP IS THE STRATEGY, not a failure to get
-        # round to them. The owner: lure the field with a Presentation,
+        # round to them: [OWNER] lure the field with a Presentation,
         # never touch the sleepers, and fight the cogs that walk in to
-        # replace the ones you kill. Three cogs are simply out of the
-        # fight for the whole duration.
+        # replace the ones you kill -- three cogs out of the fight for
+        # the whole duration. `reach` prices the opposite plan (working
+        # through the sleepers yourself), undercrediting the gag a solo
+        # VP is built around to about a quarter of what it delivers.
         #
-        # `reach` prices the opposite plan -- that you will work through
-        # the sleepers and wake each one yourself -- and so charges a
-        # 15-round Presentation for about four rounds of quiet solo.
-        # That is the gag a solo VP is built around, valued at a
-        # quarter of what it delivers.
+        # STILL PLAYS WORSE, measured: solo VP, 200 runs/cell, five
+        # slips, capped vs full at 8/12/20 cogs a round -- 81.5% vs
+        # 67.0% (p<0.001), 20.0% vs 16.5% (p=0.32), 0.0% vs 0.0%.
+        # Fourteen points worse where there's signal, so the cap stays;
+        # what's refuted is this crude removal of it, not the owner's
+        # strategy. The two don't conflict: `reach = inf` over-credits
+        # EVERY lure, including cogs the plan is about to attack itself,
+        # because a one-round scorer can't distinguish "left alone" from
+        # "next" -- that needs the plan's own targets, which neither
+        # setting reads. Drawing that distinction properly is open.
         reach = float("inf")
 
     total = 0.0
@@ -600,7 +521,8 @@ def prevented(before: BattleState, after: BattleState) -> float:
             horizon = order.get(id(new), reach)
             rounds = min(float(new.status.lure_rounds_remaining), horizon)
             total += threat * max(0.0, rounds)
-        elif weights.WAKE_COSTS_PREVENTED and old.status.lured                 and not new.status.lured:
+        elif (weights.WAKE_COSTS_PREVENTED and old.status.lured
+                and not new.status.lured):
             # WOKEN, and this used to be free. The three cases above
             # credit quiet bought; nothing charged for quiet spent, so a
             # plan could hand four sleeping cogs their attacks back and
@@ -638,14 +560,6 @@ def killed_threat(before: BattleState, after: BattleState) -> float:
     return total
 
 
-"""Rounds of survival past which more laff stops mattering to a choice.
-
-Uncapped, a maxed toon on a quiet board scores enormous survival and the
-term drowns everything else. Four rounds is long enough that a plan
-which buys a fifth is not choosing between life and death any more.
-"""
-
-
 def survival_rounds(state: BattleState, incoming=None) -> float:
     """How many rounds of incoming the party's laff currently covers.
 
@@ -668,7 +582,10 @@ def survival_rounds(state: BattleState, incoming=None) -> float:
     second that decides whether to spend a unite. Reading it against
     `expected_incoming` says so directly.
 
-    Capped by `SURVIVAL_CAP`; see there.
+    Capped at `SURVIVAL_CAP` rounds: uncapped, a maxed toon on a quiet
+    board scores enormous survival and drowns every other term, and a
+    plan buying a fifth round of survival over a fourth is no longer a
+    life-or-death choice.
 
     `incoming` OVERRIDES what the board says is coming, and the caller
     in `_quick_score` always passes the PRE-PLAN figure. Measured, solo
@@ -733,62 +650,41 @@ def past_the_death_line(state: BattleState) -> float:
 def toons_at_risk(state: BattleState) -> float:
     """Standing toons a round of incoming damage could knock out.
 
-    RE-SWEPT AFTER THE FIX BELOW, and the weight stays 0.0 -- but for a
-    different reason than the one that zeroed it first, and the new
-    reason is worth having. Solo VP, 200 runs a cell:
+    RE-SWEPT after the fix below; the weight stays 0.0, but for a
+    different and more useful reason. Solo VP, 200 runs/cell: risk
+    weight 0/5/15/40 all read 29.0%/0.0% at 12/20 cogs a round -- not
+    one game changed, +0/-0 on identical seeds.
 
-        risk weight    12 a round    20 a round
-                  0         29.0%          0.0%
-                  5         29.0%          0.0%
-                 15         29.0%          0.0%
-                 40         29.0%          0.0%
+    The function is NOT dead this time (non-zero in 61 of 168 sampled
+    VP positions, discriminating cleanly between plans), it just arrives
+    too late to matter: risk is zero for every candidate while laff is
+    healthy, so it's a constant that can't move an argmax, and it only
+    separates plans once the toon is already low -- by which point a
+    solo VP is lost regardless of the pick. Flat in the winnable region,
+    decisive in the lost one, changes nothing about the outcome.
 
-    Not one game changed at any weight, +0/-0 on identical seeds.
+    That points at prevention instead: `QUICK_W["prevent"]` values
+    removing incoming damage the same at 100 laff as at 20, when the
+    second is worth far more. Scaling prevention by how close to death
+    the toon is would act early, while the game is still winnable --
+    the thing to try next. Nothing in any scorer charges for losing a
+    toon outright (their whole pouch leaves the run, every later floor
+    in a building), only indirectly through prevention they no longer
+    contribute.
 
-    The function is NOT dead this time: it reads non-zero in 61 of 168
-    sampled VP positions, and it discriminates cleanly between plans.
-    On a toon at 35 laff facing 53 incoming from four awake cogs,
-    Presentation and Hypno-goggles leave risk at 0.000 while Foghorn,
-    Birthday Cake and a pink slip all leave it at 1.000.
+    The earlier zero was a measurement bug, not a result: this used to
+    divide an already-probability-weighted `expected_incoming` again by
+    toons standing, asking whether a toon could survive their SHARE of
+    the average -- which was non-zero in 0 of 2000 sampled facility
+    starts (zero even in a hand-built position where every toon is one
+    group attack from sad), so a 0/2/5/10 sweep moved nothing because no
+    weight moves a constant. The old ES result that zeroed
+    `QUICK_W["risk"]` was evidence about this function, not about risk.
 
-    It arrives too late to matter. Risk is zero for every candidate
-    while laff is healthy, so the term is a constant that cannot move
-    an argmax; it only separates plans once the toon is already low,
-    and by then a solo VP is lost whatever it picks. A term that is
-    flat in the winnable region and decisive in the lost one changes
-    nothing about the outcome.
-
-    That points at prevention rather than risk: `QUICK_W["prevent"]`
-    values removing incoming damage the SAME at 100 laff and at 20,
-    when the second is worth far more. Scaling prevention by how close
-    to death the toon is would act early, where the game is still
-    winnable, and is the thing to try next.
-    Nothing in any scorer charged for losing a toon. A sad toon takes
-    their whole pouch out of the run -- in a building that is every
-    later floor -- and the only way it registered was indirectly,
-    through prevention they no longer contribute.
-
-    THIS RETURNED ZERO EVERYWHERE and that is why the feature read as
-    worthless. It used to take `expected_incoming` -- already
-    probability-weighted -- and divide it again by the number of toons
-    standing, asking whether a toon could survive their share of the
-    AVERAGE. Nothing goes sad to an average. Measured over 2000 sampled
-    facility starts it was non-zero in exactly none of them, and it was
-    zero in a hand-built position of four toons on 22 laff facing four
-    level 12s, where every toon is one group attack from sad. A sweep
-    of the weight over 0, 2, 5, 10 changed not one decision in 900
-    games, because no weight moves a constant.
-
-    So the old ES result that zeroed `QUICK_W["risk"]` was never
-    evidence about risk. It was evidence about this function.
-
-    What sinks a toon is one bad ROUND, not a share of an expectation,
-    which is the rule `features.one_hit_from_death` already uses:
+    Fixed to the rule `features.one_hit_from_death` already uses:
     `outcomes.worst_case_damage` per cog, summed, against the smallest
-    laff. Same rule here, with one difference that is the whole point of
-    the term -- a LURED cog is skipped, because it does not swing, so
-    luring visibly lowers the count and the scorer can finally see that
-    it does.
+    laff -- except a LURED cog is skipped, since it doesn't swing, so
+    luring visibly lowers the count and the scorer can finally see it.
     """
 
     standing = [t for t in state.toons if t.laff > 0]
@@ -852,11 +748,6 @@ def armed_credit(before: BattleState, after: BattleState) -> float:
                 continue
         total += weights.TRAP_DISCOUNT * float(min(damage, max(0, new.hp)))
     return total
-
-
-
-
-
 
 
 # ---------------------------------------------------------------------
@@ -1149,45 +1040,34 @@ def _expected_over_rolls(state: BattleState, plan, leaf) -> float:
 def _quick_score(state: BattleState, plan, objective=None) -> float:
     """Expected value of the round over every way the dice can fall.
 
-    NO SHIPPED CALLER PASSES `objective`. `plans` (this module),
-    `hybrid._judge` (which is what `hybrid.climb` scores with) and
-    `hybrid.best_plan`, plus `tools/train_heads.py`, all call this with
-    two arguments, so the
-    `waste_penalty` branch in `_score_leaf` is unreachable in practice
-    and overkill is charged only through `QUICK_W["waste"]`, which is
-    0.0. That is the defect docs/scoring.md was written to make
-    visible; it is recorded there rather than fixed here, because
-    turning it on changes numbers and every number in this file was
-    measured.
+    NO SHIPPED CALLER PASSES `objective`: `plans`, `hybrid._judge` (what
+    `hybrid.climb` scores with), `hybrid.best_plan` and
+    `tools/train_heads.py` all call this with two arguments, so
+    `_score_leaf`'s `waste_penalty` branch is unreachable in practice --
+    overkill is charged only through `QUICK_W["waste"]` (0.0). Recorded
+    in docs/scoring.md rather than fixed here, since turning it on
+    changes numbers that were all measured as they stand.
 
-    `objective` is OPTIONAL and off by default, which is not laziness --
-    the setting only half-applies. It steers this ranker but not the
-    policy that proposes to it, so with it on, `survive` and `glass
-    cannon` still shortlist the same moves and merely order them
-    differently. That was reason enough to leave it out while the menu
-    came only from the policy; `PROBE_CHEAPEST_KILL` now puts the cheap
-    option there regardless, so the ranker can act on it.
+    `objective` is optional and off by default on purpose, not by
+    omission: it steers this ranker but not the policy that proposes to
+    it, so `survive` and `glass cannon` would still shortlist the same
+    moves and merely order them differently -- not worth it while the
+    menu came only from the policy. `PROBE_CHEAPEST_KILL` now puts the
+    cheap option there regardless, so a ranker using it could act on it.
+    What it buys over `QUICK_W["waste"]`: `waste_penalty` scales by
+    SCARCITY as well as wasted fraction, so burning one of three Grand
+    Pianos into a 6hp cog costs far more than spilling a Seltzer there
+    -- a flat fraction (swept and failed twice) can't say that.
 
-    What it buys that `QUICK_W["waste"]` cannot: `waste_penalty` scales
-    by SCARCITY as well as by wasted fraction, so burning one of three
-    Grand Pianos into a 6hp cog costs far more than spilling a Seltzer
-    there. A flat fraction cannot say that, and a flat fraction is what
-    was swept and failed -- twice.
+    Used to play one ALL-HIT round, which is what lost the CEO: nearly
+    true in a cog building (accuracy 70-95%, barely varying by track, so
+    damage and expected damage agree), but against level 13-14 cogs
+    (51-95% accuracy) the all-hit score prefers the biggest printed
+    number, reliably the least likely to land. Measured on 200 CEO
+    sides, 0 leftovers: 69.5% -> 75.0% cleared (+24/-13, p=0.049), cog
+    buildings unchanged (where the weights were fitted).
 
-    This used to play ONE ALL-HIT round, and that assumption is what lost
-    the CEO. In a cog building it is nearly true -- accuracy runs 70-95%
-    and hardly varies by track -- so ranking by damage and ranking by
-    expected damage pick the same gag. Against level 13-14 cogs accuracy
-    spans 51% (a level 7 Drop) to 95% and they stop agreeing: the all-hit
-    score prefers the biggest number printed on the gag, which is
-    reliably the least likely one to arrive.
-
-    Measured on 200 CEO sides with common random numbers, 0 leftovers:
-    69.5% -> 75.0% cleared, +24 won against 13 lost, sign test p=0.049.
-    Cog buildings unchanged, which is the result that mattered -- the
-    weights were fitted there.
-
-    It still looks one step past the round for a trap, and only a trap:
+    Still looks one step past the round for a trap, and only a trap --
     see `armed_credit`.
     """
     return _expected_over_rolls(
@@ -1566,41 +1446,29 @@ def _fires_spent(before: BattleState, after: BattleState) -> int:
                for old, new in zip(before.toons, after.toons))
 
 
-
-
 def greedy_plan(state: BattleState, objective) -> List[Optional[Action]]:
     """A decent action for every toon, chosen rather than sampled.
 
-    WHY THIS IS NOT `SensiblePrior`, WHICH IT USED TO BE
-    ----------------------------------------------------
-    `SensiblePrior` is a model of *people* -- what a stranger is likely
-    to throw. That is exactly right for one job and wrong for another,
-    and the two were sharing a policy:
+    NOT `SensiblePrior`, which it used to be: that is a model of
+    *people* (what a stranger is likely to throw), right for PICKUP
+    teammates (you can't control them, so a distribution is the correct
+    object) but wrong for the ROLLOUT continuation, which estimates the
+    value of a position under *good* play, not average play. A
+    stranger-model undervalues any line whose payoff needs
+    follow-through -- every Lure strategy there is, and the mechanism
+    behind "no Lure strategy ever appears" in docs/party-strategy.md --
+    because the plan was scored on a continuation that would not carry
+    it out.
 
-      * PICKUP teammates -- you genuinely cannot control them, so the
-        right object is a distribution over what they might do, and no
-        amount of cleverness replaces it. `SensiblePrior` keeps this job.
+    So this takes the best action it can see one round ahead under the
+    *objective the search is actually optimising*: damage landed where
+    needed, cogs killed, minus cost and waste. Greedy and myopic, and
+    still a much better proxy for "played well from here" than a guess
+    about strangers.
 
-      * The ROLLOUT continuation -- here nothing is being predicted. The
-        rollout exists to *estimate the value of a position*, and the
-        value of a position is what it is worth under good play, not
-        under average play. Estimating it with a model of an average
-        stranger systematically undervalues any line whose payoff needs
-        follow-through -- which is every Lure strategy there is, and is
-        the mechanism behind "no Lure strategy ever appears" in
-        docs/party-strategy.md. The plan was scored on a continuation
-        that would not carry it out.
-
-    So this is deliberately not a people-model. It takes the best action
-    it can see one round ahead under the *objective the search is
-    actually optimising*: damage that lands somewhere it is needed, cogs
-    killed, minus what it costs and what it throws away. Greedy and
-    myopic, and still a much better proxy for "played well from here"
-    than a guess about strangers.
-
-    It is not free. A rollout now costs a scan of each toon's candidate
-    list per round instead of one weighted draw, which is the reason
-    `ROLLOUT_ROUNDS` stays modest.
+    Not free: a rollout now scans each toon's candidate list per round
+    instead of one weighted draw, which is why `ROLLOUT_ROUNDS` stays
+    modest.
     """
     plan: List[Optional[Action]] = [None] * len(state.toons)
     working = state.clone()
@@ -1851,39 +1719,30 @@ def _cheap_score(state: BattleState, index: int, action: Action) -> float:
 def _greedy_score(state: BattleState, trial, objective) -> float:
     """One action's worth: damage, kills and HEALING, less cost and waste.
 
-    Healing was missing, and it cost more than it sounds. This function
-    scored only damage landed, kills and lures, so a Toon-Up came out at
-    `-10 * price` -- strictly negative -- and `greedy_plan` accepts
-    nothing at or below zero. So greedy_plan could never choose a heal
-    under any circumstances, and since `rollout_value` IS greedy_plan
-    played forward, every position was valued as though the party never
-    heals again.
+    Healing was missing, and it cost more than it sounds: this function
+    scored only damage, kills and lures, so a Toon-Up came out at
+    `-10 * price` (strictly negative) and `greedy_plan` accepts nothing
+    at or below zero -- so greedy_plan could never choose a heal, and
+    since `rollout_value` IS greedy_plan played forward, every position
+    was valued as though the party never heals again. Measured over 30
+    building runs before the fix: 653 decisions where the acting toon
+    held a Toon-Up, 398 with the party under 60% laff, and 5 Toon-Ups
+    thrown out of 743 gags. `_cheap_score` already credited Toon-Up
+    explicitly; the shortlist was fine, the stage that decides threw the
+    track away.
 
-    Measured over 30 building runs before the fix: 653 decisions where
-    the acting toon held a Toon-Up gag, 398 of them with the party under
-    60% laff, and 5 Toon-Ups thrown out of 743 gags.
+    Laff restored is priced at `GREEDY_W["heal"]` -- not shared with
+    `LAFF_POINT_VALUE` (read only by `_cheap_score`) or `QUICK_W["heal"]`;
+    the three constants merely hold the same number by choice. Sharing
+    the weight for real was tried and refuted (raising it to 12 gained
+    the hybrid a point and cost the search two to three). docs/scoring.md
+    lists all three.
 
-    `_cheap_score` already had this right -- it credits Toon-Up
-    explicitly and its docstring says why: "it must not be
-    systematically blind to a track, or that track never reaches the
-    shortlist". The shortlist was fine. The stage that actually decides
-    threw the same track away.
-
-    Laff restored is priced at `GREEDY_W["heal"]`. This docstring used
-    to say `LAFF_POINT_VALUE`, "shared with the other two scorers so there is
-    one number for what laff is worth rather than three" -- it is not
-    shared. `LAFF_POINT_VALUE` is read only by `_cheap_score`; the three
-    constants merely hold the same number, and the note above `QUICK_W`
-    records that sharing the heal weight WAS tried and refuted (raising
-    it to 12 gained the hybrid a point and cost the search two to
-    three). docs/scoring.md lists all three.
-
-    It also used to play one ALL-HIT round, the same assumption that lost
-    the CEO in `_quick_score`, and it matters more here than the branch
-    count suggests: `rollout_value` IS `greedy_plan` played forward, so
-    an all-hit rollout values every position as though the party never
-    misses. A trial is one toon throwing one gag, so this is two
-    branches, not sixteen.
+    Also used to play one ALL-HIT round, the same assumption that lost
+    the CEO in `_quick_score`, and it matters more here: `rollout_value`
+    IS `greedy_plan` played forward, so an all-hit rollout values every
+    position as though the party never misses. A trial is one toon
+    throwing one gag, so this is two branches, not sixteen.
     """
     # Neither depends on how the dice fall, so they are computed once
     # rather than once per branch.
@@ -1931,34 +1790,27 @@ def rollout_value(state: BattleState, objective, rng,
                   max_rounds: int = weights.ROLLOUT_ROUNDS) -> float:
     """Value of `state` from playing it out, instead of estimating it.
 
-    WHY THIS EXISTS, AND WHY IT IS THE DEFAULT HERE
-    ----------------------------------------------
-    `expectimax.heuristic_value` cannot rank party positions. Its
+    `expectimax.heuristic_value` cannot rank party positions: its
     features pool over the toons, so four maxed pouches pin
     `damage_budget_ratio` at its cap and everything scores near the
-    ceiling. Measured over the successor states of three plans on a
-    maxed four-toon position, 60 rollouts each:
+    ceiling. Measured over the successors of three plans on a maxed
+    four-toon position, 60 rollouts each: leaf values of 98.03/98.96/
+    96.73 span 2.3 points while the plans actually finish 87%/98%/95% of
+    the time -- at depth 1 that leaf is constant, so ranking falls
+    entirely to `round_reward` with no continuation visible, which is
+    fatal for exactly the strategies worth searching for (Lure's whole
+    payoff is in later rounds).
 
-        2 trap + group lure + group throw   leaf 98.03   87% ended
-        2 Foghorn + 2 Aoogah                leaf 98.96   98% ended
-        4 Foghorn                           leaf 96.73   95% ended
+    A rollout can't saturate, because it doesn't estimate anything: it
+    plays to the end and adds up what happened. The cost is noise, and
+    it measures value *under the rollout policy* (`greedy_plan`) rather
+    than best play -- a real limitation, but a noisy signal beats a
+    constant.
 
-    A 2.3-point spread across positions differing by eleven points of
-    *did you actually win*. At depth 1 that leaf is a constant, so the
-    ranking falls entirely to `round_reward` and no continuation is
-    visible -- which is fatal for exactly the strategies worth searching
-    for, since Lure's whole payoff is in later rounds.
-
-    A rollout cannot saturate, because it does not estimate anything: it
-    plays until the battle is over and adds up what happened. The cost
-    is that it is noisy and it measures the value of the position *under
-    the rollout policy* (`greedy_plan`) rather than under best play.
-    That is a real limitation, but a noisy signal beats a constant.
-
-    It also needs no clamping. `fitted.value` is clamped into
-    `expectimax._value_bounds` to keep star1 admissible; this search does
-    not prune, so there is nothing to keep admissible and nothing is
-    given up by letting the number run past +/-100.
+    Needs no clamping either: `fitted.value` is clamped into
+    `expectimax._value_bounds` to keep star1 admissible, but this search
+    doesn't prune, so nothing is given up by letting the number run past
+    +/-100.
     """
     current = state
     total = 0.0
