@@ -1,18 +1,16 @@
 """SOS Toons: the cards, and what each one does to a battle.
 
-WHY THEY MATTER. A solo VP at 20 cogs a round clears about 34% with
+WHY THEY MATTER: a solo VP at 20 cogs a round clears about 34% with
 unites and 0% without, and every loss is laff running out rather than
-gags -- the losses die about four cogs short of forty holding roughly
-37 usable gags. Flippy heals 180 laff to a lone toon, more than three
-rounds of survival against ~50 incoming, where the best Toon-Up unite
-buys about 1.6. Lil Oldman lures the whole field for six rounds.
+gags. Flippy heals 180 laff to a lone toon, more than three rounds of
+survival against ~50 incoming, where the best Toon-Up unite buys about
+1.6. Lil Oldman lures the whole field for six rounds.
 
-WHAT THE WIKI GIVES, AND WHAT IT DOES NOT. Every damage figure,
+WHAT THE WIKI GIVES, AND WHAT IT DOES NOT: every damage figure,
 duration, heal table and restock size below is [CONFIRMED] from the SOS
-Toon page. What it does not state is how the cards interact with lure
-and with the party's own accuracy rolls, and those are the rules that
-decide whether a card is good. They come from the owner's play and are
-tagged as such.
+Toon page. What it doesn't state is how the cards interact with lure
+and the party's own accuracy rolls, and those rules decide whether a
+card is good -- they come from the owner's play and are tagged as such.
 
   * AN SOS COSTS THE TOON'S TURN. Unlike a unite, which is free, so an
     SOS is an ordinary action rather than something wrapped around one.
@@ -148,53 +146,35 @@ ACCURACY_UPDATE = "2.6.7, 12 December 2019"
 # [CONFIRMED] wiki, both directions.
 ACCURACY_SWING = 75
 
-# What calling an SOS costs the SEARCH, in the units
-# `weights.FIRE_PRICE` (20) and `unites.UNITE_PRICE` (200) use.
+# What calling an SOS costs the SEARCH, in the units `weights.FIRE_PRICE`
+# (20) and `unites.UNITE_PRICE` (200) use.
 #
 # [OWNER] "extremely costly to use, again last resort or to have a very
-# good move." Set above a unite because the cards are stronger -- a
-# Flippy is 180 laff where the best Toon-Up unite is 80 -- and because
-# each one is two cards from rescuing a toon after a VP.
+# good move" -- which is what a price already expresses: a card has to
+# beat the alternative BY MORE than this, so an ordinary round never
+# buys one but a round where it changes the outcome still can.
 #
-# "OR TO HAVE A VERY GOOD MOVE" is what a price already expresses, and
-# is the reason this is a price rather than a ban. A card has to beat
-# the alternative BY MORE than this, so an ordinary round never buys
-# one and a round where it changes the outcome still can.
+# [OWNER] "An SOS card is slightly less valuable than a unite because a
+# unite can be used AND you can do something in your turn, whereas an
+# SOS card eats your turn." The model already knows that: an SOS
+# occupies the action slot, so the plan holds no gag for that toon and
+# the damage terms fall on their own -- measured with both prices
+# zeroed over 90 positions, the best gag alone beats the card alone by
+# 203 points (median) and a unite plus that gag beats it by 841. What's
+# left for the price to carry is scarcity (cards come from whole boss
+# runs), a preference rather than a measurement, so 250 sits just above
+# `UNITE_PRICE`.
 #
-# DO NOT SWEEP IT FOR WIN RATE, for the reason recorded on
-# `unites.UNITE_PRICE`: that sweep has a known answer and it is the
-# wrong one. Cheaper cards always clear more VPs, and the search would
-# be right about the number while spending a currency farmed from whole
-# boss runs. A preference, like `objective.waste_weight`.
+# NOTE IT ONLY BITES ONCE SURVIVAL IS VALUED: with `QUICK_W["survive"]`
+# at 0 a heal scores nothing, so Flippy would be declined at any price.
+# The two settings have to move together.
 #
-# NOTE IT ONLY BITES ONCE SURVIVAL IS VALUED. With
-# `QUICK_W["survive"]` at 0 a heal scores nothing at all, so Flippy
-# would be declined at any price -- the scorer cannot see laff it
-# already has. The two settings have to move together.
-# 250, and the 50 above `UNITE_PRICE` is the WHOLE of the gap on
-# purpose. [OWNER] "An SOS card is slightly less valuable than a unite
-# because a unite can be used AND you can do something in your turn,
-# whereas an SOS card eats your turn."
-#
-# That is right, and the model already knows it. An SOS occupies the
-# toon's action slot, so the plan holds no gag for that toon and the
-# damage terms fall on their own. Measured with both prices zeroed over
-# 90 positions: the best gag alone beats the card alone by 203 points
-# (median), and a unite plus that gag beats it by 841. The turn is
-# therefore already charged, and the old 200-point gap charged it a
-# second time at almost exactly the same size -- an SOS had to clear
-# roughly double its true handicap.
-#
-# What is left for the price to carry is scarcity, which is a
-# preference and not a measurement: cards come from whole boss runs.
-# "Slightly" less valuable puts it slightly above a unite.
-#
-# The above still stands: DO NOT SWEEP THIS FOR WIN RATE. Cheaper cards
-# always clear more, and that sweep's answer is known and wrong. Win
-# rates were used here only to CHECK the change harms nothing, and they
-# say ordinary play is untouched -- difficulty 3 and 5 spend 0.00 cards
-# a run at every price from 150 to 400, on two seed blocks. Only hard
-# content moves.
+# DO NOT SWEEP THIS FOR WIN RATE, for the reason on `unites.UNITE_PRICE`:
+# cheaper cards always clear more VPs, so that sweep's answer is known
+# and wrong -- a preference, like `objective.waste_weight`. Win rates
+# were used here only to CHECK the change harms nothing: difficulty 3
+# and 5 spend 0.00 cards a run at every price from 150 to 400, on two
+# seed blocks. Only hard content moves.
 SOS_PRICE = 250.0
 
 
