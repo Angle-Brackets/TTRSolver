@@ -6,21 +6,20 @@ page's solver calls at `POST /api/call`.
 
 THE SOLVER RUNS HERE, NOT IN THE BROWSER. This process is CPython in the
 repo: numpy is installed, `solver/rl/ppo_facility.json` is on disk, and
-`bridge` imports directly. That matters for three things the old
-Pyodide arrangement could not do:
+`bridge` imports directly -- three things the old Pyodide arrangement
+couldn't do. `hybrid.climb` (the PPO policy the overlay panel actually
+plays with) was doubly blocked in-browser: numpy was never
+`loadPackage`d, and the manifest globbed `*.py` so the 7.7MB policy
+export never reached the browser filesystem. Speed matters too, since
+the search is CPU-bound against a seconds budget and an interpreter
+penalty comes straight off the depth reached; and Pyodide itself is
+~10MB before anything works.
 
-  * `hybrid.climb` -- the PPO policy, which is the engine the overlay
-    panel actually plays with. In the browser it was doubly blocked:
-    numpy was never `loadPackage`d, and the manifest globbed `*.py` so
-    the 7.7 MB policy export never reached the browser filesystem.
-  * Speed. The search is CPU-bound against a seconds budget, so an
-    interpreter penalty comes straight off the depth it reaches.
-  * First load. Pyodide is ~10 MB before anything works.
-
-The property Pyodide was there for is kept and is in fact stronger: the
-page still holds no copy of the battle rules, because every answer comes
-from `bridge` calling the same `solver` package the tests import. A JSON
-call over HTTP is a shorter path to that than shipping the interpreter.
+The property Pyodide was there for -- the page holds no copy of the
+battle rules -- is kept and is in fact stronger, since every answer
+still comes from `bridge` calling the same `solver` package the tests
+import. A JSON call over HTTP is a shorter path to that than shipping
+the interpreter.
 
 `/api/manifest` remains for the old page, which mounts the sources into
 Pyodide itself. It can go when that page does.
