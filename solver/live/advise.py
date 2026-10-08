@@ -40,133 +40,46 @@ from .watch import BattleWatcher, Event
 # reading settling -- leaves the previous advice valid.
 RECOMPUTE_ON = {"battle_started", "cog_joined", "cog_defeated", "damage"}
 
-# Depth is capped rather than fixed: the search is given a time budget
-# and returns the deepest pass that finished inside it. Cost depends on
-# the position far more than on the number -- at depth 2 a two-cog fight
-# takes 0.8s and a four-cog fight 27s -- so a fixed depth either stalls
-# on a crowded battle or under-searches an easy one.
+# Capped rather than fixed: the search is given a time budget and
+# returns the deepest pass that FINISHED within it, since cost depends
+# on the position far more than on the cap (a two-cog fight ~0.8s at
+# depth 2, a four-cog fight ~27s).
 #
-# The budget comes from the game rather than from taste: Toontown runs a
-# countdown of about thirty seconds for choosing a gag, so fifteen is
-# half the time available and still leaves the answer on screen well
-# before it is needed. What that buys, measured on realistic endgame
-# loadouts with pruning on, epsilon 0.03 and the cog phase collapsed:
+# The budget mirrors the game: Toontown gives about 30s to pick a gag,
+# so 15 leaves the answer on screen well before it's needed.
 #
-#     1 cog    depth 4-7
-#     2 cogs   depth 3-4
-#     3 cogs   depth 3
-#     4 cogs   depth 2-3
+# Above one cog the BUDGET binds, not this constant: measured over 12
+# boards (solo maxed toon, epsilon 0.03), one cog reaches depth 4-7 but
+# 2-4 cogs consistently burn the whole 15s stuck at depth 2-3. So
+# raising or lowering `DEFAULT_DEPTH` changes nothing above one cog --
+# the only knob that buys a deeper pass in a fixed budget is pruning;
+# see `DEFAULT_EPSILON`.
 #
-# Those replace an older set that said depth 3 for one cog and depth 2
-# for everything else. They were true when written and several rounds
-# of optimisation have since passed; leaving them stale made the search
-# look far weaker than it is, which matters because every argument for
-# replacing the engine is an argument about buying depth.
-#
-# How much depth is worth: on the same positions, going a ply deeper
-# changes the chosen move 15% of the time on two cogs and 40-42% on
-# three and four. That is an upper bound on the benefit -- a changed
-# move is not necessarily a better one, and exact values are not
-# tractable at this size to say which -- but it does mean the crowded
-# fights are where any further depth would earn its keep.
+# Measured against `hybrid.climb` (the RL policy): on 80 single battles
+# with a wounded toon, the two agree 79/80 and search is a hair ahead
+# (100% vs 98.8% won) for 2088x the time (14.6s vs 0.007s/decision) --
+# a price difference, not a quality one. Not a general verdict: this is
+# single battles only, nothing about husbanding a pouch across floors,
+# where the two engines have more room to differ.
 DEFAULT_DEPTH = 4
 DEFAULT_BUDGET = 15.0
 
-# THE DEPTH ONLY BINDS ON ONE COG. `best_action_iterative` searches
-# 1..depth and keeps the deepest pass that FINISHED, so 4 is a cap
-# rather than a promise, and measuring what it actually reaches at this
-# budget gives 12 boards a row, solo maxed toon, epsilon 0.03:
-#
-#     cogs  median s   max s  timed out   depth reached
-#        1      5.85    9.43          0   4:12
-#        2     15.03   15.08         11   3:11  4:1
-#        3     15.09   15.20         12   2:10  3:2
-#        4     15.19   15.40         12   2:12
-#
-# From two cogs up the budget binds, not the depth, and on four the
-# search always stops at 2 having spent the whole fifteen seconds --
-# most of it failing to finish a pass it then throws away.
-#
-# That is the exact opposite of what the note above this hoped for. It
-# reasons that a ply deeper changes the move 40-42% of the time on three
-# and four cogs, so "the crowded fights are where any further depth
-# would earn its keep". Those are the boards that never get it.
-#
-# So RAISING `DEFAULT_DEPTH` does nothing above one cog, and lowering it
-# to 2 would save nothing either -- the search already stops there. The
-# only knob that can buy a ply inside a fixed budget is the pruning; see
-# `DEFAULT_EPSILON`.
-#
-# Worth knowing separately: the panel takes the full fifteen seconds on
-# any board with two or more cogs. If that is too slow in play, the
-# depth table says a smaller budget costs very little on four cogs.
-#
-# WHICH RAISES WHETHER THE SEARCH IS WORTH RUNNING AT ALL HERE, since
-# `hybrid.climb` answers the same board in a millisecond. Measured, 80
-# single battles, four cogs, a WOUNDED toon (45-75 laff, because a maxed
-# toon wins every one of these under either engine and separates
-# nothing), paired on identical seeds:
-#
-#     engine        won   mean laff left   s/decision
-#     rl         98.8%             56.7         0.007
-#     search    100.0%             57.9        14.647
-#
-#     same outcome on 79 of 80; search only 1, RL only 0, p=1.0
-#
-# So they AGREE almost always, the search is a hair ahead inside noise,
-# and it charges 2088x the time for it. That is a price difference
-# rather than a quality one, and on a crowded board the price is fifteen
-# seconds of a live fight.
-#
-# It is NOT a general verdict, and two limits matter. This is single
-# battles: nothing here tests husbanding a pouch across floors, which is
-# where the two engines have the most room to differ. And the RL engine
-# has a failure mode the search cannot have -- its proposals can
-# collapse onto one kind of move, which is what pink slips did to it --
-# patched by `hybrid.PROBE_WHEN_DEGENERATE` but patched, not absent. The
-# search enumerates legal actions and so cannot fail that way.
-
 # Dropped probability mass per chance node. Checked against an exact
-# search on four positions: at 0.03 every one picks the same move while
-# running 1.5-1.8x faster, and at 0.08 the three-cog position changes its
-# answer. Sitting at 0.03 keeps the speedup that has been verified not to
-# change a decision.
+# search on four positions: 0.03 picks the same move everywhere while
+# running 1.5-1.8x faster; 0.08 changes the answer on a three-cog
+# position.
 DEFAULT_EPSILON = 0.03
 
-# RAISING IT BUYS DEPTH THAT DOES NOT CHANGE THE PLAY. Since the depth
-# cap does not bind above one cog (see above), pruning is the only knob
-# that can reach a deeper pass inside the budget -- so it was measured,
-# 14 boards a row at the panel's 15s, against a reference of epsilon
-# 0.03 given 60s:
-#
-#     cogs  epsilon        depth reached   agrees with ref
-#        3      ref                 3:14        --
-#             0.03                 2:14        13/14
-#             0.08          2:5 3:7 4:2        13/14
-#             0.15          2:3 3:9 4:2        11/14
-#        4      ref              2:7 3:7        --
-#             0.03                 2:14        14/14
-#             0.08             2:13 3:1        14/14
-#             0.15             2:11 3:3        12/14
-#
-# 0.08 is a real gain in depth at no cost in agreement: three-cog boards
-# go from every one stuck at depth 2 to seven reaching 3 and two
-# reaching 4. 0.15 goes deeper still and starts disagreeing, which is
-# the accuracy being spent.
-#
-# THEN THE GAMES SAID IT DOES NOT MATTER. 42 paired single battles,
-# three cogs, maxed toon, 15s a decision -- the regime where 0.08 buys
-# the ply -- came out 41 TIED, one better, none worse, +0.40 laff,
-# p=1.0. A four-cog run at 2s was 117 tied of 120, but that one proves
-# nothing: at 2s neither epsilon gets past the same shallow pass, so it
-# was the wrong regime to ask in.
-#
-# So 0.03 stays, on the grounds that nothing justifies moving it rather
-# than that 0.08 was refuted. The likely reason for all the ties is that
-# a maxed toon against three cogs is not a CLOSE position, and a deeper
-# search only changes an answer that was nearly balanced. If the panel
-# is ever pointed at close positions -- low laff, or a boss -- this is
-# worth asking again, in that regime rather than this one.
+# 0.08 was also tried as a way to buy depth within the same budget (the
+# only knob that can, since depth itself doesn't bind above one cog --
+# see `DEFAULT_DEPTH`): three-cog boards went from every one stuck at
+# depth 2 to most reaching 3-4, with no loss of agreement against a 60s
+# reference. But played out for real -- 42 paired battles, three cogs,
+# 15s/decision -- it changed nothing: 41 tied, 1 better, 0 worse, p=1.0.
+# Likely because a maxed toon against three cogs is rarely a close
+# position, so the extra depth has nothing to bite on. Kept at 0.03
+# since nothing justifies moving it; worth re-testing against closer
+# positions (low laff, a boss) if the panel is ever pointed at one.
 
 # Collapse the cog phase into its mean where the objective allows it.
 # A ply costs actions x chance outcomes, and this attacks the second
