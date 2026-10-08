@@ -1330,3 +1330,20 @@ non-significant dip) on 200 fresh duo VP sides:
 Still within noise, still slightly behind, and 55% slower a decision
 (1.88 s vs 1.21 s). Kept, on the owner's reasoning; if a later sweep
 makes the gap significant, the old weights are in git (2731e4e^).
+
+## The panel's preset in the playouts (bfc7fe2)
+
+Each preset scales the playouts' laff weight, pouch weight and a per-round
+charge by its own numbers relative to Balanced. Paired:
+
+    my-building, 200     balanced 149   conserve 147   survive 142
+                         speedrun 141   glass cannon 140  (p 0.08 at worst)
+    solo VP, 60, owner pouch + 5 unites
+                         balanced 57 (46.5 rounds)   conserve 57   glass 56
+                         survive 55   speedrun 53 (38.4 rounds)
+
+Speedrun does what it says -- 17% fewer rounds in a VP for 4 losses in 60.
+Conserve is identical to Balanced in a VP, as it must be: the pouch is
+only valued where a fight continues past the playout (buildings). No
+preset beats Balanced on wins, which is expected -- Balanced is the
+measured setting and the others trade wins for what they ask for.
