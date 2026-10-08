@@ -222,19 +222,16 @@ class Model:
     # text, because the advice is the thing being read at a glance and
     # provenance is a property OF it rather than part of it.
     engine: str = ""
-    # BOTH ENGINES' ANSWERS, KEPT SIDE BY SIDE, so the badge can be a
-    # toggle instead of a label. The search takes fifteen seconds on any
-    # board with two or more cogs (see `advise.DEFAULT_DEPTH`), so a
-    # player who swaps to it after the fact would otherwise pay that
-    # cost mid-fight. It runs in the background regardless of which
-    # answer is on screen; swapping then reads a value that is already
-    # here.
+    # BOTH ENGINES' ANSWERS, KEPT SIDE BY SIDE, so the badge is a toggle
+    # rather than a label: the search takes fifteen seconds on any board
+    # with two or more cogs (`advise.DEFAULT_DEPTH`), so it runs in the
+    # background regardless of which answer is shown and swapping just
+    # reads a value already here.
     #
     # `preferred_engine` is the player's choice and persists across
-    # rounds. `engine` stays what actually PRODUCED the text currently
-    # displayed, which is not always the preference -- the search may
-    # not have finished yet, and on the first round of a fight it never
-    # has.
+    # rounds; `engine` is whichever one actually PRODUCED the text on
+    # screen right now, which lags the preference until that engine
+    # answers.
     rl_gag: str = ""
     rl_track: str = ""
     rl_gag_level: int = 0
@@ -243,17 +240,14 @@ class Model:
     search_gag_level: int = 0
     search_ready: bool = False
     preferred_engine: str = "rl"
-    # THE REASONS ARE PER ENGINE, for the same reason the gag is. They
-    # describe a MOVE, and the two engines routinely pick different
-    # ones -- so a single pair of fields shows one engine's numbers
-    # under the other engine's advice. That is not hypothetical: with
-    # the RL badge on, a live board read "Grand Piano on cog 1 -- 95%
-    # acc, kills 2" while the piano was 70% and killed one. The 95 and
-    # the 2 belonged to a group Wedding Cake the search had picked and
-    # the page never displayed.
+    # THE REASONS ARE PER ENGINE, like the gag: they describe a MOVE, and
+    # the two engines routinely pick different ones, so a shared pair of
+    # fields would show one engine's numbers under the other's advice --
+    # seen live as an RL "Grand Piano, 95% acc, kills 2" where the 95 and
+    # the 2 actually belonged to the search's unshown Wedding Cake.
     #
-    # `incoming` and `survive` stay single because they describe the
-    # BOARD, which both engines read identically.
+    # `incoming` and `survive` stay single: they describe the BOARD,
+    # which both engines read identically.
     rl_accuracy: Optional[int] = None
     rl_reason: str = ""
     rl_organic: bool = False
@@ -292,27 +286,19 @@ class Model:
     organic: bool = False
     organic_tracks: List[str] = field(default_factory=list)
     # The most pink slips the solver may PLAN with, whatever the toon
-    # actually holds. Zero -- the default -- means never advise a fire.
-    #
-    # A cap rather than a count, because the count is read from the game
-    # (`setPinkSlips`) and is always right. What it cannot know is how
-    # many the player is WILLING to spend, and slips are the one
-    # resource here that costs real money to replace.
-    #
-    # It also needs no tracking across rounds or floors, which is the
-    # trap it looks like it should fall into. The game decrements
-    # `setPinkSlips` when one is fired and the panel re-reads it every
-    # cycle, so "how many are left" is always the live value. There is
-    # no used-count to maintain and nothing to reset when a VP moves to
-    # its second wave or a building to its next floor.
+    # actually holds; zero (the default) means never advise one. A cap
+    # rather than a count, because the game's own `setPinkSlips` count is
+    # always right but can't say how many the player is WILLING to
+    # spend -- slips cost real money to replace. Needs no tracking
+    # across rounds or floors: the game decrements `setPinkSlips` itself
+    # and the panel re-reads it every cycle.
     max_fires: int = 0
 
-    # The most UNITES and SOS CARDS the solver may plan with, whatever
-    # the toon holds. Zero like `max_fires`, and for the same reason:
-    # both are farmed from boss runs, so spending one is the player's
-    # call rather than the solver's. A cap of zero means never advise
-    # one, which is also what an unread pouch gives -- so the safe
-    # default and the unknown case agree.
+    # The most UNITES and SOS CARDS to plan with, whatever the toon
+    # holds. Zero for the same reason as `max_fires` -- both are farmed
+    # from boss runs, so spending one is the player's call -- and zero
+    # also happens to be what an unread pouch gives, so the safe default
+    # and the unknown case agree.
     max_unites: int = 0
     max_sos: int = 0
 
@@ -321,16 +307,12 @@ class Model:
     # advice. Source-neutral on purpose: only one front end records
     # today, and the page must not learn which.
     #
-    # `feedback_move` is what the player was SEEN to do, read off the
-    # pouch rather than asked for, and `feedback_against` names the
-    # engine it departed from. `feedback_problem` is why a round was not
-    # readable -- shown INSTEAD, because a gap the player can see while
-    # playing is worth more than one discovered at fit time.
-    #
-    # `feedback_fixable` says whether the row can still be amended. Only
-    # the most recent one can: the log is append-only and a correction
-    # rewrites the tail, so offering it on an older row would silently
-    # edit the wrong record.
+    # `feedback_move` is what the player was SEEN to do (read off the
+    # pouch, not asked for); `feedback_against` names the engine it
+    # departed from; `feedback_problem` is shown INSTEAD when a round
+    # wasn't readable. `feedback_fixable` is true only for the most
+    # recent row, since the log is append-only and a correction on an
+    # older one would silently edit the wrong record.
     feedback_move: str = ""
     feedback_against: str = ""
     feedback_problem: str = ""
@@ -347,13 +329,9 @@ class Model:
     feedback_stated: bool = False
 
     # WHAT THE TOON IS HOLDING, as {track, level, count}, so the page can
-    # offer a move the player could actually make and nothing else.
-    #
-    # The alternative -- a full seven-by-seven grid -- invites naming a
-    # gag that is not in the pouch, and a preference for a move that was
-    # never available is not a preference, it is a wish. Forty-nine
-    # cells is also unusable in a strip this size, where the handful
-    # actually carried is not.
+    # offer a move the player could actually make -- a full seven-by-
+    # seven grid would invite naming a gag not in the pouch, which is a
+    # wish rather than a preference, and wouldn't fit a strip this size.
     pouch: List[dict] = field(default_factory=list)
     # WHAT IS LEFT, after the advice already given this fight. The
     # `max_*` above are what the player says they carry; these are what
@@ -419,17 +397,11 @@ class Model:
     def can_confirm(self) -> bool:
         """May the player assert a battle right now?
 
-        ALWAYS, once the game window is there. This used to require
-        plates or the menu already visible, which gated the override on
-        the very thing it exists to override: detection takes a poll or
-        two to settle, and during exactly that window the button was
-        greyed out.
-
-        Asserting a fight that is not happening is not dangerous. It sets
-        `forced`, and `build_state` still refuses without readings -- so
-        the panel says what it cannot see rather than inventing advice.
-        The old worry, that a forced battle would be answered from
-        whatever the readers last saw, is handled there rather than here.
+        ALWAYS, once the game window is there -- requiring plates or the
+        menu first would gate the override on the very thing it exists
+        to override, during the poll or two detection takes to settle.
+        Not dangerous either way: it sets `forced`, and `build_state`
+        still refuses to answer without real readings.
         """
         if self.in_battle:
             return True             # always allowed to say it is over
@@ -454,14 +426,11 @@ class Model:
     def can_advise(self) -> bool:
         """May "work it out now" be pressed?
 
-        The search otherwise runs only when the battle *changes* -- a
-        cog dying, damage landing -- which leaves no way to retry the
-        common failures. The gag menu opening after the fight started,
-        or a cog being labelled mid-battle, both leave a stale problem
-        on screen that nothing would recompute until something died.
-
-        Withheld only while a search is already running, and when there
-        is no battle to search.
+        The search otherwise runs only when the battle *changes*, which
+        leaves no way to retry common failures -- the gag menu opening
+        late, or a cog labelled mid-battle -- that would otherwise sit
+        stale until something died. Withheld only while already running,
+        or with no battle to search.
         """
         return self.in_battle and not self.thinking
 
@@ -566,15 +535,11 @@ class Worker(AdviceWorker):
                 # The plates as they stood, for counting defeats below.
                 before = list(watcher.view.cogs)
                 events = watcher.poll()
-                # THE FRAME THE WATCHER JUST GRADED, not a fresh one.
-                # Grabbing again here meant `menu_visible` and
-                # `read_panel` ran the same `find_panel` check on two
-                # different captures taken milliseconds apart, and the
-                # menu is mid-slide for several of those. The panel
-                # reported "see: gag menu" and "no gag menu on screen"
-                # together, which reads as the tool contradicting
-                # itself. One frame, one answer -- and one screen grab
-                # per poll instead of two.
+                # THE FRAME THE WATCHER JUST GRADED, not a fresh one: a
+                # second grab let `menu_visible` and `read_panel` check
+                # two captures taken milliseconds apart, and while the
+                # menu was mid-slide they'd disagree ("see: gag menu" and
+                # "no gag menu" together). One frame, one answer.
                 frame = watcher.last_frame
                 if frame is None:               # nothing polled yet
                     frame = watcher.capture.grab()
@@ -699,25 +664,19 @@ class Worker(AdviceWorker):
         """Ask again after a read that produced no state.
 
         A FAILED READ MUST NOT BE FINAL. Searches run on position
-        CHANGES, and the frame grabbed at a round boundary is the
-        likeliest one to be unreadable -- the gag menu is sliding, the
-        plates are behind an attack animation. That read failed, posted
-        its reasons, and then NOTHING ASKED AGAIN: the next `damage`
-        event cannot arrive, because the player is sitting at the gag
-        menu waiting for the advice that never came. The panel looked
-        like it had given up mid-fight, and it had.
+        CHANGES, and the frame at a round boundary is the likeliest to
+        be unreadable (gag menu sliding, plates mid-animation) -- with no
+        retry, the next `damage` event can't arrive because the player is
+        stuck at the gag menu waiting for advice that never comes.
 
-        Gated on `problems` rather than on the absence of advice,
-        because the PREVIOUS round's advice is still on screen at that
-        moment -- so "no answer yet" is not what the failure looks
-        like. Success clears `problems`, so this stops on its own.
+        Gated on `problems` rather than on the absence of advice, since
+        the PREVIOUS round's advice is still on screen at that moment.
+        Success clears `problems`, so this stops on its own.
 
-        `thinking` IS NOT TRUSTED INDEFINITELY. It is only ever cleared
-        by a search reporting back, and a search that is superseded
-        never reports -- so a flag stuck on would block every retry for
-        the rest of the fight and freeze the panel on a stale problem
-        while the readers were, by then, seeing the board perfectly
-        well. Past the budget plus slack it is treated as gone.
+        `thinking` IS NOT TRUSTED INDEFINITELY: it's only cleared by a
+        search reporting back, and a superseded search never reports, so
+        past budget-plus-slack it's treated as stuck rather than blocking
+        every retry for the rest of the fight.
         """
         stuck = (self._thinking_since
                  and now - self._thinking_since > self.budget + STUCK_SLACK)
@@ -900,18 +859,14 @@ class Worker(AdviceWorker):
     def end_fight(self) -> None:
         """The player says the fight is over. Wipe it and stop advising.
 
-        `set_forced(None)` was not enough: None means "decide for
-        yourself", and the readers still see plates on screen, so the
-        battle re-asserted on the very next poll and the button did
-        nothing. False actually suppresses -- see
-        `BattleWatcher.in_battle`, where `forced is False` returns early.
-        It is released automatically once the plates are gone, so the
-        next fight is detected normally rather than staying suppressed.
+        `set_forced(None)` ("decide for yourself") isn't enough while the
+        readers still see plates, since the battle just re-asserts next
+        poll; `False` actually suppresses (`BattleWatcher.in_battle`) and
+        releases itself once the plates are gone.
 
-        Everything derived from the old fight goes with it. A cog named
-        by hand, an advice line, a refusal -- all describe a battle that
-        has ended, and carrying any of it into the next one is how a name
-        lands on the wrong cog.
+        Everything derived from the old fight goes with it -- a hand-
+        named cog, an advice line, a refusal -- or a name lands on the
+        wrong cog in the next one.
         """
         self.set_forced(False)
         watcher = getattr(self, "_watcher", None)
@@ -973,49 +928,39 @@ def _row(reading) -> "CogRow":
     else:
         name = (reading.department or "unknown").title()
         identified = False
-    # OFFERED ON EVERY ROW, not only unidentified ones. A confident
-    # wrong answer is worse than no answer: the library holds six of
-    # thirty-two heads, so a cog it has never seen can match the nearest
-    # one it has -- a Number Cruncher read as a Bean Counter, both
-    # Cashbots. With the dropdown hidden on identified rows there was no
-    # way to say otherwise, and the solver planned the whole fight
-    # against the wrong cog's attacks.
+    # OFFERED ON EVERY ROW, not only unidentified ones: a confident wrong
+    # answer is worse than no answer. The library holds six of
+    # thirty-two heads, so an unseen cog can match the nearest one it
+    # has (a Number Cruncher read as a Bean Counter, both Cashbots), and
+    # hiding the dropdown on identified rows left no way to correct it.
+    #
+    # EVERY COG is offered, with the likely ones first -- narrowing to
+    # the plate's own department is wrong for asking a person, because a
+    # misread department hides the very cog on screen (CLAUDE.md:
+    # "narrowing to the wrong five cogs is worse than not narrowing at
+    # all"). The reader's guess only orders the list; the player decides.
     choices = []
-    if True:
-        # EVERY COG, with the likely ones first. Narrowing to the pool the
-        # plate allows is right for automatic matching and wrong for
-        # asking a person: the department read can be wrong, and then the
-        # cog actually on screen is the one option never offered. That is
-        # the failure CLAUDE.md warns about -- "narrowing to the wrong
-        # five cogs is worse than not narrowing at all" -- and it showed
-        # up immediately: a plate misread as Cashbot could not be named
-        # Head Hunter, which is a Bossbot.
-        #
-        # The player can see the cog. The reader's guess orders the list;
-        # it does not limit it.
-        from .catalogue import candidates
+    from .catalogue import candidates
 
-        likely = list(candidates(reading.department, reading.level))
-        if reading.cog and reading.cog not in likely:
-            likely.insert(0, reading.cog)
-        rank = {key: i for i, key in enumerate(likely)}
-        every = [c.key for dept in data.COG_DEPARTMENTS.values()
-                 for c in dept.cogs]
-        for key in sorted(every, key=lambda k: (rank.get(k, len(rank)), k)):
-            try:
-                entry = data.cog(data.department_of(key), key)
-                choices.append({"key": key, "display": entry.display,
-                                "likely": key in rank,
-                                "current": key == reading.cog,
-                                "department": entry.department})
-            except (KeyError, ValueError):        # pragma: no cover
-                continue
-    # SNAPPED THE WAY THE SOLVER SNAPS IT. `session.FULL_HEALTH` treats
-    # anything at or above the tolerance as untouched, because the bar
-    # under-reads by a few percent and the shortfall scales with how
-    # large the plate is. Showing the raw fraction meant the panel said
-    # 91% while the solver was correctly using full HP, which reads as a
-    # bug and prompted exactly that report.
+    likely = list(candidates(reading.department, reading.level))
+    if reading.cog and reading.cog not in likely:
+        likely.insert(0, reading.cog)
+    rank = {key: i for i, key in enumerate(likely)}
+    every = [c.key for dept in data.COG_DEPARTMENTS.values()
+             for c in dept.cogs]
+    for key in sorted(every, key=lambda k: (rank.get(k, len(rank)), k)):
+        try:
+            entry = data.cog(data.department_of(key), key)
+            choices.append({"key": key, "display": entry.display,
+                            "likely": key in rank,
+                            "current": key == reading.cog,
+                            "department": entry.department})
+        except (KeyError, ValueError):        # pragma: no cover
+            continue
+    # SNAPPED THE WAY THE SOLVER SNAPS IT: `session.FULL_HEALTH` treats
+    # anything at or above the tolerance as untouched, since the bar
+    # under-reads by a few percent. Showing the raw fraction instead
+    # read as a bug (91% on screen while the solver used full HP).
     from .session import FULL_HEALTH
 
     shown = max(0.0, min(1.0, float(reading.health)))
