@@ -1,41 +1,30 @@
 """Battles with other toons in them, and the two ways to treat them.
 
-WHY THERE ARE TWO MODES
------------------------
-Whether a teammate is something you *choose* or something you *predict*
-is not a detail of the search, it is a different problem, and a solver
-that assumes the wrong one gives bad advice in the other.
+WHY THERE ARE TWO MODES: whether a teammate is something you *choose* or
+something you *predict* is a different problem, not a detail of the
+search, and assuming the wrong one gives bad advice in the other.
 
-`Mode.PICKUP` is a random group. You control one toon and cannot control
-the rest, so their actions are a chance node -- the same shape the cog
-phase already has, an outcome distribution over choices you do not make.
-Advice is then "the best move given what teammates tend to do".
+`Mode.PICKUP` is a random group: you control one toon, so the rest are a
+chance node (the same shape the cog phase already has), and advice is
+"the best move given what teammates tend to do". `Mode.COORDINATED` is
+an organised team, or one person advising all of them -- every toon's
+action is chosen together, the only way to reach plays that make
+coordination worth anything (stacking a track for `calc_hp_bonus`,
+holding a Trap for somebody else's Lure).
 
-`Mode.COORDINATED` is an organised team, or one person advising all of
-them. Every toon's action is chosen together, which is the only way to
-reach the plays that make coordination worth anything -- stacking a
-track on one cog for `calc_hp_bonus`, or holding a Trap for somebody
-else's Lure.
+Searching teammates as choices you can't direct produces advice like
+"throw a level 1, my teammate will throw a level 7 for the combo", which
+assumes an agreement that doesn't exist; modelling a coordinating team
+as a distribution throws away the reason to coordinate.
 
-The distinction is not cosmetic. Searching teammates as choices when you
-cannot direct them produces advice like "throw a level 1, my teammate
-will throw a level 7 into the same cog for the combo", which assumes an
-agreement that does not exist. Modelling them as a distribution when the
-team IS coordinating throws away the entire reason to coordinate.
-
-WHAT THE TEAMMATE MODEL IS AND IS NOT
--------------------------------------
-`TeammateModel` is the distribution the pickup chance node samples. It
-is a **model of people**, not a rule of the game, and nothing in the
-wiki or the source can confirm it -- there is no fact of the matter
-about what a stranger will throw.
-
-`SensiblePrior` below is therefore a stated guess, written down so it
-can be argued with and replaced. It is deliberately crude: real play
-data would beat it, and the interface takes a distribution precisely so
-a fitted model can be dropped in without touching the search.
-
-Read any pickup-mode number as resting on that guess.
+WHAT THE TEAMMATE MODEL IS AND IS NOT: `TeammateModel` is the
+distribution the pickup chance node samples. It's a **model of people**,
+not a rule of the game -- nothing in the wiki or the source can confirm
+what a stranger will throw. `SensiblePrior` below is a stated guess,
+written down so it can be argued with and replaced; the interface takes
+a distribution so a model fitted from real play can be dropped in
+without touching the search. Read any pickup-mode number as resting on
+that guess.
 """
 from __future__ import annotations
 
@@ -49,23 +38,14 @@ from .data import gags as gags_mod
 from .search import expectimax
 from .state import Action, BattleState, Track
 
-# `outcomes`, `search.expectimax` and `facility` USED TO BE
-# FUNCTION-LOCAL IMPORTS here (in `SensiblePrior._incoming`,
-# `SolverPolicy.distribution` and `step`), and none of the three is a
-# cycle -- nothing they reach imports `party`. The only two modules that
-# import this one are `search.party_search` and `search.hybrid`, and
-# neither is reachable from `outcomes` (-> simulator, mechanics, data),
-# from `expectimax` (-> outcomes, simulator) or from `facility`
-# (-> data, state).
-#
-# Verified rather than reasoned: every module under solver/ imported in
-# its own fresh interpreter, plus `party_search`, `hybrid`, `rl.env`,
-# `outcomes` and `expectimax` each imported BEFORE this module.
-#
-# Why it is worth doing: `_incoming` runs once per cog per candidate
-# gag whenever a pickup round samples a teammate, and Python re-runs
-# `_handle_fromlist` on every one -- 8,641 import calls from these two
-# files in a 4,000-step pickup rollout.
+# `outcomes`, `search.expectimax` and `facility` are imported at module
+# level rather than function-locally: none of the three is a cycle
+# (nothing they reach imports `party`, verified by importing every
+# module under solver/ in its own fresh interpreter), and a
+# function-local import re-runs on every call -- 8,641 import calls from
+# these two files in a 4,000-step pickup rollout, since `_incoming` runs
+# once per cog per candidate gag whenever a pickup round samples a
+# teammate.
 
 
 class Mode(str, Enum):
@@ -118,30 +98,24 @@ class SensiblePrior(TeammateModel):
     NOT MEASURED, and it cannot be: there is no fact of the matter about
     what a stranger will do. What it encodes is how people visibly play
     -- spend as little as possible and take as little as possible --
-    which matters most in exactly the fights where a party solver is
-    worth having, the long ones.
+    which matters most in the long fights a party solver is worth
+    having for.
 
-    Four things it weighs, and the first two are why the earlier version
-    of this was wrong:
+    Four things it weighs:
 
-    * **Overkill is waste.** A Wedding Cake into a five-hit-point cog
-      kills it and throws the rest away. The first version scored on raw
-      damage and so actively preferred the biggest gag in the pouch,
-      which is the opposite of how anybody plays. Only damage up to the
-      cog's remaining health counts, and the excess is charged for.
-    * **Rare gags are dear.** A gag is priced by how few fit in a pouch,
-      so a level 7 has to earn its place. Nobody opens with their
-      Railroad.
+    * **Overkill is waste.** Only damage up to the cog's remaining
+      health counts; the excess is charged for, so the model doesn't
+      prefer the biggest gag in the pouch regardless of target.
+    * **Rare gags are dear.** Priced by how few fit in a pouch, so a
+      level 7 has to earn its place.
     * **Killing is worth more than hurting.** A dead cog never attacks
-      again, which is worth more than the hit points suggest.
-    * **Lure is damage prevented.** A lured cog does not attack, so a
-      Lure is scored by what it stops rather than what it deals -- which
-      is why teams lure so much, and why a model that only knew about
-      damage tracks would never predict it.
+      again.
+    * **Lure is damage prevented.** A lured cog doesn't attack, so a
+      Lure is scored by what it stops rather than what it deals.
 
-    `focus` is how much probability the favourite gets. High enough that
-    the prediction means something, low enough that the search does not
-    plan around a guess as though it were certain.
+    `focus` is how much probability the favourite gets -- high enough
+    the prediction means something, low enough the search doesn't plan
+    around a guess as though it were certain.
     """
 
     def __init__(self, focus: float = 0.6):
@@ -259,27 +233,25 @@ class SensiblePrior(TeammateModel):
 class SolverPolicy(TeammateModel):
     """Assume a teammate plays the objective you are recommending.
 
-    The principled version of the same idea. `SensiblePrior` hand-scores
-    an imitation of good play; this asks the solver what good play *is*
-    and predicts that -- so a party is modelled as everyone subscribing
-    to the same objective rather than as one real player surrounded by
-    approximations.
+    The principled version of `SensiblePrior`: instead of hand-scoring
+    an imitation of good play, this asks the solver what good play *is*
+    and predicts that.
 
-    Better in a way that costs. A prior is a scan of the pouch; this is
-    a search per teammate per node, so it is for offline work -- asking
-    what a coordinated team should do, checking whether a known strategy
-    falls out -- and not for the 15-second budget the live advisor has.
+    Costs more: a prior is a scan of the pouch, this is a search per
+    teammate per node, so it's for offline work (checking whether a
+    known strategy falls out of a coordinated team) rather than the
+    15-second live advisor budget.
 
-    `depth` is deliberately shallow. A teammate is being *predicted*,
-    and predicting them as a deeper searcher than the person you are
-    advising is a strange claim to make about a stranger.
+    `depth` is deliberately shallow -- predicting a teammate as a deeper
+    searcher than the person being advised is a strange claim to make
+    about a stranger.
 
-    LIMITATION worth knowing: the state is rotated so the teammate sits
-    at index 0, because the search assumes it is choosing for `toons[0]`
-    -- but `CogStatus.damage_by_toon` indices are not rotated with it,
-    so a cog's memory of who hurt it is wrong from the rotated point of
-    view. That only skews which toon a cog is predicted to attack
-    inside the teammate's own lookahead, not the round actually played.
+    LIMITATION: the state is rotated so the teammate sits at index 0 (the
+    search assumes it chooses for `toons[0]`), but `CogStatus.
+    damage_by_toon` indices aren't rotated with it, so a cog's memory of
+    who hurt it is wrong from the rotated view. This only skews which
+    toon a cog is predicted to attack inside the teammate's own
+    lookahead, not the round actually played.
     """
 
     def __init__(self, depth: int = 2, objective=None, focus: float = 0.7):
@@ -378,12 +350,11 @@ def step(state: BattleState, mine: Optional[Action] = None,
     healed = simulator.apply_party_round(nxt, actions, rng=rng)
 
     # SPEND THE PASS BUDGET. `apply_party_round` filters passes out
-    # before it does anything, so nothing here was decrementing
-    # `free_passes` and a party could have passed forever -- the
-    # termination measure (gags, lure rounds, free passes) would have
-    # stopped descending. Charged once per round rather than per toon,
-    # and not at all while a cog is lured, because there the lure timer
-    # is already the quantity going down.
+    # before doing anything, so this is the only place `free_passes`
+    # decrements -- without it a party could pass forever and the
+    # termination measure (gags, lure rounds, free passes) would stop
+    # descending. Charged once per round, not per toon, and not at all
+    # while a cog is lured, since the lure timer is already descending.
     if not lured_before and any(a is not None and a.is_pass
                                 for a in actions):
         nxt.free_passes = max(0, nxt.free_passes - 1)
@@ -392,40 +363,21 @@ def step(state: BattleState, mine: Optional[Action] = None,
         _party_cog_phase(nxt, healed, rng)
     nxt.round_num += 1
 
-    # THE UNITE COOLDOWN TICKS HERE, at the round boundary.
-    #
-    # `unites.tick_cooldown` had NO CALLER anywhere in `solver/`. Using
-    # a unite set `unite_cooldown = COOLDOWN_ROUNDS` and nothing ever
-    # decremented it, so `can_use_unite` stayed False for the rest of
-    # the battle: one unite per fight, permanently, however many the
-    # toon carried.
-    #
-    # Found in a solo VP trace -- the toon died on round 37 holding
-    # SEVEN of its eight unites, having sat on 2 laff for nine straight
-    # rounds. In a fight this project's own arithmetic says is decided
-    # by laff, that is most of the healing on hand being unreachable.
-    #
-    # Ticked in `step`, not in `apply_party_round`: the scorers call
-    # that one on scratch clones to price a plan, and a cooldown that
-    # ran down during scoring would let a search see a unite it cannot
-    # actually have yet.
+    # THE UNITE COOLDOWN TICKS HERE, at the round boundary, not inside
+    # `apply_party_round`: that function also runs on scratch clones
+    # (`greedy_plan` prices a plan with it), and a cooldown that ran down
+    # during scoring would let a search see a unite it doesn't actually
+    # have yet.
     for toon in nxt.toons:
         unites_mod.tick_cooldown(toon)
 
-
-    # Cogs walk in to replace the dead, at the ROUND BOUNDARY.
-    #
-    # This was inside `apply_party_round` and had to move. That function
-    # is not only how a round resolves -- `greedy_plan` calls it on a
-    # scratch clone after each toon picks, so later toons can see the
-    # earlier ones' choices. Reinforcing there appended a cog to the
-    # scratch state, so the next toon enumerated a target index that did
-    # not exist in the real state, and the plan raised IndexError when
-    # applied.
-    #
-    # The boundary is also where it belongs on the merits: a cog that
-    # walks in should not be targetable by gags thrown in the round it
-    # joined, nor get to swing in it. Both phases are done by here.
+    # Cogs walk in to replace the dead, at the ROUND BOUNDARY rather than
+    # inside `apply_party_round` -- `greedy_plan` calls that on a scratch
+    # clone after each toon picks, so reinforcing there would append a
+    # cog absent from the real state and make a later toon's target index
+    # invalid. The boundary is also right on the merits: a cog that walks
+    # in should not be targetable by, or get to swing in, the round it
+    # joined.
     facility.reinforce(nxt)
     return nxt, healed, nxt.is_terminal()
 
@@ -440,9 +392,7 @@ def _party_cog_phase(state: BattleState, healed: List[int], rng) -> None:
 
     Group attacks hit every standing toon. [CONFIRMED] TTR wiki, which
     classifies all 68 attacks into "Group Cog attacks" (14) and "Single
-    Cog attacks" (54) -- see `data.GROUP_ATTACKS`. Before this the party
-    took strictly less damage than the game deals, because every attack
-    was resolved as single-target.
+    Cog attacks" (54) -- see `data.GROUP_ATTACKS`.
 
     One accuracy roll decides a group attack for the whole team, the
     same shape as a toon's group gag: it either connects or it does not.
