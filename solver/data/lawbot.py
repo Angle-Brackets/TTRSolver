@@ -121,15 +121,14 @@ LAWBOT = Department(
         department="lawbot",
         levels=(3, 4, 5, 6, 7),
         # Wiki: https://toontownrewritten.wiki/Double_Talker
-        # [RESOLVED] Appendix A spelled this "Buzzword", B and C "Buzz Word";
-        # the wiki uses Buzz Word. Key is buzz_word package-wide.
-        # [CORRECTED] group_attacks was {"buzz_word"} on the strength of
-        # Appendix B's Type column. The wiki says Buzz Word is a single-
-        # target attack: the Double Talker page gives Target = One Toon,
-        # https://toontownrewritten.wiki/Buzz_Word gives Target = One Toon
-        # and files it under Category:Single Cog attacks, and the same
-        # attack is single-target on Micromanager and The Mingler too.
-        # Double Talker now has no group attacks at all.
+        # [RESOLVED] Appendix A spelled this "Buzzword", B and C "Buzz
+        # Word"; the wiki uses Buzz Word. Key is buzz_word package-wide.
+        # [CORRECTED] group_attacks was {"buzz_word"} per Appendix B's
+        # Type column, but the wiki says Buzz Word is single-target
+        # (Target = One Toon on both the Double Talker and Buzz Word
+        # pages, filed under Single Cog attacks, and single-target on
+        # Micromanager and The Mingler too). Double Talker now has no
+        # group attacks at all.
         attacks=(
             CogAttack(
                 "rubber_stamp", "Rubber Stamp",
@@ -315,28 +314,21 @@ LAWBOT = Department(
         department="lawbot",
         levels=(8, 9, 10, 11, 12),
         # Wiki: https://toontownrewritten.wiki/Big_Wig
-        # [FREQ STALE] The wiki's roster has FOUR attacks; the guide had two.
-        # A 50/50 split over two attacks cannot be right for a
+        # [FREQ STALE] The wiki's roster has FOUR attacks; the guide had
+        # two. A 50/50 split over two attacks cannot be right for a
         # four-attack cog.
-        # finger_wag damage: RESOLVED by triangulation. The wiki appeared to
-        # contradict itself -- the Big Wig page gives 9, 11, 13, 16, 18
-        # while https://toontownrewritten.wiki/Finger_Wag gives
-        # 13, 15, 17, 19, 21 for the same five levels.
-        #
-        # The Finger_Wag page is misattributing Throw Book's row. Three
-        # independent places agree Big Wig's THROW BOOK damage is exactly
-        # 13, 15, 17, 19, 21: the wiki's own Throw Book entry for this
-        # cog (see unmodeled_attacks below), Open Toontown's
-        # SuitBattleGlobals.py, and the pre-rebalance guide -- which also
-        # listed this row under "finger_wag" even though Toontown Online's
-        # Big Wig has no Finger Wag at all, only Power Trip and Throw
-        # Book. So the row was mislabeled at the source and the wiki's
-        # per-attack page inherited the error.
-        #
-        # That leaves the Big Wig page's 9, 11, 13, 16, 18 as the only
-        # unexplained-away figure for Finger Wag, and it is monotonic
-        # across the over-level seam where the other row is not. Filled
-        # in from it. [CONFIRMED] wiki, Big Wig page.
+        # finger_wag damage: RESOLVED by triangulation. The wiki appeared
+        # to contradict itself: the Big Wig page gives 9,11,13,16,18
+        # while the Finger_Wag page gives 13,15,17,19,21 for the same
+        # five levels. The Finger_Wag page is misattributing Throw
+        # Book's row -- three independent sources (the wiki's own Throw
+        # Book entry for this cog, Open Toontown, and the pre-rebalance
+        # guide) agree Big Wig's THROW BOOK damage is 13,15,17,19,21,
+        # and the pre-rebalance guide shows that row was mislabeled
+        # "finger_wag" at the source, which the wiki's per-attack page
+        # inherited. That leaves the Big Wig page's 9,11,13,16,18 as the
+        # only figure for Finger Wag, monotonic where the other row
+        # isn't. Filled in from it. [CONFIRMED] wiki, Big Wig page.
         attacks=(
             CogAttack(
                 "power_trip", "Power Trip",
