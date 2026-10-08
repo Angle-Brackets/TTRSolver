@@ -30,18 +30,12 @@ from .state import (
     ATTACK_ORDER, BattleState, CogState, Action, Track,
 )
 
-# `facility` and `search.objective` USED TO BE FUNCTION-LOCAL IMPORTS
-# inside `step`, and neither had to be. Both depend only on `data` and
-# `state`, so nothing here is a cycle: checked by importing each of the
-# 60 modules under solver/ in its own fresh interpreter, and by
-# importing `search.objective`, `facility`, `outcomes`, `search.hybrid`
-# and `search.party_search` FIRST and then this module.
-#
-# Python re-runs `_handle_fromlist` on every execution of a
-# function-local `from . import x`, and `step` is called once per
-# sampled round -- 11,670 import calls in a 6,000-step solo rollout,
-# two per round. See `party.py` for the two that genuinely are cycles
-# and have to stay local.
+# `facility` and `search.objective` are imported at module level rather
+# than inside `step`: both depend only on `data` and `state`, so neither
+# is a cycle, and a function-local `from . import x` re-imports on every
+# call -- 11,670 import calls in a 6,000-step solo rollout. See
+# `party.py` for the two imports that genuinely are cycles and must stay
+# local.
 
 
 def is_group_action(track: Track, level: int) -> bool:
@@ -66,71 +60,27 @@ def is_group_action(track: Track, level: int) -> bool:
 def legal_actions(state: BattleState) -> List[Action]:
     """Every action the toon may take this round, pass included.
 
-    WHEN PASS IS OFFERED
-    --------------------
-    Always, while `state.free_passes` lasts. Passing is an ordinary
-    choice: conserve a scarce gag, or in a party decline to hit a cog
-    because `mechanics.pick_cog_target` makes it prefer whoever damaged
-    it most, so swinging really does pull its next attack onto you.
+    WHEN PASS IS OFFERED: always, while `state.free_passes` lasts.
+    Passing is an ordinary choice -- conserve a scarce gag, or in a
+    party decline to hit a cog because `mechanics.pick_cog_target`
+    prefers whoever damaged it most, so attacking draws its next swing
+    onto you.
 
-    It used to be offered only when a cog was lured and nothing
-    productive could be done. That was too narrow -- it made both of the
-    above unsayable -- but the reasons behind it are real and worth
-    keeping in view.
+    A LURED PASS COSTS NOTHING OFF THE BUDGET, because a lured cog does
+    not attack, so the lure timer itself is the descending quantity. The
+    move this exists for: trap and lure left, cogs already lured. Trap
+    can't land on a lured cog, so the only gag action is to burn a Lure
+    re-luring a cog that's already lured; waiting for the lure to lapse,
+    then trapping and re-luring, wins fights that would otherwise run
+    the pouch dry (tests/test_pass.py plays one out).
 
-    The first is that a pass is not the free move it looks like at a
-    search horizon. A lured cog does not attack, so passing while the
-    battle is lured costs no laff and no gag: the leaf evaluator sees a
-    round that cost nothing, and a shallow search will happily lure and
-    then coast. The cost is real but it is off the horizon -- the lure
-    lapses and no progress was made. Offered unconditionally, this
-    swung a depth-2 search off a Cream Pie that killed a cog outright
-    and onto a Lure. Exact play was never fooled; shallow play was, and
-    shallow play is what ships.
-
-    The second is termination. `solve()` terminates because every action
-    spends a gag, so the gag count strictly decreases and the state
-    graph is a DAG. A pass spends nothing, so an always-legal pass would
-    let the search walk pass -> pass -> pass forever. Requiring a lured
-    cog keeps a measure that still decreases: a lured cog's
-    `lure_rounds_remaining` ticks down during the cog phase, and nothing
-    but a fresh Lure gag puts rounds back. The measure is lexicographic,
-    (gags remaining, total lure rounds remaining), and well-founded.
-
-    The move this exists for: trap and lure left, cogs already lured. A
-    trap cannot be placed on a lured cog, so the only gag action is to
-    burn a Lure re-luring a cog that is already lured. Waiting for the
-    lure to lapse, then trapping and re-luring, wins fights that
-    otherwise run the pouch dry. tests/test_pass.py plays one out.
-
-    THE UNLURED PASS, AND WHY IT IS BUDGETED
-    ----------------------------------------
-    Passing with nothing lured is also a real move, and the rule above
-    used to forbid it outright. Two cases it was wrong about:
-
-      * conserving a scarce gag, when taking a hit is cheaper than
-        spending the only Railroad in the pouch;
-      * declining to hit a cog in a party, because
-        `mechanics.pick_cog_target` makes a cog prefer whoever damaged
-        it most -- so attacking really does draw its next swing onto
-        you, and sometimes the right move is to let a healthier toon
-        take the aggro.
-
-    `state.free_passes` is a TERMINATION GUARD and not a strategic
-    limit, which is why it starts at 12 -- high enough never to bind in
-    a real battle.
-
-    It cannot simply be unbounded. `solve()` terminates because a
-    well-founded measure descends every round, and an unlured pass
-    spends no gag and ticks no lure. In the outcome branch where every
-    cog MISSES it also costs no laff, leaving a state identical to its
-    parent -- so the graph stops being a DAG and the search recurses
-    forever down pass -> pass -> pass. The measure is therefore
-    (gags, lure rounds, free passes), and still descends.
-
-    A lured pass does not draw on the budget: the lure timer is already
-    the quantity going down, and the trap-and-wait line can need many
-    rounds of it.
+    AN UNLURED PASS DOES DRAW ON `state.free_passes`, a TERMINATION
+    GUARD rather than a strategic limit (it starts at 12, high enough
+    never to bind in a real battle). It can't be unbounded: `solve()`
+    terminates on the lexicographic measure (gags remaining, lure rounds
+    remaining, free passes) strictly decreasing every round, and an
+    unlured pass that missed everything would otherwise leave a state
+    identical to its parent, making the search recurse forever.
     """
     actions = []
     toon = state.toon
@@ -145,30 +95,23 @@ def legal_actions(state: BattleState) -> List[Action]:
         # knows a trap springs when a lure lands.
         return actions
 
-    # PINK SLIPS, one per live cog. Offered before gags because they are
+    # PINK SLIPS, one per live cog. Offered before gags since they're
     # unconditional: no accuracy, no track, no interaction with lure or
-    # trap. Finite and strictly decreasing, so they do not threaten the
-    # termination argument above -- the measure simply gains a component.
+    # trap. Finite and strictly decreasing, so they don't threaten the
+    # termination argument above.
     for i, cog in enumerate(state.cogs):
         if toon.fires > 0 and not cog.status.is_dead:
             actions.append(Action(track=None, target_index=i, fire=True))
 
-    # SOS TOONS, offered only when the toon holds the card. Every
-    # existing position has an empty `sos_cards`, so this adds nothing
-    # anywhere until a caller stocks one -- which is what keeps the
-    # behaviour lock green.
-    #
-    # An SOS costs the turn, so it is an ordinary action beside the
-    # gags rather than something layered on top, and it is finite and
-    # strictly decreasing like a pink slip, so it does not threaten the
-    # termination argument above.
+    # SOS TOONS, offered only when held. An SOS costs the turn, so it's
+    # an ordinary action beside the gags, and finite and strictly
+    # decreasing like a pink slip.
     for name, held in getattr(toon, "sos_cards", {}).items():
         # `name in BY_NAME` is not paranoia: the live readers build
-        # `sos_cards` from what the game sends, and a name the tables do
-        # not know would be offered here and then raise `KeyError` in
-        # `apply_toon_action` -- a crash in the search rather than a
-        # card politely not offered. `hybrid._sos_probes` has always
-        # filtered this way; the two enumerators must agree.
+        # `sos_cards` from what the game sends, and an unknown name would
+        # otherwise be offered here and raise in `apply_toon_action` --
+        # a crash in the search rather than a card politely not offered.
+        # `hybrid._sos_probes` filters the same way; the two must agree.
         if held > 0 and name in sos_mod.BY_NAME:
             actions.append(Action(track=None, sos=name))
 
@@ -189,12 +132,7 @@ def legal_actions(state: BattleState) -> List[Action]:
             continue
 
         if track == Track.TOON_UP:
-            # Toon-Up names a TOON, and this enumerated cogs. With four
-            # cogs and two toons it produced four heals aimed at cog
-            # indices, and the heal quietly fell back to "first standing
-            # teammate" -- so the search saw several identical actions
-            # wearing different labels and printed nonsense like
-            # `Feather -> cog 0`.
+            # Toon-Up's target_index names a TOON, not a cog.
             #
             # [CONFIRMED] TTR wiki: a toon cannot heal themselves, so
             # the actor is excluded.
@@ -215,30 +153,22 @@ def legal_actions(state: BattleState) -> List[Action]:
                     continue  # can't trap an already-trapped or lured cog
             actions.append(Action(track=track, level=level, target_index=i))
 
-    # Drop the moves that provably do nothing. `is_productive` already
-    # knew about them and was only ever consulted for the pass decision,
-    # so the search was free to spend a round re-luring an
-    # already-lured cog -- which refreshes a timer and buys nothing --
-    # or dropping on a lured one, which always misses.
+    # Drop moves that provably do nothing -- e.g. re-luring an
+    # already-lured cog (refreshes a timer, buys nothing) or Drop on a
+    # lured one (always misses). See `is_productive`.
     productive = [a for a in actions if is_productive(state, a)]
     if productive:
         actions = productive
 
-    # PASS, widened. Offered whenever a cog is lured -- that is how lure
-    # rounds get burned, and it costs no budget because the lure timer
-    # is already the quantity descending -- and otherwise while
-    # `free_passes` lasts.
+    # PASS, offered whenever a cog is lured (that's how lure rounds get
+    # burned, at no cost to the budget since the lure timer is already
+    # descending) and otherwise while `free_passes` lasts.
     #
-    # This was reverted once, on the belief that it broke exact
-    # `solve()`. It did not: `solve` computed its depth budget as
-    # "gags + 1", on the assumption that every action spends a gag, and
-    # a pass does not. The search truncated and its leaves fell through
-    # to `heuristic_value`, which is what invented the value. Fixing the
-    # budget to count `free_passes` too makes narrow and wide agree
-    # exactly where they should -- checked over 93 random positions,
-    # with no case of the wider rule scoring LOWER, which more options
-    # cannot do -- and the six positions where it scores higher are
-    # genuine, one of them by 131 points.
+    # `solve()`'s depth budget must count `free_passes` as well as gags,
+    # or a pass-including search truncates early and its leaves fall
+    # through to `heuristic_value` -- checked over 93 random positions,
+    # with the wider rule never scoring lower (more options cannot hurt)
+    # and six positions scoring genuinely higher, one by 131 points.
     if any(cog.status.lured for cog in active) or state.free_passes > 0:
         actions.append(Action(track=None, level=0, target_index=None))
 
@@ -294,27 +224,21 @@ def _apply_trap_trigger(cog: CogState) -> int:
 
     Ordering [CONFIRMED]: within a round, attacks resolve Toon-up -> Trap
     -> Lure -> Sound -> Throw -> Squirt -> Drop, so a Trap laid in the
-    same round is already on the ground when the Lure resolves. A solo
-    toon acts once per round, so the trap here is always from an earlier
-    round; either way, detonating at Lure time matches the source order.
+    same round is already on the ground when the Lure resolves.
 
     A trapped cog that is DAMAGED rather than lured keeps its trap: the
-    guide describes Trap as persisting on the cog until a Lure moves it
-    onto the trap, and gives no rule for damage clearing a trap. (Nor is
-    re-trapping possible -- legal_actions blocks trapping an already
-    trapped or lured cog, which is [CONFIRMED].)"""
+    guide describes Trap as persisting until a Lure moves the cog onto
+    it, with no rule for damage clearing a trap. (Nor is re-trapping
+    possible -- legal_actions blocks trapping an already trapped or
+    lured cog, [CONFIRMED].)"""
     # trained_fraction 1.0, matching mechanics.calc_toon_damage's default
-    # and therefore every other track. This read 0.0 -- the MINIMUM of the
-    # range -- which is a convention no other gag uses. TNT deals 90-180,
-    # so a trap was being resolved at 90 while a Grand Piano of the same
-    # level resolved at 170, and any comparison between Trap and another
-    # track was measuring that discrepancy rather than the game.
+    # and every other track -- NOT the minimum of the range, which no
+    # other gag uses as its resolution point.
     if cog.status.trap_damage is not None:
-        # AN SOS TRAP CARRIES ITS OWN DAMAGE. `Clerk Will` and friends
-        # place a named trap gag at SOS-tier numbers -- 60/120/180
-        # against the gags' own 50/85/180 -- which a level cannot
-        # express. Checked before the level so the card wins where both
-        # are somehow set.
+        # An SOS trap carries its OWN damage: `Clerk Will` and friends
+        # place a named trap gag at SOS-tier numbers (60/120/180 against
+        # the gags' own 50/85/180), which a level can't express. Checked
+        # before the level so the card wins where both are somehow set.
         dmg = int(cog.status.trap_damage)
     else:
         dmg = data.gag(Track.TRAP, cog.status.trap_level).damage_at(
@@ -337,13 +261,12 @@ def toon_action_accuracy(state: BattleState, action: Action,
     A pass always "hits": it has one outcome, so the search should not
     split a chance node over it.
 
-    `actor` indexes `state.toons`, and defaults to 0 because solo play is
-    the whole of every other caller. A party round must pass it: accuracy
-    reads the thrower's TRAINING and whether the track is organic to
-    them, and both are per toon. This read `state.toon` unconditionally,
-    so every gag in a party round was scored with toon 0's training --
-    invisible on a maxed team, which is every boss position modelled so
-    far, and wrong for any mixed party.
+    `actor` indexes `state.toons`, defaulting to 0 for solo play. A party
+    round must pass it explicitly: accuracy reads the thrower's TRAINING
+    and whether the track is organic to THEM, both of which are per toon
+    -- reading `state.toon` unconditionally would score every gag in a
+    party round with toon 0's training, invisible on a maxed team but
+    wrong for any mixed party.
     """
     if action.sos is not None:
         # [CONFIRMED] wiki: no SOS gag misses, since 2.6.7. The
@@ -387,30 +310,22 @@ def apply_toon_action(state: BattleState, action: Action,
     # spending it from the wrong pouch is silent and wrong.
     toon = state.toons[actor]
     if action.is_pass:
-        # Nothing spent from the pouch, nothing dealt. The round still
-        # happens -- the caller runs the cog phase, which is the entire
-        # point of passing while lured: it is how lure rounds get
-        # burned.
+        # Nothing spent, nothing dealt. The round still happens -- the
+        # caller runs the cog phase, which is how passing while lured
+        # burns lure rounds.
         #
-        # An UNLURED pass does spend something: a unit of
-        # `free_passes`. That is what keeps the termination measure
-        # descending, since such a pass ticks no lure and costs no gag.
-        # A lured pass is free here because the lure timer is already
-        # the quantity going down.
+        # An UNLURED pass spends a unit of `free_passes` instead, to
+        # keep the termination measure descending (it ticks no lure and
+        # costs no gag otherwise). A lured pass is free here because the
+        # lure timer is already the quantity going down.
         if not any(cog.status.lured for cog in state.active_cogs()):
             state.free_passes = max(0, state.free_passes - 1)
         return 0, 0
 
     if action.sos is not None:
-        # An SOS Toon answers the call. Spends the card and the turn,
+        # An SOS Toon answers the call: spends the card and the turn,
         # cannot miss, and resolves at once except for Trap, which
         # places something a later Lure collects.
-        #
-        # Reported as 0 damage for the same reason a fire is: every
-        # scorer reads the return value as damage dealt by the TOON,
-        # and an SOS that healed 180 or lured a field dealt none.
-        # `sos.apply` returns what it actually did, for callers that
-        # want it.
         from . import sos as sos_mod
 
         held = toon.sos_cards.get(action.sos, 0)
@@ -422,16 +337,12 @@ def apply_toon_action(state: BattleState, action: Action,
         cards[action.sos] = held - 1
         toon.sos_cards = cards
         did = sos_mod.apply(sos_mod.BY_NAME[action.sos], state)
-        # DAMAGE stays 0, for the reason above. LAFF HEALED DOES NOT.
-        # The first element of this tuple is laff restored, not damage,
-        # and returning 0 for it meant `apply_party_round` recorded no
-        # healing and `QUICK_W["heal"]` never saw an SOS heal at all.
-        #
-        # What that cost: `_restored` caps a heal at the toon's
-        # headroom, which is exactly the "worth more when you are low"
-        # weighting a heal should have -- 17 laff into a full toon, 125
-        # into a dying one. With the report stuck at zero, Flippy
-        # scored 558.4 at 120 laff and 558.4 at 12.
+        # Reported as (laff healed, 0 damage): every scorer reads this
+        # tuple's second element as damage dealt by the TOON, and an SOS
+        # that healed or lured dealt none. Laff healed DOES matter --
+        # `_restored` weights a heal by the toon's headroom (17 into a
+        # full toon, 125 into a dying one), so it must be reported, not
+        # folded into "damage" or dropped.
         return int(did.get("healed", 0)), 0
 
     if action.fire:
@@ -439,10 +350,9 @@ def apply_toon_action(state: BattleState, action: Action,
         # `hit` is not consulted, and it spends the toon's action for the
         # round exactly as a gag would.
         #
-        # Reported as 0 damage rather than the cog's remaining hp: the
-        # cog is fired out of the fight, not damaged, and every scorer in
-        # the project reads the return value as damage dealt. Crediting
-        # it as damage would make a fire look like the biggest hit in the
+        # Reported as 0 damage rather than the cog's remaining hp: every
+        # scorer reads the return value as damage dealt, and crediting a
+        # fire as damage would make it look like the biggest hit in the
         # game to an evaluator that already struggles to price a kill.
         index = action.target_index
         if index is None or not (0 <= index < len(state.cogs)):
@@ -453,17 +363,15 @@ def apply_toon_action(state: BattleState, action: Action,
         if toon.fires <= 0:
             raise ValueError("no pink slip to spend")
         toon.fires -= 1
-        # Kills BOTH layers of a Version 2.0 -- [CONFIRMED] wiki. Nothing
-        # here needs to know about the second layer because a fire never
-        # leaves one behind.
+        # [CONFIRMED] wiki: a pink slip eliminates BOTH layers of a
+        # Version 2.0 -- the suit and the Skelecog form -- so a fired
+        # v2.0 leaves nothing, and clearing `suited` here also keeps
+        # dead cogs from splitting the memo key on a flag that no
+        # longer matters.
         cog.hp = 0
         cog.status.is_dead = True
         cog.status.lured = False
         cog.status.trapped = False
-        # Both layers go. [CONFIRMED] wiki: a pink slip eliminates the
-        # suit AND the Skelecog form, so a fired v2.0 leaves nothing --
-        # clearing this also keeps dead cogs from splitting the memo key
-        # on a flag that can no longer matter.
         cog.status.suited = False
         return 0, 0
 
@@ -483,26 +391,22 @@ def apply_toon_action(state: BattleState, action: Action,
 
     if action.track == Track.TOON_UP:
         # [CONFIRMED] TTR wiki: "Toon-Up gags do not necessarily miss, but
-        # rather, provide 20% of original values that are rounded up." So a
-        # missed Toon-Up still heals -- it is the one track where a miss
-        # isn't a no-op, which is why this sits above the `if not hit`.
+        # rather, provide 20% of original values that are rounded up." So
+        # a missed Toon-Up still heals -- the one track where a miss
+        # isn't a no-op, which is why this sits above `if not hit`.
         #
-        # But it heals SOMEBODY ELSE. [CONFIRMED] TTR wiki (Toon-Up):
-        # "Toons cannot use Toon-Up gags to restore their own laff" --
-        # they "restore each other's laff". This path is the solo one,
-        # where there is nobody else, so the gag is spent and heals
-        # nothing. It used to return the full value to the thrower,
-        # which made a solo Toon-Up a self-heal the game does not offer.
+        # But it heals SOMEBODY ELSE: [CONFIRMED] wiki, "Toons cannot use
+        # Toon-Up gags to restore their own laff". This path is solo,
+        # where there's nobody else, so the gag is spent and heals
+        # nothing.
         return 0, dealt
 
     if not hit:
         return healed, dealt
 
     if action.track == Track.TRAP:
-        # Every target, not just the first. Railroad is a group gag -- it
-        # lays a trap in front of all of them -- and arming only one cog
-        # quietly turned the best trap in the game into a single-target one,
-        # which made the Railroad+Lure combo look far weaker than it is.
+        # Every target, not just the first: Railroad is a group gag that
+        # lays a trap in front of all of them.
         #
         # An existing trap is overwritten -- [CONFIRMED] TTR 3.0.0, "if
         # there are active Trap gags on Cogs, and a Railroad gag is placed
@@ -516,10 +420,8 @@ def apply_toon_action(state: BattleState, action: Action,
         # and is still refused on a lured cog.
         #
         # That is what makes Railroad-then-Lure work IN ONE ROUND: Trap
-        # resolves before Lure, the Railroad wakes the field and arms it,
-        # and the Lure lands afterwards and springs it. Skipping lured
-        # cogs -- which this used to do -- made the strongest combination
-        # in the game unplayable whenever anything was already asleep.
+        # resolves before Lure, the Railroad wakes and arms the field,
+        # and the Lure lands afterwards and springs it.
         group = data.gag(action.track, action.level).group
         if group and not all(c.status.lured for c in targets):
             for cog in targets:
@@ -548,21 +450,11 @@ def apply_toon_action(state: BattleState, action: Action,
                 dealt += cog.take_damage(dmg)
                 # THE TRAP KNOCKS IT OUT OF THE LURE. [CONFIRMED] by the
                 # owner: "If you lure a cog onto a trap, the cog becomes
-                # unlured after taking damage."
-                #
-                # This was a [TODO] that guessed the other way and kept
-                # the cog lured, which made Trap+Lure strictly better
-                # than it is -- the cog took the trap damage AND stayed
-                # asleep for the full lure duration, so the combo bought
-                # damage and several rounds of prevention at once.
-                #
-                # It does not. Springing a trap SPENDS the lure: you
-                # trade the rounds the cog would have spent asleep for
-                # the trap's damage. That is the real trade-off behind
-                # the combo and any evaluation of Trap has to price it,
-                # which is why the discount cannot just be
-                # P(spring) x damage -- the lure given up is part of the
-                # cost.
+                # unlured after taking damage." Springing a trap SPENDS
+                # the lure -- the trade is the trap's damage for the
+                # rounds the cog would have spent asleep -- so pricing
+                # Trap can't be just P(spring) x damage; the lure given
+                # up is part of the cost.
                 continue
             cog.status.apply_lure(acc_before_bonus, rounds, action.level)
 
@@ -587,12 +479,11 @@ def apply_toon_action(state: BattleState, action: Action,
             # bites when kbBonus lands on an odd base damage.
             dmg = int(total)
             dealt += cog.take_damage(dmg)
-            # THE KNOCKBACK IS ALREADY IN `total` ABOVE, AND THE LURE
-            # ENDS HERE. A landed attack of any damage track wakes the
-            # cog -- [CONFIRMED] by the owner, see
-            # mechanics.LURE_ENDS_ON_DAMAGE. So a Throw collects its +50%
-            # against the sleeping cog and then the cog is awake, and if
-            # it survived it attacks this round.
+            # The knockback is already in `total` above, and the lure
+            # ends here: [CONFIRMED] by the owner, any landed attack of a
+            # damage track wakes the cog (mechanics.LURE_ENDS_ON_DAMAGE).
+            # A Throw collects its +50% against the sleeping cog, and
+            # only then does the cog wake and (if it survived) attack.
             if cog.status.is_dead or action.track in mechanics.DAMAGE_TRACKS:
                 cog.status.clear_lure()
 
@@ -619,26 +510,18 @@ def _tick_lure(cog: CogState, rng=random) -> bool:
     lure_rounds_remaining counts cog phases the cog skips, so a lure of N
     rounds set this round makes the cog miss this round and the next N-1.
 
-    THE OFF-BY-ONE IS SETTLED, and this used to say it could not be --
-    on the grounds that the per-level durations were [TODO], which they
-    have not been for some time (`mechanics.lure_duration_rounds` is
-    [CONFIRMED] against the wiki). Measured two ways, agreeing:
+    THE OFF-BY-ONE IS SETTLED (`mechanics.lure_duration_rounds` is
+    [CONFIRMED] against the wiki), measured two ways, agreeing: calling
+    this function on a lured board skips exactly the table value of cog
+    phases per gag (Big Magnet 3, Hypno-goggles 4, Presentation 8); and a
+    recorded solo VP with Hypno-goggles on four cogs held laff flat for
+    four consecutive rounds and dropped on the fifth, matching.
 
-    * Here. Lure a board and call this function until something lands:
-      Big Magnet skips 3 cog phases, Hypno-goggles 4, Presentation 8 --
-      each exactly its table value, with damage on the very next phase.
-    * In play. A recorded solo VP, Hypno-goggles onto four cogs: laff
-      held at 106/140 across four consecutive gag-menu rounds and fell
-      on the fifth, immediately after the cog's badge switched to the
-      crossed-out magnet that marks a lure ending.
-
-    **The in-game numbers are one higher and must not be copied.** The
-    gag tooltip reads "Rounds: 5" for Hypno-goggles, 4 for Big Magnet
-    and 9 for Presentation -- it counts the round the lure is thrown in,
-    which is not a round the cog would have attacked in anyway. The
-    badge above a lured cog does NOT count that round and so matches the
-    table. A reader watching footage sees the tooltip first and finds
-    four apparent confirmations that this table is one short; it is not.
+    **The in-game tooltip numbers are one higher and must not be
+    copied** ("Rounds: 5" for Hypno-goggles, 4 for Big Magnet, 9 for
+    Presentation) -- the tooltip counts the round the lure is thrown in,
+    which the cog wouldn't have attacked in anyway; the in-battle badge
+    does not count that round and matches this table.
     """
     status = cog.status
     if status.lure_rounds_remaining <= 0:
@@ -704,18 +587,14 @@ def step(state: BattleState, action: Action, gag_cost_lambda=None,
          objective=None) -> Tuple[BattleState, float, bool]:
     """Sample one round, and score it exactly as the search would.
 
-    The reward is delegated to the objective rather than recomputed
-    here, because it was recomputed here and the two drifted. This
-    function and `outcomes.action_outcomes` are meant to price a round
-    identically -- that is what lets a sampled rollout be compared with
-    a searched line -- and keeping that true by writing the same
-    arithmetic in two places lasted exactly as long as nobody changed
-    an objective. Adding a scarcity term to the balanced preset broke
-    it immediately.
+    The reward is delegated to the objective rather than recomputed here:
+    this function and `outcomes.action_outcomes` must price a round
+    identically so a sampled rollout can be compared with a searched
+    line, and writing the same arithmetic twice let them drift the first
+    time an objective changed.
 
     `gag_cost_lambda` is the old positional float and still works: it
-    builds an objective with that gag cost and nothing else, which is
-    what it always meant.
+    builds an objective with that gag cost and nothing else.
     """
     if objective is None:
         if gag_cost_lambda is None:
@@ -786,24 +665,17 @@ def _prev_hits_apply(prev_group: bool, prev_targets, this_group: bool,
 
 
 def _spend_gag(toon, track, level) -> None:
-    """Take one gag out of the pouch, refusing to take one that is not
-    there.
+    """Take one gag out of the pouch, raising if it isn't there.
 
-    A pouch holds explicit zeroes -- `{(SQUIRT, 7): 0}` is an ordinary
-    entry for a toon who has used them all -- so a bare `-= 1` on a
-    missing key raised KeyError while the same spend on a ZERO count
-    went quietly to -1 and dealt full damage. Two spellings of the same
-    mistake, one loud and one silent.
+    A pouch holds explicit zeroes -- `{(SQUIRT, 7): 0}` is ordinary for a
+    toon who has used them all -- so this must check the count rather
+    than decrementing blindly, or a zero count goes quietly to -1 and
+    deals full damage.
 
-    Nothing in normal play reaches this: `legal_actions` only offers a
-    gag with a positive count, and `legal_mask` derives from it. It is
-    hand-built plans that get here, and they are exactly the ones with
-    nobody to check them -- a scorer handed an impossible plan returned
-    a plausible number, which cost an afternoon and a wrong commit.
-
-    KeyError rather than a new exception type because every caller that
-    scores a speculative plan already catches it, and this is the same
-    fact those catches are for: the plan cannot be played.
+    Nothing in normal play reaches the raise: `legal_actions` only offers
+    a gag with a positive count. It's hand-built plans that get here, and
+    KeyError is used (rather than a new type) because every caller that
+    scores a speculative plan already catches it.
     """
     counts = dict(toon.gag_counts)
     if counts.get((track, level), 0) <= 0:
@@ -818,32 +690,20 @@ def _check_pouches(state: BattleState,
     BEFORE any of the round is applied.
 
     Every non-pass, non-fire action in a party round spends exactly one
-    gag -- `_apply_track_group` calls `_spend_gag` once per resolved
-    action on all four of its arms -- so the plan can be priced against
-    the pouches without simulating anything.
+    gag, so the plan can be priced against the pouches without
+    simulating anything.
 
-    WHY IT IS CHECKED HERE AND NOT LEFT TO `_spend_gag`. The spend
-    happens track by track, in ATTACK_ORDER, as each group resolves. An
-    unplayable plan therefore raised from three frames down AFTER the
-    earlier tracks had already mutated `state`, and said only
-    `KeyError: (<Track.TOON_UP: 'toon_up'>, 1)` -- no toon, no hint that
-    the PLAN was the thing at fault. Checking first makes the refusal
-    atomic (a caller that passes a live state gets it back untouched,
-    which `tests/test_pass.py` already asserts for the single-toon case)
-    and makes the message name the seat.
+    Checked here rather than left to `_spend_gag`, which fires mid-round
+    (tracks resolve one at a time in ATTACK_ORDER): by then earlier
+    tracks have already mutated `state`, and the raise names a gag and
+    level but not which seat or plan was at fault. Checking first makes
+    the refusal atomic and able to name the seat.
 
-    THE CALLER IS ALWAYS THE ONE AT FAULT. `legal_actions` only offers a
-    gag with a positive count and `rl.env.legal_mask` is derived from
-    it, so a plan that respects the mask cannot reach this: 20,000 legal
-    coordinated `BattleEnv` steps raise nothing. The crash this was
-    written for came from a driver that ignored the mask and fed action
-    index 1 to every seat -- `Action(TOON_UP, 1, target_index=None)`,
-    a GROUP Toon-Up level 1, which is not a group gag and which
-    `legal_actions` never emits for anybody.
-
-    KeyError, not a new exception type, for the reason `_spend_gag`
-    gives: every caller that scores a speculative plan already catches
-    it, and this is the same fact those catches are for.
+    A plan that respects `legal_actions`/`rl.env.legal_mask` cannot reach
+    this raise -- it exists for hand-built or buggy plans that bypass
+    the mask (e.g. a driver that fed a nonexistent GROUP Toon-Up to every
+    seat). KeyError, not a new exception type, for the reason
+    `_spend_gag` gives.
 
     Counted per toon BY IDENTITY, so two seats holding the same
     `ToonState` object are charged one gag each rather than both reading
@@ -885,32 +745,27 @@ def apply_party_round(state: BattleState,
     cogs in `state`.
 
     THIS IS WHERE A PARTY STOPS BEING FOUR SOLO TOONS. Three effects
-    exist only here, and each is why the round cannot be resolved by
+    exist only here, each a reason the round can't be resolved by
     calling `apply_toon_action` four times:
 
     * Order. Gags resolve by track -- Toon-Up, Trap, Lure, Sound, Throw,
-      Squirt, Drop -- not by who chose first. A Lure that lands before a
+      Squirt, Drop -- not by who chose first. A Lure landing before a
       Throw is what makes the Throw a knockback.
     * Combos. Same-track gags on the same cog in the same round have
-      their damage summed and then get `calc_hp_bonus` on the total.
-      Summed *then* bonused: four Throws at one cog are not four
-      separately-bonused Throws.
+      their damage summed, THEN get `calc_hp_bonus` on the total -- four
+      Throws at one cog are not four separately-bonused Throws.
     * Stun. A landed attack makes later attacks of a *different* track
       more accurate, via `calc_same_round_prev_hits`.
 
-    Accuracy is rolled per attack at the moment it resolves, because the
-    stun bonus depends on what has already landed. Passing `hits` fixes
-    the rolls instead, which is what an enumerating caller wants.
+    Accuracy is rolled per attack at the moment it resolves, since the
+    stun bonus depends on what already landed. Passing `hits` fixes the
+    rolls instead, for an enumerating caller.
 
     `record`, if given, is appended with one `(track, key, accuracy)` per
     ROLL GROUP -- the shared die, not the gag -- carrying the accuracy
-    this round actually resolved it against, stun bonus and Lure bonus
-    included. A caller that fixes `hits` and wants to know what that
-    branch was worth needs the accuracy the simulator used, and deriving
-    it a second time outside this function would be a second
-    implementation of the same rule, free to disagree with this one
-    while both looked right. `(track, key)` is unique per round: tracks
-    resolve in ATTACK_ORDER, so one track is prepared exactly once.
+    actually resolved (stun and Lure bonus included), so a caller that
+    fixes `hits` can know what that branch was worth without a second,
+    possibly-drifting implementation of the same rule.
     """
     healed = [0 for _ in state.toons]
 
@@ -919,45 +774,34 @@ def apply_party_round(state: BattleState,
     # per-track spends further down.
     _check_pouches(state, actions)
 
-    # PINK SLIPS RESOLVE FIRST, before any gag. A fired cog is removed
-    # from the battle by cannon, so it is gone before the round's gags
-    # land -- which means a teammate who threw at the same cog has wasted
-    # the gag. That ordering is [ASSUMED]: no source states where in a
-    # round the cannon fires, and the alternative (slips last) would let
-    # a party damage a cog and then remove it for free.
+    # PINK SLIPS RESOLVE FIRST, before any gag: a fired cog is removed by
+    # cannon, so it's gone before the round's gags land, wasting a
+    # teammate's gag thrown at the same cog. [ASSUMED] ordering -- no
+    # source states when in a round the cannon fires, but the
+    # alternative (slips last) would let a party damage a cog and then
+    # remove it for free.
     #
-    # It also has to happen outside the sort below, which keys on
-    # ATTACK_ORDER.index(track) -- a slip has no track and that raised
-    # "None is not in list" the moment fires reached a party round.
+    # Also has to happen outside the sort below, which keys on
+    # ATTACK_ORDER.index(track) -- a slip has no track.
     for i, action in enumerate(actions):
         if action is not None and action.fire:
             apply_toon_action(state, action, hit=True, actor=i)
 
-    # SOS TOONS RESOLVE HERE TOO, and for the same two reasons. They
-    # have no track, so the sort below would raise "None is not in
-    # list" on them exactly as it did on slips; and they cannot miss,
-    # so nothing about them belongs in the roll-group machinery.
+    # SOS TOONS RESOLVE HERE TOO, for the same two reasons: no track
+    # (same sort problem), and can't miss (no roll-group machinery
+    # needed).
     #
-    # BEFORE THE GAGS IS [ASSUMED]. No source states where in a round
-    # an SOS lands, and it only matters in a party -- solo there is one
-    # action. Chosen to match slips rather than invented separately,
-    # and it is the ordering that makes the useful plays legible: a
-    # teammate's Lure SOS puts the field to sleep before another toon's
-    # Throw arrives to collect the knockback.
+    # BEFORE THE GAGS IS [ASSUMED] -- no source states when an SOS lands
+    # in a round. Chosen to match slips, and it's the ordering that
+    # makes the useful plays legible: a teammate's Lure SOS puts the
+    # field to sleep before another toon's Throw collects the knockback.
     for i, action in enumerate(actions):
         if action is not None and getattr(action, "sos", None):
-            # THE RETURN VALUE IS THE POINT for a heal card. This
-            # discarded it, so Flippy restored the laff on the state and
-            # reported healing NOTHING -- and `_score_leaf` reads the
-            # report, not the state. The whole `QUICK_W["heal"]` term
-            # was therefore blind to every SOS heal.
-            #
-            # It also hid the laff-relative weighting that `_restored`
-            # already implements: that caps a heal at the toon's
-            # headroom, so 180 laff into a full toon is worth 17 and the
-            # same card into a dying one is worth 125. With the report
-            # stuck at zero, Flippy scored the SAME at 120 laff as at
-            # 12 -- measured, 558.4 both.
+            # The return value is the point for a heal card: `_score_leaf`
+            # reads the REPORT, not the state, so a discarded return
+            # would make `QUICK_W["heal"]` blind to every SOS heal, and
+            # hide the laff-relative weighting `_restored` applies (180
+            # laff into a full toon is worth 17, into a dying one 125).
             gained, _damage = apply_toon_action(state, action,
                                                 hit=True, actor=i)
             healed[i] += gained
@@ -981,34 +825,26 @@ def apply_party_round(state: BattleState,
 
         # Everything of one track resolves together, so a combo forms
         # from gags that were chosen independently.
-        # Index cogs by identity. `list.index` compares by value and
-        # CogState is a dataclass, so two untouched cogs of the same type
-        # and level are equal -- which made a Throw aimed at cog 1 report
-        # itself as hitting cog 0, and then combo with the gag that
-        # really did. Found by a test asserting two cogs do not combo.
+        #
+        # Index cogs by identity, not `list.index` -- CogState is a
+        # dataclass, so two untouched cogs of the same type and level
+        # compare equal, which would misattribute a Throw at cog 1 to
+        # cog 0.
         where = {id(c): i for i, c in enumerate(state.cogs)}
         # ONE ROLL PER TRACK PER TARGET, NOT PER GAG. Gags of the same
         # track aimed at the same cog share a single accuracy roll, so
         # they all land or all miss together; a group gag rolls once for
-        # the whole battle. Rolling each gag separately let a party
-        # hedge -- four Throws at one cog would almost surely land
-        # *something* -- which is not the game and badly overvalues
-        # stacking a track on one target.
+        # the whole battle. Rolling each gag separately would let a
+        # party hedge (four Throws almost surely landing *something*),
+        # badly overvaluing stacking a track on one target.
         #
-        # THE BEST GAG SHARING A ROLL SETS THE ACCURACY. For every track
-        # but Lure and Toon-Up this is moot, because propAcc is uniform
-        # within a track -- a Cupcake and a Birthday Cake are both 75, so
-        # it makes no difference which is read. Lure is where it bites:
-        # its accuracies run 60/55/70/65/80/75/90 by level, and a
-        # stronger Lure on a cog carries a weaker one thrown at the same
-        # cog rather than being dragged down by it.
-        #
-        # [UNVERIFIED] for Lure -- play knowledge, not the wiki, which
-        # documents the per-gag accuracies and says nothing about two
-        # Lures on one cog. Applied to every track because taking the
-        # maximum over equal numbers changes nothing, so the uniform
-        # tracks are unaffected either way. Toon-Up (70 up to level 6,
-        # 95 at 7) follows the same rule by analogy and nothing more.
+        # THE BEST GAG SHARING A ROLL SETS THE ACCURACY. Moot for every
+        # track but Lure and Toon-Up, where propAcc is uniform within a
+        # track. Lure's accuracies run 60/55/70/65/80/75/90 by level, so
+        # a stronger Lure on a cog carries a weaker one thrown at the
+        # same cog. [UNVERIFIED] for Lure -- play knowledge, not the
+        # wiki, applied to every track since taking the max over equal
+        # numbers changes nothing for the uniform ones.
         prepared = []
         for toon_index in same_track:
             action = actions[toon_index]
@@ -1083,19 +919,12 @@ def _apply_track_group(state: BattleState, track: Track, resolved,
     """Apply one track's worth of simultaneous gags, combos included."""
     if track == Track.TOON_UP:
         for toon_index, action, _t, _g, hit in resolved:
-            # Spend it. This returned without spending, which made
-            # healing free -- and a free action is one a search will
-            # take for no reason. A joint search filled three of four
-            # slots with Feathers thrown at toons already on full laff,
-            # purely because they cost nothing.
             toon = state.toons[toon_index]
             _spend_gag(toon, action.track, action.level)
 
             # [CONFIRMED] TTR wiki (Toon-Up): "Toons cannot use Toon-Up
             # gags to restore their own laff"; they "restore each
-            # other's laff". This credited the heal to the THROWER,
-            # which is the rule backwards -- and it is why a party at
-            # full laff kept being advised to heal itself.
+            # other's laff" -- the heal credits everyone but the thrower.
             amount = mechanics.calc_toon_heal(action.level, hit)
             others = [i for i, other in enumerate(state.toons)
                       if i != toon_index and other.laff > 0]
@@ -1104,26 +933,15 @@ def _apply_track_group(state: BattleState, track: Track, resolved,
 
             if data.gag(Track.TOON_UP, action.level).group:
                 # [CONFIRMED] TTR wiki: "Group Toon-Up gags provide laff
-                # evenly between Toons."
-                #
-                # EVENLY BETWEEN THE RECIPIENTS, not the party. The wiki
-                # never says among whom, which stood as a [TODO] here;
-                # [CONFIRMED] by the owner from play: it is split across
-                # the toons being healed, and the thrower is not one of
-                # them. So one gag over a four-toon party is three
-                # shares, not four -- nothing is lost to the thrower.
-                #
-                # A two-toon party therefore hands its single recipient
-                # the full value: a level 7 is 210 to the other toon.
-                # That is not a special case, it is one recipient.
+                # evenly between Toons." [OWNER] from play: evenly among
+                # the toons being HEALED, not the whole party -- the
+                # thrower isn't a recipient, so one gag over a four-toon
+                # party is three shares, not four.
                 share = amount // len(others)
                 for index in others:
                     healed[index] += share
             else:
-                # `target_index` names a TOON for this track. It used to
-                # be read as a cog index, which meant a heal aimed at
-                # teammate 1 indexed cogs[1] and raised IndexError once
-                # there were more toons than cogs.
+                # `target_index` names a TOON for this track, not a cog.
                 target = action.target_index
                 if target is None or target not in others:
                     target = others[0]
@@ -1134,15 +952,9 @@ def _apply_track_group(state: BattleState, track: Track, resolved,
         # TWO TRAPS ON ONE COG CANCEL. [CONFIRMED] by the owner: thrown in
         # the same round at the same cog, neither is placed and BOTH gags
         # are still spent. The Railroad is the exception -- it nils the
-        # other trap and places anyway.
-        #
-        # This cannot be delegated to `apply_toon_action` one toon at a
-        # time, which is what it used to do: each call sees only its own
-        # trap, so the second silently overwrote the first and a cog that
-        # should have ended the round bare ended it armed. It is also the
-        # only reason a fourth toon can answer a badly-placed trap at all
-        # -- throwing a second trap at the same cog is how you stop the
-        # first from springing.
+        # other trap and places anyway. (This is also how a fourth toon
+        # can answer a badly-placed trap: throw a second one at the
+        # same cog to stop the first from springing.)
         claims: Dict[int, List[Tuple[int, object]]] = {}
         for toon_index, action, targets, _g, hit in resolved:
             _spend_gag(state.toons[toon_index], action.track, action.level)
@@ -1175,22 +987,13 @@ def _apply_track_group(state: BattleState, track: Track, resolved,
         return
 
     if track == Track.LURE:
-        # SIMULTANEOUS, which is not the same as sequential. Two Lures in
-        # one round are ONE effect on each cog, and this used to call
-        # `apply_toon_action` per toon: the first Lure sprang the trap
-        # and left the cog awake, and the second then saw an untrapped
-        # cog and lured it. [CONFIRMED] by the owner that this is wrong
-        # -- the Lures fire together, the trap springs once, and the cog
-        # stays awake.
-        #
-        # It mattered: a teammate trapping a cog about to be lured
-        # throws the lure away, and sequential resolution let a second
-        # Lure quietly undo that. It also made a group Lure look like an
-        # answer to a badly-placed Trap, which it is not.
-        #
-        # What a second Lure DOES buy is accuracy -- see
-        # `mechanics.multi_lure_bonus`, already applied to the shared
-        # roll above.
+        # SIMULTANEOUS, not sequential. [CONFIRMED] by the owner: two
+        # Lures in one round are ONE effect on each cog -- if the cog was
+        # trapped, the trap springs once and the cog stays awake; a
+        # second Lure cannot then re-lure it, so a group Lure is not an
+        # answer to a badly-placed Trap. What a second Lure DOES buy is
+        # accuracy -- see `mechanics.multi_lure_bonus`, already applied
+        # to the shared roll above.
         claims: Dict[int, Tuple[int, object]] = {}
         for toon_index, action, targets, _g, hit in resolved:
             _spend_gag(state.toons[toon_index], action.track, action.level)
@@ -1235,13 +1038,9 @@ def _apply_track_group(state: BattleState, track: Track, resolved,
                 continue
             if track == Track.DROP and cog.status.lured:
                 continue          # Drop always misses a lured cog
-            # Via `calc_toon_damage`, NOT `damage_at(1.0, ...)`. Going
-            # straight to the table hardcoded a fully-trained toon and
-            # bypassed `mechanics.DAMAGE_TRAINED_FRACTION`, so a search
-            # run against a pessimistic damage assumption silently kept
-            # dealing maxed damage here -- and the mismatch between what
-            # the knob said and what the round dealt looked exactly like
-            # the round inventing damage out of nowhere.
+            # Via `calc_toon_damage`, NOT `damage_at(1.0, ...)` directly
+            # -- the latter hardcodes a fully-trained toon and bypasses
+            # `mechanics.DAMAGE_TRAINED_FRACTION`.
             damage = mechanics.calc_toon_damage(
                 track, action.level, organic=toon.is_organic(track))
             per_target.setdefault(cog_index, []).append((toon_index, damage))
