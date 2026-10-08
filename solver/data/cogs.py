@@ -34,17 +34,12 @@ def cog_max_hp(level: int) -> int:
         levels 1-11:  f(x) = (x + 1)(x + 2)
         levels 12+:   f(x) = (x + 1)(x + 2) + 14
 
-    The old single-formula version was right for levels 1-11 and wrong for
-    every level from 12 up: it returned 182 at level 12 where TTR gives 196.
-    That is not a wiki inconsistency, it is a balance change --
-
-        TTR 3.0.0 (2021-12-03) "Decreased Level 12 Cog health very slightly.
-        Level 13+ Cogs use a different formula to determine their health."
-
-    Before 3.0.0 a level-12 cog got a flat 10% boost to 200; since 3.0.0 the
-    +14 term applies from level 12 upward and 200 became 196. The wiki's own
-    worked example at level 16 -- (17)(18) + 14 = 320 -- matches its table,
-    as do all 20 published rows (asserted in tests/test_data.py).
+    A single formula without the +14 term is right for 1-11 and wrong
+    from 12 up (182 vs TTR's 196) -- not a wiki inconsistency but a
+    balance change, TTR 3.0.0: "Decreased Level 12 Cog health very
+    slightly. Level 13+ Cogs use a different formula." The wiki's own
+    worked example at level 16 -- (17)(18) + 14 = 320 -- matches its
+    table, as do all 20 published rows (asserted in tests/test_data.py).
     """
     x = level + 1
     hp = x * (x + 1)
@@ -68,29 +63,24 @@ def _fill_unmodeled(spec):
 
     Twelve attacks across eight cogs are confirmed by the wiki to exist,
     with damage published, but NO accuracy or frequency anywhere. Nine
-    of the twelve are GROUP attacks hitting the whole team for 3-21, so
-    leaving them unfired understates cog threat in exactly the direction
-    that flatters toons -- and worst for parties, which is the same
-    shape as the group-cog-attacks gap fixed earlier.
+    are GROUP attacks hitting the whole team for 3-21, so leaving them
+    unfired understates cog threat in the direction that flatters toons
+    (worst for parties).
 
     Open Toontown cannot supply them, checked rather than assumed: its
-    tables give Mr Hollywood only PowerTrip 50 / RazzleDazzle 50 and
-    Robber Baron only PowerTrip 50 / TeeOff 50 -- precisely the attacks
-    already modelled. TTR added the rest in a rebalancing pass, so the
-    Toontown Online lineage predates them and structurally has nothing
-    to say. (One partial lead it does give: Big Wig's Throw Book at
-    frequency 50. Not used here, since applying it alone would make one
-    cog's mix sourced and the rest borrowed.)
+    tables give only the attacks already modelled for these cogs, since
+    TTR added the rest in a later rebalancing pass the Toontown Online
+    lineage predates.
 
     So each unmodeled attack borrows the MEAN of its own cog's modelled
-    attacks at that level, and every attack is then rescaled so the
-    level still sums to 100. Borrowing within the cog rather than across
-    cogs matters: accuracy is per-cog, and shared attacks disagree at
-    the same level 149 times against 19 agreements.
+    attacks at that level, then every attack is rescaled so the level
+    still sums to 100. Borrowing within the cog rather than across cogs
+    matters: accuracy is per-cog, and shared attacks disagree at the
+    same level 149 times against 19 agreements.
 
-    This is a preference for being roughly right over being precisely
-    silent, taken knowingly. If the wiki ever publishes the columns,
-    delete this function -- do not tune it.
+    A preference for being roughly right over precisely silent, taken
+    knowingly. If the wiki ever publishes the columns, delete this
+    function -- do not tune it.
     """
     from .types import CogAttack
     import dataclasses
@@ -177,23 +167,20 @@ def _fill_unmodeled(spec):
 # the footnote "The Big Cheese can have three additional levels, up to
 # level 15."
 #
-# DAMAGE IS [CONFIRMED], read from each cog's CogAttackTable on the wiki,
-# which publishes eight levels per attack. Our stored arrays are an exact
-# PREFIX of those eight on every attack of all three cogs, which is how
-# the extension was checked rather than trusted -- see
-# tests/test_boss_levels.py.
+# DAMAGE IS [CONFIRMED], read from each cog's CogAttackTable on the wiki.
+# Our stored arrays are an exact PREFIX of the wiki's eight levels per
+# attack on all three cogs, which is how the extension was checked
+# rather than trusted -- see tests/test_boss_levels.py.
 #
-# ACCURACY AND FREQUENCY ARE [ASSUMED], and this is the only guess here.
-# The wiki publishes neither at ANY level (our existing values come from
-# the QED guide), and Open Toontown cannot help: its SuitBattleGlobals
-# stores five levels per cog exactly as we do, so the Toontown Online
-# lineage has nothing above 12 either. Checked, not assumed.
+# ACCURACY AND FREQUENCY ARE [ASSUMED], the only guess here. The wiki
+# publishes neither at any level above 12, and Open Toontown's
+# SuitBattleGlobals stores only five levels per cog same as we do, so
+# that lineage has nothing above 12 either (checked, not assumed).
 #
-# So the last published value is CARRIED FORWARD FLAT. That is a
-# deliberately dull choice: extrapolating the visible trend (55, 65, 70,
-# 75, 80 -> 85, 90, 95) would be inventing a curve, while a flat carry
-# invents only "no further change". It errs toward weaker cogs, which is
-# the direction that flatters toons, so treat any CEO clear rate as an
+# So the last published value is CARRIED FORWARD FLAT -- a deliberately
+# dull choice: extrapolating the visible trend would invent a curve,
+# while a flat carry invents only "no further change". It errs toward
+# weaker cogs (flattering toons), so treat any CEO clear rate as an
 # upper bound. `solver.search.sensitivity` finds the recommended move
 # unchanged across +-20 accuracy points, so this costs forecast
 # precision rather than advice.
@@ -228,15 +215,14 @@ HIGH_LEVEL_DAMAGE = {
 
 # OFF BY DEFAULT, AND THAT IS THE POINT. A modelled attack whose accuracy
 # column is entirely None is a deliberate [TODO] -- the wiki publishes no
-# accuracy and the guide gave three values for one attack, so the cell was
-# left missing so that `accuracy_at` RAISES rather than substituting.
-# Four tests depend on exactly that behaviour.
+# accuracy for it, so the cell was left missing so `accuracy_at` RAISES
+# rather than substituting. Four tests depend on exactly that behaviour.
 #
-# `the_big_cheese/glower_power` is the case, and it is why the street cog
-# pools exclude the Big Cheese. The CEO's second battle opens with one, so
-# `solver.ceo` turns this on and accepts a borrowed accuracy -- the same
-# [ASSUMED] mechanism `_fill_unmodeled` already applies to twelve other
-# attacks, and stated rather than smuggled.
+# `the_big_cheese/glower_power` is the case, which is why the street cog
+# pools exclude the Big Cheese. The CEO's second battle opens with one,
+# so `solver.ceo` turns this on and accepts a borrowed accuracy -- the
+# same [ASSUMED] mechanism `_fill_unmodeled` already applies elsewhere,
+# stated rather than smuggled.
 #
 # Anything measured with this on inherits an approximation. Leave it off
 # unless you are modelling a fight that cannot be built without it.
