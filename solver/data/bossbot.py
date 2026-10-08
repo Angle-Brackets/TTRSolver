@@ -34,20 +34,11 @@ Online*, and per the changelog below TTR has since changed both columns.
 
 THE 4.0.0 HOLE
 --------------
-TTR 4.0.0 ("Under New Management", 2024) rebalanced cog attacks wholesale.
-From the wiki's Release notes (2024), section "Cog Attacks":
-
-  "All Cog Attacks across all Cog departments have been rebalanced to make
-   them all on an equal footing of overall strength"
-  "Tweaked numerous accuracy values of the over-leveled Sellbots that were
-   mildly over-tuned, and established values for the over-leveled Cogs in
-   the other Cog departments."
-  "Tweaked numerous frequency values across all Cogs that have their attack
-   pool updated."
-  "Introducing 12 new Cog Attacks that help provide variety and accommodate
-   for some missing damage that some Cog departments have been lacking."
-
-Earlier, TTR 3.0.0 (2021) rebalanced cog *health* -- see data.cog_max_hp.
+TTR 4.0.0 ("Under New Management", 2024) rebalanced cog attacks wholesale
+per the wiki's Release notes: all cog attacks rebalanced to an equal
+footing of overall strength, numerous accuracy and frequency values
+tweaked, and 12 new attacks introduced. (Earlier, TTR 3.0.0 rebalanced
+cog *health* -- see data.cog_max_hp.)
 
 Two consequences for the tables below:
 
@@ -195,19 +186,15 @@ BOSSBOT = Department(
         department="bossbot",
         levels=(4, 5, 6, 7, 8),
         # Wiki: https://toontownrewritten.wiki/Micromanager
-        # [FREQ STALE] The wiki's roster has SIX attacks; the guide had five.
-        # Close the Loop is one of 4.0.0's new attacks, so per the 4.0.0
-        # note "frequency values across all Cogs that have their attack
-        # pool updated" were tweaked -- the frequencies below are the
-        # pre-4.0.0 five-attack split and no longer describe this cog.
-        # brain_storm accuracy: RESOLVED, and the suspicion was wrong. A flat
-        # 5 looked like a dropped zero -- the other four attacks run
-        # 50/60/70/80/90 and nothing else in Appendix C is under 10 -- so
-        # it was left None. Open Toontown's SuitBattleGlobals.py carries
-        # ('BrainStorm', (4, 6, 9, 12, 15), (5, 5, 5, 5, 5), ...), i.e.
-        # the guide transcribed it faithfully and the value really is
-        # that low. Filled in, and [UNVERIFIED] for TTR exactly like every
-        # other accuracy row rather than held to a stricter standard.
+        # [FREQ STALE] The wiki's roster has SIX attacks; the guide had
+        # five. Close the Loop is one of 4.0.0's new attacks, so the
+        # frequencies below are the pre-4.0.0 five-attack split and no
+        # longer describe this cog.
+        # brain_storm accuracy: RESOLVED. A flat 5 looked like a dropped
+        # zero (the other four run 50/60/70/80/90), but Open Toontown's
+        # SuitBattleGlobals.py carries the same (5,5,5,5,5), confirming
+        # the guide transcribed it faithfully. Filled in, [UNVERIFIED]
+        # like every other accuracy row.
         attacks=(
             CogAttack(
                 "demotion", "Demotion",
@@ -330,15 +317,13 @@ BOSSBOT = Department(
         # Wiki: https://toontownrewritten.wiki/Corporate_Raider
         # [RESOLVED] The guide's appendices disagreed on the 4th attack:
         # A and C said "Rolodex", B said "Power Tie". The wiki settles it
-        # in B's favour -- Corporate Raider's attack is Power Tie
-        # (https://toontownrewritten.wiki/Power_Tie lists this cog; the
-        # Rolodex page does not). The key was renamed rolodex ->
-        # power_tie; the numbers are unchanged, and the wiki's damage row
-        # [10, 12, 14, 16, 18] matches the one the guide had under both
-        # names, so no frequency or accuracy was reassigned.
-        # [FREQ STALE] The wiki's roster has FIVE attacks; the guide had four.
-        # Hostile Takeover is new in 4.0.0, so the split below predates
-        # the pool change.
+        # in B's favour -- the Power Tie page lists this cog, the Rolodex
+        # page doesn't. Renamed rolodex -> power_tie; numbers unchanged
+        # since the wiki's damage row matches what the guide had under
+        # both names.
+        # [FREQ STALE] The wiki's roster has FIVE attacks; the guide had
+        # four. Hostile Takeover is new in 4.0.0, so the split below
+        # predates the pool change.
         attacks=(
             CogAttack(
                 "canned", "Canned",
@@ -378,21 +363,18 @@ BOSSBOT = Department(
         levels=(8, 9, 10, 11, 12),
         # Wiki: https://toontownrewritten.wiki/The_Big_Cheese
         # [RESOLVED] glower_power damage. The guide gave three values per
-        # level ("10, 14, 14") because, per its Appendix C footnote, The
-        # Big Cheese had three unused attacks (CigarSmoke, FloodTheMarket,
-        # SongAndDance) that all rendered as Glower Power while keeping
-        # their own stats. TTR 4.0.0 un-hid them: Flood the Market and
-        # Power Trip are now real, separately-named attacks on this cog,
-        # and Glower Power has a single damage row of its own --
-        # [10, 12, 15, 18, 20], confirmed on both the cog page and
-        # https://toontownrewritten.wiki/Glower_Power. The first of the
-        # guide's three values (10) turns out to have been the Glower
-        # Power one, but that is hindsight, not how the value was chosen.
-        # [TODO] glower_power accuracy stays None: the guide gave three
-        # values for the same reason, and the wiki publishes no accuracy.
-        # [FREQ STALE] The wiki's roster has FOUR attacks; the guide had two.
-        # A 50/50 split over two attacks cannot be right for a four-attack
-        # cog.
+        # level because The Big Cheese had three unused attacks
+        # (CigarSmoke, FloodTheMarket, SongAndDance) that all rendered as
+        # Glower Power while keeping their own stats. TTR 4.0.0 un-hid
+        # them: Flood the Market and Power Trip are now real,
+        # separately-named attacks, and Glower Power has its own damage
+        # row -- [10, 12, 15, 18, 20], confirmed on both the cog page and
+        # the Glower Power page.
+        # [TODO] glower_power accuracy stays None: the wiki publishes no
+        # accuracy for it.
+        # [FREQ STALE] The wiki's roster has FOUR attacks; the guide had
+        # two. A 50/50 split over two attacks cannot be right for a
+        # four-attack cog.
         attacks=(
             CogAttack(
                 "tee_off", "Tee Off",
