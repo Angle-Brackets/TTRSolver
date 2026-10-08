@@ -19,17 +19,6 @@ from __future__ import annotations
 from typing import Dict, Optional
 
 
-def _targets(state, action):
-    """The cogs an action lands on: one, or every live cog for a group."""
-    live = [c for c in state.cogs if not c.status.is_dead]
-    if action is None or getattr(action, "target_index", None) is None:
-        return live
-    try:
-        return [state.cogs[action.target_index]]
-    except (IndexError, TypeError):
-        return live
-
-
 def accuracy_of(state, action, actor: int = 0) -> Optional[int]:
     """The chance this gag lands, as the game computes it.
 

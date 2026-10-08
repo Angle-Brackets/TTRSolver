@@ -26,7 +26,7 @@ from __future__ import annotations
 import os
 import struct
 from pathlib import Path
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, Optional, Tuple
 
 MAGIC = b"pmf\0\n\r"
 
@@ -122,17 +122,6 @@ def extract(subfile: str, phase: str, override: Optional[str] = None,
         cached.write_bytes(blob[start:start + length])
         return cached
     raise AssetError(f"{subfile} not found in {phase}")
-
-
-def find(pattern: str, override: Optional[str] = None) -> List[str]:
-    """Every subfile across every phase whose name contains `pattern`."""
-    root = install_dir(override)
-    hits = []
-    for multifile in sorted(root.glob("phase_*.mf")):
-        for name, _start, length, _flags in entries(multifile):
-            if pattern.lower() in name.lower():
-                hits.append(f"{multifile.name}:{name} ({length:,}B)")
-    return hits
 
 
 # The interface font. Chosen by measurement, not by eye: rendered against
