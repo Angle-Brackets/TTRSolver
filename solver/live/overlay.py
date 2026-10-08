@@ -479,6 +479,14 @@ class Worker(AdviceWorker):
     pixels -- and the player overrides for what pixels cannot say.
     """
 
+    # DECISION LOG (`feedback.FeedbackLog`), off unless a path is given:
+    # each round, what every row advised beside what the player threw,
+    # read off the pouch the menu shows. Source "ttr", so usable by TTR.
+    feedback_to = None
+    _feedback = None
+    _fb_board = None        # the board the latest advice was for
+    _fb_pending = None      # last round's board and advice, awaiting its result
+
     def __init__(self, outbox: "queue.Queue", objective, depth: int,
                  budget: float, ignore_checksum: bool = False):
         # `model` FIRST: the base sets `allow_level_7` and the holdings
@@ -599,6 +607,7 @@ class Worker(AdviceWorker):
                     if model.turn:
                         self.note_spent(self.displayed_action(),
                                         model.unite or None)
+                        self._feedback_round_over()
                     model.turn = turn
                 # Not between a boss fight's rounds: the pouch does not
                 # refill there, so neither do the holdings.
@@ -697,8 +706,63 @@ class Worker(AdviceWorker):
 
         self._start_playout(state, horizon, self.budget, is_current, describe)
 
+    def _feedback_round_over(self) -> None:
+        """The round just played: hold its board and advice for the diff."""
+        if self.feedback_to and self._fb_board is not None:
+            self._fb_pending = {
+                "state": self._fb_board, "rl": self._rl_action,
+                "search": self._search_action, "playout": self._playout_action,
+                "engine": self.model.engine or "",
+                "rejected": tuple(sorted(map(repr, self._rejected))),
+                "objective": getattr(self, "objective_name", "")}
+
+    def _feedback_observe(self, now_state) -> None:
+        """Record last round once a board with a different pouch arrives.
+
+        A board with the SAME pouch is a late answer about last round, not
+        the next one, so it leaves the pending round waiting. Never raises.
+        """
+        pending = self._fb_pending
+        if not pending or now_state is None:
+            return
+        try:
+            from . import feedback as feedback_mod
+            from .. import data
+            from ..state import Action
+
+            before = pending["state"]
+            old = dict(getattr(before.toon, "gag_counts", {}) or {})
+            new = dict(getattr(now_state.toon, "gag_counts", {}) or {})
+            if old == new:
+                return
+            self._fb_pending = None
+            key, why = feedback_mod.spent_gag(old, new)
+            observed = None
+            if key is not None:
+                track, level = key
+                try:
+                    group = bool(data.gag(track, level).group)
+                except Exception:              # noqa: BLE001
+                    group = False
+                observed = Action(track=track, level=level,
+                                  target_index=feedback_mod.infer_target(
+                                      before.cogs, now_state.cogs, group))
+            if self._feedback is None:
+                self._feedback = feedback_mod.FeedbackLog(self.feedback_to, source="ttr")
+            self._feedback.append(feedback_mod.Decision(
+                source="ttr", round_num=getattr(before, "round_num", 0),
+                state=before, rl=pending["rl"], search=pending["search"],
+                playout=pending["playout"], observed=observed, unreadable=why,
+                engine_shown=pending["engine"], rejected=pending["rejected"],
+                objective=pending["objective"]))
+        except Exception:                      # noqa: BLE001 -- never cost the advice
+            self._fb_pending = None
+
     def _on_first_answer(self, action, unite_str, state) -> None:
         from . import advise as advise_mod
+        self._feedback_observe(state)
+        if state is not None:
+            self._fb_board = state
         model = self.model
         if action is not None:
             text = advise_mod._render(action, state)

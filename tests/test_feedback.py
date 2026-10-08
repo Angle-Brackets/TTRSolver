@@ -1060,3 +1060,56 @@ class FightKindIsObservableTest(unittest.TestCase):
 
         self.assertEqual(env_mod.obs_dim_for(3) + len(env_mod.KINDS),
                          env_mod.obs_dim_for(4))
+
+
+class TtrRecorderTest(unittest.TestCase):
+    """The screen panel's decision log: a round is recorded once a board
+    with a different pouch arrives."""
+
+    def _worker(self, path):
+        from solver.live import overlay
+
+        w = overlay.Worker.__new__(overlay.Worker)
+        w.model = overlay.Model()
+        w.feedback_to = path
+        w._feedback = None
+        w._fb_board = w._fb_pending = None
+        w._rl_action = w._search_action = w._playout_action = None
+        w._rejected = set()
+        w.objective_name = "balanced"
+        return w
+
+    def _boards(self):
+        from solver.state import BattleState, CogState, ToonState, Track
+
+        def board(pies):
+            toon = ToonState(100, 100, {Track.THROW: 7}, {(Track.THROW, 5): pies})
+            return BattleState(toons=[toon], cogs=[CogState("flunky", "bossbot", 4, 30, 30)])
+        return board(3), board(2)
+
+    def test_the_thrown_gag_is_recorded_as_ttr(self):
+        import os
+        import pickle
+        import tempfile
+        from solver.state import Action, Track
+
+        path = os.path.join(tempfile.mkdtemp(), "fb.pkl")
+        w = self._worker(path)
+        before, after = self._boards()
+        w._fb_board = before
+        w._rl_action = Action(Track.THROW, 5, 0)
+        w._feedback_round_over()
+        w._feedback_observe(before)          # a late answer about last round
+        self.assertIsNotNone(w._fb_pending)
+        w._feedback_observe(after)
+        with open(path, "rb") as fh:
+            row = pickle.load(fh)
+        self.assertEqual("ttr", row.source)
+        self.assertEqual((Track.THROW, 5), (row.observed.track, row.observed.level))
+        self.assertEqual(Action(Track.THROW, 5, 0), row.rl)
+
+    def test_off_without_a_path(self):
+        w = self._worker(None)
+        w._fb_board = self._boards()[0]
+        w._feedback_round_over()
+        self.assertIsNone(w._fb_pending)

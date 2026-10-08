@@ -151,6 +151,7 @@ class Decision:
     state: Any = None                   # the BattleState, pickled whole
     rl: Any = None                      # the policy's Action
     search: Any = None                  # the search's Action
+    playout: Any = None                 # the playouts' Action (newer rows only)
     observed: Any = None                # what the player actually spent
     unreadable: Optional[str] = None    # why `observed` is None
 

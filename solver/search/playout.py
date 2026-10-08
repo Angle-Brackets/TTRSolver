@@ -816,7 +816,9 @@ def menu_in_child(state: BattleState, reject, allow_level_7: bool,
 # so the menu stays ~10 however many toons there are, and the rollouts
 # play the teammates from `party.DEFAULT_MODEL` -- `SensiblePrior`, a
 # MODEL OF PEOPLE, labelled as a guess in `solver/party.py`. Any number
-# this path produces rests on it.
+# this path produces rests on it. `TEAMMATE_MODEL` swaps it (None is
+# `party.DEFAULT_MODEL`), e.g. for `party.NetTeammate`.
+TEAMMATE_MODEL = None
 
 
 # HOW A BOARD WITH TEAMMATES ON IT IS PLAYED OUT in the panels.
@@ -904,6 +906,7 @@ def rollout_pickup(state: BattleState, plan, horizon, seed: int) -> float:
     start.holdout, start.cogs_remaining = [], 0
     env = env_mod.BattleEnv(rng=rng, sampler=lambda _r: start,
                             coordinated=False, max_rounds=ROUND_CAP)
+    env.teammate_model = TEAMMATE_MODEL
     env.reset()
     env.state.kind = kind
     if horizon is not None:

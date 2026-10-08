@@ -27,6 +27,8 @@ ARMS  (`name` or `name:key=value,key=value`)
   playout       the Playout row: `playout.pick_wide` with shipped settings
   top3          `playout.pick` -- the scorer's top three, played out
   net           the fast network alone, one forward pass a decision (solo)
+  mcts          `mcts.pick` -- open-loop tree search over your decisions
+                (keys iters=<n> c=<puct> k=<menu size>; solo, else playouts)
       keys: stages=8/16/32  pouch=<weight>  player=net|climb  rollouts=<n>
             net=<weights.json>  (the fast network's weights, default shipped)
             kit=owner  (restock every toon with `vp.OWNER_VP_POUCH` first)
@@ -34,6 +36,8 @@ ARMS  (`name` or `name:key=value,key=value`)
             mates=off  (the ENGINE assumes teammates never use their unites;
                         in the fight itself they always do)
             mode=coordinated|pickup  (`playout.GROUP_MODE`)
+            truth=prior|net   (how pickup teammates play in the fight)
+            assume=prior|net  (what the engine's rollouts expect of them)
             style=<preset>  (the panel's preset, e.g. survive, "glass cannon")
 
 Each board is shown to the engine as the live panel would see it: no
@@ -161,6 +165,12 @@ def play(job):
     # only the engine's own rollouts drop them.
     model_mates = opts.get("mates", "on") != "off"
     playout.GROUP_MODE = opts.get("mode", "coordinated")
+    # Pickup teammates: `truth` is how they play in the fight, `assume` is
+    # what the engine's rollouts expect -- separate so a model of people
+    # can be tested against teammates who do not play like it.
+    from solver import party as party_mod
+    teammates = {"prior": None, "net": party_mod.NetTeammate()}
+    playout.TEAMMATE_MODEL = teammates[opts.get("assume", "prior")]
     from solver.search import objective as objective_mod
     playout.set_style(objective_mod.PRESETS[opts.get("style", "balanced")])
     stages = tuple(int(x) for x in opts.get("stages", "8/16/32").split("/"))
@@ -169,6 +179,7 @@ def play(job):
     env = env_mod.BattleEnv(rng=random.Random(seed), sampler=sample,
                             coordinated=coordinated, max_rounds=cap)
     env.boss_players = PLAYERS.get(regime)
+    env.teammate_model = teammates[opts.get("truth", "prior")]
     env.reset()
     if opts.get("kit") == "owner":
         from solver import vp as vp_mod
@@ -196,6 +207,13 @@ def play(job):
             elif name == "top3":
                 res = playout.pick(view, _horizon(env, state), seed=seed * 1000 + rounds,
                                    rollouts=int(opts.get("rollouts", 8)))
+                plan = res.plan if res else None
+            elif name == "mcts":
+                from solver.search import mcts
+                mcts.C_PUCT = float(opts.get("c", 1.5))
+                mcts.MENU_K = int(opts.get("k", 4))
+                res = mcts.pick(view, _horizon(env, state), seed=seed * 1000 + rounds,
+                                iterations=int(opts.get("iters", mcts.ITERATIONS)))
                 plan = res.plan if res else None
             elif name == "net":
                 plan = fastplayer.act(view) if len(view.toons) == 1 else None

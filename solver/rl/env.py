@@ -626,6 +626,9 @@ class BattleEnv:
         # two-player VP, and the two meet different counts. None means
         # this side is everyone (`vp.side_rounds`, `ceo.round_one_for`).
         self.boss_players: Optional[int] = None
+        # How pickup teammates play: a `party.TeammateModel`, or None for
+        # `party.DEFAULT_MODEL`.
+        self.teammate_model = None
         self.state: Optional[BattleState] = None
         self.rounds = 0
         self.actor = 0
@@ -867,7 +870,8 @@ class BattleEnv:
                 joint=list(self.pending), rng=self.rng)
         else:
             nxt, _healed, _done = party_mod.step(
-                before, action, mode=party_mod.Mode.PICKUP, rng=self.rng)
+                before, action, mode=party_mod.Mode.PICKUP,
+                model=self.teammate_model, rng=self.rng)
 
         laff_lost = sum(max(0, b.laff - a.laff)
                         for b, a in zip(before.toons, nxt.toons))

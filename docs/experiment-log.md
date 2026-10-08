@@ -1347,3 +1347,40 @@ Conserve is identical to Balanced in a VP, as it must be: the pouch is
 only valued where a fight continues past the playout (buildings). No
 preset beats Balanced on wins, which is expected -- Balanced is the
 measured setting and the others trade wins for what they ask for.
+
+## Open-loop MCTS over your own decisions: not better than flat playouts
+
+`search/mcts.py`: the tree holds sequences of your plans; each iteration
+draws its own future, descends by PUCT (root menu = `wide_candidates`,
+uniform priors; deeper menus = the fast network's top 4 with its
+probabilities), expands one node and lets the network play on. Same
+budget as `pick_wide` (168 playouts); on a sample VP board it grew 12
+decisions deep and took 2.8 s against 2.3 s. Paired, owner pouch, no
+unites:
+
+                    flat    c=0.7   c=1.5   c=3    c=6
+    duo VP, 100      52      38      49      42     46
+    solo VP, 100     61      51      56      --     --
+
+No setting beats flat; c=0.7 is significantly worse (p 0.04). A tree
+splits the same playouts across many nodes, so the root's estimates get
+noisier, and the deeper nodes add little because the network's prior is
+peaked (82% on one move is common) -- below the root the tree mostly
+re-plays the network's own choice. Open-loop averaging over divergent
+futures also blurs the deeper decisions. Kept as a module and a sweep arm
+(`mcts`), not wired into the panel. Revisit with a value network
+(truncated rollouts buy more iterations) or a much larger budget.
+
+## A network teammate model (`party.NetTeammate`)
+
+Pickup teammates from the fast network, from their own seat, spread over
+its top 4 moves. The sweep separates how teammates play in the fight
+(`truth`) from what the engine assumes (`assume`). 200 party buildings:
+
+                         assume prior   assume net
+    truth = prior             96            93
+    truth = net              101           101
+
+What the engine assumes makes no measurable difference; network
+teammates simply play a little better. `SensiblePrior` stays the default
+(it is also ~45% faster a decision); `NetTeammate` is available.

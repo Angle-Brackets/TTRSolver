@@ -300,6 +300,59 @@ def _as_actor(state: BattleState, toon_index: int) -> BattleState:
     return rotated
 
 
+class NetTeammate(TeammateModel):
+    """A teammate who plays sensibly for THEIR pouch and the board.
+
+    Even a stranger knows their own gags and laff and can see the cogs.
+    This asks the fast network (`search.fastplayer`, a copy of climb) what
+    to throw from the teammate's own seat, and spreads the probability
+    over its top `k` moves, sharpened or flattened by `temperature`.
+
+    STILL A MODEL OF PEOPLE: it assumes a stranger plays roughly as climb
+    would, which nothing can confirm -- the same standing as
+    `SensiblePrior`, with the difference that it reacts to the actual
+    pouch and board instead of a hand-written scoring of them. Falls back
+    to `SensiblePrior` when the network is unavailable.
+    """
+
+    def __init__(self, k: int = 4, temperature: float = 1.0):
+        self.k = k
+        self.temperature = temperature
+        self._fallback = SensiblePrior()
+
+    def distribution(self, state: BattleState, toon_index: int
+                     ) -> List[Tuple[float, Optional[Action]]]:
+        from .search import fastplayer
+
+        if state.toons[toon_index].laff <= 0 or not state.active_cogs():
+            return [(1.0, None)]
+        if not fastplayer.available():
+            return self._fallback.distribution(state, toon_index)
+        ranked = fastplayer.ranked(_seat_view(state, toon_index), self.k)
+        if not ranked:
+            return [(1.0, None)]
+        weights = [p ** (1.0 / self.temperature) for _plan, p in ranked]
+        total = sum(weights)
+        out = []
+        for (plan, _p), w in zip(ranked, weights):
+            action = plan[0] if plan else None
+            if action is not None and action.is_pass:
+                action = None
+            out.append((w / total, action))
+        return out
+
+
+def _seat_view(state: BattleState, toon_index: int) -> BattleState:
+    """That toon alone, the others a count -- the shape the network knows."""
+    view = state.clone()
+    me = view.toons[toon_index]
+    others = sum(1 for i, t in enumerate(view.toons) if i != toon_index and t.laff > 0)
+    view.toons = [me]
+    view.allies_standing = others + max(0, int(getattr(state, "allies_standing", 0)))
+    view.holdout = []
+    return view
+
+
 DEFAULT_MODEL = SensiblePrior()
 
 

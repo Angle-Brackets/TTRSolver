@@ -385,6 +385,9 @@ def main(argv: Optional[list] = None) -> int:
     parser.add_argument("--objective", default="balanced",
                         help="one of " + ", ".join(sorted(objectives.PRESETS)))
     parser.add_argument("--depth", type=int, default=advise_mod.DEFAULT_DEPTH)
+    parser.add_argument("--feedback", default=None, metavar="PATH",
+                        help="append each round's advice and the gag you "
+                             "actually threw to PATH (off by default)")
     parser.add_argument("--budget", type=float,
                         default=advise_mod.DEFAULT_BUDGET)
     parser.add_argument("--ignore-checksum", action="store_true")
@@ -432,6 +435,7 @@ def main(argv: Optional[list] = None) -> int:
     state.model.objective = objective_name
     state.model.budget = args.budget
     worker.objective_name = objective_name
+    worker.feedback_to = args.feedback
     api = Api(worker, state)
 
     width, height, left, top = _geometry()

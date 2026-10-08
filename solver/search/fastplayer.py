@@ -219,6 +219,33 @@ def choose_unite(state: BattleState):
     return _choice_of(state.toons[0], int(np.argmax(logits)))
 
 
+def ranked(state: BattleState, k: int = 4) -> List[Tuple[list, float]]:
+    """The network's top `k` legal one-seat plans with their probabilities
+    (renormalised over the k), each carrying the unite it opens with.
+    The move head reads the board after the unite, as `act` does."""
+    import numpy as np
+    from .. import unites as unites_mod
+    from .playout import with_unite
+
+    if not available():
+        raise RuntimeError("no fast player weights")
+    unite = choose_unite(state)
+    board = state
+    if unite is not None:
+        board = state.clone()
+        unites_mod.apply(board.toons[0], unite)
+    x, mask = features(board)
+    w, b = _MODEL[-1]
+    logits = np.where(np.array(mask), _trunk(x) @ w + b, -np.inf)
+    order = [int(i) for i in np.argsort(-logits)[:k] if np.isfinite(logits[i])]
+    if not order:
+        return []
+    top = np.array([logits[i] for i in order])
+    probs = np.exp(top - top.max())
+    probs /= probs.sum()
+    return [(with_unite([action_of(i)], unite), float(p)) for i, p in zip(order, probs)]
+
+
 def act(state: BattleState) -> List[Optional[Action]]:
     """A one-seat plan: the network's best legal move, carrying the unite
     it opens with (`playout.Plan`). `state` is not changed."""
