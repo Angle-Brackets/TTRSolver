@@ -1,52 +1,42 @@
 """The CEO's two turn-based cog battles.
 
-WHAT THE WIKI CONFIRMS (Chief Executive Officer)
-------------------------------------------------
-Four phases, of which two are turn-based combat and are what this models:
+WHAT THE WIKI CONFIRMS (Chief Executive Officer): four phases, of which
+two are turn-based combat and are what this models.
 
   1. First cog battle -- "waiter-suited Cogs, some of which are Version
      2.0, that range from level 9 to level 14".
-  2. Banquet round -- feeding oil cans, real-time, NOT modelled. Two cans
-     kill an ordinary cog and three kill a Version 2.0.
+  2. Banquet round -- feeding oil cans, real-time, NOT modelled. Two
+     cans kill an ordinary cog, three kill a Version 2.0.
   3. Second cog battle -- "Toons first battle a level 14 Version 2.0 Big
      Cheese and then battle the leftover Cogs if there are any".
   4. Final battle -- golf balls and seltzer, real-time, NOT modelled.
 
-THE BANQUET IS THE COUPLING, and it is why `LEFTOVERS` is a parameter
-rather than a constant: whatever survives phase 2 walks into phase 3. The
-minigame cannot be modelled, but its OUTPUT is just a count, so sweeping
-that count covers the whole range of banquet outcomes from perfect play
-to none at all.
+THE BANQUET IS THE COUPLING, which is why `LEFTOVERS` is a parameter
+rather than a constant: whatever survives phase 2 walks into phase 3.
+The minigame can't be modelled, but its OUTPUT is just a count, so
+sweeping it covers the whole range of banquet outcomes.
 
-WHAT IS ASSUMED, AND WHERE IT CAME FROM
----------------------------------------
+WHAT IS ASSUMED, AND WHERE IT CAME FROM:
+
 `V2_FRACTION` -- the wiki says only "some of which are Version 2.0".
-[ASSUMED] at 0.20 from the owner's observed play.
+[ASSUMED] at 0.20 from the owner's observed play. Open Toontown
+disagrees and is recorded because the disagreement is useful:
+`SuitBuildingGlobals.SuitBuildingInfo` entry 14 is the only entry
+carrying a `REVIVES (1,)` field, applied to every suit generated, making
+the first battle 100% Version 2.0 in Toontown Online. TTR evidently
+rebalanced it; observed play wins, the source is kept for reference.
 
-Open Toontown says otherwise and is recorded here because the
-disagreement is the useful part: `SuitBuildingGlobals.SuitBuildingInfo`
-entry 14 -- the building code the CEO's first battle passes -- is the
-ONLY entry in that table carrying a sixth field, `REVIVES (1,)`, and
-`SuitPlannerInteriorAI` applies that one value to every suit it
-generates. In Toontown Online the first battle is therefore 100% Version
-2.0. TTR evidently rebalanced it. Observed play wins; the source is kept
-so a disagreement has somewhere to start.
+`LEFTOVERS` are ALL Version 2.0. [OPEN TOONTOWN SOURCE], confirmed by
+the owner: `generateDinerSuits` builds every diner with `revives=1`.
 
-`LEFTOVERS` are ALL Version 2.0. [OPEN TOONTOWN SOURCE], confirmed by the
-owner: `generateDinerSuits` builds every diner with `revives=1`, and
-`__genSuitObject` passes that straight to `setSkeleRevives`.
+The second battle's opener is ONE level 14 Big Cheese, per the wiki.
+Open Toontown makes it TWO at level 12; the wiki is the source of truth
+for TTR, and the discrepancy is noted rather than split.
 
-The second battle's opener is ONE level 14 Big Cheese, per the wiki. Open
-Toontown makes it TWO at level 12; the wiki is the source of truth for
-TTR, and the discrepancy is noted rather than split.
-
-THE PARTY
----------
-Four toons splitting two and two, exactly as the VP does, so a
-`ceo_position` is one side of the room. Laff 100-119, gags maxed with
-level 7s available, and five pink slips each -- which is a lot of
-firepower, and deliberately so: the CEO is the fight pink slips are the
-reward for.
+THE PARTY: four toons splitting two and two, exactly as the VP does, so
+a `ceo_position` is one side of the room. Laff 100-119, gags maxed with
+level 7s available, and five pink slips each -- deliberately a lot of
+firepower, since the CEO is the fight pink slips are the reward for.
 """
 from __future__ import annotations
 
