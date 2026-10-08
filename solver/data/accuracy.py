@@ -4,36 +4,26 @@ Rewritten wiki: https://toontownrewritten.wiki/Accuracy
 
     atkAcc = propAcc + trackExp + tgtDef + bonus
 
-SOURCE NOTE -- READ THIS BEFORE EDITING
----------------------------------------
-Every table in this module has now been checked against the TTR wiki's
-Accuracy page and the seven per-track pages (Toon-Up, Trap, Lure, Sound,
-Throw, Squirt, Drop), which carry the same base-accuracy column. It no
-longer relies on the QED1224 strategy guide, which describes *Toontown
-Online* and predates TTR's rebalancing. See docs/data-confidence.md.
-
-The wiki blocks ordinary fetches (403) but serves its MediaWiki API:
+SOURCE NOTE -- READ BEFORE EDITING: every table here is checked against
+the TTR wiki's Accuracy page and the seven per-track pages (Toon-Up,
+Trap, Lure, Sound, Throw, Squirt, Drop), not the QED1224 strategy guide,
+which describes *Toontown Online* and predates TTR's rebalancing. See
+docs/data-confidence.md. The wiki blocks ordinary fetches (403) but
+serves its MediaWiki API:
 
     curl "https://toontownrewritten.wiki/api.php?action=parse\\
           &page=Accuracy&prop=wikitext&format=json"
 
-Audit result, propAcc: the guide and the wiki agree on six of the seven
-tracks. The one guide error was Toon-Up level 7 (High Dive), which the
-guide had at 100% and the wiki puts at 95% -- stated twice on the
-Toon-Up page ("High Dive has a 95% base accuracy ... the only Toon-Up gag
-to have high accuracy") and again in the Accuracy page's own table. The
-flat rows really are flat in TTR: Lure and Toon-Up are the only two tracks
-whose gags differ from each other, which the Accuracy page says outright
-("For all gag tracks besides Toon-Up and Lure, every gag in the same track
-have the same propAcc value").
+Audit result, propAcc: the guide and wiki agree on six of seven tracks.
+The one error was Toon-Up level 7 (High Dive), guide 100% vs wiki 95%.
+Lure and Toon-Up are the only two tracks whose gags differ within the
+track; the rest are flat, per the Accuracy page.
 
-TTR REBALANCING HISTORY captured here (from the Accuracy page's own
-"Update changes" section, plus the per-track pages' changelogs):
-  4.0.0 -- Several changes to the accuracy *logic* of Lure gags, and a
-           cosmetic change to Drop's accuracy description ("low" ->
-           "very low"). The Accuracy page is explicit that "No changes
-           were made to the actual base accuracy values of Drop gags."
-           Same update set PrevHits to 25 per prior hit (see below).
+TTR REBALANCING HISTORY (Accuracy page's "Update changes", plus
+per-track changelogs):
+  4.0.0 -- Several changes to Lure's accuracy *logic*; no change to
+           Drop's actual values despite a wording tweak. Same update set
+           PrevHits to 25 per prior hit (see below).
   4.0.0 -- (Trap page) Trap gags give a 10% accuracy bonus to Lure gags
            used on Cogs with the Trapped status effect.
   4.0.5 -- (Trap page) Trap activation stun bonus 30% -> 50%; the passive
@@ -92,26 +82,17 @@ TRACK_EXP_BY_LEVEL = {1: 0, 2: 10, 3: 20, 4: 30, 5: 40, 6: 50, 7: 60}
 # so a lookup for them raises instead of inventing a number.
 #
 # THE LEVEL 4/5 AMBIGUITY IS RESOLVED. The wiki prints "-12*/-15" at level 4
-# and "-15*/-20" at level 5 with the footnote:
-#
-#   "Rank 1 Cogs used the tgtDef value with the asterisk for the marked
-#    levels."
-#
-# "Rank" here is position on the corporate ladder, which the wiki's
-# Corporate ladder page calls tier: "Typically, a Cog's minimum level is the
-# same as their tier in the ladder and their maximum level is four levels
-# greater. For example, Flunky is the first Cog on the Bossbots' corporate
-# ladder, making them tier 1." Rank/tier 1 is therefore exactly Flunky,
-# Bottom Feeder, Short Change and Cold Caller.
-#
-# So the key is (cog level, cog rank), not cog level alone -- and both
-# branches are reachable, because a level-4 cog may be a rank-1 Flunky or a
+# and "-15*/-20" at level 5, footnoted: "Rank 1 Cogs used the tgtDef value
+# with the asterisk for the marked levels." Rank here is the cog's tier on
+# the corporate ladder (Flunky, Bottom Feeder, Short Change and Cold Caller
+# are rank 1). So the key is (cog level, cog rank), not level alone -- both
+# branches are reachable, since a level-4 cog may be a rank-1 Flunky or a
 # rank-4 Micromanager. Use tgt_def() below when the rank is known.
 #
-# TGT_DEF_BY_LEVEL keeps the rank-1 branch at levels 4 and 5, unchanged from
-# before this audit, so callers that don't know a cog's rank behave exactly
-# as they used to. mechanics.calc_tgt_def is such a caller; a cog's rank is
-# available to it as COG_DEPARTMENTS[dept][cog_type]["levels"][0].
+# TGT_DEF_BY_LEVEL keeps the rank-1 branch at levels 4 and 5 so callers
+# that don't know a cog's rank behave as before. mechanics.calc_tgt_def
+# is such a caller; a cog's rank is available to it as
+# COG_DEPARTMENTS[dept][cog_type]["levels"][0].
 TGT_DEF_RANK_1 = {
     1: -2, 2: -5, 3: -10, 4: -12, 5: -15, 6: -25,
     7: -30, 8: -35, 9: -40, 10: -45, 11: -50, 12: -55,
@@ -164,26 +145,18 @@ ACCURACY_CAP = 95
 # [CONFIRMED] -- TTR wiki, Accuracy, 4.3.3 update: "the battle accuracy
 # system's 95% hard cap is now a soft cap ... all accuracy bonuses such as
 # stun bonus, Lure bonus, Trap placements, and Toons Hit can slightly push
-# the final accuracy value higher than 95%". Restated in the page's own
-# special rules: "For all other gags, atkAcc can slightly be pushed higher
-# than 95% due to stun bonus, Lure bonus, Trap placements, and Toons Hit."
+# the final accuracy value higher than 95%".
 #
-# NOT MODELLED. mechanics.calc_toon_accuracy still applies min(acc, 95)
-# unconditionally, which is the pre-4.3.3 behaviour. The wiki does not
-# quantify "slightly" -- it never states the post-4.3.3 ceiling, nor
-# whether propAcc/trackExp/tgtDef alone can still exceed 95 -- so the exact
-# replacement rule is not derivable from this source and no number for it
-# is recorded here.
-# NAMED "_IN_GAME" BECAUSE NOTHING READS IT. It records a fact about
-# TTR, and `mechanics.calc_toon_accuracy` applies `min(acc,
-# ACCURACY_CAP)` unconditionally regardless of its value -- so the
-# solver models a HARD cap while this says the game's is soft.
+# NOT MODELLED: mechanics.calc_toon_accuracy still applies min(acc, 95)
+# unconditionally (pre-4.3.3 behaviour). The wiki never quantifies
+# "slightly" or states a replacement ceiling, so no number for it is
+# recorded here.
 #
-# It was `ACCURACY_CAP_IS_SOFT`, which read as a claim about our own
-# behaviour: a reader who trusted it would believe the soft cap was
-# modelled, and a test asserting it is True looked like it checked
-# that. The suffix keeps the fact and drops the implication.
-# `tests/test_accuracy_data.py` now also pins the modelled behaviour.
+# NAMED "_IN_GAME" BECAUSE NOTHING READS IT: it records a fact about TTR
+# while the solver models a HARD cap regardless of this value. (Named
+# `ACCURACY_CAP_IS_SOFT` originally, which read as a claim about our own
+# behaviour rather than the game's.) `tests/test_accuracy_data.py` pins
+# the modelled (hard-cap) behaviour.
 ACCURACY_CAP_IS_SOFT_IN_GAME = True
 
 # [CONFIRMED] -- Accuracy#Special rules: "Except when using a Drop gag on

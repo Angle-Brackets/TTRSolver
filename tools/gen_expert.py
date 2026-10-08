@@ -4,34 +4,27 @@
 
 Expert iteration, the AlphaZero shape. PPO could not discover Trap+Lure
 because the payoff is a round away and conditional on a roll -- with 246
-actions to choose between, the sequence is essentially never explored,
-so the returns never contain it and the critic correctly grades those
-positions as worthless *to that policy*. Curriculum moved the start
-state closer and did not fix it; the lay rate stayed at 9.3%.
+actions to choose between the sequence is essentially never explored, so
+the critic correctly grades those positions as worthless *to that
+policy*. Curriculum moved the start state closer and didn't fix it; the
+lay rate stayed at 9.3%. The search doesn't have to discover the
+sequence -- it simulates the trap trigger directly -- so let it play,
+write down what it did, and train on that.
 
-The search does not have to discover the sequence. It simulates the
-trap trigger directly. So let it play, write down what it did, and train
-on that.
+NOT THE DISTILLATION THAT ALREADY FAILED: `docs/ml-design.md` P0 trained
+a ranker on shortlist orderings at independently sampled positions and
+lost end to end. Two differences here matter. **Trajectories, not
+positions** -- states are recorded along search-guided play, so training
+sees the distribution a policy following the search would actually
+visit, rather than states no good player reaches. **Moves, not
+rankings** -- the label is the move the search chose and the value it
+assigned, what a policy actually needs, rather than noisy sampled
+rankings whose top entries sit within noise of each other.
 
-WHY THIS IS NOT THE DISTILLATION THAT ALREADY FAILED
-----------------------------------------------------
-`docs/ml-design.md` P0 trained a ranker on shortlist orderings at
-independently sampled positions, and it lost end to end. Two differences
-here, and both matter:
-
-* **Trajectories, not positions.** States are recorded along
-  search-guided play, so the training distribution is the one a policy
-  following the search would actually visit. Sampling positions
-  independently trains on states no good player reaches.
-* **Moves, not rankings.** The label is the move the search chose and
-  the value it assigned, which is what a policy needs. The ranking
-  labels were noisy sampled estimates whose top entries sat within noise
-  of each other.
-
-The teacher is `party_search.evaluate`. It is not optimal -- depth 1
-with a rollout continuation -- so this is imitation of something
-imperfect, and the ceiling is the search's own play. That is the honest
-limit and it is still far above a policy that never lays a trap.
+The teacher is `party_search.evaluate`: depth 1 with a rollout
+continuation, not optimal, so this is imitation of something imperfect
+and the ceiling is the search's own play. Still far above a policy that
+never lays a trap.
 """
 from __future__ import annotations
 
@@ -68,11 +61,10 @@ def one_episode(args):
      facility) = args
     rng = random.Random(seed)
     def sampler(r, _h=hard, _s=strange, _c=combo, _f=facility):
-        # Facility positions matter more here than anywhere else. The
-        # search's advantage over PPO is almost entirely in multi-floor
-        # play -- heals and traps whose payoff arrives a round later --
-        # so trajectories drawn only from street battles would not
-        # contain the behaviour worth cloning.
+        # Facility positions matter most here: the search's edge over
+        # PPO is almost entirely multi-floor play (heals and traps whose
+        # payoff arrives a round later), which street-only trajectories
+        # would not contain.
         if r.random() < _f:
             return env_mod.facility_position(r)
         state = env_mod.mixed_position(r, _h, _s, _c)
@@ -83,15 +75,13 @@ def one_episode(args):
     obs, mask = e.reset()
     rows, done, guard = [], False, 0
 
-    # 60 decisions is about 15 rounds with a four-toon party, which cuts
-    # a multi-floor building off around its second floor -- exactly the
-    # play worth recording. The environment truncates per floor already,
-    # so this only has to be generous.
+    # 400 decisions is generous -- the env already truncates per floor,
+    # so this just needs to not cut a multi-floor building short.
     while not done and guard < 400:
         guard += 1
-        # The expert. In coordinated mode the search returns a joint
-        # plan and we take the entry for whoever is deciding, so the
-        # policy learns each seat's move in the plan the search chose.
+        # The expert. Coordinated mode returns a joint plan; take the
+        # entry for whoever is deciding so the policy learns each seat's
+        # move in the plan the search chose.
         mode = Mode.COORDINATED if coordinated else Mode.PICKUP
         value, plan = ps.evaluate(e.state, depth=1, mode=mode,
                                   samples=samples, max_plans=max_plans,

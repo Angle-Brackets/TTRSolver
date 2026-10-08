@@ -26,7 +26,7 @@ from __future__ import annotations
 import os
 import struct
 from pathlib import Path
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, Optional, Tuple
 
 MAGIC = b"pmf\0\n\r"
 
@@ -124,17 +124,6 @@ def extract(subfile: str, phase: str, override: Optional[str] = None,
     raise AssetError(f"{subfile} not found in {phase}")
 
 
-def find(pattern: str, override: Optional[str] = None) -> List[str]:
-    """Every subfile across every phase whose name contains `pattern`."""
-    root = install_dir(override)
-    hits = []
-    for multifile in sorted(root.glob("phase_*.mf")):
-        for name, _start, length, _flags in entries(multifile):
-            if pattern.lower() in name.lower():
-                hits.append(f"{multifile.name}:{name} ({length:,}B)")
-    return hits
-
-
 # The interface font. Chosen by measurement, not by eye: rendered against
 # a real "Level 6" plate it scores IoU 0.81, where Humanist -- the
 # obvious guess, and the one this project first assumed -- manages 0.33.
@@ -150,14 +139,9 @@ INTERFACE_FONT = ("ImpressBT.ttf", "phase_3.mf")
 #     bottom-right necktie           -> Bossbot   (the boss's tie)
 #
 # [CONFIRMED] against the wiki's own department icons, which carry the
-# department in their filenames. This was wrong for its first several
-# commits: the tiles were assigned by guessing what each picture
-# depicted, which swapped Bossbot and Sellbot and made every reading of
-# those two confidently incorrect -- a real Bossbot plate was reported as
-# Sellbot with a 0.43 margin, well above the confidence floor. Guessing
-# the mapping and then checking only that four emblems existed is what
-# let it stand. If this order is ever touched, re-verify it against a
-# named source rather than by eye.
+# department in their filenames. Guessing this by eye once swapped
+# Bossbot and Sellbot, reporting a real Bossbot plate as Sellbot at a
+# confident 0.43 margin -- re-verify against a named source, not by eye.
 COG_ICONS = ("ttr_t_ara_gen_cogIcons.jpg", "phase_3.5.mf")
 
 # The battle status-effect atlas, 2x2 like the emblems. The lure magnet
@@ -178,17 +162,16 @@ BUTTON_ICONS = ("ttr_t_gui_sbk_buttonIcons.jpg", "phase_3.5.mf")
 BUTTON_ALPHA = ("ttr_t_gui_sbk_buttonIcons_a.rgb", "phase_3.5.mf")
 MAP_CELL = (1, 0)
 
-# The organic indicator: the green leaf badge the game draws on a gag
-# grown on a gag tree. Unlike the two above it is NOT on a regular grid
-# -- the battle GUI palettes are packed sheets, not atlases with equal
-# cells -- so it is an explicit box rather than a (column, row).
+# The organic indicator: the green leaf badge on a gag grown on a gag
+# tree. Unlike the atlases above, the battle GUI palettes are packed
+# sheets without equal cells, so this is an explicit box, not a
+# (column, row).
 #
-# Found by name rather than by eye: `ttr_m_gui_bat_gagGUI.bam` carries a
-# node called `ttr_t_gui_bat_toonGUI_indicator_organic_card`, and the
-# only green blob on the palettes that model references is this one.
-# The box is the alpha bounding box of that blob with two pixels of
-# margin, so a future repack shows up as a misaligned crop rather than
-# as a silently wrong icon.
+# Found by name, not by eye: `ttr_m_gui_bat_gagGUI.bam` names a node
+# `..._indicator_organic_card`, and the only green blob the model
+# references on these palettes is this one. The box is that blob's
+# alpha bounding box plus two pixels of margin, so a repack shows up as
+# a misaligned crop rather than a silently wrong icon.
 ORGANIC_PALETTE = ("battle_gui_remastered_palette_4amla_20.jpg",
                    "phase_3.5.mf")
 ORGANIC_ALPHA = ("battle_gui_remastered_palette_4amla_20_a.rgb",
@@ -379,18 +362,14 @@ def track_icons(override: Optional[str] = None) -> Dict[str, Path]:
 
 
 # The floating markers TTR draws above a cog for each status effect.
+# `ttr_m_gui_bat_statusEffect.bam` names all of them (`..._icon_trapped`,
+# `..._icon_lured`, `..._icon_v2_0`, thirty more), packed two-by-two into
+# the `battle_gui_status_effects_remastered_palette_*` sheets -- but not
+# which cell, so these two were identified by eye against a live frame:
+# trap is a banana peel, lure the red magnet.
 #
-# `ttr_m_gui_bat_statusEffect.bam` names every one of them --
-# `..._icon_trapped`, `..._icon_lured`, `..._icon_v2_0` and thirty more
-# -- and the art is packed two-by-two into the
-# `battle_gui_status_effects_remastered_palette_*` sheets. The bam does
-# not say WHICH cell, so the two that matter here were identified by
-# eye against a live frame: the trap marker is a banana peel, the lure
-# marker the red magnet.
-#
-# Only these two are mapped. The rest exist and are findable the same
-# way, but an entry here is a claim that the cell is right, and a wrong
-# cell would have the reader hunting for the wrong picture.
+# Only these two are mapped -- an entry here is a claim the cell is
+# right, and a wrong one sends the reader hunting for the wrong picture.
 STATUS_ICON_CELLS = {
     "trapped": ("8", (1, 0)),
     "lured": ("5", (1, 0)),

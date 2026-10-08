@@ -257,19 +257,16 @@ SELLBOT = Department(
         department="sellbot",
         levels=(7, 8, 9, 10, 11),
         # Wiki: https://toontownrewritten.wiki/The_Mingler
-        # [CONFLICT -- UNRESOLVED] power_trip. The wiki's Mingler roster has
-        # only FOUR attacks (Buzz Word, Paradigm Shift, Schmooze, Tee
-        # Off), and https://toontownrewritten.wiki/Power_Trip lists its
-        # users as The Big Cheese, Big Wig, Robber Baron and Mr.
-        # Hollywood -- not The Mingler. So TTR appears to have taken
-        # Power Trip off this cog. It is kept in the table anyway,
-        # because removing it means redistributing its 15% frequency
-        # across the other four attacks and that redistribution is a
-        # number no source gives. Leaving 15% of this cog's turns
-        # unallocated would instead dump the shortfall onto whichever
-        # attack happens to be first in the dict, which is worse.
-        # Its damage and accuracy rows below are guide-era TTO values
-        # with no wiki counterpart -- treat this attack as fiction.
+        # [CONFLICT -- UNRESOLVED] power_trip. The wiki's Mingler roster
+        # has only FOUR attacks (Buzz Word, Paradigm Shift, Schmooze, Tee
+        # Off); the Power Trip page lists its users as The Big Cheese,
+        # Big Wig, Robber Baron and Mr. Hollywood, not The Mingler -- TTR
+        # appears to have removed it from this cog. Kept in the table
+        # anyway: removing it means redistributing its 15% frequency, a
+        # number no source gives, and leaving it unallocated would dump
+        # the shortfall onto whichever attack is first in the dict,
+        # which is worse. Its damage/accuracy rows are guide-era TTO
+        # values with no wiki counterpart -- treat this attack as fiction.
         attacks=(
             CogAttack(
                 "buzz_word", "Buzz Word",

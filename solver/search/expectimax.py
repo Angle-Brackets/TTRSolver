@@ -1,124 +1,60 @@
 """
 Depth-limited expectimax over the battle tree, with *-minimax pruning.
 
-The tree alternates two node kinds:
+Two node kinds alternate: MAX (the toon picks the highest-EV action) and
+CHANCE (the gag's hit roll and the cogs' counter-attack, with exact
+probabilities from `outcomes.action_outcomes`). Rewards follow
+`simulator.step`'s convention (-laff lost, -lambda*gag level, +/-100
+terminal), so this optimizes the same objective a sampling agent would.
 
-  MAX node    -- the toon picks the action with the highest expected value
-  CHANCE node -- the gag's hit roll and the cogs' counter-attack, whose
-                 outcomes come from outcomes.action_outcomes() with exact
-                 probabilities
+PRUNING
+-------
+Plain alpha-beta doesn't apply: a chance node is an average, not a max,
+so one bad child can't refute it. The analogue is Ballard's *-minimax:
+star1 bounds a chance node by the unseen probability mass and cuts when
+that interval leaves (alpha, beta); star2 first probes one action per
+child (a MAX node is worth at least any single action, a real lower
+bound) to tighten the same test. Both exact -- `tests/test_search.py`
+checks identical value AND move against exhaustive search.
 
-Value of a state = max over legal actions of
-    sum_outcomes P(outcome) * (reward + discount * value(next_state))
+Pruning only pays once the bounds are tight. The floor used to assume
+the toon could lose its whole laff bar; made depth-aware instead (at
+most `d` rounds of damage at depth `d` -- see `_value_bounds`), pruning
+went from a loss to a 2.7-3.9x win that grows with cog count. Caching
+the damage distribution, a gag-count-free merge key, and `__slots__`
+added a further 7-25x on top (measured at depth 2, 2-4 cogs). Set
+`prune=False` to measure against either change.
 
-Rewards match simulator.step's convention (-laff lost, -lambda*gag level,
-+/-100 terminal), so this optimizes the same objective a sampling agent
-would.
+That floor must track whichever evaluator is installed
+(`heuristic_floor`): the hand-written form bottoms out from laff alone,
+but the fitted evaluator can score a full-laff toon at -98 (pouch can't
+finish the fight), so it needs its own minimum. Pruning still wins with
+it, just less tightly (2.0x cut vs. 1.3-1.4x for the hand-written form).
 
-PRUNING -- MEASURED, AND ON BY DEFAULT
---------------------------------------
-Plain alpha-beta doesn't apply to expectimax: a chance node is an average,
-not a max, so one bad child can't refute it the way it can under a minimax.
-The analogue is Ballard's *-minimax, and both levels are here: star1 bounds
-a chance node by the unseen probability mass and cuts when that interval
-leaves the (alpha, beta) window, and star2 first probes one action per
-child (a MAX node is worth at least any single action, so a probe is a real
-lower bound) to tighten the same test.
+TERMINATION AND EXACTNESS
+--------------------------
+Every action but the pass spends a gag; the pass is legal only while a
+cog is lured, and lured rounds tick down. So (gags remaining, lure
+rounds remaining) strictly decreases down any line, the state graph is
+a DAG, and `solve` terminates.
 
-Both are exact -- `tests/test_search.py` checks they return the same value
-AND the same move as an exhaustive search.
+Exactness also needs `BattleState.can_still_damage` as a terminal
+condition: without it, running out of gags with cogs still alive left
+no legal actions and fell through to `heuristic_value` at a non-cutoff
+node. Re-solving 300 cached positions under two heuristics changed 83%
+of the answers before this was fixed. `heuristic_value` is now reached
+only at a depth cutoff, so two `solve` results are comparable regardless
+of which heuristic is installed.
 
-For a long time both were also *slower*, and this module said so. The
-cause was never the probe: it was the interval the probe aimed into. The
-floor assumed the toon could lose every point of laff it had, so a
-branch's value ranged over ~300 points and the unseen-mass term stayed
-too wide to ever cut.
+What an out-of-gags position is worth (loss, fleeing, or playing out the
+cog phase to defeat) is a modelling decision left open rather than
+guessed at.
 
-The fix was to make the floor depth-aware. At a limit of `d` plies only
-`d` rounds happen, so the toon can lose at most `d` rounds of damage --
-and if that cannot reach zero laff, the battle cannot be lost inside the
-horizon and the -100 does not belong in the bound at all. See
-`_value_bounds`. On a two-cog position at depth 2 the range fell from
-~296 to 151, and pruning went from a loss to a win:
-
-    position   exhaustive   pruned    gain
-    1 cog           0.16s    0.06s    2.7x
-    2 cogs          2.30s    0.81s    2.8x
-    3 cogs         27.71s    7.87s    3.5x
-    4 cogs         93.62s   23.71s    3.9x
-
-Values match exactly in every case, and the gain grows with the position,
-which is the right shape -- the crowded fights are the ones that needed
-it. Set `prune=False` to measure against.
-
-That floor is only as tight as the evaluator lets it be, and the fitted
-evaluator has since given some of it back. The depth-aware argument
-bounds how much *laff* the horizon can take, which bounds the leaf only
-if the leaf's value is a function of laff -- true of the hand-written
-form, false of a model carrying `cannot_finish`, which scores a full-laff
-toon at -98 when its pouch cannot finish the fight. The floor now asks
-the evaluator for its own minimum (`heuristic_floor`) instead of assuming
-one. Pruning survives it: on the same two- and three-cog positions the
-fitted evaluator cuts leaves 2.0x against exhaustive, where the
-hand-written form manages 1.3-1.4x, because a sharper evaluator orders
-moves better and that is the other half of what makes a cut fire.
-
-Four further passes since, none of them algorithmic: caching the damage
-distribution, a merge key that omits the gag counts (identical across one
-action's outcomes), sharing `track_exp` and copy-on-write `gag_counts` in
-`BattleState.clone`, and `__slots__` on the battle dataclasses. Depth 2
-end to end:
-
-    position   before    after
-    2 cogs     11.80s    0.47s     25x
-    3 cogs     50.90s    4.57s     11x
-    4 cogs     95.20s   13.64s      7x
-
-WHY A FULL SOLVE TERMINATES, AND IS EXACT
------------------------------------------
-Almost every action consumes a gag, so gags-remaining decreases down any
-line, and depth is bounded by the size of the pouch rather than by
-anything we choose. The exception is the pass, which spends nothing; it
-is legal only while a cog is lured, and a lured cog's rounds tick down
-during the cog phase. So the measure is lexicographic -- (gags
-remaining, total lure rounds remaining) -- it strictly decreases either
-way, the state graph is a DAG, and `solve` always terminates.
-
-It also reaches the end of the battle, but only since the out-of-gags
-rule landed. **This module claimed exactness for a long time while a
-hole in it made the claim false**, and the shape of that hole is worth
-keeping in mind whenever a new terminal condition is considered. A line
-used to end when the pouch emptied, which is not the same as the fight
-being over: with cogs still standing there were no legal actions,
-`best_action` was None, and the value returned was `heuristic_value`
--- an estimate, at the exact place the search was supposed to stop
-estimating.
-
-It mattered far more than it sounds. Re-solving 300 cached training
-positions under two different heuristics changed **83% of the answers**,
-by 3.7 points on average, and `tools/fit_heuristic.py` was labelling
-with the fitted heuristic installed -- fitting a model partly to its own
-output. It surfaced as a *negative* regret figure, which is
-arithmetically impossible when both sides are exact.
-
-The rule that closed it is in `BattleState.can_still_damage`: nothing
-restocks a pouch mid-fight, so having no way left to damage a cog ends
-the battle as surely as running out of laff. `heuristic_value` is now
-reached only at a depth cutoff, never at a dead end, and two `solve`
-results are comparable regardless of which heuristic was installed.
-
-Fixing it means deciding what an out-of-gags position is worth. The toon
-cannot win from there -- no gags, no damage -- so the honest options are
-a loss, or the value of fleeing, or continuing the cog phase until the
-toon is defeated. That is a modelling decision, not a bug fix, and it is
-deliberately left open rather than guessed at.
-
-A NOTE ON THE HEURISTIC
------------------------
-Unlike everything in solver/data/, the heuristic is not a game constant to
-be transcribed -- it's a design choice, and its weights are tunable rather
-than [CONFIRMED]. It only applies at a depth cutoff; a full solve never
-consults it.
+HEURISTIC
+---------
+Unlike `solver/data/`, the heuristic is a tunable design choice, not a
+[CONFIRMED] game constant. It only applies at a depth cutoff; a full
+solve never consults it.
 """
 import time
 from typing import Dict, List, Optional, Tuple

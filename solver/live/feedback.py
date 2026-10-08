@@ -1,44 +1,32 @@
 """What the player actually did, recorded beside what was advised.
 
-The panel proposes a move every round and the player either takes it or
-does something else. That disagreement is a LABEL, and until now it was
-discarded the moment the board changed -- along with every press of
-Reconsider, which is a player going to the trouble of saying "not this".
+The panel proposes a move every round; when the player does something
+else, that disagreement is a LABEL worth keeping rather than discarding.
 
-Nothing here asks the player a question. The move is OBSERVED:
-`setInventory` is parsed every poll already, and throwing a gag
-decrements exactly one cell by exactly one. Pink slips, SOS cards and
-unites each have their own dict and move the same way. Asking would be
-slower, interrupt a fight, and be wrong whenever the player misremembers
--- and this module's whole value is that its labels are not guesses.
+The move is OBSERVED, never asked: `setInventory` is parsed every poll
+already, and a thrown gag decrements exactly one cell by one (pink
+slips, SOS cards and unites move the same way in their own dicts).
+Asking would be slower, interrupt a fight, and be wrong whenever the
+player misremembers -- this module's value is that its labels aren't
+guesses.
 
-WHAT IT REFUSES TO SAY. A round it cannot read is recorded as
-unreadable, with the reason, rather than as a best guess. Two cells down
-is two gags or a misread and there is no way to tell which; a cell going
-UP is a restock, which makes every other delta that round meaningless.
-A wrong label is worse than a missing one here for the usual reason --
-a gap is visible and a wrong row is not -- and worse than usual on top
-of that, because these rows are training data and nothing downstream
-will ever re-derive them.
+A round it cannot read cleanly is recorded as unreadable, with the
+reason, rather than guessed at: a wrong label is worse than a missing
+one, and worse again here because these rows are training data nothing
+downstream will re-derive. For the same reason, a target is left `None`
+whenever the inventory diff doesn't pin it to a single cog.
 
-TARGETS ARE OFTEN UNKNOWABLE and are left `None` when they are. The
-inventory says WHICH gag, never at WHICH cog. A single-target gag on a
-board where exactly one cog lost hp pins it; anything else does not, and
-a guess there would silently teach the wrong target.
-
-**`source` IS A QUARANTINE FLAG, not a label.** Realms is Toontown
+**`source` is a QUARANTINE FLAG, not a label.** Realms is Toontown
 Online lineage and nothing read from it may train a TTR policy, fit a
-weight or score one -- see the repo's CLAUDE.md. It is stamped on every
-record at write time rather than inferred from a filename later,
-because a file that gets renamed or merged is exactly how that rule
-gets broken once and irreversibly.
+weight, or score one -- see the repo's CLAUDE.md. Stamped at write time
+rather than inferred later, since a renamed or merged file is exactly
+how that rule breaks irreversibly.
 
 These are ONE PLAYER'S PREFERENCES, not measurement. Solo positions
-already have exact labels from `expectimax.solve`, which is stronger
-evidence than an opinion; the rows worth having are the ones the exact
-search cannot reach -- party boards, multi-round Lure, and the
-facility horizon. `Decision.beats` reports the comparison and says
-nothing about who is right.
+already have exact labels from `expectimax.solve`; the rows worth
+having are where the exact search can't reach -- party boards,
+multi-round Lure, the facility horizon. `Decision.beats` reports the
+comparison, not who is right.
 """
 from __future__ import annotations
 
@@ -166,17 +154,11 @@ class Decision:
     observed: Any = None                # what the player actually spent
     unreadable: Optional[str] = None    # why `observed` is None
 
-    # WHAT THE PLAYER SAYS THEY WOULD USE, which is NOT the same fact as
-    # what they were seen to do and must never collapse into it.
-    #
-    # Following the advice to see how it plays out records agreement;
-    # a misclick records a preference nobody holds; a round that could
-    # not be read records nothing at all. All three are cases where the
-    # observation is a poor label and the player's own word is a good
-    # one. It also reaches moves that were never thrown -- the whole
-    # space of "I'd have done X instead" that watching can never see.
-    #
-    # Stated, so it outranks the inferred one in `beats`.
+    # WHAT THE PLAYER SAYS THEY WOULD USE -- NOT the same fact as what
+    # they were seen to do, and must never collapse into it. Covers cases
+    # where the observed move is a poor label (a misclick, an unreadable
+    # round) and reaches moves that were never thrown at all. Stated, so
+    # it outranks the inferred one in `beats`.
     preferred: Any = None
 
     engine_shown: str = ""

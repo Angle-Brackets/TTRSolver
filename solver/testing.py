@@ -1,17 +1,12 @@
 """
 Shared battle fixtures for tests and demos.
 
-This module used to also hold synthetic stand-ins for [TODO] data --
-`synthetic_bossbot_accuracy()` and `synthetic_lure_durations()`. Both are
-gone: their real values have been transcribed (cog accuracy from the
-strategy guide's appendices, lure durations from the TTR wiki), and the
-project rule is that a stand-in is deleted the moment its data lands.
-Leaving one in place stops being scaffolding and starts overwriting good
-data with bad.
-
-If you need a new one, follow the same shape they had: a context manager
-that restores the real value on exit, an obviously-fake value that nobody
-could mistake for transcribed data, and a test asserting it doesn't leak.
+A synthetic stand-in for [TODO] data is deleted the moment the real data
+lands -- leaving one in place stops being scaffolding and starts
+overwriting good data with bad. If you need one, use this shape: a
+context manager that restores the real value on exit, an obviously-fake
+value nobody could mistake for transcribed data, and a test asserting it
+doesn't leak.
 """
 from . import data
 from .state import ToonState, CogState, BattleState, Track

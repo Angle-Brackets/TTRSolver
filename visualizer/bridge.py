@@ -74,21 +74,14 @@ def toon_to_dict(toon: ToonState) -> Dict[str, Any]:
                  for (t, lvl), n in sorted(toon.gag_counts.items(),
                                             key=lambda kv: (kv[0][0].value,
                                                             kv[0][1]))],
-        # Organic tracks were missing here, and a field that is dropped
-        # in serialisation is invisible rather than broken: a state that
-        # went through this round-trip came back safe, and the only
-        # symptom was a benchmark whose organic and non-organic columns
-        # were identical to the last decimal. Organic changes damage by
-        # 10-15%, so anything measured across this boundary was measuring
-        # the wrong loadout.
+        # Organic was missing here once -- a dropped field is invisible
+        # rather than broken, so a round trip came back "safe" while a
+        # benchmark's organic and non-organic columns matched exactly
+        # (organic changes damage 10-15%).
         "organic": sorted(t.value for t in toon.organic_tracks),
-        # THE CONSUMABLES, and they were all missing. Same failure the
-        # organic note above describes and for the same reason: a
-        # dropped field is invisible rather than broken. A position
-        # built here with five slips and a book of cards came back
-        # carrying none, so every line this tool showed was the line for
-        # a toon holding nothing -- and a solo VP is 0% without them
-        # against 45% with.
+        # Consumables were missing too, same failure: a position built
+        # with five slips and a deck of cards came back holding none,
+        # and a solo VP is 0% without them against 45% with.
         "fires": int(getattr(toon, "fires", 0)),
         "unites_held": int(getattr(toon, "unites_held", 0)),
         # Keyed by the card's own name, exactly as `simulator` looks
@@ -273,13 +266,10 @@ def _parse_toon_cfg(tcfg: Dict[str, Any]) -> ToonState:
     def _card(name):
         """A real card name, or None. NEVER the caller's string.
 
-        This used to fall back to the string it was given, so anything
-        the page invented became a card the toon "held" -- and the
-        failure surfaced four layers down as
-        `KeyError: 'cogs_miss'` inside `simulator.apply_toon_action`,
-        with nothing pointing at the scenario that caused it.
-        `cogs_miss` is a card KIND, not a card; the page was offering
-        kinds as if they were cards.
+        Used to fall back to the string it was given, so anything the
+        page invented became a card the toon "held", surfacing four
+        layers down as `KeyError: 'cogs_miss'` -- a card KIND, not a
+        card -- with nothing pointing at the real cause.
         """
         wanted = str(name).lower()
         return next((real for real in sos.BY_NAME
@@ -366,16 +356,12 @@ def build_state(cfg: Dict[str, Any]) -> BattleState:
         if not cog_key:
             # A department with no named cog: pick one that can actually
             # APPEAR at this level. `COG_DEPARTMENTS[dept]` is a
-            # `Department`, not a list -- indexing it with 0 asked it for
-            # a cog keyed "0", and since a Department is always truthy
-            # the "flunky" fallback beside it could never run. So
-            # department-plus-level, the most ordinary way to describe a
-            # cog, raised `KeyError: "Sellbots has no cog '0'"`.
-            #
-            # Level matters beyond not crashing: a cog's damage and
-            # accuracy are indexed by where the level falls in its own
-            # range, so a level 4 Sellbot must not be built as a
-            # Mr. Hollywood. First match, so the choice is repeatable.
+            # `Department`, not a list, so indexing it with 0 used to
+            # raise `KeyError: "Sellbots has no cog '0'"`. Level matters
+            # beyond not crashing too -- damage and accuracy are indexed
+            # by where the level falls in a cog's own range, so a level 4
+            # Sellbot must not become a Mr. Hollywood. First match, so
+            # the choice is repeatable.
             department = data.COG_DEPARTMENTS.get(dept)
             candidates = list(department.cogs) if department else []
             at_level = [c for c in candidates if lvl in c.levels]

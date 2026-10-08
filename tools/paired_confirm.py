@@ -2,19 +2,16 @@
 
     python paired_confirm.py old.json new.json
 
-WHY PAIRED, AND WHY FRESH SEEDS
--------------------------------
-`eval_retrain.py` reports each policy's rate on three sets and eyeballs
-the gap. At 120 games a set the standard error on a single rate is about
-4 points, so it cannot resolve the 1-2 point differences it prints -- and
-picking the best of six seeds on those same sets is selection, not
-measurement. This project has been burned by exactly that before.
-
-Two fixes here. Both policies play the SAME positions, so the comparison
-is paired and only the games they DISAGREE on carry information -- a
-McNemar test on the discordant pairs, which is far more sensitive than
-comparing two independent-looking rates. And the seeds are ones no
-policy was chosen on, so this confirms rather than re-selects.
+WHY PAIRED, AND WHY FRESH SEEDS: `eval_retrain.py` reports each policy's
+rate on three sets and eyeballs the gap, but at 120 games a set the
+standard error on one rate is about 4 points, which can't resolve the
+1-2 point differences it prints -- and picking the best of six seeds on
+those same sets is selection, not measurement (this project has been
+burned by exactly that before). Fix: both policies play the SAME
+positions, so only the games they DISAGREE on carry information (a
+McNemar test on the discordant pairs, far more sensitive than comparing
+two independent-looking rates), and the seeds are ones no policy was
+chosen on, so this confirms rather than re-selects.
 """
 import random
 import shutil

@@ -1,49 +1,37 @@
 """
 Exact outcome distributions: the enumerating twin of `simulator.step`.
 
-`simulator.step` *samples* a single next state -- it calls `random` for the
-toon's hit roll, each cog's attack choice, each cog's hit roll, and each
-damage range. That's the right interface for MCTS or RL rollouts, but
-expectimax and value iteration need the outcome *distribution*, not one
-draw from it. This module provides it:
+`simulator.step` *samples* a single next state -- it calls `random` for
+the toon's hit roll, each cog's attack choice, each cog's hit roll, and
+each damage range. That's right for MCTS/RL rollouts, but expectimax and
+value iteration need the outcome *distribution*, not one draw. This
+module provides it:
 
     action_outcomes(state, action) -> [(prob, next_state, reward), ...]
 
 with probabilities summing to 1 and `reward` matching `simulator.step`'s
-reward convention exactly, so a solver built on this optimizes the same
+convention exactly, so a solver built on this optimizes the same
 objective a sampling agent would.
 
-WHY THE COG PHASE DOESN'T EXPLODE
----------------------------------
-Naively the cog phase is a joint over (which attack x hit/miss) for every
-cog: (5 attacks x 2)^4 = 10,000 branches for four cogs. Two things collapse
-it. First, the toon is solo, so a cog's attack choice has no effect on the
-next state beyond the damage number -- the joint convolves down to a
-distribution over *total damage*, usually a few dozen values. Second, the
-only per-cog state the phase can change is whether a lured cog woke up, so
-the surviving joint is (woken-subset x total-damage), not the full product.
-The visualizer's `convolve()` does the same collapse in JS.
+WHY THE COG PHASE DOESN'T EXPLODE: naively it's a joint over (which
+attack x hit/miss) per cog -- (5 attacks x 2)^4 = 10,000 branches for
+four cogs. Two things collapse it. The toon is solo, so a cog's attack
+choice doesn't affect the next state beyond the damage number, so the
+joint convolves down to a distribution over *total damage*. And the only
+per-cog state the phase can change is whether a lured cog woke up, so
+the surviving joint is (woken-subset x total-damage). The visualizer's
+`convolve()` does the same collapse in JS.
 
-WHERE THE RULES LIVE
---------------------
-The toon phase is NOT reimplemented here -- this module calls
-`simulator.apply_toon_action(state, action, hit)`, the same deterministic
-function `simulator.step` uses once it has rolled the dice. So gag damage,
-kbBonus, trap detonation, and lure application can only be written once.
-
-The cog phase genuinely does exist twice: `simulator._resolve_cog_phase`
-samples it, `cog_phase_outcomes` below enumerates it. Enumerating is not a
-transformation of sampling, so some duplication is unavoidable there. Two
-things keep the pair honest -- both go through `mechanics` and the same
-data tables for every constant, and `tests/test_outcomes.py`'s
-`test_matches_sampled_step` compares the enumerated distribution against
-8,000 samples of `step`, state by state and reward by reward. If they ever
-drift, that test fails.
-
-(Having `step` sample *from* this enumeration would remove even that seam,
-but it would make every sampled step pay for building the full
-distribution -- far too slow for the rollout-heavy uses `step` exists for --
-and it would make simulator and outcomes mutually recursive.)
+WHERE THE RULES LIVE: the toon phase is NOT reimplemented here -- this
+module calls `simulator.apply_toon_action(state, action, hit)`, the same
+deterministic function `simulator.step` uses once dice are rolled, so
+gag damage, kbBonus, trap detonation and lure application are written
+once. The cog phase genuinely exists twice (`simulator._resolve_cog_phase`
+samples it, `cog_phase_outcomes` below enumerates it); both go through
+`mechanics` and the same data tables, and
+`tests/test_outcomes.py::test_matches_sampled_step` compares the
+enumerated distribution against 8,000 samples of `step` to keep them
+honest.
 """
 from functools import lru_cache
 from typing import Dict, List, Optional, Tuple
@@ -75,14 +63,13 @@ def cog_attack_outcomes(cog: CogState) -> List[Tuple[float, str, int, bool]]:
     """(probability, attack_name, damage, hit) for one cog's turn, assuming
     it attacks at all.
 
-    Depends only on the cog's type and level -- not on its HP, lure or trap
-    state -- so the real work is cached. A depth-2 search called this 11,111
-    times for three distinct cogs.
+    Depends only on the cog's type and level -- not HP, lure or trap
+    state -- so the real work is cached: a depth-2 search called this
+    11,111 times for three distinct cogs.
 
-    This is the unmerged form of `cog_damage_distribution` below. The search
-    only ever needs the damage number, but anything showing a human what
-    happened needs to say *which* attack -- "Pencil Pusher used Fountain Pen
-    for 6" rather than "6 damage from somewhere".
+    The unmerged form of `cog_damage_distribution` below: the search only
+    needs the damage number, but a UI needs to say *which* attack --
+    "Pencil Pusher used Fountain Pen for 6" rather than "6 damage".
     """
     return _attack_outcomes(cog.department, cog.cog_type, cog.level)
 
@@ -166,23 +153,18 @@ def _damage_distribution_shared(department: str, cog_type: str, level: int,
     """The same distribution, for damage landing on YOU with teammates
     beside you.
 
-    SPLIT BY ATTACK, NOT APPLIED TO THE COG. This is why it cannot work
-    off `_damage_distribution`, which has already merged the attacks
-    into damage numbers and thrown the names away:
+    SPLIT BY ATTACK, NOT APPLIED TO THE COG -- can't work off
+    `_damage_distribution`, which has already merged attacks into
+    damage numbers and thrown the names away. A single-target attack
+    picks one toon, so it reaches you with probability `share` and
+    otherwise deals nothing; a GROUP attack hits everyone, so it's never
+    diluted. Scaling a cog's whole distribution by `share` would
+    quietly halve the Lawbot group attacks that make a crowded battle
+    dangerous. `data.GROUP_ATTACKS` is [CONFIRMED] from the wiki's own
+    two categories; being group is a property of the ATTACK, not the
+    cog throwing it.
 
-      * a single-target attack picks one toon, so it reaches you with
-        probability `share` and otherwise deals you nothing;
-      * a GROUP attack hits every toon standing, so it reaches you
-        whatever the party size -- it is not diluted at all.
-
-    Scaling a cog's whole distribution by `share` would quietly halve
-    the Lawbot group attacks that are exactly what makes a crowded
-    battle dangerous. `data.GROUP_ATTACKS` is [CONFIRMED] from the
-    wiki's own two categories, and being group is a property of the
-    ATTACK rather than of the cog throwing it.
-
-    A miss is already damage 0 and is left alone: it does not matter
-    whose face it missed.
+    A miss is already damage 0 and is left alone.
     """
     share = 1.0 / (1.0 + max(0, allies))
     dist: Dict[int, float] = {}
@@ -448,28 +430,25 @@ def cog_phase_summary(state: BattleState) -> List[Dict]:
 def collapse_damage(branches: List[Outcome]) -> List[Outcome]:
     """Merge outcomes that differ only in how much damage the cogs dealt.
 
-    A ply costs `actions x chance outcomes`, and the second factor is
-    what keeps the search shallow -- 20 to 70 branches per action, almost
-    all of them the same events with a different damage total. Unlike the
-    toon's own hit roll, that number carries no decision: the cogs cannot
-    kill each other, cannot change what gags remain, and cannot alter
-    anything the next choice depends on except the laff figure.
+    A ply costs `actions x chance outcomes`, and the chance-outcome count
+    is what keeps the search shallow -- 20 to 70 branches per action,
+    almost all the same events with a different damage total. Unlike the
+    toon's own hit roll, that number carries no decision: the cogs can't
+    kill each other, change what gags remain, or alter anything the next
+    choice depends on except laff. So branches sharing a cog configuration
+    collapse into one carrying the probability-weighted mean laff,
+    dropping outcomes per action to a handful -- worth one to two extra
+    plies.
 
-    So branches sharing a cog configuration collapse into one carrying
-    the probability-weighted mean laff. Outcomes per action drop to a
-    handful, which is worth one to two extra plies.
+    NOT merged: branches whose cog states differ at all (a gag hit vs
+    missed, a lure held vs ended) stay separate, since those change the
+    next decision; and a branch where the toon died stays separate from
+    one where it survived, since averaging a death into a survival would
+    make the search cheerfully walk into a loss.
 
-    Two things are deliberately NOT merged. Branches whose cog states
-    differ at all -- a gag hit rather than missed, a lure held rather
-    than ended -- stay separate, because those do change the next
-    decision. And a branch where the toon died stays separate from one
-    where it survived: averaging a death into a survival is exactly the
-    distortion that would make the search cheerfully walk into a loss.
-
-    This is an approximation, and the only one here that touches the
-    shape of the tree rather than its tails. It makes the search
-    risk-*neutral* about damage, which is wrong near zero laff and wrong
-    for an objective that weights laff heavily, so callers should keep
+    This is an approximation -- the only one here that touches the shape
+    of the tree rather than its tails. It makes the search risk-*neutral*
+    about damage, which is wrong near zero laff, so callers should keep
     the plies nearest the root exact -- see `evaluate`'s `exact_plies`.
     """
     if len(branches) <= 1:
@@ -498,10 +477,9 @@ def collapse_damage(branches: List[Outcome]) -> List[Outcome]:
 
 
 def _cog_key(state: BattleState) -> Tuple:
-    # `suited` is in here for the same reason `free_passes` is in
-    # `state_key`: it changes what happens next. A suited cog at 90 hp
-    # has 180 left to give and a bare one has 90, so collapsing them
-    # would let the memo answer a Version 2.0 with a Skelecog's value.
+    # `suited` is included because it changes what happens next: a
+    # suited cog at 90 hp has 180 left to give and a bare one has 90, so
+    # collapsing them would answer a Version 2.0 with a Skelecog's value.
     return tuple((c.cog_type, c.department, c.level, c.hp, c.status.is_dead,
                   c.status.lured, c.status.lure_rounds_remaining,
                   c.status.lure_acc_before_bonus, c.status.lure_level,
@@ -518,21 +496,20 @@ def merge_key(state: BattleState) -> Tuple:
     the counts are identical across all of them and hashing a
     twenty-element frozenset of them per outcome is pure overhead --
     measured at 11.8 million generator steps on a three-cog depth-2
-    search, for a value that never varies within the comparison.
+    search.
 
-    Only for merging siblings. Use `state_key` for the transposition
+    Only for merging siblings; use `state_key` for the transposition
     table, where states genuinely differ in what has been spent.
 
     The fast path is one toon, because that is every searched position
     today; the tuple form is only built for a party. Laff is per toon
-    and ORDER MATTERS -- toons are not interchangeable, they hold
-    different pouches, so this must not be a frozenset.
+    and ORDER MATTERS -- toons hold different pouches, so this must not
+    be a frozenset.
     """
-    # `allies_standing` is deliberately NOT here, on this function's own
-    # stated rule. Every sibling being merged is an outcome of ONE action
-    # in ONE state, so the party size is identical across all of them --
-    # the same argument that keeps the gag counts out. It IS in
-    # `state_key`, where states genuinely differ.
+    # `allies_standing` is deliberately NOT here: every sibling being
+    # merged is an outcome of ONE action in ONE state, so party size is
+    # identical across them -- same argument as the gag counts above. It
+    # IS in `state_key`, where states genuinely differ.
     if len(state.toons) == 1:
         return (state.toon.laff, _cog_key(state))
     return (tuple(t.laff for t in state.toons), _cog_key(state))
@@ -541,39 +518,28 @@ def merge_key(state: BattleState) -> Tuple:
 def state_key(state: BattleState) -> Tuple:
     """Hashable identity for a state, for outcome merging and solver
     memoization. `round_num` is deliberately excluded -- nothing in the
-    mechanics depends on it, so including it would split otherwise
-    identical nodes.
+    mechanics depends on it, so including it would split identical nodes
+    for nothing. The test for every field here is whether it can change
+    what happens next, not whether it changes.
 
     This is the hottest function in the search -- a depth-2 two-cog
-    position calls it 319,000 times -- so two things here are deliberate
-    and worth keeping.
+    position calls it 319,000 times -- so two micro-optimisations are
+    worth keeping: the track is used as-is rather than as `t.value`
+    (`Track` subclasses `str`, so the member is already a good key, and
+    `.value` accounted for a fifth of the whole search); and the gag
+    counts are a frozenset rather than a sorted tuple, since this key is
+    only ever hashed, never ordered or serialised.
 
-    The track is used as-is rather than as `t.value`. `Track` subclasses
-    `str`, so the member is already a perfectly good key, and `.value`
-    goes through `DynamicClassAttribute` on every access: it accounted
-    for 6.2 million enum lookups and a fifth of the whole search.
+    A party keys on every toon, in order -- keying on `toons[0]` alone
+    would let the memo answer one party's question with another's value
+    (same lead toon, different teammates).
 
-    The gag counts are a frozenset rather than a sorted tuple. Both are
-    canonical, but a frozenset needs no comparisons, and this key is only
-    ever hashed -- never ordered, never serialised.
-
-    A party keys on every toon, in order. Keying on `toons[0]` alone
-    would let the memo answer a question about one party with the value
-    of a different one -- same lead toon, different teammates -- which
-    is the quietest possible way for a transposition table to be wrong.
-
-    `free_passes` is in the key for that same reason, and was left out
-    when the field was added. It changes `legal_actions`, so two states
-    differing only in it are genuinely different nodes -- and with them
-    collapsed, the memo answered a position holding three passes with
-    the value of one holding none. The symptom was a search that liked
-    passing MORE as its laff dropped, which is backwards, and it was
-    visible only because someone asked why it would not throw.
-
-    Contrast `round_num`, which stays out: nothing in the mechanics
-    reads it, so including it would split identical nodes for nothing.
-    The test is whether a field can change what happens next, not
-    whether it changes.
+    `free_passes`, `allies_standing`, `toons_hit_rounds` and
+    `cogs_miss_rounds` are all in the key because each changes
+    `legal_actions` or the cog phase, so two states differing only in
+    one are genuinely different nodes. Leaving `free_passes` out once
+    collapsed a position holding three passes with one holding none,
+    producing a search that liked passing MORE as its laff dropped.
     """
     if len(state.toons) == 1:
         toon = state.toon
@@ -583,27 +549,14 @@ def state_key(state: BattleState) -> Tuple:
                       for (t, lvl), n in toon.gag_counts.items() if n > 0),
             # Pink slips change `legal_actions` AND `can_still_damage`,
             # so a toon holding two is a different node from one holding
-            # none. Same test as `free_passes`.
+            # none.
             toon.fires,
             _cog_key(state),
             state.free_passes,
             state.cogs_remaining,
             len(state.holdout),
             state.kind,
-            # Teammates change the cog phase -- a single-target attack
-            # has somewhere else to land -- so a position with three
-            # allies is a different node from the same one solo. It is
-            # constant within a single search, so this costs one tuple
-            # slot and never splits a node; it is here because `solve`
-            # takes a caller-supplied memo, and one reused across
-            # party sizes would serve a solo answer to a party question.
-            # `free_passes` is in this key for the same reason, and was
-            # left out when IT was added.
             state.allies_standing,
-            # Timed SOS effects. A Cogs Miss running changes the cog
-            # phase and a Toons Hit changes every accuracy roll, so two
-            # positions identical but for one are not the same node --
-            # the `free_passes` test above, applied.
             state.toons_hit_rounds,
             state.cogs_miss_rounds,
         )

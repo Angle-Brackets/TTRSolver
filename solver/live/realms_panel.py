@@ -3,28 +3,18 @@
     python -m solver.live.realms_panel
     python -m solver.live.realms_panel --objective survive --budget 8
 
-A SECOND PANEL, deliberately. `overlay.Worker` polls a screen capture,
-runs `find_plates`, reads a gag menu and hedges every number it produces
-with a confidence. None of that applies here: `realms_session` is handed
-typed fields by the server. Threading a second world through the TTR
-worker would put "if realms:" through the one module whose entire job is
-being careful about pixels, and the TTR panel would then be able to
-break from an edit made for a game it does not read.
+A SECOND PANEL, deliberately: `overlay.Worker` polls a screen capture,
+finds plates and hedges every number with a confidence, none of which
+applies here, since `realms_session` is handed typed fields by the
+server. Threading that through the TTR worker would put "if realms:"
+through the one module whose entire job is being careful about pixels.
 
-WHAT IT SHARES, AND WHY THAT IS NOT THE SAME THING. `Model`, `CogRow`
-and `model_json` are imported and never modified. They are the VIEW --
-a description of what a panel shows -- and both panels showing the same
-thing is the point rather than a leak. The built React app renders this
-with no changes at all. What is not shared is every line of reading.
-
-WHAT THE PLAYER SEES DIFFERENTLY, all of it because the data is better:
-
-  * cog names are never "?" and the picker is never needed -- identity
-    comes from `setDNAString`, so there is nothing to guess at
-  * health is exact. The TTR panel shows a fraction read off a green
-    bar; this shows 20/20 because the server said 20/20
-  * LURED is read from the battle roster rather than marked by hand
-  * party size is read from `setMembers` rather than asked for
+WHAT IT SHARES: `Model`, `CogRow` and `model_json` are imported and
+never modified. They are the VIEW, and the built React app renders this
+with no changes at all -- what differs is every line of reading. Health
+is exact (not a fraction off a green bar), cog identity comes straight
+from `setDNAString` (so the picker never appears), LURED and party size
+are read from the battle roster rather than marked by hand.
 
 Realms balance must not reach `solver/data/` -- see `docs/realms.md`.
 This panel reads a POSITION and prices it with TTR's rules, which is
@@ -40,13 +30,13 @@ from itertools import count
 from pathlib import Path
 from typing import List, Optional
 
-from .overlay import ADVICE_LINGER, CogRow, Model
+from .overlay import CogRow, Model
 from .worker import AdviceWorker
-from .panel import DIST, PULL_INTERVAL_MS, model_json
+from .panel import DIST, model_json
 
-# Evaluations `hybrid.climb` may spend per answer. See the call site for
-# the measurement; the short version is that the old 8 was starving the
-# probes and cost about ten points of win rate for five milliseconds.
+# Evaluations `hybrid.climb` may spend per answer. See the call site:
+# the old value of 8 starved the probes, costing about ten points of
+# win rate for five milliseconds.
 PANEL_BUDGET = 24
 
 POLL_INTERVAL = 0.4
@@ -56,16 +46,11 @@ POLL_INTERVAL = 0.4
 # search is started when the POSITION changes, which is what these
 # summarise.
 DEFAULT_DEPTH = 4
-# WAS 12s, AND IT BOUGHT NOTHING. Depth 4 never completes -- CLAUDE.md
-# measures depth 3 at "many minutes" -- so iterative deepening always
-# runs to the deadline, however long that is. Measured on the owner's
-# real 70-gag loadout, the recommended move stops changing by 2s in
-# every position tried: one cog, two cogs and four.
-#
-# It is not free time either. The search is CPU-bound Python in the
-# same process as the UI, so a long one starves the poll loop and the
-# window both -- which showed up as a panel that dragged when moved and
-# cog health that appeared to stop updating.
+# Depth 4 never completes (CLAUDE.md: depth 3 is "many minutes"), so
+# iterative deepening always runs to this deadline. On the owner's real
+# 70-gag loadout the recommended move stopped changing by 2s across one,
+# two and four cogs -- a longer budget bought nothing but CPU, which
+# this shares with the UI thread and made the window drag.
 DEFAULT_BUDGET = 4.0
 DEFAULT_EPSILON = 0.03
 
@@ -156,10 +141,9 @@ def _outcome(before, after) -> dict:
 def _entry_for(track, level):
     """Any `env.ACTIONS` entry with this track and level, for keying.
 
-    The model carries the DISPLAYED move as a slug and a level rather
-    than as an Action, so Reconsider has to find something with the same
-    `reject_key`. Any entry of that track and level does -- the key
-    ignores the target, which is the point.
+    The model carries the move as a slug and level, not an Action, so
+    Reconsider needs something with the same `reject_key` -- any entry
+    of that track and level does, since the key ignores the target.
     """
     from ..rl import env as env_mod
 
@@ -173,15 +157,10 @@ def _entry_for(track, level):
 def _track_of(action):
     """The page's track slug for an action, or None.
 
-    "fire" is a SENTINEL, not a gag track. It exists so the advice line
-    can show a pink slip instead of falling back to the no-track styling
-    that a pass uses -- firing and passing are not the same thing and
-    should not look alike.
-
-    It also stops the crash this replaced. A fire has `track=None` and
-    `is_pass=False`, so `None if action.is_pass else action.track.value`
-    raised AttributeError on the first fire the panel was ever offered.
-    Nothing read the slip count until now, so nothing ever offered one.
+    "fire" is a SENTINEL, not a gag track -- it lets the advice line show
+    a pink slip instead of the no-track styling a pass uses. A fire has
+    `track=None` and `is_pass=False`, so a naive `action.track.value`
+    raises; this guards it.
     """
     from .advise import track_of
 
@@ -198,11 +177,10 @@ def _level_of(action):
 
 
 def _render(action, state) -> str:
-    """Advice as one line. Reuses the TTR panel's wording where it can.
+    """Advice as one line, reusing the TTR panel's wording.
 
-    Two panels phrasing the same recommendation differently would be a
-    worse outcome than the coupling, and this imports a formatter rather
-    than any of the reading.
+    Two panels phrasing the same move differently would be worse than
+    the coupling, so this imports a formatter rather than any reading.
     """
     try:
         from .advise import _render as shared
@@ -211,11 +189,9 @@ def _render(action, state) -> str:
     except Exception:                   # pragma: no cover - defensive
         if action is None or getattr(action, "is_pass", False):
             return "pass"
-        # Guard the track-less actions FIRST. This fallback exists to
-        # survive a failure in the shared renderer, and it used to raise
-        # AttributeError on `None.value` while doing so -- turning a
-        # recoverable problem into a crash, for exactly the two actions
-        # (fire, SOS) most likely to have caused it.
+        # Guard the track-less actions FIRST -- this fallback must
+        # survive even for the two actions (fire, SOS) most likely to
+        # have broken the shared renderer in the first place.
         if getattr(action, "sos", None):
             return f"call {action.sos}"
         if getattr(action, "fire", False):
@@ -227,29 +203,22 @@ def search_in_child(state, objective_name: str, depth: int,
                     budget: float, allow_level_7: bool):
     """Run the search in a SEPARATE PROCESS and return a plain result.
 
-    WHY A PROCESS AND NOT A THREAD. The search is CPU-bound pure Python,
-    so a thread holds the GIL for most of its slice and starves both the
-    poll loop and the window. The panel dragged when moved and cog
-    health appeared to stall; cutting the search from twelve seconds to
-    four only made that less obvious rather than fixing it. A process
-    has its own interpreter and cannot interfere at all.
+    A PROCESS, NOT A THREAD: the search is CPU-bound pure Python, so a
+    thread holds the GIL and starves both the poll loop and the window.
+    A process has its own interpreter and cannot interfere at all.
 
     Returns `(text, track, level, target)` rather than an `Action`, so
-    nothing crosses the process boundary but a string and three scalars,
-    and the child renders the wording itself so it stays identical
-    either way.
+    only a string and three scalars cross the process boundary, and the
+    child renders the wording so it stays identical either way.
 
-    THE TARGET IS PART OF THE MOVE, not decoration on the label. It was
-    left out on the grounds that the caller only needed the track and
-    the level -- true for `reject_key`, which ignores the target, and
-    false for `explain.describe`, which SIMULATES the round. A move
-    rebuilt without one has `target_index=None`, and
-    `simulator._targets_for` reads that as every active cog, so a
-    single-target gag was described as hitting the whole lineup: a
-    Whole Fruit Pie on one cog captioned "147 damage across 4 cogs".
+    THE TARGET IS PART OF THE MOVE, not decoration: `reject_key` ignores
+    it but `explain.describe` SIMULATES the round, and a move rebuilt
+    with `target_index=None` reads to `simulator._targets_for` as every
+    active cog -- a single-target gag described as hitting the whole
+    lineup.
 
-    Top-level rather than a closure because Windows spawns rather than
-    forks, and a closure cannot be pickled into a fresh interpreter.
+    Top-level rather than a closure: Windows spawns rather than forks,
+    and a closure cannot be pickled into a fresh interpreter.
     """
     from .. import state as state_mod
     from ..search import expectimax, objective as objectives
@@ -261,11 +230,10 @@ def search_in_child(state, objective_name: str, depth: int,
             state, depth=depth, objective=objective,
             epsilon=DEFAULT_EPSILON, time_budget=budget, exact_plies=1)
     except expectimax.MissingData as exc:
-        # A [TODO] cell in a cog's table makes EVERY action unevaluable,
-        # because they all run the same cog phase. The policy is
-        # unaffected, so the caller keeps its answer -- but it has to be
-        # told, or the panel silently downgrades to the policy on every
-        # board holding that cog and looks like it is merely slow.
+        # A [TODO] cell makes EVERY action unevaluable, since they all
+        # run the same cog phase. The policy is unaffected, but the
+        # caller has to be TOLD or the panel silently downgrades to it
+        # and looks merely slow.
         return MISSING_DATA, str(exc), None, None
     if action is None:
         return "no legal move -- nothing left to throw", None, None, None
@@ -276,9 +244,8 @@ def search_in_child(state, objective_name: str, depth: int,
 def rows_from_state(state) -> List[CogRow]:
     """`CogRow`s from a searched state.
 
-    `identified` is always True and `choices` always empty: the cog came
-    from `setDNAString`, so the panel has nothing to ask the player and
-    the picker never appears.
+    `identified` is always True and `choices` always empty: identity
+    came from `setDNAString`, so the picker never appears.
     """
     from .. import data
 
@@ -299,18 +266,14 @@ def rows_from_state(state) -> List[CogRow]:
 class RealmsWorker(AdviceWorker):
     """Reads the cluster, searches when the position moves, posts a Model."""
 
-    # CLASS-LEVEL, not only set in `__init__`. The consumable caps must
-    # read 0 on an instance built any other way -- the tests construct
-    # one with `__new__` -- because 0 is the safe value: it advises none
-    # of a resource farmed from boss runs. An AttributeError here would
-    # be the good failure; silently inheriting a stale cap would not.
+    # CLASS-LEVEL, not only set in `__init__`: tests build an instance
+    # with `__new__`, and 0 is the safe default -- it advises none of a
+    # resource farmed from boss runs.
     max_fires = 0
     max_unites = 0
     max_sos = 0
-    # Same reason as the caps above: an instance built with `__new__`
-    # must read "not recording" rather than raise. Off is the safe
-    # default here too -- a panel that quietly starts writing training
-    # rows nobody asked for is worse than one that records nothing.
+    # Same reason: an instance built with `__new__` must read "not
+    # recording" rather than raise. Off is the safe default.
     feedback_to = None
     _feedback = None
     _prev_state = None
@@ -333,17 +296,12 @@ class RealmsWorker(AdviceWorker):
         self.model = Model()
         super().__init__(outbox, objective, depth, budget)
         self.listener = listener
-        # "rl", "search" or "both". WHICH IS BETTER IS NOT ESTABLISHED,
-        # which is the honest reason this is a choice rather than a
-        # decision made here. Everything offline in this project -- the
-        # CEO sweeps, the building runs, the ship gate -- evaluates
-        # `hybrid.climb`, so the search is the UNTESTED path in the
-        # panel, not the policy. The owner reports preferring the
-        # policy's picks and there is no measurement to contradict them.
+        # "rl", "search" or "both". WHICH IS BETTER IS NOT ESTABLISHED:
+        # everything offline in this project evaluates `hybrid.climb`,
+        # so the search is the untested path here, not the policy.
         self.engine = engine
-        # Playouts run wherever the search does: they are its company,
-        # not a replacement, until one has been measured against the
-        # other in live play.
+        # Playouts run wherever the search does: company, not a
+        # replacement, until measured against it in live play.
         self.model.engines = {"both": ["rl", "search", "playout"],
                               "search": ["search", "playout"],
                               "rl": ["rl"]}.get(engine, [])
@@ -351,8 +309,7 @@ class RealmsWorker(AdviceWorker):
         # HUMAN FEEDBACK. `feedback_to` is a path or None; the log is
         # built lazily so an unset flag costs nothing. `_prev_state` is
         # the board the standing advice was given for, kept so the next
-        # round can diff the pouch against it and see what was actually
-        # thrown -- see `solver.live.feedback`.
+        # round can diff the pouch against it -- see `solver.live.feedback`.
         self.feedback_to = None
         self._feedback = None
         self._prev_state = None
@@ -369,10 +326,9 @@ class RealmsWorker(AdviceWorker):
         """Redraw, recompute -- and drop the position key.
 
         `tick` searches only when the position key CHANGES, so without
-        this a setting moved mid-fight is honoured on the next cog
-        action rather than now. `reconsider` deliberately does not come
-        through here: clearing the key there wiped the rejection before
-        anything could read it, because an empty key always differs.
+        this a setting changed mid-fight waits for the next cog action.
+        `reconsider` deliberately does not come through here: clearing
+        the key there would wipe the rejection before anything read it.
         """
         self._last_key = ()
         super()._settings_changed()
@@ -402,17 +358,13 @@ class RealmsWorker(AdviceWorker):
         next_full = 0.0
         while not self._stop.is_set():
             cycle = time.time()
-            # THE FIGHT IS REFRESHED EVERY POLL, THE WORLD IS NOT.
-            # Both used to share a five-second timer, so a cog's HP was
-            # up to five seconds stale -- the server does not re-send
-            # `setHP` on every hit, it sends `damageSuit` for the
-            # animation, so the value in the store is only as fresh as
-            # the last query. Advice computed against a cog that died
-            # four seconds ago is worse than late advice.
-            #
-            # The asymmetry is what makes this cheap: the roster is two
-            # to five objects, the full sweep was 137, and it was the
-            # full sweep that needed throttling in the first place.
+            # THE FIGHT IS REFRESHED EVERY POLL, THE WORLD IS NOT. The
+            # server doesn't re-send `setHP` on every hit (it sends
+            # `damageSuit` for the animation), so the store is only as
+            # fresh as the last query -- advice against a cog that died
+            # seconds ago is worse than late advice. The asymmetry keeps
+            # this cheap: the roster is two to five objects, the full
+            # sweep was 137, and only the full sweep needs throttling.
             try:
                 self.listener.refresh_battle_members()
                 if cycle >= next_full:
@@ -423,11 +375,9 @@ class RealmsWorker(AdviceWorker):
             try:
                 self.tick()
             except Exception as exc:    # noqa: BLE001
-                # A worker that dies leaves the panel frozen on its last
-                # model, which from the outside is indistinguishable
-                # from a fight it cannot read -- no error, no output,
-                # just a window that never changes. Report it through
-                # the channel the panel already shows.
+                # A dead worker leaves the panel frozen on its last
+                # model -- indistinguishable from a fight it can't read.
+                # Report it through the channel the panel already shows.
                 self.model.problems = [
                     f"the reader failed: {exc.__class__.__name__}: {exc}"]
                 self.model.detected_battle = False
@@ -478,24 +428,20 @@ class RealmsWorker(AdviceWorker):
         key = _position_key(state)
         if key != self._last_key or self._asked.is_set():
             if key != self._last_key:
-                # A NEW BOARD FORGETS THE REJECTIONS. Keeping them would
-                # silently narrow every later round, and a player who
-                # dismissed one Lure three rounds ago would stop being
-                # offered Lure without knowing why. Deliberately not
-                # cleared when `_asked` fired instead -- that is
-                # Reconsider itself asking, and clearing there would
-                # undo the rejection it was just given.
-                # BEFORE the rejections are dropped: a Reconsider is
-                # the player saying "not this" about THIS board, and it
-                # is the highest-signal label the panel produces.
+                # Record the round's feedback BEFORE the rejections are
+                # dropped -- a Reconsider is the highest-signal label the
+                # panel produces, about THIS board.
                 if self._last_key:
                     self._record_feedback(state)
                     self._watch_step(state)
+                # A NEW BOARD FORGETS THE REJECTIONS. Keeping them would
+                # silently narrow later rounds. Not cleared when `_asked`
+                # fires instead -- that's Reconsider itself asking, and
+                # clearing there would undo the rejection just given.
                 self._rejected.clear()
-                # THE BOARD MOVED, so the advice that stood for the last
-                # one has been played. Charge it against the holdings,
-                # but not on the `_asked` arm -- that is a recompute of
-                # the SAME round and would spend a slip per press.
+                # THE BOARD MOVED, so the last advice has been played.
+                # Charge it against the holdings -- but not on the
+                # `_asked` arm, which recomputes the SAME round.
                 if self._last_key:
                     self.note_spent(self.displayed_action(),
                                     self.model.unite or None)
@@ -509,17 +455,16 @@ class RealmsWorker(AdviceWorker):
     def _track_boss(self, result) -> None:
         """Which boss fight this is and how many cogs it has lost.
 
-        EXACT, because this client names its cogs: a cog id that leaves
-        a boss battle's roster died -- nothing else takes a cog out of a
-        battle that is still running. When the battle itself is replaced
-        by the next one of the SAME boss, the round was cleared, so the
-        ids still listed in the old roster died too; that catches the
-        last kill of a round, which the roster may never report because
-        the battle object goes first.
+        EXACT, because this client names its cogs: a cog id leaving a
+        boss battle's roster died, nothing else removes one from a
+        running battle. When the battle is replaced by the next one of
+        the SAME boss, the round was cleared, so ids still in the old
+        roster died too -- catching the last kill, which the roster may
+        never otherwise report since the battle object goes first.
 
-        No state means no fight on screen -- between a VP's two rounds,
-        say -- and leaves the count alone. Clearing it there would
-        restart the count at every round.
+        No state means no fight on screen (between a VP's rounds, say)
+        and leaves the count alone; clearing it there would restart the
+        count every round.
         """
         if result.state is None:
             return
@@ -554,20 +499,17 @@ class RealmsWorker(AdviceWorker):
     def _record_feedback(self, now_state) -> None:
         """One round's label: what was advised against what was thrown.
 
-        THE MOVE IS OBSERVED, NEVER ASKED FOR. The pouch is read every
-        poll anyway, and throwing a gag takes exactly one off exactly
-        one cell, so diffing the board the advice stood for against the
-        board that followed says what was played -- exactly, with no
-        question put to a player who is mid-fight and no reliance on
-        them remembering correctly afterwards.
+        THE MOVE IS OBSERVED, NEVER ASKED FOR: the pouch is read every
+        poll, and a thrown gag takes exactly one off exactly one cell,
+        so diffing the before/after board says what was played exactly
+        -- no question put to a player mid-fight, no reliance on memory.
 
         A round it cannot read is recorded WITH THE REASON rather than
-        dropped or guessed at. These rows are training data and nothing
-        downstream re-derives them, so a wrong one is permanent in a way
-        a missing one is not. `feedback.spent_gag` owns that judgement.
+        dropped or guessed at -- these rows are training data and a
+        wrong one is permanent in a way a missing one is not.
+        `feedback.spent_gag` owns that judgement.
 
-        Never raises. Advice must not be lost to its own bookkeeping --
-        the same rule `explain` keeps.
+        Never raises: advice must not be lost to its own bookkeeping.
         """
         if not self.feedback_to:
             return
@@ -578,10 +520,9 @@ class RealmsWorker(AdviceWorker):
             if before is None:
                 return
             if self._feedback is None:
-                # "realms" IS A QUARANTINE FLAG. Realms is Toontown
-                # Online lineage and nothing read from it may train a
-                # TTR policy or fit a weight; stamping it at write time
-                # is what stops a renamed file breaking that later.
+                # "realms" IS A QUARANTINE FLAG: nothing read from Realms
+                # may train a TTR policy, and stamping it at write time
+                # survives a later file rename.
                 self._feedback = feedback_mod.FeedbackLog(
                     self.feedback_to, source="realms")
 
@@ -626,11 +567,10 @@ class RealmsWorker(AdviceWorker):
     def _watch_step(self, now_state) -> None:
         """One round of a watched fight, appended to the open episode.
 
-        INDEPENDENT OF THE ADVICE. This runs whether or not either
-        engine was consulted, which is the point: watch mode is for
-        recording how the fight was actually played, and paying fifteen
-        seconds of search per round for advice nobody is reading would
-        make a VP run unwatchable.
+        INDEPENDENT OF THE ADVICE: runs whether or not either engine was
+        consulted, since watch mode records how the fight was actually
+        played and paying for search advice nobody reads would make a
+        VP run unwatchable.
 
         The board recorded is the one BEFORE the action, so the pair is
         a transition rather than a snapshot.
@@ -680,11 +620,10 @@ class RealmsWorker(AdviceWorker):
     def _close_episode(self) -> None:
         """Write the fight that just ended, and start a fresh one.
 
-        The outcome is read from the LAST board seen rather than from
-        the absence of one: a battle can also vanish because the client
-        dropped or the player walked away, and calling that a loss would
-        teach the wrong lesson about the position it stopped in.
-        `feedback.outcome_of` leaves it unknown instead.
+        The outcome is read from the LAST board seen, not the absence of
+        one: a battle can also vanish because the client dropped or the
+        player walked away, and calling that a loss would teach the
+        wrong lesson. `feedback.outcome_of` leaves it unknown instead.
         """
         episode = self._episode
         self._episode = None
@@ -694,8 +633,8 @@ class RealmsWorker(AdviceWorker):
             from . import feedback as feedback_mod
 
             # The final round: the board moved from `_prev_state` to
-            # nothing, so the action is unreadable -- but the STATE is
-            # the terminal position and is worth having on its own.
+            # nothing, so the action is unreadable, but the STATE is the
+            # terminal position and worth having on its own.
             if self._prev_state is not None:
                 episode.steps.append(feedback_mod.Step(
                     round_num=getattr(self._prev_state, "round_num", 0),
@@ -712,15 +651,14 @@ class RealmsWorker(AdviceWorker):
     def _show_receipt(self, decision, state, written: bool) -> None:
         """The strip under the advice: what was just logged, or why not.
 
-        A RECEIPT, not a question. The move was read rather than asked
-        for, so the ordinary case needs no answer and the strip is there
-        to be ignored -- it says what went into the file so a player can
-        notice it going wrong while they still remember the round, which
-        is the only moment the memory is any use.
+        A RECEIPT, not a question: the move was read, not asked for, so
+        the ordinary case needs no answer and the strip exists to be
+        ignored -- it lets a player notice a bad write while they still
+        remember the round.
 
-        An unreadable round says so INSTEAD of naming a move. That is
-        the case worth surfacing: a gap discovered here costs one glance
-        and a gap discovered at fit time costs the run.
+        An unreadable round says so INSTEAD of naming a move: a gap
+        found here costs one glance, a gap found at fit time costs the
+        run.
         """
         from .. import data
 
@@ -740,9 +678,8 @@ class RealmsWorker(AdviceWorker):
                                                decision.observed.level).display
             except Exception:                  # noqa: BLE001
                 model.feedback_move = "your move"
-            # Name the engine departed from, not both: the point of the
-            # line is the disagreement, and "differs from both" is what
-            # two names side by side already say.
+            # Name the engine departed from, not both: "differs from
+            # both" is already what two names side by side say.
             beats = decision.beats()
             against = [name for name, differed in beats.items() if differed]
             if against:
@@ -761,20 +698,17 @@ class RealmsWorker(AdviceWorker):
                      fire: bool = False, is_pass: bool = False) -> None:
         """The player naming the move they would make instead.
 
-        WRITTEN AGAINST THE BOARD ON SCREEN, immediately and as its own
-        row. It does not wait for the round to resolve, because a stated
-        preference is already a complete label -- board, both proposals,
-        and what a human says beats them -- and waiting would lose every
-        one given on the last round of a fight, which is exactly when
-        the interesting ones get given.
+        WRITTEN AGAINST THE BOARD ON SCREEN, immediately, as its own row
+        -- it does not wait for the round to resolve, since waiting
+        would lose every preference stated on a fight's last round,
+        exactly when the interesting ones get given.
 
         A row can therefore carry a stated move and, later, an observed
-        one for the same board. That is deliberate: whether a player
-        does what they say is worth being able to count, and folding the
-        two together would throw that away. See `Decision.player_move`.
+        one for the same board, deliberately: whether a player does what
+        they say is worth counting. See `Decision.player_move`.
 
-        Refuses a gag the toon is not carrying. A preference for a move
-        that was never available is not a preference.
+        Refuses a gag the toon is not carrying -- a preference for a
+        move that was never available is not a preference.
         """
         if not self.feedback_to:
             return
@@ -872,16 +806,14 @@ class RealmsWorker(AdviceWorker):
     def _record_position(self, state, advice: str) -> None:
         """Append the EXACT position searched, so it can be replayed.
 
-        Reconstructing a board from a screenshot has now failed twice on
-        picks the owner reported: a Storm Cloud at a lured level 1 and a
-        pass with four lured cogs and a full pouch. Both rebuilt boards
-        gave sensible moves, which means the panel was searching
-        something other than what was reconstructed -- and no amount of
-        rebuilding by hand will find that.
+        Reconstructing a board from a screenshot has failed twice on
+        picks the owner reported, each time giving a sensible move that
+        proved the panel searched something else -- hand rebuilding
+        can't find that.
 
-        Pickle rather than a summary: a summary records what I thought
-        to write down, which is exactly the assumption that keeps being
-        wrong.
+        Pickle rather than a summary: a summary only records what I
+        thought to write down, which is the assumption that keeps
+        being wrong.
         """
         if not self.record_to:
             return
@@ -897,11 +829,8 @@ class RealmsWorker(AdviceWorker):
                             handle)
             self.recorded += 1
         except Exception as exc:        # noqa: BLE001
-            # SAY SO, ONCE. This used to be `pass`, and the directory the
-            # owner chose did not exist -- so every round failed silently
-            # and the recording they were relying on was never written.
-            # A diagnostic that fails without saying is worse than none,
-            # since it is trusted.
+            # SAY SO, ONCE: a diagnostic that fails silently is worse
+            # than none, since it is trusted.
             if not self.record_error:
                 self.record_error = f"{exc.__class__.__name__}: {exc}"
                 self.model.problems = list(self.model.problems) + [
@@ -909,11 +838,9 @@ class RealmsWorker(AdviceWorker):
                     f"{self.record_error}"]
 
     def _search(self, state) -> None:
-        # WATCH MODE RUNS NEITHER ENGINE. A VP is forty-plus rounds and
-        # the search budgets fifteen seconds of CPU each; spending that
-        # on advice nobody is reading makes the machine the player is
-        # playing on worse for no return. The board is still read every
-        # poll, which is all the recorder needs.
+        # WATCH MODE RUNS NEITHER ENGINE: a VP is forty-plus rounds, and
+        # spending CPU on advice nobody reads has no return. The board is
+        # still read every poll, which is all the recorder needs.
         if self.engine == "none":
             self.model.thinking = False
             return
@@ -930,16 +857,14 @@ class RealmsWorker(AdviceWorker):
         """The trained policy's move, in milliseconds.
 
         `hybrid.climb` is what every offline evaluation in this project
-        actually runs -- the CEO sweeps, the building runs, the ship
-        gate -- and it is a thousand times faster than the search the
-        panel was using: 1-224ms against 9-12s on the same positions.
+        runs, and is a thousand times faster than the search: 1-224ms
+        against 9-12s on the same positions.
 
-        It is used here to answer IMMEDIATELY rather than to replace the
-        search, because which of the two plays better is genuinely not
-        established. They agreed on one of three test positions and
-        differed on the other two, and nothing here has measured which
-        was right. So the fast answer goes up first and the search
-        replaces it if it disagrees.
+        Used here to answer IMMEDIATELY, not to replace the search --
+        which of the two plays better is genuinely unmeasured (they
+        agreed on one of three test positions, differed on two) -- so
+        the fast answer goes up first and the search replaces it if it
+        disagrees.
         """
         try:
             import random
@@ -947,25 +872,16 @@ class RealmsWorker(AdviceWorker):
             from ..search import hybrid
 
             hybrid.LAST_UNITE = None
-            # BUDGET 24, not 8. Eight was below `climb`'s own default
-            # of 16 with nothing justifying it, and it starved the
-            # targeted probes: they are appended after the track sweep,
-            # so at 8 they are never evaluated and `PROBE_CHEAPEST_KILL`
-            # was dead in live play.
-            #
-            # Measured on the sampler's own parties, 250 runs a cell on
-            # two seed blocks: 88.8% -> 98.4% and 85.2% -> 99.2%,
-            # +24/-0 and +35/-0 paired, p<0.001 both. It also spends
-            # FEWER slips (18.4 -> 14.5), because the cheap-kill probe
-            # finally gets to offer the gag that does the job.
-            #
-            # It costs 5 milliseconds. Warm latency is 1.9ms at 8 and
-            # 7ms at 24, against a poll interval measured in hundreds.
+            # BUDGET 24, not `climb`'s default of 8: at 8 the targeted
+            # probes, appended after the track sweep, are never reached.
+            # Measured on the sampler's parties, two seed blocks:
+            # 88.8%->98.4% and 85.2%->99.2%, p<0.001 both, and fewer
+            # slips spent (18.4->14.5). Costs 5ms against a poll
+            # interval measured in hundreds.
             plan = hybrid.climb(state, random.Random(0), budget=PANEL_BUDGET,
                                 reject=frozenset(self._rejected))
-            # The unite `climb` chose, if any, for the line above the
-            # advice. Read straight after the call because it is a
-            # module global that the next call overwrites.
+            # The unite `climb` chose, if any. Read straight after the
+            # call: it's a module global the next call overwrites.
             chosen = hybrid.LAST_UNITE
             if chosen is None:
                 self._advise_unite(self.model, "")
@@ -973,9 +889,8 @@ class RealmsWorker(AdviceWorker):
                 from .. import unites as unites_mod
                 self._advise_unite(self.model, unites_mod.describe(chosen))
 
-            # The same numbers the screen-reading panel shows, from the
-            # same helper: the two front ends must not explain a move
-            # differently.
+            # Same helper the screen-reading panel uses, so the two front
+            # ends never explain a move differently.
             from . import explain as explain_mod
 
             first = plan[0] if plan else None
@@ -1002,25 +917,20 @@ class RealmsWorker(AdviceWorker):
 
     def _run_search(self, token, state, objective, depth, budget,
                     allies=()) -> None:
-        # Something on screen straight away. A blank panel for twelve
-        # seconds is the complaint that started this.
-        # A NEW POSITION INVALIDATES THE STORED SEARCH ANSWER. Leaving
-        # it would let the badge toggle produce last round's move, which
-        # is worse than having nothing to toggle to.
+        # A NEW POSITION INVALIDATES THE STORED SEARCH ANSWER -- leaving
+        # it would let the badge toggle show last round's move.
         self.model.search_gag = ""
         self.model.search_track = ""
         self.model.search_gag_level = 0
         self.model.search_ready = False
 
-        # IN A GROUP, COORDINATED: the board PPO and the playouts plan on
-        # carries the teammates as toons, so they choose the whole party's
-        # moves together -- a Lure for a teammate's Sound, 7s held for the
-        # round that needs them -- and the panel shows YOUR part. It
-        # assumes the teammates play theirs; if they do not, the next
-        # board is read as it really is and the plan is redone. Measured
-        # in simulation on 40 party VPs: planned together 23 wins, each
-        # toon alone 0, whoever the teammate was. The expectimax search
-        # keeps the board with allies as a count.
+        # IN A GROUP, COORDINATED: PPO and the playouts plan with
+        # teammates as toons, choosing the whole party's moves together
+        # (a Lure for a teammate's Sound, 7s held for the round that
+        # needs them), assuming they play theirs -- the panel shows only
+        # YOUR part. Measured on 40 party VPs: planned together 23 wins,
+        # each toon alone 0. The expectimax search still keeps allies as
+        # a count.
         board = state
         if allies:
             import copy
@@ -1075,14 +985,12 @@ class RealmsWorker(AdviceWorker):
                 search_in_child, state,
                 getattr(objective, "name", self.objective_name),
                 depth, budget, self.allow_level_7)
-            # A margin past the child's own deadline. It should return
-            # on time by itself; this only stops a wedged process
-            # holding the panel on "thinking" for ever.
+            # A margin past the child's own deadline, only to stop a
+            # wedged process holding the panel on "thinking" forever.
             text, track, level, target = future.result(timeout=budget + 20.0)
             if text == MISSING_DATA:
-                # Keep the policy's move -- it is a real answer and the
-                # only one available here -- and say what stopped the
-                # search rather than letting it look like a slow one.
+                # Keep the policy's move -- the only real answer here --
+                # and say what stopped the search, not that it's slow.
                 with self._lock:
                     if token != self._current:
                         return
@@ -1093,9 +1001,8 @@ class RealmsWorker(AdviceWorker):
                 self._post()
                 return
         except Exception as exc:        # noqa: BLE001
-            # A search that dies takes its thread with it and nothing
-            # else notices: no advice appears, which looks exactly like
-            # a search still running.
+            # A search that dies takes its thread with it unnoticed: no
+            # advice appears, looking exactly like one still running.
             text, track, level, target = (f"the search failed: "
                                           f"{exc.__class__.__name__}: {exc}"), None, None, None
 
@@ -1103,23 +1010,16 @@ class RealmsWorker(AdviceWorker):
             if token != self._current:
                 return                  # the fight moved on
 
-        # STORED ALWAYS, DISPLAYED ON REQUEST. The search runs whichever
-        # engine the player is reading, precisely so that swapping to it
-        # costs nothing: the fifteen seconds are spent while they are
-        # looking at the policy's move, not after they ask.
-        # THE SEARCH HANDS BACK TEXT, NOT AN ACTION. `search_in_child`
-        # runs in another process and returns `(text, track, level,
-        # target)`, so there is no Action here to keep -- and assigning
-        # one crashed this thread with `NameError: name 'action' is not
-        # defined`, which takes the search with it and looks exactly
-        # like a slow search that never finishes.
+        # STORED ALWAYS, DISPLAYED ON REQUEST: the search runs whichever
+        # engine is on screen, so swapping to it later costs nothing.
         #
-        # Reconstructed by the same route Reconsider always used: any
-        # `ACTIONS` entry of that track and level, THEN the real target
-        # copied onto it. The target used to be dropped, on the reading
-        # that `reject_key` ignores it -- which is true of Reconsider
-        # and false of `explain.describe`, the other consumer, because
-        # that one simulates the round.
+        # THE SEARCH HANDS BACK TEXT, NOT AN ACTION -- `search_in_child`
+        # runs in another process -- so the move is rebuilt by the same
+        # route Reconsider uses: any `ACTIONS` entry of that track and
+        # level, then the real target copied onto it. The target matters:
+        # `target_index=None` means "every active cog" to the simulator,
+        # which is true for `reject_key` but wrong for `explain.describe`,
+        # which simulates the round.
         self._search_action = None
         rebuilt = None
         if track and track not in ("fire", "sos") and level:
@@ -1132,13 +1032,10 @@ class RealmsWorker(AdviceWorker):
             except (LookupError, ValueError):
                 rebuilt = None
             if rebuilt is not None:
-                # A COPY, CARRYING THE REAL TARGET. `_entry_for` hands
+                # A COPY, carrying the real target: `_entry_for` hands
                 # back the shared `env.ACTIONS` entry, so setting the
-                # target on it would edit the action table itself for
-                # every later lookup. And the target has to be set: a
-                # `target_index` of None means "every active cog" to the
-                # simulator, which is how a single-target gag came to be
-                # described as hitting four.
+                # target directly would edit the action table for every
+                # later lookup.
                 rebuilt = dataclasses.replace(rebuilt, target_index=target)
         self._search_action = rebuilt
         self.model.search_gag = text
@@ -1168,19 +1065,12 @@ class RealmsWorker(AdviceWorker):
               engine: str = "") -> None:
         """Put a move on the panel without ending the search.
 
-        `engine` says WHICH one produced it, shown as a badge rather
-        than folded into the sentence -- the advice is what gets read at
-        a glance, and provenance is a property of it rather than part of
-        it.
-
-        It is not decoration. The objective control steers the search
-        and does NOT steer the policy: `hybrid.climb` takes no objective
-        and `party_search._quick_score` reads fixed global weights, so
-        an "rl" answer is the same move whether the player picked
-        "survive" or "glass cannon". Only the "search" that replaces it
-        honours the setting, and a panel showing an objective-blind move
-        under an objective dropdown without saying so is lying about
-        what it is doing.
+        `engine` says WHICH one produced it, shown as a badge rather than
+        folded into the sentence. It's not decoration: the objective
+        control steers the search but NOT the policy -- `hybrid.climb`
+        takes no objective -- so an "rl" answer is the same move whatever
+        the player picked, and the badge is what stops that from reading
+        as a lie.
         """
         self.model.gag = _render(action, state)
         self.model.engine = engine
@@ -1202,15 +1092,9 @@ class RealmsWorker(AdviceWorker):
         self.model.sos_left = self.remaining("sos")
         self.model.objective = self.objective_name
         self.model.budget = self.budget
-        # LATEST WINS. This was a FIFO that dropped the NEWEST model when
-        # it filled, so under load the panel rendered a queue of stale
-        # ones and never caught up -- cog health visibly a round behind
-        # the fight.
-        #
-        # A stale battle state is not merely late, it is wrong: the
-        # advice beside it was computed for a cog that has since taken
-        # damage or died. There is no value in an old model once a newer
-        # one exists, so the old one is thrown away rather than the new.
+        # LATEST WINS, not FIFO: a stale battle state isn't merely late,
+        # it's wrong (advice computed for a cog that has since died), so
+        # when the queue is full the old model is dropped, not the new.
         fresh = copy(self.model)
         while True:
             try:
@@ -1226,14 +1110,10 @@ class RealmsWorker(AdviceWorker):
 class RealmsApi:
     """What the page may call. A strict subset of the TTR panel's.
 
-    `name_cog` and `mark_lured` are INERT rather than absent, and that
-    is a correction. They were left off entirely on the reasoning that
-    the server states both and a player should not be able to overrule
-    it with a guess -- which is right about what they should DO and
-    wrong about whether they should exist. The page is shared, so a
-    click reaches whatever the Api has, and a missing method fails at
-    click time with nothing the player will ever see. They exist and do
-    nothing.
+    `name_cog` and `mark_lured` are INERT rather than absent: the server
+    states both, so a click should not override it, but the page is
+    shared and a missing method fails at click time with nothing the
+    player ever sees. They exist and do nothing.
     """
 
     def __init__(self, state: "RealmsPanelState", worker: RealmsWorker):
@@ -1258,10 +1138,9 @@ class RealmsApi:
         """The strip's "wrong?" control.
 
         Two answers only: name the cog the reader could not pin, or
-        throw the row away. There is deliberately no way to edit the GAG
-        from here -- that field was read off the pouch exactly, so a
-        player disagreeing with it means something else is wrong and the
-        row should go rather than be patched into something plausible.
+        discard the row. No way to edit the GAG from here -- that field
+        was read off the pouch exactly, so disagreeing with it means
+        something else is wrong and the row should go, not be patched.
         """
         self._worker.correct_feedback(target_index=target_index,
                                       discard=bool(discard))
@@ -1314,14 +1193,10 @@ class RealmsApi:
         return None
 
     def set_toon_count(self, count) -> None:
-        """Accepted and ignored, with the reason said out loud.
-
-        Party size is READ here, from `setMembers`. The TTR panel needs
-        the player to supply it because nothing on screen counts toons
-        reliably. Letting a click override the server would be strictly
-        worse data, so the control does nothing -- but the page is
-        shared, so the method has to exist or the click raises.
-        """
+        """Accepted and ignored: party size is READ here, from
+        `setMembers`. Letting a click override the server would be
+        strictly worse data; the method exists only because the page
+        is shared and a missing one would raise."""
         return None
 
     def set_boss(self, kind) -> None:
@@ -1344,17 +1219,14 @@ class RealmsApi:
     def toggle_fight(self, *_args) -> None:
         """The page's "I'm in a fight" button.
 
-        It RECOMPUTES rather than overriding detection, which is the
-        opposite of what it does on the TTR panel. There it sets
-        `forced`, because the screen readers genuinely miss fights and
-        the player can see one the pixels cannot. Here the cluster
-        states whether a battle exists, so asserting one would replace a
-        fact with an opinion -- and if the reader cannot build a state,
-        forcing changes nothing anyway: `build_state` still refuses and
-        the panel still shows the reasons.
-
-        What is useful about the button is the impatience behind it, so
-        it does that part: refresh and re-search immediately.
+        It RECOMPUTES rather than overriding detection, the opposite of
+        the TTR panel (which sets `forced` because its pixel reader can
+        genuinely miss a fight). Here the cluster states whether a
+        battle exists, so asserting one would replace a fact with an
+        opinion -- and would change nothing anyway if the reader can't
+        build a state. What's useful about the button is the
+        impatience, so that's the part it serves: refresh and
+        re-search immediately.
         """
         try:
             self._worker.listener.refresh_all()
@@ -1439,9 +1311,9 @@ def _trace(listener) -> int:                 # pragma: no cover
                    "setSkeleRevives", "doRevive", "setMovie"}
 
     def in_the_fight(do_id: int) -> bool:
-        """Only the battle and its own cogs. The street sends a
-        `setState` per wandering cog several times a second and it
-        buried the four lines that matter."""
+        """Only the battle and its own cogs -- the street sends a
+        `setState` per wandering cog several times a second, which
+        would bury the lines that matter."""
         for battle in listener.battles():
             if do_id == battle.do_id:
                 return True
@@ -1453,9 +1325,9 @@ def _trace(listener) -> int:                 # pragma: no cover
     def snapshot() -> str:
         """What `build_state` would report RIGHT NOW.
 
-        The arrival log alone cannot tell a listener bug from a model
-        bug: it shows the value landing and never what the panel holds
-        a moment later. Printing both on the same line does.
+        The arrival log alone can't tell a listener bug from a model
+        bug -- it shows the value landing, never what the panel holds a
+        moment later. Printing both together does.
         """
         from . import realms_session
 
@@ -1480,15 +1352,10 @@ def _trace(listener) -> int:                 # pragma: no cover
                      f"lured={members.suits_lured!r} "
                      f"traps={members.suit_traps!r}")
         if name == "setMovie":
-            # THE ROUND'S ACTUAL RESULT. `ToonAttack.hp` is the damage
-            # dealt per target and `suitDied` says whether it finished
-            # the cog, so this is what really happened -- as against
-            # `setChosenToonAttacks`, which is only what was AIMED.
-            #
-            # It is also the discriminator the last capture lacked: with
-            # only setHP to go on, "the server sends pre-round HP" and
-            # "the server resolves instantly and that attack missed"
-            # explain the same bytes.
+            # THE ROUND'S ACTUAL RESULT: `ToonAttack.hp` is damage dealt
+            # per target and `suitDied` whether it finished the cog --
+            # against `setChosenToonAttacks`, which is only what was
+            # AIMED.
             value = _summarise_movie(value)
         text = str(value)
         print(f"  {time.time()-started:7.2f}s  {obj.do_id:<11} "
@@ -1525,12 +1392,11 @@ def _headless(listener, objective, depth, budget) -> int:  # pragma: no cover
     try:
         while True:
             cycle = time.time()
-            # THROTTLED. This used to refresh every poll, which with 133
-            # objects at 2.5 polls a second put a few hundred queries a
-            # second through the message director -- 6,000 GET_ALL
-            # replies in one fight, most of them re-describing a
-            # butterfly that had not changed. The battle roster is
-            # cheap and worth doing often; everything else is not.
+            # THROTTLED: a full refresh every poll put a few hundred
+            # queries a second through the message director, mostly
+            # re-describing objects that hadn't changed. The battle
+            # roster is cheap and worth doing often; everything else
+            # is not.
             try:
                 if cycle >= next_full:
                     listener.refresh_all()
@@ -1615,51 +1481,44 @@ def main(argv: Optional[list] = None) -> int:   # pragma: no cover
     parser.add_argument("--dir", help="Realms install directory")
     parser.add_argument("--engine", default="both",
                         choices=("both", "rl", "search", "none"),
-                        help="'rl' is the trained policy alone, answering "
-                             "in milliseconds and ignoring the objective. "
+                        help="'rl' is the trained policy alone, in "
+                             "milliseconds, ignoring the objective. "
                              "'search' is expectimax alone, which honours "
                              "it. 'both' shows the policy first and lets "
                              "the search replace it. Which plays better "
-                             "is genuinely unmeasured -- everything "
-                             "offline here evaluates the policy, so the "
-                             "search is the untested one.")
+                             "is genuinely unmeasured.")
     parser.add_argument("--watch", metavar="PATH",
                         help="record the fight as a TRAJECTORY to PATH: "
-                             "one episode per battle, every round's board "
-                             "and the move you made, written when the "
-                             "fight ends so the terminal round -- the one "
-                             "that says whether a VP was won -- is in it. "
+                             "one episode per battle, written when the "
+                             "fight ends so the terminal round is in it. "
                              "Pair with --engine none to watch without "
-                             "paying for advice nobody is reading. Rows "
-                             "are stamped source=realms.")
+                             "paying for advice nobody reads. Rows are "
+                             "stamped source=realms.")
     parser.add_argument("--feedback", metavar="PATH",
                         help="append one labelled row per round to PATH: "
                              "the board, both engines' proposals, and the "
-                             "move you ACTUALLY made, read off the pouch "
-                             "rather than asked for. Rounds it cannot "
-                             "read are recorded with the reason instead "
-                             "of guessed at. Rows are stamped source="
-                             "realms, which quarantines them from TTR "
-                             "training -- see solver/live/feedback.py.")
+                             "move ACTUALLY made, read off the pouch. "
+                             "Unreadable rounds are recorded with the "
+                             "reason. Rows are stamped source=realms, "
+                             "quarantining them from TTR training -- see "
+                             "solver/live/feedback.py.")
     parser.add_argument("--record", metavar="PATH",
-                        help="append every searched position and the "
-                             "advice given to PATH, so a bad pick can be "
-                             "replayed exactly. Rebuilding a board from a "
-                             "screenshot has twice produced a position "
-                             "the solver handles correctly, which proves "
-                             "only that the reconstruction was wrong.")
+                        help="append every searched position and its "
+                             "advice to PATH, so a bad pick can be "
+                             "replayed exactly -- rebuilding a board from "
+                             "a screenshot has twice produced a position "
+                             "the solver handles fine, proving only that "
+                             "the reconstruction was wrong.")
     parser.add_argument("--trace", action="store_true",
                         help="log every field the cogs and the battle "
-                             "receive, with timestamps. For working out "
-                             "WHY a value is late rather than guessing: "
-                             "it shows whether the server re-sends setHP "
-                             "on a hit or only damageSuit.")
+                             "receive, with timestamps -- for working out "
+                             "WHY a value is late, e.g. whether the "
+                             "server re-sends setHP on a hit.")
     parser.add_argument("--headless", action="store_true",
                         help="no window: print what the worker sees each "
-                             "poll. This is the only way to tell a panel "
-                             "that cannot read the fight from a panel "
-                             "whose reader thread has died -- both look "
-                             "like a window that never changes.")
+                             "poll. The only way to tell a panel that "
+                             "can't read the fight apart from one whose "
+                             "reader thread died -- both look frozen.")
     args = parser.parse_args(argv)
 
     index = DIST / "index.html"
@@ -1734,13 +1593,9 @@ def main(argv: Optional[list] = None) -> int:   # pragma: no cover
         """PUSH the model into the page. Do not merely store it.
 
         The page does not poll -- `App.jsx` installs `window.pushModel`
-        and waits to be called, and `Api.pull` exists only for
-        `npm run dev` where there is no Python. Updating `state.model`
-        and stopping there left the page rendering its OWN defaults
-        forever, which is why the panel showed "waiting for a battle"
-        and a 15s budget while the reader could see the fight perfectly:
-        15 is App.jsx's fallback, not this module's 12, and that
-        mismatch is what gave it away.
+        and waits to be called; `Api.pull` exists only for `npm run dev`
+        where there is no Python. Stopping at `state.model = ...` would
+        leave the page rendering its own defaults forever.
         """
         while not state.closing:
             try:

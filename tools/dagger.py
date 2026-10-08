@@ -2,93 +2,67 @@
 
     python tools/dagger.py --iterations 6
 
-WHY THIS AND NOT THE EXPERT ITERATION THAT ALREADY FAILED
----------------------------------------------------------
+WHY THIS, NOT THE EXPERT ITERATION THAT ALREADY FAILED
+--------------------------------------------------------
 `tools/gen_expert.py` cloned the SEARCH's play and collapsed to 7.5% of
-buildings against PPO's 35%. Two things were wrong with it and both are
-fixed here.
+buildings against PPO's 35%, for two reasons fixed here:
 
-**The states came from the teacher.** It recorded positions along the
-search's own trajectory, so the policy was trained on states it would
-never itself visit. One small deviation early puts the learner in a
-position the training set never covered, and the errors compound --
-textbook covariate shift. Here the rollouts follow the LEARNER and only
-the labels come from the teacher, which is the whole of DAgger.
+* **States came from the teacher.** Recording positions along the
+  search's own trajectory trains on states the learner never visits --
+  one early deviation and the errors compound (covariate shift). Here
+  rollouts follow the LEARNER; only the labels come from the teacher.
+* **The teacher was too far away.** The search's moves (e.g. trap5 +
+  hold where the policy opens three Sounds) are outside what the policy
+  can represent, so cloning them taught noise -- the clone didn't even
+  copy the teacher's healing (1.3% vs 5.3%).
 
-**The teacher was too far away.** The search plays a different game from
-PPO: it opens with trap5 and a hold where the policy opens with three
-Sounds. Those targets are outside what the policy can represent, so
-cloning them mostly teaches noise -- and indeed the clone failed to copy
-even the behaviour that made the teacher good, healing 1.3% against the
-teacher's 5.3%.
-
-`hybrid.climb` is a better teacher for exactly the reason it is a weaker
-player: its plans are ONE-SEAT PERTURBATIONS of the policy's own output.
-Every label is reachable. It is also cheap enough to run inline -- 0.6 ms
-a decision against the search's 124 -- so labelling every visited state
-costs nothing, which is what makes the AlphaZero loop affordable without
+`hybrid.climb` is a better teacher for being a weaker player: its plans
+are ONE-SEAT PERTURBATIONS of the policy's own output, so every label is
+reachable, and it is cheap enough to run inline (0.6ms/decision vs the
+search's 124ms) to label every visited state -- AlphaZero's loop, without
 MCTS.
 
-WHAT WOULD MAKE THIS FAIL
--------------------------
-The teacher is only ~1.5 points better than the student it is teaching
-(climb 65.0% against plain PPO's 61.7% on the same sets), so the signal
-per round is small. If the policy converges to the teacher exactly, the
-ceiling is the teacher -- and the interesting question is whether the
-loop compounds: a better policy proposes better candidates, which makes
-climb better, which teaches a better policy. That is the AlphaZero
-argument, and it is what the iteration count is here to test.
-
-IT DOES NOT COMPOUND. MEASURED.
--------------------------------
-Six iterations, 120 episodes each, 15,393 aggregated states, warm-started
-from the track-entropy policy. Paired on the same three seed sets every
-comparison in this project uses, 180 buildings each:
+RESULT: IT DOES NOT COMPOUND. MEASURED.
+------------------------------------------
+The hope was a compounding loop: better policy -> better `climb`
+candidates -> better teacher -> better policy. Six iterations, 120
+episodes each, 15,393 aggregated states, warm-started from the
+track-entropy policy, paired on the project's three standard seed sets
+(180 buildings each):
 
     plain (argmax)   57.2 / 53.9 / 61.7  ->  57.8 / 54.4 / 54.4   -2.0
     climb, budget 8  68.3 / 61.7 / 65.0  ->  66.1 / 60.0 / 66.1   -0.9
 
-Mixed signs and a negative mean, both ways round. The loop does not
-help, and the run is kept because the reason is worth more than the
-feature would have been.
+Mixed signs, negative mean, both ways round -- kept because the reason is
+worth more than the feature would have been. Agreement with the teacher
+never rises either (44.3/37.6/43.1/44.1/42.7/45.8% across iterations)
+even as loss falls monotonically (1.56 -> 1.26): a MOVING TARGET, not a
+fixed point. Unlike MCTS, `climb` is a perturbation OF THE STUDENT'S OWN
+PROPOSAL, so training the student moves the target with it. Same lesson
+as everywhere else this project has been bitten: a judge must be
+independent of the proposer. `climb` works as policy-plus-scorer, two
+things with different blind spots; distilling it into the policy leaves
+only `_quick_score`'s myopia (one all-hit round), training the policy to
+swing.
 
-**Agreement never rises.** 44.3 / 37.6 / 43.1 / 44.1 / 42.7 / 45.8 across
-the six iterations, while the loss falls monotonically 1.56 -> 1.26. The
-student fits the labels better and agrees with the teacher no more than
-it did at the start. That is what a MOVING TARGET looks like, and it is
-the structural difference from AlphaZero: MCTS is a fixed improvement
-operator that a policy can converge onto, whereas `climb` is defined as
-a perturbation OF THE STUDENT'S OWN PROPOSAL. Change the student and the
-target moves with it. There is no fixed point to walk toward.
+TWO HARNESS BUGS THAT NEARLY BURIED THAT CONCLUSION
+------------------------------------------------------
+The first full run measured -12.4 plain, not -2.0. The teacher was
+queried ONCE PER ROUND and seat k read its label off the resulting joint
+plan -- so the label assumed seats 0..k-1 played the TEACHER's picks,
+while the trajectory had played the STUDENT's. In a coordinated plan the
+seats are chosen against each other, so those labels described positions
+that never occurred (10.4 of the 12.4 points). `collect` now re-queries
+the teacher at every seat with the committed prefix pinned
+(`hybrid.climb(..., fixed=...)`); agreement fell 53.7% -> 41.2% the
+moment the labels became honest, since a teacher that responds to the
+student disagrees with it more.
 
-It is also the same lesson as everything else that has failed here, from
-the other end: A JUDGE MUST BE INDEPENDENT OF THE PROPOSER. `climb`
-works because it is policy AND scorer, two things with different blind
-spots. Distilling it into the policy collapses the pair into one member
-of it, and what survives is `_quick_score`'s myopia -- it scores one
-all-hit round, so a policy trained to imitate it is trained to swing.
-
-THE BUG THAT NEARLY BURIED THAT CONCLUSION
-------------------------------------------
-The first full run measured -12.4 plain rather than -2.0, and it was the
-harness, not the idea. The teacher was queried ONCE PER ROUND and seat k
-read off the resulting joint plan -- so seat k's label was the move that
-was right when seats 0..k-1 played the TEACHER's picks, while the
-trajectory had played the STUDENT's. In a coordinated plan the seats are
-chosen against each other, so those labels described a position that
-never occurred, and 10.4 of the 12.4 points were that alone.
-
-`collect` now re-queries the teacher at every seat with the committed
-prefix pinned (`hybrid.climb(..., fixed=...)`). The tell was in the
-agreement number: it fell from 53.7% to 41.2% the moment the labels
-became honest, because a teacher that actually responds to the student
-disagrees with it more.
-
-Second harness bug, same run: the cross-entropy was taken over all 246
-actions including the illegal ones, whose logits inference never reads.
-The loss sat at 5.46 against ln(246) = 5.51 -- near-uniform -- while the
-student already agreed with the teacher on more than half of its
-decisions. The mask belongs in the loss; with it the loss starts at 1.47.
+Second: the cross-entropy ran over all 246 actions including illegal
+ones inference never reads, so loss sat at 5.46 (near ln(246)=5.51,
+i.e. near-uniform) while the student already agreed with the teacher
+over half the time. The mask belongs in the loss; with it, loss starts
+at 1.47.
 """
 from __future__ import annotations
 
@@ -136,15 +110,9 @@ def collect(episodes: int, budget: int, seed: int, sampler):
         while not done and guard < 250:
             guard += 1
             seat = e.actor
-            # ASK THE TEACHER ABOUT THE STATE THAT ACTUALLY HAPPENED.
-            # Computing one joint plan per round and reading seat k off
-            # it labels seat k with the move that was right when seats
-            # 0..k-1 played the TEACHER's picks -- but the trajectory
-            # played the STUDENT's, because that is what makes this
-            # DAgger. Those labels answer a question about a position
-            # that did not occur, and in a coordinated plan the seats
-            # are chosen against each other, so it is not a small
-            # difference: it is the whole of the coordination.
+            # Ask the teacher about the state that actually happened: the
+            # prefix the STUDENT played, not a joint plan re-read per
+            # seat (see the module docstring's first harness bug).
             committed = {i: e.pending[i] for i in range(seat)}
             teacher = hybrid.climb(e.state, rng, budget=budget,
                                    fixed=committed)
@@ -238,12 +206,9 @@ def main():
                          device=device)
         Y = torch.tensor([r[1] for r in dataset], dtype=torch.long,
                          device=device)
-        # THE MASK BELONGS IN THE LOSS. Without it the cross-entropy is
-        # taken over all 246 actions including the illegal ones, whose
-        # logits inference never looks at -- so the loss came out at
-        # 5.46 against ln(246) = 5.51, near-uniform, while the student
-        # was already agreeing with the teacher on 53.7% of decisions.
-        # It was mostly measuring noise the policy is never asked about.
+        # The mask belongs in the loss (see the module docstring's
+        # second harness bug) -- otherwise cross-entropy runs over
+        # illegal actions too and mostly measures noise.
         M = torch.tensor([r[2] for r in dataset], dtype=torch.bool,
                          device=device)
         losses = []

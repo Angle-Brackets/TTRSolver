@@ -2,38 +2,26 @@
 
     python tools/ship_gate.py incumbent.json candidate.json
 
-WHY THIS EXISTS
----------------
-0822c00 shipped a policy on a facility-only confirmation -- +1.2% over
-1600 paired positions, p = 0.09 -- and it cost 16.5 points on the CEO
-and 22.5 at two banquet leftovers. Facilities were level, so the
-evidence that approved the swap could not see the damage. 76e2e05
-reverted it.
+WHY THIS EXISTS: 0822c00 shipped a policy on a facility-only confirmation
+(+1.2% over 1600 paired positions, p=0.09) that cost 16.5 points on the
+CEO and 22.5 at two banquet leftovers -- facilities were level, so the
+evidence that approved the swap couldn't see the damage (76e2e05
+reverted it). The lesson isn't "measure more"; it's that a policy is
+deployed across distributions a single held-out set doesn't represent,
+and boss sides differ most: they're the only positions with Version 2.0
+cogs, pink slips as standard, and cogs above level 12.
 
-The lesson is not "measure more". It is that a policy is deployed across
-several distributions that a single held-out set does not represent, and
-boss sides are the ones that differ most: they are the only positions
-with Version 2.0 cogs, pink slips as standard, and cogs above level 12.
-A gate that cannot see them cannot approve a swap.
-
-READING THE OUTPUT, AND THE TRAP IN IT
---------------------------------------
-CEO seed variance is enormous. Eight policies differing only in their
-training seed spanned 23.3% to 62.5% on CEO 0 while their buildings
-rates sat inside a two-point band. So:
-
-  * A CEO difference of ten points between two policies is NOT evidence
-    that one is better. It is inside the noise of which seed you drew.
-  * Picking the best of N seeds on the CEO has been measured and
-    refuted (4b7da34) -- the selection winner lost on held-out sides.
-  * What this gate is for is catching a REGRESSION large enough to
-    matter, not ranking two good policies.
-
-Facilities are paired and get a McNemar test, because there the effect
-sizes are small and the noise is low enough to resolve them. Boss cells
-are reported as rates with the seed-variance caveat attached, because
-pretending a p-value there means something is how a 39-point spread gets
-read as a finding.
+READING THE OUTPUT, AND THE TRAP IN IT: CEO seed variance is enormous --
+eight policies differing only in training seed spanned 23.3% to 62.5% on
+CEO 0 while their building rates sat inside a two-point band. So a ten
+point CEO difference between two policies is not evidence one is
+better, it's noise; picking the best of N seeds on the CEO has been
+measured and refuted (4b7da34, the selection winner lost on held-out
+sides); and this gate exists to catch a REGRESSION large enough to
+matter, not to rank two good policies. Facilities get a paired McNemar
+test (effect sizes small, noise low enough to resolve); boss cells are
+reported as rates with the seed-variance caveat attached, since a
+p-value there would read a 39-point spread as a finding.
 """
 import random
 import shutil

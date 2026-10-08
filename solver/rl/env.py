@@ -37,30 +37,21 @@ from .. import data, facility, party as party_mod, simulator
 from .. import state as state_mod
 
 # Zero a level-7 count the rules forbid, so the pouch looks naturally
-# empty rather than full of unusable gags. OFF: the reasoning was sound
-# and the measurement said no.
+# empty rather than full of unusable gags. OFF -- the reasoning was
+# sound and the measurement said no.
 #
-# The mismatch is real. With `state.ALLOW_LEVEL_7` off -- the panel's
-# "hold my 7s for the boss" toggle -- `legal_mask` drops level 7 while
+# The mismatch is real: with `state.ALLOW_LEVEL_7` off (the panel's
+# "hold my 7s for the boss" toggle), `legal_mask` drops level 7 while
 # the observation still reports the count, so the policy sees resources
-# it cannot spend. That combination never occurs in training: when a
-# training pouch has no 7s the count is genuinely 0, which is 52% of
-# sampled loadouts. Zeroing it should have put the observation back in
-# distribution.
+# it can't spend -- a combination that never occurs in training, since a
+# training pouch with no 7s genuinely reads 0 (52% of sampled loadouts).
 #
-# It changed nothing worth having, paired over 800 no-7 sides:
-#
-#     cell        shown   zeroed
-#     buildings   62.0%    61.5%
-#     buildings   61.0%    60.0%
-#     CEO 0       24.0%    22.0%
-#     CEO 2        6.5%     6.5%
-#     pooled      35 up / 42 down, p=0.49
-#
-# All four cells lean the wrong way, so it stays off. Kept as a flag
-# because the argument survives the result -- a policy retrained with
-# no-7 play as an explicit arm might use those inputs differently, and
-# this is the knob that would test it.
+# Changed nothing worth having, paired over 800 no-7 sides: buildings
+# 62.0%->61.5% and 61.0%->60.0%, CEO-0 24.0%->22.0%, CEO-2 6.5%->6.5%,
+# pooled 35 up/42 down (p=0.49). All four lean the wrong way, so it
+# stays off -- kept as a flag because the argument survives the result:
+# a policy retrained with no-7 play as an explicit arm might use these
+# inputs differently, and this is the knob that would test it.
 MASK_SEVENS_IN_OBS = False
 
 # Zero the `KINDS` one-hot, keeping the width. THE CONTROL ARM, and the
@@ -124,67 +115,39 @@ PENDING_DIM = MAX_TOONS * (len(TRACKS) + 2)      # track one-hot, group, none
 
 # WHAT KIND OF FIGHT THIS IS, one-hot, added at OBS_VERSION 4.
 #
-# The observation carried a single `facility` bit and a count of cogs
-# still to come, and nothing else about context -- so a street battle
-# and a VP wave with the same board read almost identically. That is
-# not a hypothetical cost: `_stock_fires` records the policy learning
-# "hold slips -> fire" because it is a reasonable habit on a one-to-four
-# cog street, and that "carried to an eight-cog VP wave ... is the
-# reflex that loses fifty points of win rate". The workaround was to
-# tune what fraction of TRAINING episodes stock slips, which treats the
-# symptom: the agent still could not see which fight it was in.
+# The observation carried only a `facility` bit and a cogs-remaining
+# count, so a street battle and a VP wave with the same board read
+# almost identically -- `_stock_fires` records the policy learning
+# "hold slips -> fire" on a one-to-four cog street and carrying that
+# reflex into an eight-cog VP wave for a fifty-point loss. Tuning how
+# often training stocks slips only treated the symptom.
 #
-# EVERY FIGHT THE GAME HAS, not only the ones the harness builds today.
-# Four of these are live (`street` by default, plus `facility`, `vp` and
-# `ceo`); the rest are reserved. That is deliberate: the width is fixed
-# at export and a policy is only valid against its own, so filling in a
-# slot later would cost another OBS_VERSION bump and invalidate every
-# policy again. Eleven floats against 306 is nothing; a second retrain
-# is not.
+# EVERY FIGHT THE GAME HAS, not just what the harness builds today:
+# four are live (`street` default, `facility`, `vp`, `ceo`), the rest
+# reserved, since the width is fixed at export and filling a slot later
+# would need another OBS_VERSION bump and a retrain (eleven floats
+# against 306 is nothing; a retrain is not). `facility` stays alongside
+# the specific facilities because the code still emits the generic
+# string. An unknown kind encodes as all zeros rather than bucketing
+# into `street`, so a later addition reads as "none of these" rather
+# than claiming to be one. ORDER IS PART OF THE FORMAT -- append only.
 #
-# `facility` is kept ALONGSIDE the specific facilities because the code
-# still emits the generic string -- `facility_position` builds a floor
-# without saying which HQ it belongs to. Dropping it would encode every
-# position that harness produces as all zeros.
+# MEASURED, AND IT BOUGHT NOTHING: two 2M-step policies, identical
+# width/seed/settings, differing only in whether these floats are live
+# (`MASK_KINDS_IN_OBS` the control). 150 paired sides/cell: street
+# 52.0% vs 52.7% (+0/-1, p=1.000), facility 45.3% vs 44.0% (+12/-10,
+# p=0.832) -- a coin flip. The training eval (42.75 vs 34.61) didn't
+# survive a held-out test, which is exactly why the control arm exists:
+# against a SHIPPED policy the same pair would show a 55-point "win"
+# caused by a different training recipe, not this feature.
 #
-# ORDER IS PART OF THE FORMAT. Appending is safe; inserting or
-# reordering silently changes what every fitted weight means. It was
-# still free to slot `field_office` in beside the other facilities
-# because nothing has been fitted on version 4 yet -- once a policy
-# ships against it, this tuple may only grow at the end.
-#
-# An unknown kind encodes as all zeros rather than being bucketed into
-# `street`, so a kind added later reads as "not any of these" instead
-# of quietly claiming to be one of them.
-#
-# MEASURED, AND IT BOUGHT NOTHING. Two policies at 2M steps, identical
-# width, seed and settings, differing only in whether these floats are
-# live (`MASK_KINDS_IN_OBS` is the control):
-#
-#     cell        kinds   nokind   discordant     p
-#     street      52.0%    52.7%      +0/-1     1.000
-#     facility    45.3%    44.0%     +12/-10    0.832
-#
-# 150 paired sides a cell, common random numbers. A coin flip.
-#
-# The training eval said otherwise -- 42.75 return against 34.61 -- and
-# that gap did not survive a held-out paired test. It is in-sample luck,
-# and it is the reason the control arm exists: against a SHIPPED policy
-# the same pair would have shown a 55-point "win" caused entirely by a
-# different training recipe.
-#
-# WHAT THIS DOES NOT SAY. Not that context is worthless -- the cells
-# where it should matter most could not be measured. Both arms score
-# ~0% on the VP (a default-recipe policy cannot win one), and the CEO
-# cell raises on a [TODO] accuracy for the_big_cheese/glower_power.
-# Street is most of training and barely moves by construction, leaving
-# facility as the only informative cell. One training run each, and
-# PPO runs are high variance.
-#
-# Kept because it costs nothing: no shipped policy reads these floats,
-# older versions encode unchanged, and the reserved slots mean a new
-# facility will not need another OBS_VERSION bump. It must not be
-# described as an improvement until a boss cell can be measured.
+# NOT PROOF CONTEXT IS WORTHLESS -- the cells where it should matter
+# most (VP, CEO) couldn't be measured (0% win, or blocked on a [TODO]
+# accuracy), leaving facility as the only informative cell from one PPO
+# run each. Kept because it costs nothing (no shipped policy reads
+# these floats, older versions are unchanged, reserved slots avoid a
+# future bump) but must not be called an improvement until a boss cell
+# can be measured.
 KINDS = (
     "street",       # an ordinary street battle
     "building",     # a cog building floor
@@ -524,29 +487,23 @@ _FIRE_INDEX = {
 def legal_mask(state: BattleState, actor: int = 0) -> List[bool]:
     """Which indices the agent may pick this round.
 
-    DERIVED FROM `simulator.legal_actions`, deliberately, rather than
-    reimplementing its rules. There used to be two move generators and
-    they drifted, as two of anything will: the mask never applied the
-    productivity rules, so the agent healed parties already on full
-    laff -- 4.0% of every gag it threw -- and it validated Toon-Up
-    targets against live COG indices, a bug the simulator had already
-    found and fixed on its own side without the second copy being
-    corrected with it. Diffed over 1,178 positions that was 204
-    Toon-Ups the mask allowed and the search did not, and 147 the other
-    way.
+    DERIVED FROM `simulator.legal_actions` rather than reimplementing its
+    rules -- two move generators drifted before: this mask never applied
+    the productivity rules (healing parties already on full laff, 4.0%
+    of every gag thrown) and validated Toon-Up targets against live COG
+    indices, a bug the simulator had already fixed on its own side.
+    Diffed over 1,178 positions: 204 Toon-Ups the mask allowed and the
+    search didn't, 147 the other way.
 
-    Nothing here decides legality. It translates.
+    Nothing here decides legality, it translates. Two things it still
+    owns, being about the agent rather than the rules:
 
-    Two things this function still owns, because they are about the
-    agent rather than the rules:
-
-    * The actor. `legal_actions` always speaks for `toons[0]`, so the
-      state is rotated and Toon-Up targets -- which name a TOON -- are
+    * The actor: `legal_actions` always speaks for `toons[0]`, so the
+      state is rotated and Toon-Up targets (which name a TOON) are
       mapped back to this state's numbering.
-    * The guarantee of a move. An all-False mask leaves the agent with
-      nothing to pick, so the pass is restored if nothing else survives.
-      `legal_actions` cannot reach that state; the mask is called on
-      states the search would never be asked about.
+    * The guarantee of a move: an all-False mask leaves the agent
+      nothing to pick, so the pass is restored if nothing else survives
+      -- a state `legal_actions` would never be asked about.
     """
     mask = [False] * len(ACTIONS)
     if (not state.active_toons() or actor >= len(state.toons)
@@ -1652,65 +1609,52 @@ SCRAPPY_HARDSHIP = 0.8
 def scrappy_position(rng) -> BattleState:
     """A facility floor for a party that has no business being there.
 
-    WHY THIS EXISTS. On the standard facility sampler the two agents are
-    tied -- 65.9% against 65.0% over three sets, inside the noise -- and
-    every lever tried against that tie has come back null. The tie may be
-    a property of the TASK rather than of the agents: with a maxed pouch
-    there is usually a gag that simply removes the problem, so most
-    positions have many good answers and it does not matter much which
-    one you pick. That is exactly what the CRN experiment measured -- the
-    agents disagree on 95% of rounds and three quarters of the
-    disagreements are worth under a point.
+    On the standard facility sampler the two agents tie (65.9% vs 65.0%
+    over three sets, inside noise) and every lever tried against it has
+    come back null -- the tie may be a property of the TASK: with a
+    maxed pouch there's usually a gag that just removes the problem, so
+    most positions have many good answers and the pick barely matters
+    (the CRN experiment found the agents disagree on 95% of rounds, but
+    three quarters of disagreements are worth under a point).
 
     Take the shortcuts away and the support tracks have to carry the
-    fight. With low laff you cannot trade hits, and with mediocre gags
-    you cannot one-shot a cog or lean on Sound to clear a floor, so
-    Toon-Up and Lure stop being optional. Those are precisely the two
-    tracks every scorer here prices worst: `_quick_score` pays for damage
-    landed, a heal is capped at the target's missing laff, and
-    `prevented` is worth 2.0 a point against a kill's flat 120.
+    fight: low laff means you can't trade hits, mediocre gags mean you
+    can't one-shot a cog or lean on Sound, so Toon-Up and Lure stop
+    being optional -- exactly the two tracks every scorer here prices
+    worst (`_quick_score` pays for damage landed, a heal is capped at
+    missing laff, `prevented` is worth 2.0 a point against a kill's flat
+    120). So this is a task where the evaluator's known weaknesses
+    should finally cost something measurable.
 
-    So this is a task where the evaluator's known weaknesses should
-    finally cost something measurable, and where a difference between the
-    agents has room to appear.
-
-    SYNTHETIC, and labelled as such. The wiki says nothing about how
+    SYNTHETIC, labelled as such: the wiki says nothing about how
     underlevelled a party attempting a building typically is;
-    `SCRAPPY_HARDSHIP` is a dial, not a datum. It never goes below the
-    laff floor the previous playground awards, so every toon it builds
-    could really have reached the street it is on.
+    `SCRAPPY_HARDSHIP` is a dial, not a datum (never below the laff
+    floor the previous playground awards, so every toon could really
+    have reached this street).
 
-    THE PARTY IS CONSTRAINED TO HOLD THE SUPPORT TRACKS, and the first
-    version was not. Hardship lowers `grind`, and grind decides how many
-    tracks a toon ever trained, so squeezing it stripped exactly the
-    tracks this regime is meant to lean on: Lure fell 34% -> 23% and
-    Toon-Up 43% -> 32%. A party that has no Lure cannot be made to
-    demonstrate anything about Lure. So the pooled party must hold both,
-    and the sampler redraws until it does.
+    CONSTRAINED TO HOLD THE SUPPORT TRACKS: the first version wasn't,
+    and lowering `grind` (which decides how many tracks a toon ever
+    trained) stripped exactly the tracks this regime means to lean on
+    (Lure 34% -> 23%, Toon-Up 43% -> 32%) -- a party with no Lure can't
+    demonstrate anything about Lure. So the sampler redraws until the
+    pooled party holds both. Stated bias: these are underlevelled
+    parties that DID train support, not a random sample of them.
 
-    That is a bias, stated rather than hidden: these are underlevelled
-    parties that DID train support, not a random sample of underlevelled
-    parties.
+    WHAT IT SHOWED, not what it was built for. Over 120 buildings:
+    standard climb 60.8%/search 60.0% (toons lost 1.02/0.99), scrappy
+    climb 50.0%/search 50.0% (toons lost 1.52/1.47). The task got 10
+    points harder as intended (Sound 15.7% -> 11.1%, Toon-Up 5.4% ->
+    7.9%) and the agents stayed exactly level -- a stronger result than
+    the original tie, since two agents that track each other as the
+    ground moves are equal in a way two that merely score the same
+    aren't.
 
-    WHAT IT SHOWED, AND IT WAS NOT WHAT IT WAS BUILT FOR. Over 120
-    buildings, both agents:
-
-        standard   climb 60.8%   search 60.0%   toons lost 1.02 / 0.99
-        scrappy    climb 50.0%   search 50.0%   toons lost 1.52 / 1.47
-
-    The task got 10 points harder in the intended way -- Sound 15.7% ->
-    11.1%, Toon-Up 5.4% -> 7.9% -- and the agents stayed exactly level.
-    So the tie is NOT an artifact of an easy task, which is what this
-    regime was written to test. That is a stronger result than the
-    original tie: two agents that track each other as the ground moves
-    are equal in a way two agents that merely score the same are not.
-
-    The oddity worth chasing: LURE USE DOES NOT MOVE, 11.9% -> 12.0%,
-    although the party pools Lure far more often here (59% -> 77%) and
-    the regime exists because you cannot trade hits. Both agents answer a
-    harder fight by healing more rather than by preventing more, and
-    both share `_quick_score`'s `prevented` term. That points at the
-    shared evaluator rather than at either agent.
+    Worth chasing: LURE USE DOESN'T MOVE (11.9% -> 12.0%) despite the
+    party pooling Lure far more often here (59% -> 77%) in a regime
+    built around not being able to trade hits. Both agents answer a
+    harder fight by healing more rather than preventing more, and both
+    share `_quick_score`'s `prevented` term -- pointing at the shared
+    evaluator, not either agent.
     """
     street = facility.sample_street(rng)
     for _ in range(40):

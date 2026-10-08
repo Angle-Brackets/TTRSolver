@@ -1,34 +1,24 @@
 """Telling one cog from another by the head render on its plate.
 
-Department and level are readable straight off the plate, but they do not
-identify a cog: only 8 of the 48 (department, level) pairs name a single
-cog, and the worst pairs allow five. The remaining evidence is the little
-3D render of the cog's head in the plate's slot.
+Department and level alone don't identify a cog: only 8 of 48 pairs name
+a single cog, the worst allow five. The remaining evidence is the
+plate's 3D head render.
 
-WHY A COLLECTED LIBRARY RATHER THAN SHIPPED ART
------------------------------------------------
-There is no per-cog icon in the game files to match against. `cogIcons`
-is the four department emblems; the per-cog images that turn up in the
-phase files (`flunky.jpg`, `spin-doctor.jpg`, ...) are texture skins for
-3D models, not flat icons. The slot holds a live render, so the reference
-has to be captured from a rendered frame.
+No per-cog icon ships in the game files to match against -- `cogIcons`
+is just the four department emblems, and the per-cog images in the phase
+files are texture skins, not flat icons. So the reference has to be a
+captured render, which works because the render's camera, light and
+teal backdrop are fixed: the same cog gives nearly the same pixels every
+time.
 
-That is less fragile than it sounds. The render uses a fixed camera, a
-fixed light and a constant teal backdrop, so the same cog produces very
-nearly the same pixels every time -- which is exactly the condition
-template matching wants.
+Labelling costs little: the plate narrows candidates to at most five, so
+each cog needs answering once, ever, while playing normally.
 
-It also does not need a grind. The plate already narrows the field to at
-most five candidates, so labelling is picking one of a handful, and each
-cog needs answering once ever. Play normally, label what shows up.
-
-WHAT IS STORED
---------------
-A signature per cog: the slot resized to a small fixed grid, with the
-teal backdrop masked out so the comparison is about the cog and not the
-proportion of background it happens to cover. Signatures live in a JSON
-index beside the PNG crops they came from, so a bad label can be
-inspected and deleted by hand.
+Stored per cog: the slot resized to a small fixed grid with the teal
+backdrop masked out, so comparison is about the cog, not how much
+background it covers. Signatures live in a JSON index beside the PNG
+crops they came from, so a bad label can be inspected and deleted by
+hand.
 """
 from __future__ import annotations
 
@@ -76,26 +66,19 @@ class Match:
     def confident(self) -> bool:
         """Whether this match is worth acting on.
 
-        Two rules, because a match with nothing to compare against is a
-        different kind of claim from one that beat an alternative.
-
         With a runner-up, `margin` does the work and the absolute
-        distance only has to be sane.
+        distance just has to be sane.
 
-        WITHOUT ONE, MARGIN IS INFINITY AND MEANS NOTHING. That is not a
-        hypothetical: the library starts empty and fills one cog at a
-        time, so for a long while every pool has exactly one known
-        candidate. A single Spin Doctor entry made *every* Lawbot of
-        level 6-10 match it -- Legal Eagle, Back Stabber, Big Wig alike
-        -- at maximum confidence, because there was no second entry to
-        be closer to. `margin > 0.02` is trivially satisfied by infinity.
+        WITHOUT ONE, MARGIN IS INFINITY AND MEANS NOTHING -- not
+        hypothetical: the library fills one cog at a time, so for a long
+        while every pool has exactly one known candidate, and a single
+        Spin Doctor entry once matched every Lawbot level 6-10 at
+        "confidence" for want of anything else to beat.
 
-        So an unverified match is held to a much tighter distance.
-        Measured on real plates: a correct match scores 0.000-0.028 and
-        a wrong cog 0.132-0.157, which MAX_DISTANCE at 0.22 admits
-        happily. MAX_UNVERIFIED_DISTANCE sits between the two, nearer
-        three times the worst correct reading than half the best wrong
-        one.
+        So an unverified match is held to MAX_UNVERIFIED_DISTANCE
+        instead: correct matches measure 0.000-0.028, wrong ones
+        0.132-0.157, and this threshold sits nearer triple the worst
+        correct reading than half the best wrong one.
         """
         if self.runner_up is None:
             return self.distance <= MAX_UNVERIFIED_DISTANCE
@@ -228,32 +211,28 @@ class HeadCatalogue:
         """The only cog left, when every known candidate is ruled out.
 
         The plate narrows a cog to at most five, and the library learns
-        them one at a time -- so there is a moment in every group where
-        all but one are known. If none of those match, the answer is the
-        remaining one, by deduction rather than resemblance. Nothing is
-        being guessed: it is the same reasoning as reading four names off
-        a list of five and taking the fifth.
+        them one at a time, so there is a moment in every group where
+        all but one are known. If none of those match, the remaining one
+        is the answer by deduction, not resemblance -- the same
+        reasoning as reading four names off a list of five.
 
-        This is why the head library does not have to be finished. The
-        last cog in each group never needs labelling, and cogs appear at
-        several levels, so one that is unknown in one group is often
-        deducible in another.
+        This is why the library never has to be finished: the last cog
+        in each group needs no label, and since cogs appear at several
+        levels, one unknown in one group is often deducible in another.
 
-        Refuses unless the deduction is airtight:
+        Refuses unless airtight:
 
         * exactly one candidate unknown -- two leaves a choice
         * at least one candidate known -- a lone unknown rules out
-          nothing and would be a guess dressed as a deduction
-        * every known candidate genuinely ruled out, at
-          MAX_UNVERIFIED_DISTANCE. Correct matches measure 0.000-0.028
-          and wrong ones 0.132-0.157, so "none of these is it" is a
-          statement the numbers actually support.
+          nothing
+        * every known candidate ruled out at MAX_UNVERIFIED_DISTANCE
+          (correct matches measure 0.000-0.028, wrong ones 0.132-0.157)
 
-        Deliberately does NOT record what it works out. A signature is
+        Deliberately does NOT record what it deduces: a signature is
         written once and consulted forever, so a wrong entry poisons
         every later match, while a wrong deduction costs one battle.
-        `read_battle --label` is where a human turns this into a stored
-        entry.
+        `read_battle --label` is where a human turns a deduction into a
+        stored entry.
         """
         unknown = [c for c in among if c not in self.entries]
         known = [c for c in among if c in self.entries]

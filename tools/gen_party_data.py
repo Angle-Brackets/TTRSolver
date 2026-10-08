@@ -4,24 +4,20 @@
 
 For each sampled party position this runs a **deliberately wide** search
 and records what it thought of every plan on its shortlist. One position
-therefore yields:
+therefore yields a VALUE label (the position's searched value, for P1)
+and a full RANKING over ~100 plans, for P0 -- not an argmax, since the
+search already computes a value for every shortlisted plan, so the
+ranking is free once it has run and is far more signal per unit of
+compute than a single best-move label.
 
-  * a VALUE label -- the position's searched value, for P1;
-  * a full RANKING over ~100 plans, for P0. Not an argmax. A search
-    already computes a value for every shortlisted plan, so the ranking
-    is free once the search has run, and it is far more signal per unit
-    of compute than a single best-move label.
-
-THE TEACHER IS WIDER THAN THE STUDENT, DELIBERATELY
----------------------------------------------------
-`docs/ml-design.md` §2b: labels come from search, and search only ranks
-what its shortlist admitted. Training on the shipped shortlist would
-teach the policy today's blind spots -- including the `QUICK_SCORED_PER_TRACK`
-prefix bug that hid 2 Foghorn + 2 Aoogah for four commits.
-
-So generation runs at `--teacher-plans` / `--teacher-per-track` well
-above the defaults and pays for it in wall clock. The student is allowed
-to be narrow. The teacher is not.
+THE TEACHER IS WIDER THAN THE STUDENT, DELIBERATELY: `docs/ml-design.md`
+§2b notes labels come from search, and search only ranks what its
+shortlist admitted. Training on the shipped shortlist would teach the
+policy today's blind spots -- including the `QUICK_SCORED_PER_TRACK`
+prefix bug that hid 2 Foghorn + 2 Aoogah for four commits. So generation
+runs at `--teacher-plans` / `--teacher-per-track` well above the shipped
+defaults and pays for it in wall clock. The student may be narrow; the
+teacher may not.
 
 Output is a JSON file of {state, plans, values}. States round-trip
 through `visualizer.bridge`, the same as `fit_heuristic`'s cache, so

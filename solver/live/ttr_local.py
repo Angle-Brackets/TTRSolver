@@ -1,51 +1,35 @@
 """Client for Toontown Rewritten's Local (Companion App) API.
 
-TTR's own client can serve read-only JSON about your toon over HTTP on
-localhost, once you switch it on in the game's options. It is official and
-consent-gated: the game shows a prompt naming the `User-Agent` you send,
-and you accept it in-game before anything is handed over.
+TTR's own client serves read-only JSON about your toon over HTTP on
+localhost, once enabled in the game's options. It is consent-gated: the
+game shows a prompt naming the `User-Agent` you send, accepted in-game
+before anything is handed over.
 
-WHAT THIS CAN AND CANNOT DO
----------------------------
-It cannot see the battle. There is no endpoint for the cogs you are
-fighting, their levels, their health, or whose turn it is -- every
-plausible name (`/battle.json`, `/combat.json`, `/cogs.json`, ...) returns
-404, and the seventeen that exist are about your toon and the world, not
-the fight. That looks deliberate rather than accidental: the API is gated
-behind a consent prompt precisely because TTR decided what third parties
-may read, and live combat is on the other side of that line.
+WHAT THIS CAN AND CANNOT DO. It cannot see the battle -- every
+battle-shaped endpoint (`/battle.json`, `/combat.json`, `/cogs.json`, ...)
+returns 404, and the seventeen that exist are about your toon and the
+world. That looks deliberate: consent gates what third parties may read,
+and live combat is on the other side of it.
 
-So this fills in the half of the solver's setup that is about *you*:
-
-  laff            exact, current and max
-  gag tracks      which are unlocked, to what level, and whether organic
-  location        zone / neighborhood / district
-  invasion        what is invading your district, if anything
-
+So this fills in the half of setup that is about *you*: laff (exact,
+current and max), unlocked gag tracks and organic, location, invasion.
 The cogs you are facing still have to be entered by hand.
 
-One further gap: `/gags.json` reports the highest level unlocked in each
-track and its experience, but *not how many of each gag you are carrying*.
-So this narrows the picker to gags you could legally hold and gets organic
-right; the counts remain yours to set. `available_gags()` returns the
-former and says nothing about the latter, deliberately -- inventing counts
-here would be exactly the kind of plausible-looking stand-in the project
-rules out.
+`/gags.json` gives the highest level unlocked per track, not how many of
+each gag you're carrying -- `available_gags()` narrows the picker to
+what you could legally hold and nothing more; inventing a count would be
+exactly the plausible-looking stand-in the project rules out.
 
-PROTOCOL TRAPS
---------------
-Two things will silently defeat you, both learned the hard way:
+PROTOCOL TRAPS, both learned the hard way:
 
-- The `Host` header must be `localhost:<port>`. Sending `127.0.0.1:1547`
-  or `[::1]:1547` does not produce an error -- the server drops the
-  connection with no response at all, which reads exactly like the game
-  not running. This is anti-DNS-rebinding, and it is why every URL here
-  is built with the literal hostname `localhost`.
-- The API only listens once the setting is enabled in-game. Before that
-  the port is closed, which again looks like "no game running".
+- `Host` must be `localhost:<port>` exactly. `127.0.0.1` or `[::1]` gets
+  the connection dropped with no response -- anti-DNS-rebinding, and
+  indistinguishable from the game not running.
+- The API only listens once enabled in-game; before that the port is
+  closed, which looks the same.
 
-`NotRunning` deliberately mentions both, because from the outside they are
-indistinguishable.
+`NotRunning` mentions both, since from the outside they can't be told
+apart.
 """
 from __future__ import annotations
 
@@ -65,12 +49,10 @@ PORTS = tuple(range(1547, 1553))
 
 DEFAULT_USER_AGENT = "TTRSolver (Toontown battle advisor)"
 
-# Generous on purpose. The first request bearing a given Authorization
-# token costs about three seconds against a live client -- measured at
-# 2.9s, versus 1.8ms once the same token has been seen before -- and if
-# the game decides to raise its consent prompt, the request waits on a
-# human. A tight timeout here fails in the most misleading way possible,
-# looking exactly like the game not running.
+# Generous on purpose: the first request on a new Authorization token
+# costs ~3s against a live client (2.9s vs 1.8ms once seen before), and
+# if the game raises its consent prompt the request waits on a human. A
+# tight timeout here fails the same way the game not running would.
 DEFAULT_TIMEOUT = 30.0
 
 # Port scanning is a different question and wants a short fuse.
@@ -143,14 +125,12 @@ class Snapshot:
     def merits_gained(self, previous: "Snapshot") -> Dict[str, int]:
         """Merits added to the toon's own disguises between two snapshots.
 
-        This is the closest the Local API gets to noticing a battle, and
-        it is a weak signal worth being honest about. It fires only for
-        departments whose suit you already own, only for that
-        department's cogs, and the amount reflects cog levels rather than
-        how many were in the fight -- so it can say "a Sellbot fight just
-        paid out" but never which cogs, how many, or whether you won
-        cleanly. Observed going 0 -> 3 the moment a Sellbot street battle
-        ended.
+        The closest the Local API gets to noticing a battle, and a weak
+        signal: it fires only for departments whose suit you already
+        own, and the amount reflects cog levels rather than how many
+        fought -- it can say "a Sellbot fight just paid out" but never
+        which cogs, how many, or whether you won. Observed going 0 -> 3
+        the moment a Sellbot street battle ended.
         """
         gained = {}
         for dept, (current, _target) in self.merits.items():
@@ -196,10 +176,9 @@ class Snapshot:
     def invasion_text(self) -> str:
         """The invasion as a person would say it, or "" for none.
 
-        HERE RATHER THAN AT EACH CALLER. `invasion` is a
-        `(cog, count, mega)` tuple, and the panel was rendering it with
-        `str()` -- which put a raw Python repr on screen,
-        `('Spin Doctors', 3000, False)`, over a live battle.
+        Centralised here because `invasion` is a `(cog, count, mega)`
+        tuple, and rendering it with plain `str()` put a raw repr like
+        `('Spin Doctors', 3000, False)` on screen.
         """
         if not self.invasion:
             return ""

@@ -211,48 +211,34 @@ def build_env(state: BattleState, horizon, rng):
 # score cogs alone.
 LAFF_WEIGHT = 0.5
 
-# WHAT THE POUCH IS WORTH when a playout stops before the fight does. In a
-# building the next floor's cogs are unknown, so a playout ends with the
-# floor on screen -- and without this the gags left over were worth
-# nothing, so a Foghorn (95%) beat a Whole Cream Pie (90%) on a lone
-# 32 hp Tightwad, spending one of two Foghorns on a floor that was nearly
-# won. A player knows more floors are coming even without knowing which
-# cogs, and keeps the Foghorn.
+# WHAT THE POUCH IS WORTH when a playout stops before the fight does: in
+# a building the next floor's cogs are unknown, so without this, gags
+# left over were worth nothing (a Foghorn beat a Whole Cream Pie on a
+# lone 32hp Tightwad, spending one of two Foghorns on an already-won
+# floor). Weight, in cogs, on the remaining pouch's worth as a fraction
+# of its worth when the decision was made (`pouch_value`); keyed by
+# fight kind, since a horizon fight plays every round and its pouch
+# value is already in the result.
 #
-# The weight, in cogs, on the remaining pouch's worth as a fraction of its
-# worth when the decision was made (see `pouch_value`). Keyed by fight
-# kind; a fight with a horizon plays every round, so its pouch's worth is
-# already in the result and it gets none.
-#
-# Measured with the owner's toon (54 laff, 40-gag pouch, their tracks) in
-# 600 paired Daisy Gardens buildings, against 413 cleared at weight 0:
-# 1 -> 412, 1.5 -> 414, 2 -> 411, 3 -> 407 (all p > 0.5), 6 -> 378
-# (+25/-60, p < 0.001: it hoards). Generic solo buildings at 3: 54 vs 55.
-# So it changes outcomes by nothing measurable up to 3 and harms at 6.
-# Set at 2: just past the ~1.7 that turns the lone-Tightwad Foghorn into
-# a Whole Cream Pie, well inside the harmless range. What it buys is
-# advice that spends the gag an expert would, not more clears in a
-# simulator whose buildings are decided by laff.
+# Measured, owner's toon, 600 paired Daisy Gardens buildings against 413
+# cleared at weight 0: 1/1.5/2/3 all within noise of 0 (407-414, p>0.5),
+# 6 hoards and loses (378, p<0.001). Set at 2: just past the ~1.7 that
+# turns the lone-Tightwad Foghorn into a Cream Pie, well inside the
+# harmless range -- it buys advice that spends the gag an expert would,
+# not more clears in a simulator that buildings decide by laff alone.
 POUCH_WEIGHT = {"facility": 2.0}
 
 
-# WHAT A GAG IS WORTH LATER: the damage it could still deal.
+# WHAT A GAG IS WORTH LATER: worth = damage per cog x cogs it can expect
+# to hit (1 for single-target, GROUP_REACH for group). The group
+# advantage scales with how hard the gag hits, which a flat "group = x2"
+# got backwards: a Foghorn (~38 x 2.5) beats a Whole Cream Pie (~38) for
+# a lone 32hp cog, but an Aoogah (~15 x 2.5) loses to a Safe (~65) for a
+# cog on 1hp. Damage is the middle of the gag's range in the wiki-sourced
+# tables (organic where the toon has it) -- the board knows a track's
+# training level, not the points within it.
 #
-#     worth = damage per cog x the cogs it can expect to hit
-#
-# A single-target gag hits 1. A group gag hits GROUP_REACH, the cogs
-# typically standing when one is thrown. So the group advantage scales
-# with how hard the gag hits, which is what the owner's cases need:
-# a Foghorn (~38 x 2.5) is worth far more than a Whole Cream Pie (~38),
-# so a lone 32 hp cog gets the pie; an Aoogah (~15 x 2.5) is worth less
-# than a Safe (~65), so a cog on 1 hp gets the Aoogah, not the Safe; and
-# Aoogah vs Seltzer is close, as it should be. A flat "group = x2" got
-# the second case backwards. Damage is the middle of the gag's range in
-# the wiki-sourced tables (organic where the toon has it): the board
-# knows a track's training level, not the points within it.
-#
-# [OWNER] 2.5 -- the owner's figure for how many cogs a group gag
-# typically hits. Not measured.
+# [OWNER] 2.5, the typical cogs a group gag hits. Not measured.
 GROUP_REACH = 2.5
 # SCARCITY BY WHAT IS LEFT, not by what could be carried: the k-th last
 # copy of a gag counts (1 + LAST_COPY / k) times -- spending one of two

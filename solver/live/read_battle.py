@@ -109,10 +109,8 @@ def report(records: List[dict]) -> None:
                   f"(margin {r['department_margin']:.2f} < "
                   f"{MIN_DEPARTMENT_MARGIN})")
         if r["level"] is None:
-            # SAY WHICH GATE FAILED. This printed the score against
-            # MIN_LEVEL_SCORE whichever test failed, so a margin failure
-            # read as "score 0.78 < 0.55" -- a false statement that sends
-            # you looking at the wrong threshold.
+            # Report whichever gate actually failed -- score or margin --
+            # rather than always quoting the score against MIN_LEVEL_SCORE.
             score, margin = r["level_score"], r.get("level_margin")
             if score < MIN_LEVEL_SCORE:
                 print(f"           level unreadable: score {score:.2f} "
@@ -129,17 +127,13 @@ def comparison_sheet(frame, plate, pool: List[str],
                      out: Optional[Path] = None) -> Optional[Path]:
     """The head on screen, beside the art of every candidate.
 
-    Labelling from the plate alone is guesswork, and it produced a wrong
-    answer the first time it was tried: the portrait is 65x45 pixels,
-    which is enough to see a shape and not enough to name it. Put it
-    next to `visualizer/assets/cog-<dept>-<name>.png` and the same
-    decision becomes obvious -- a Lawbot read as an Ambulance Chaser was
-    plainly a Spin Doctor once the two were side by side, green head and
-    brown hair against white with a red cross.
+    The plate portrait is 65x45 pixels -- enough to see a shape, not
+    enough to name it from memory. Side by side with
+    `visualizer/assets/cog-<dept>-<name>.png` the choice gets obvious.
 
     Returns the path written, or None if PIL is missing or no candidate
-    art exists. The caller must stay usable either way: this is an aid
-    to the person answering, not a step in the pipeline.
+    art exists -- callers must stay usable either way, since this is an
+    aid to the person answering, not a pipeline step.
     """
     try:
         from PIL import Image, ImageDraw
@@ -232,16 +226,11 @@ def status(catalogue: HeadCatalogue) -> None:
 def _write_png(frame, path: Path) -> None:
     """Write an RGB array as a PNG, using zlib and struct only.
 
-    Deliberately not Pillow. `vision.py` is the one module allowed a
-    third-party import and numpy is all it gets; adding an imaging
-    library so that a diagnostic can save a file would put a new package
-    between the readers and every machine that runs them.
-
-    The byte constants are built with `bytes([...])` rather than written
-    as escapes. That is not style: this function was first written with
-    them and the escapes were collapsed in transit, so the signature
-    went out as UTF-8 encoded 0x89 and a stray NUL landed in the source.
-    Numbers cannot be mangled that way.
+    Deliberately not Pillow: numpy is the one third-party import this
+    package allows (in `vision.py`), and a diagnostic save shouldn't add
+    another. Byte constants are built with `bytes([...])` rather than
+    escapes, which have been seen mangled in transit (e.g. the signature
+    byte going out as UTF-8-encoded).
     """
     import struct
     import zlib
@@ -277,23 +266,18 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("image", nargs="?", help="screenshot to read")
     parser.add_argument("--live", action="store_true",
                         help="grab the game window now instead of reading a "
-                             "saved screenshot. This is the path the panel "
-                             "uses, and it can fail where a saved file "
-                             "succeeds -- the capture is scoped to the "
-                             "window and its size drives every threshold")
+                             "saved screenshot -- the path the panel uses, "
+                             "scoped to the window so its size drives every "
+                             "threshold")
     parser.add_argument("--label", action="store_true",
                         help="ask about cogs the library cannot name")
     parser.add_argument("--status", action="store_true",
                         help="show how much of the library is filled in")
     parser.add_argument("--dir", help="head library directory")
     parser.add_argument("--save", metavar="PATH",
-                        help="write the live grab to PATH as well as "
-                             "reading it. The frame is scoped to the game "
-                             "window, so it is what the readers actually "
-                             "see -- a full-screen screenshot taken by "
-                             "hand is a different image, and calibrating a "
-                             "threshold on the wrong one has gone wrong "
-                             "here before")
+                        help="also write the live grab to PATH -- scoped to "
+                             "the game window, unlike a full-screen "
+                             "screenshot taken by hand")
     args = parser.parse_args(argv)
 
     catalogue = HeadCatalogue(Path(args.dir) if args.dir else None)
@@ -302,11 +286,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
 
     if args.live:
-        # THE PATH THE PANEL USES. A saved screenshot is a plain PNG of
-        # the whole screen; the live grab is scoped to the game window and
-        # every size threshold in `find_plates` is a fraction of what it
-        # returns. So the two can disagree, and when they do this is the
-        # only way to see it.
+        # The path the panel uses: a saved screenshot is the whole screen,
+        # but the live grab is scoped to the game window, and every size
+        # threshold in `find_plates` is a fraction of that. The two can
+        # disagree, hence this diagnostic.
         from .watch import Capture
         from .window import game_rect
 
@@ -324,13 +307,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         if rect:
             left, top, right, bottom = rect
             print(f"window size : {right - left}x{bottom - top}")
-        # THE PANEL'S OWN GATES, not just find_plates. The watcher does
-        # not call find_plates directly: it goes through `locate_plates`,
-        # which is gated on a subsampled `any_plates`, and then requires
-        # the gag menu as well before it will call it a battle. A reader
-        # that finds a plate here while the panel says "nothing on screen"
-        # means one of those gates is the difference, and each is a
-        # different bug.
+        # The panel's own gates, not just find_plates: the watcher goes
+        # through `locate_plates` (gated on subsampled `any_plates`) and
+        # also requires the gag menu before calling it a battle. If a
+        # plate shows here but the panel says nothing is on screen, one
+        # of these gates is the difference.
         from .vision import any_plates, locate_plates
         from .gagpanel import find_panel
 
@@ -350,11 +331,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"gag menu    : {'found ' + str(panel_box) if panel_box is not None else 'NOT FOUND'}")
         print(f"              a battle needs plates AND the menu to start")
         if panel_box is None:
-            # WHICH ROW, AND BY HOW MUCH. `find_panel` needs all seven
-            # track colours to form a run of MIN_RUN_FRAC of the frame
-            # width, and returns None if one is missing -- without
-            # saying which. A colour the game has shifted and a band too
-            # short are different bugs with the same symptom.
+            # find_panel needs all seven track colours to form a run of
+            # MIN_RUN_FRAC of the frame width and just returns None if one
+            # is missing -- so show each row's run to say which failed.
             import numpy as np
 
             from .gagpanel import (COLOUR_TOLERANCE, MIN_RUN_FRAC,
@@ -376,10 +355,9 @@ def main(argv: Optional[List[str]] = None) -> int:
                         marks = np.flatnonzero(hit[y])
                         span = int(marks[-1] - marks[0]) + 1
                         lit = int(marks.size)
-                # `_qualifies` is what find_panel uses: an unbroken run,
-                # OR a span that is wide and mostly filled. Reporting the
-                # longest run alone said FAILS for a row the real test
-                # accepts, which is worse than saying nothing.
+                # Use the real test (`_qualifies`: an unbroken run, or a
+                # span that's wide and mostly filled) -- the raw run length
+                # alone can say FAILS for a row find_panel accepts.
                 passed = any(_qualifies(hit[y], need) for y in rows)
                 cover = (lit / span) if span else 0.0
                 print(f"                {track.value:<8} run {best:>4}px  "
@@ -398,10 +376,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                 x0, y0 = r["box"][0], r["box"][1]
                 print(f"   {r['w']}x{r['h']} at ({x0},{y0})  {r['why']}")
         if not plates:
-            # WHAT COLOUR IS UP THERE. When no candidate forms at all the
-            # mask is the suspect, and the only way to tune it is to know
-            # what it was looking at. Plates sit in the upper middle of
-            # the frame, so sample that band and report the most
+            # No candidate at all means the mask is the suspect; sample
+            # the upper-middle band where plates sit and show the most
             # teal-leaning pixels in it.
             import numpy as np
 

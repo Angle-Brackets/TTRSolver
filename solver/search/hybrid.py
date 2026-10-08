@@ -1,90 +1,61 @@
 """PPO proposes, the search's scorer judges.
 
 The policy costs a third of a millisecond a decision and the party
-search costs a hundred, so there is room to spend a little of that gap
-checking the policy's own suggestions. This samples a few joint plans
-from the trained policy and keeps whichever one `_quick_score` likes
-best.
+search costs a hundred, so there's room to check the policy's own
+suggestions. This samples a few joint plans from the trained policy and
+keeps whichever one `_quick_score` likes best.
 
-Measured over 180 HELD-OUT buildings -- seeds never tuned against,
-which matters because the tuned set flattered this badly:
+Measured over 180 HELD-OUT buildings (seeds never tuned against -- the
+tuned set flattered this badly):
 
     agent                floors  finished   plans/second
     plain PPO              2.44     61.7%           2266
     climb, budget 8        2.49     66.1%            656
-    climb, budget 16       2.48     66.1%            467
-    best-of-16 sampling       -         -            106
     full search            2.48     67.8%              1
 
-`climb` recovers about two thirds of the distance from the policy to
-the search for roughly double the policy's cost, and it is
-deterministic -- it walks the policy's ranked logits rather than
-sampling, so it returns the same plan every time.
-
-THE SEARCH IS STILL AHEAD, by 1.7 points. On the tuned seeds this
-scored 69.4% against the search's 65.0% and looked like a win; on fresh
-buildings it is 66.1% against 67.8%. Same code, same budget. Anything
-measured on the set it was chosen on is worth re-running elsewhere.
-
-BUDGET 8 BEATS BUDGET 16 on the tuned set (69.4% against 66.7%) and
-ties it here. `_quick_score` is an approximation, so climbing it harder
-optimises the proxy rather than the game -- more budget is not
-automatically better, which is the tell that the scorer, not the
-search strategy, is now the ceiling.
+`climb` recovers about two thirds of the distance from policy to search
+for roughly double the policy's cost, and is deterministic (walks the
+policy's ranked logits rather than sampling). The search is still ahead
+by 1.7 points -- on the tuned seeds this looked like a win (69.4% vs
+65.0%) but that reverses on fresh buildings; always re-run a tuned
+result elsewhere. Budget 16 ties budget 8 here despite beating it on the
+tuned set: `_quick_score` is an approximation, so climbing it harder
+optimises the proxy, not the game -- the scorer, not the search
+strategy, is the ceiling.
 
 WHERE THE REMAINING GAP IS
 --------------------------
-Usage over 80 held-out buildings, climb at budget 8 against the search:
+Usage over 80 held-out buildings, climb at budget 8 vs. the search:
+climb holds 2.1% of decisions against the search's 11.0%, throws 13%
+more gags (2159 vs 1918), and skews to level 4 (38.1% vs 27.9%) where
+the search prefers 5-6. The common cause: `_quick_score` pays for damage
+landed, so an action dealing none scores near zero whatever it saves --
+on seed 31003 the search heals 3 times and holds the party at 48-55
+laff, while climb heals twice and loses the building.
 
-    holds      2.1%   11.0%      <- the big one
-    throw     44.4%   35.1%
-    squirt    20.3%   23.4%
-    sound     11.4%   14.1%
-    drop      10.0%    8.2%
-    lure       7.8%    9.5%
-    toon_up    4.8%    6.7%
-    trap       1.3%    2.9%
-
-CLIMB ALWAYS SWINGS. It declines to act on 2.1% of decisions against
-the search's 11.0%, throws 13% more gags over the same buildings (2159
-against 1918), and skews to level 4 (38.1% against 27.9%) where the
-search prefers 5 and 6. More gags, each weaker, and almost never a
-hold.
-
-Every one of those differences is the same thing: `_quick_score` pays
-for damage landed, so an action that deals none scores near zero
-whatever it saves. Healing is the visible case -- on seed 31003 the
-search heals three times in seven rounds and holds the party at 48-55
-laff, while the climb heals twice, the second time at [2, 17, 2], and
-loses the building with two toons carrying Toon-Up 7.
-
-A caution about the obvious fix, learnt the hard way: hold-variants
-were forced into the SEARCH's shortlist once and play got worse, 2.07
-floors to 1.83, and that was written down as "the overkill is not a
-bug". It was ranked by `_quick_score` too. What that experiment
-actually showed is that holding *as this scorer judges it* is bad --
-the search's own 11% comes from sampled rollouts, which can see a
-conserved gag spent later.
+The obvious fix doesn't work: forcing hold-variants into the SEARCH's
+shortlist made play worse (2.07 floors to 1.83) because they're ranked
+by `_quick_score` too. The search's own 11% comes from sampled
+rollouts, which can see a conserved gag spent later -- holding *as this
+scorer judges it* is genuinely bad.
 
 WHY IT WORKS
 ------------
 PPO is a better PROPOSAL DISTRIBUTION than the search's enumeration.
-`party_search.plans` builds joint plans combinatorially and then
-truncates, and that truncation is where a long line of this project's
-bugs have lived -- a stratified cut that dropped every Sound plan, a
-shortlist that dropped Trap in 39 of 39 positions, a lexicographic
-prefix that dropped the best line outright. The policy suggests a
-handful of plausible plans directly and the scorer only has to rank
-those.
+`party_search.plans` builds joint plans combinatorially and truncates,
+which is where a long line of bugs have lived (a stratified cut that
+dropped every Sound plan, a shortlist that dropped Trap in 39 of 39
+positions, a lexicographic prefix that dropped the best line outright).
+The policy suggests a handful of plausible plans directly and the
+scorer only ranks those.
 
-THE JUDGE MUST NOT BE THE PROPOSER
-----------------------------------
-Ranking the same samples with PPO's own critic achieves nothing: 57.8%
-at four plans and 58.3% at twelve, against 58.9% for plain argmax. It
-asks the network to catch its own mistakes, and a network that could
-would not be making them. `docs/ml-design.md` records the learned-leaf
-evaluator losing in place for the same reason. `_quick_score` is an
-independent opinion and that is the whole point of it.
+THE JUDGE MUST NOT BE THE PROPOSER. Ranking the same samples with PPO's
+own critic achieves nothing (57.8% at four plans, 58.3% at twelve, vs.
+58.9% for plain argmax) -- it asks the network to catch its own
+mistakes, and a network that could wouldn't be making them
+(`docs/ml-design.md` records the same failure for a learned-leaf
+evaluator). `_quick_score` is an independent opinion, which is the
+point of it.
 
 Needs numpy, and says so by returning False from `available()` rather
 than raising -- the same contract `search/policy.py` follows. Torch
@@ -335,39 +306,22 @@ def _judge(state: BattleState, plan, deep: bool) -> float:
 def _judge_uncached(state: BattleState, plan, deep: bool) -> float:
     """Rank a plan. One round, or two.
 
-    `_quick_score` scores a single round, which is why a trap scores
-    near zero and why climbing it harder stops paying: it cannot see
-    anything that arrives next round.
+    `_quick_score` scores a single round, so a trap scores near zero and
+    climbing it harder stops paying -- it can't see next round. It takes
+    the expectation over accuracy rolls, not the all-hit score this used
+    to compute (that preferred the biggest printed number, reliably the
+    least likely to land, and fixing it moved the CEO 69.5% -> 75.0%).
 
-    NOT "all-hit", which this said for a long time after it stopped
-    being true. It takes the expectation over the accuracy rolls, and
-    that change is why the CEO went 69.5% -> 75.0%: an all-hit score
-    prefers the biggest number printed on a gag, which is reliably the
-    least likely one to land. The horizon is what is missing here, not
-    the dice. `deep` plays the plan, then
-    lets `greedy_plan` answer for the round after, and counts that at
-    LOOKAHEAD_DISCOUNT.
+    `deep` plays the plan, lets `greedy_plan` answer for the round after,
+    and counts that at LOOKAHEAD_DISCOUNT -- the cheapest imitation of
+    `party_search`'s multi-round `rollout_value`.
 
-    This is what the search has and the climb did not. `party_search`
-    scores its plans with `rollout_value`, several rounds of play; this
-    is the cheapest possible imitation of it.
-
-    IT IS OFF, having been measured. Over 180 held-out buildings:
-
-        1-ply, budget 8      66.7% finished   0.61 ms
-        1-ply, budget 12     65.0%            0.73 ms
-        2-ply, budget 8      63.9%            1.82 ms
-        2-ply, budget 12     63.9%            2.38 ms
-
-    Nearly three points worse at three times the cost. The second round
-    is played by `greedy_plan`, which is a myopic proxy itself, so this
-    adds a GUESS about the next round to a real evaluation of this one
-    and weights the guess at 0.7. A lookahead is only as good as the
-    policy that plays it forward.
-
-    Third judge improvement to fail: trap credit was worth +0.6 (noise),
-    track probes -2.8, this -2.8. Plain one-ply `_quick_score` at budget
-    8 has beaten all of them.
+    OFF, measured: over 180 held-out buildings, 1-ply/budget 8 finishes
+    66.7% in 0.61ms vs. 2-ply/budget 8's 63.9% in 1.82ms -- nearly three
+    points worse at three times the cost, because the lookahead's second
+    round is itself only `greedy_plan`'s myopic guess. Third judge
+    improvement to fail (after trap credit +0.6 noise and track probes
+    -2.8); plain one-ply `_quick_score` at budget 8 beats all of them.
     """
     from . import party_search as ps
 
@@ -450,6 +404,26 @@ advising; nothing else should depend on it.
 # rule -- standard play should not need consumables -- falls out of the
 # prices rather than needing a rule about buildings.
 OFFER_UNITES = True
+"""Whether `climb` may open a round by using a unite.
+
+A ROUND IS TWO DECISIONS when a unite is available -- use one, then
+throw -- since a unite costs no action and applies immediately in
+planning. [OWNER, from play; see solver/unites.py.]
+
+Modelled as a state TRANSFORMATION wrapped around the ordinary choice,
+not an action-table entry: 246 actions times up to thirteen unite
+options is unusable, while wrapping costs one extra evaluation per
+candidate, only when one is off cooldown and not obviously wasted.
+
+Each candidate is scored on the transformed state and charged
+`unites.UNITE_PRICE` (ten times a pink slip) -- a PREFERENCE, not a
+tunable, so this flag is about whether the option exists, not how
+eagerly it's taken.
+
+Was off until measured: a solo VP at 16-20 cogs/round read 0.0% for
+every policy, weight and observation version tried, though the owner
+beats that fight. Unites were the unmodelled difference.
+"""
 
 # An SOS card cannot be PROPOSED, only played. The whole `climb` menu is
 # indices into `env.ACTIONS`, and no SOS has an index -- adding one would
@@ -465,31 +439,30 @@ OFFER_UNITES = True
 # Off until measured. `party_search` prices a call at `SOS_PRICE`, which
 # is deliberately steep enough that one wins only where it dominates.
 OFFER_SOS = True
-"""Whether `climb` may open a round by using a unite.
-
-A ROUND IS TWO DECISIONS when a unite is available -- use one, then
-throw -- because a unite costs no action and applies immediately in the
-planning phase. [OWNER, from play; see solver/unites.py.]
-
-Modelled as a state TRANSFORMATION wrapped around the ordinary choice,
-never as an entry in the action table. The table has 246 actions and
-there are up to thirteen unite options; multiplying them is unusable,
-while wrapping costs one extra evaluation per candidate and only when
-one is off cooldown and not obviously wasted.
-
-Each candidate is scored on the transformed state and charged
-`unites.UNITE_PRICE`, which is ten times a pink slip. That price is a
-PREFERENCE, not a tunable -- see the note on it -- so this flag is
-about whether the option exists at all, not about how eagerly it is
-taken.
-
-OFF by default until measured. The question it exists to answer: a solo
-VP at 16 and 20 cogs a round reads 0.0% for every policy, weight and
-observation version tried, while the owner beats that fight. Unites are
-the difference nobody has modelled.
-"""
 
 PROBE_CHEAPEST_KILL = True
+"""Offer the SMALLEST gag that kills each cog, alongside the policy's.
+
+The scorer already prefers the cheap kill but never gets the chance to
+say so: on a lone level-1 Cold Caller (6hp) it rates a Cupcake at 129.5
+over a Storm Cloud's 118.5, but `climb` only judges what the policy
+proposes, and the policy's top three were all big gags. `_track_key`
+probing doesn't cover this either -- it offers each TRACK's biggest by
+the policy's ranking, not the smallest that finishes the job; the gap
+is size, not track.
+
+One entry per live cog (bounded by the board, not the pouch), only when
+something in the pouch kills it outright.
+
+MEASURED, paired, 250 runs/cell then 300 held out: vp+5slips 81.2% ->
+82.0% (+1/-0, p=1.00), vp+0slips 48.8% -> 54.4% (+24/-3, p=0.0002),
+buildings 16.0% -> 21.6% (+30/-9, p=0.0008). Seven points on both
+no-slip cells, and it replicates. Doesn't save gags (11.2 vs 11.4/run)
+-- it wins more rounds outright, since the smallest kill leaves the
+bigger gag for the cog that needs it. Pays most with no slip to fall
+back on, the opposite of the board that found it (five slips; the real
+fix there was `FIRE_PRICE`'s floor).
+"""
 
 # The same idea for LURE, which `_cheapest_kills` deliberately skips
 # because a lure deals no damage and "kills it" does not apply.
@@ -564,41 +537,6 @@ SOS_CHARGED_TO_BUDGET = False
 # Reported from live play: a lone trapped level 5 Ambulance Chaser with
 # a Trapdoor, advised a GROUP Small Magnet.
 PROBE_LURE_ON_TRAP = True
-"""Offer the SMALLEST gag that kills each cog, alongside the policy's.
-
-The scorer already prefers the cheap kill and never gets the chance to
-say so. On a lone level 1 Cold Caller with 6 hp it rates a Cupcake at
-129.5 and a Storm Cloud at 118.5 -- it knows -- but `climb` only ever
-judges what the policy proposes, and the policy's top three were all
-big gags. That is the same shape as the pink slip collapse: a menu with
-no cheap option on it, and a judge blamed for a proposal it never saw.
-
-`_track_key` probing does not cover this. It offers the best of each
-TRACK by the policy's own ranking, which on a 6 hp cog is the biggest
-Throw and the biggest Squirt, not the smallest one that finishes the
-job. The distinction the menu is missing is not track, it is size.
-
-One entry per live cog, so the cost is bounded by the board rather than
-the pouch, and only when something in the pouch actually kills it
-outright.
-
-MEASURED, paired on identical seeds, 250 runs a cell then 300 held out:
-
-    cell             off     on    held out      paired (held out)
-    vp + 5 slips   81.2%  82.0%   84.3 -> 84.7   +1/-0    p=1.00
-    vp + 0 slips   48.8%  54.4%   46.7 -> 53.7   +24/-3   p=0.0002
-    buildings      16.0%  21.6%   17.3 -> 24.3   +30/-9   p=0.0008
-
-Seven points on both no-slip cells, and it replicates. Note it does NOT
-save gags -- 11.2 against 11.4 a run, 17.4 against 17.8 -- so this is
-not conservation. It wins more rounds outright, because spending the
-smallest thing that kills leaves the bigger gag for the cog that needs
-it, and the run lasts long enough to throw more of them.
-
-It pays most where there is no slip to fall back on, which is the
-opposite of where it was found: the board that prompted it had five
-slips and the fix that mattered there was `FIRE_PRICE`'s floor.
-"""
 
 
 def _sos_probes(state, seat: int):
@@ -832,91 +770,45 @@ def _track_key(entry):
 PROBE_WHEN_DEGENERATE = True
 """Probe the tracks when the whole top-k is ONE kind of move.
 
-`probe_tracks` is decided per CALL and defaults to party-only, because
-in solo the extra reach mostly gives an approximate scorer more room to
-act on its errors. This is decided per SEAT and asks a narrower
-question: did the policy just hand the judge a menu with no choice on
-it?
+Decided per SEAT (unlike `probe_tracks`, decided per CALL and defaulting
+to party-only): did the policy hand the judge a menu with no choice on
+it? When every top-k entry shares a `_track_key`, the judge can only
+order variants of one move, however badly it scores.
 
-When every entry in the top-k shares a `_track_key`, the judge is
-choosing between orderings of one move and cannot see an alternative,
-however badly the one on offer scores.
+TEN PINK SLIPS DO EXACTLY THAT: a fire keys as (None, False), so ten of
+them collapse to one entry and the top-3 is three fires. The policy then
+fires every round, which costs a ROUND (~15 laff with cogs awake) for no
+gag -- solo VP at 8 cogs/round went from 49.5% with an empty slip pocket
+to 0.0% with ten in it.
 
-TEN PINK SLIPS DO EXACTLY THAT. A fire keys as (None, False), so all
-of them collapse to one entry and the top-3 is three fires. The policy
-then fires every round, and since a slip costs no gag but does cost a
-ROUND -- about fifteen laff with the cogs awake -- it met the back half
-of the VP with no laff left. Solo VP at 8 cogs a round went from 49.5%
-with an empty slip pocket to 0.0% with ten in it.
+Solo VP, 8 cogs/round, 300 runs/cell selection then 500 held out:
+probes-off/-always/degenerate-only win rates are 56.3%/66.0%/66.7-68.6%
+with ten slips, 47.0%/37.3%/47.3-47.4% with none. Neither fixed setting
+wins both rows -- probing always costs ten points empty-handed (p=0.006),
+probing never costs ten points loaded. Held out: +138/-65 (p<0.0001)
+with slips, +2/-1 without -- all the gain, none of the cost.
 
-Solo VP, 8 cogs a round, 300 runs a cell on selection seeds and 500 on
-held out:
+THE NET'S OWN RANKING IS THE ROOT CAUSE, which the probe works around
+rather than fixes: on a live VP board the four fires take ranks 1-4 at
+logits 20.4-21.1 against the best gag's 14.8 (a ~500x probability gap),
+and the ranking is backwards on its own terms -- a 20hp Cold Caller
+outranks both Hollywoods, and luring the whole board (when firing is
+free) makes every fire logit fall, not rise. It reads as a reflex on
+holding slips, uninformed by the board; only a retrain can fix the
+ranking itself.
 
-    slips   probes off   probes always   degenerate-only
-       10       56.3%          66.0%         66.7% / 68.6%
-        0       47.0%          37.3%         47.3% / 47.4%
+CANNOT REGRESS ANYTHING ALREADY PROBED: the condition short-circuits on
+`probe_tracks or _menu_is_degenerate`, so every party position (where
+`probe_tracks` defaults on) is unaffected -- only solo changes, and
+solo buildings without slips read neutral (17.3% vs 16.7%, p=0.80).
 
-Neither FIXED setting wins both rows. Probing always costs ten points
-with an empty pocket (p=0.006, reproducing the +9.2% for probes-off
-already recorded on `climb`); probing never costs ten with slips in it.
-The rows disagree because the menu only collapses in one of them, which
-is the thing this flag tests for. Held out it is +138/-65 (p<0.0001)
-with slips and +2/-1 without -- all of the gain, none of the cost.
-
-WHY THE NET RANKS FIRES THERE AT ALL, since a probe works around
-that rather than fixing it. On a live VP board -- L12 196hp, L11 156hp,
-L8 90hp, L3 20hp, all awake, 49.9 laff of incoming, ten slips -- the
-four fires take ranks 1 to 4 at logits 20.4 to 21.1 with the best gag
-at 14.8. A gap of 6.2 logits is about 500x in probability, so a 3-wide
-menu can contain nothing else. With the slips removed the same net
-ranks Geyser, Wedding Cake, Toontanic, Hypno-goggles -- sensibly.
-
-It is not evaluating the board, and two readings show it rather than
-suggest it. The spread across the four targets is 0.647 logits, and
-the ORDER is wrong: the 20 hp Cold Caller outranks both Hollywoods, so
-whatever it has learned, it is not "remove the biggest threat". And
-lure the whole board -- incoming 49.9 -> 0.0, which is precisely when
-a slip is free -- and every fire logit falls by 5.6 to 6.6. It rates
-firing WORST exactly where firing is cheapest, which is backwards.
-
-So the prior is close to a reflex on holding slips, and uninformed by
-the rest of the position. That is what `--fire-fraction 0.15` predicts:
-a slip-carrying board is a thin slice of training, and a slip-carrying
-board that is ALSO lured is thinner still. The probe forces a
-comparison the net never learned to make; only a retrain that shows it
-those positions can fix the ranking itself.
-
-WHERE IT CANNOT REGRESS, and it is worth knowing why rather than
-measuring it: the condition is `probe_tracks or _menu_is_degenerate`,
-which short-circuits, so on any position where probes are already on --
-every party position, since `probe_tracks` defaults to party-only -- the
-new code is not even called and behaviour is bit-identical. Only solo
-can change. Solo buildings at difficulty 8 with no slips read 17.3%
-against 16.7%, +9/-7, p=0.80: neutral, on the surface where the
-Drop-argmax collapse lived and where a degenerate menu was therefore
-most plausible without slips in the pouch.
-
-WHAT THIS REPLACES, and why it is better than what it replaces. The
-first fix was a hand-written rule that withheld slips unless every live
-cog was lured, on the reasoning that a lured board does not swing so
-the round is free. It worked -- 54.0% held out against 47.4% for
-withholding them entirely -- and it was still wrong, in two ways this
-one is not.
-
-It was a rule about pink slips, so it could only ever fix pink slips;
-the Drop-argmax collapse is the same failure and it would have missed
-it. And it was aimed at the ranking when the fault was in the REACH:
-with the alternatives on the menu the policy fires MORE, not less --
-5.2 slips a run against 3.0 -- and wins ten points more often. The
-lure rule was suppressing a good move to prevent a bad one, because
-nothing had put the two side by side. Turning it back on on top of
-degenerate probing measured 57.3% against 66.0%: it costs nine points
-once the judge can see.
-
-The order the project keeps -- model, then weights, then reach -- says
-to suspect the proposal before the ranking. This is the reach, and it
-is the third time on this function that a menu the judge never saw was
-mistaken for a judgement it got wrong.
+REPLACES a hand-written rule withholding slips unless the whole board
+was lured. That rule worked (54.0% vs 47.4% held out) but could only
+ever fix pink slips (missing the same failure elsewhere) and suppressed
+a GOOD move to prevent a bad one without ever comparing them: with
+alternatives on the menu the policy actually fires MORE (5.2 slips/run
+vs 3.0) and wins more often. Turning the old rule back on atop this
+measured 57.3% vs 66.0% -- nine points lost once the judge can see.
 """
 
 
@@ -943,70 +835,31 @@ def _menu_is_degenerate(order, values) -> bool:
 
 @_memoised
 def climb(state: BattleState, rng=random,
-          # RAISED WITH `width`, and it has to be. `budget` counts judge
-          # calls and the scoring loop breaks on `spent >= budget`, so a
-          # default budget of 16 against a default width of 16 starves
-          # the probes appended after the policy's own entries. Measured
-          # on the trapped ambulance chaser: budget 12 picks Storm
-          # Cloud, 16 picks Small Magnet, 20 and 24 pick the $1 Bill
-          # that springs the trap. The shipped panels already pass 24;
-          # this stops a caller relying on the default from silently
-          # getting the truncated answer.
+          # Raised together with `width`: `budget` counts judge calls
+          # and a default of 16 against width 16 starves the probes
+          # appended after the policy's own entries. On a trapped
+          # ambulance chaser: budget 12 picks Storm Cloud, 16 picks
+          # Small Magnet, 20/24 pick the $1 Bill that springs the trap.
+          # Panels already pass 24; this keeps a caller on the default
+          # from silently getting the truncated answer.
           budget: int = 24,
-          # WIDTH IS WHY THE TWO ENGINES DISAGREE, and 16 is worth it.
-          # [OWNER] reported the policy spending a dearer gag than the
-          # exact search wanted on the same board. Spying on every plan
-          # `_judge` is asked to score says why:
+          # 16, measured. [OWNER] reported the policy spending a dearer
+          # gag than the exact search wanted on the same board; spying
+          # on every plan `_judge` scores showed why -- at width 3 the
+          # search's pick is offered 0/4 times, at 8 it's 2/4, at 16
+          # it's 4/4 (RL agrees with it 3/4). Below 16 the scorer never
+          # sees the move at all, so no weight could ever reach it.
           #
-          #   width   search's pick offered   RL agrees with it
-          #       3            0 of 4                0 of 4
-          #       8            2 of 4                2 of 4
-          #      16            4 of 4                3 of 4
+          # Solo VP, 20/round, everything carried, paired: width 3 vs 16
+          # read 60% vs 76% on selection seeds and 48% vs 75% held out
+          # (+15/-4, p=0.019) -- not noise. Buildings are untouched (82%
+          # at both widths, +0/-0): width pays where the POUCH binds (a
+          # solo VP is ~4255 cog HP against a ~2730-damage pouch), and a
+          # two-floor building shared by three toons never gets there.
+          # Costs 20ms -> 26ms a decision.
           #
-          # At 3 the scorer NEVER SEES the move, so no weight on `price`
-          # or `waste` could reach it -- those sweeps were measuring a
-          # menu, not a scorer.
-          #
-          # A FIRST PASS AT 10 RUNS A CELL SAID IT BOUGHT NOTHING AND
-          # THAT WAS TOO SMALL A SAMPLE. Solo VP, 20 a round, everything
-          # carried, paired on identical seeds:
-          #
-          #   runs   seeds        width 3   width 16   paired
-          #     25   selection        60%        76%   +6/-2
-          #     40   HELD OUT         48%        75%   +15/-4, p=0.019
-          #
-          # BUILDINGS ARE UNTOUCHED, and that was re-run properly: the
-          # first check reported one floor a run, which barely exercises
-          # the pouch. On real multi-floor buildings, 2.6-toon parties,
-          # 40 paired runs: 82% finished at both widths, +0/-0.
-          #
-          # The split is the point. Width pays where the POUCH binds --
-          # a solo VP is 40 cogs over two long floors, and my own
-          # arithmetic puts 4255 cog HP against a pouch worth ~2730
-          # single-target. A two-floor building shared by three toons
-          # never gets near that, so a better menu has nothing to buy.
-          #
-          # Cost is 20ms -> 26ms a decision.
-          #
-          # WIDTH AND BUDGET ARE COUPLED, and this is the thing to know
-          # before changing either. `budget` counts JUDGE CALLS and the
-          # scoring loop breaks on `spent >= budget`, so a menu wider
-          # than the budget never reaches the probes appended after the
-          # policy's own entries -- `_cheapest_kills`, `_cheapest_lures`
-          # and the SOS list, which exist precisely because the policy
-          # ranks them nowhere.
-          #
-          # On the trapped ambulance chaser the owner reported:
-          #
-          #   width 16, budget  8 -> Foghorn, wasting the armed trap
-          #   width 16, budget 24 -> $1 Bill, springing it   (the panel)
-          #   width 32, budget 24 -> Small Magnet, starved again
-          #   width 32, budget 48 -> $1 Bill
-          #
-          # So width 32 measuring worse than 3 on the VP (+3/-7) was
-          # BUDGET STARVATION, not the approximate-scorer effect the
-          # module docstring records for budget. 16 fits inside the
-          # panel's 24; anything wider needs the budget raised with it.
+          # Coupled with `budget` -- see the docstring below before
+          # raising either alone.
           width: int = 16, probe_tracks: Optional[bool] = None,
           deep: bool = False,
           fixed: Optional[Mapping[int, Optional[Action]]] = None,
@@ -1015,212 +868,113 @@ def climb(state: BattleState, rng=random,
           ) -> Optional[Sequence[Optional[Action]]]:
     """Coordinate ascent on the joint plan, instead of independent draws.
 
-    `best_plan` re-rolls every seat on every sample, which spends its
-    budget re-deciding the seats that were already right. A joint plan
-    is one action per toon, so the natural move is to fix the others and
-    vary one seat at a time -- the same structure the search exploits
-    when it enumerates per toon.
+    `best_plan` re-rolls every seat on every sample, spending its budget
+    re-deciding seats that were already right. A joint plan is one action
+    per toon, so the natural move is to fix the others and vary one seat
+    at a time.
 
-    Starts from the policy's argmax plan, then sweeps the seats,
-    offering each the policy's top `width` alternatives and keeping any
-    that `_quick_score` prefers. Repeats until a full sweep changes
-    nothing or the budget of scorer calls runs out.
+    Starts from the policy's argmax plan, sweeps the seats offering each
+    the policy's top `width` alternatives, keeps any `_quick_score`
+    prefers, and repeats until a full sweep changes nothing or `budget`
+    (`_quick_score` calls, so this is comparable with `best_plan` at
+    equal cost) runs out.
 
-    Budget is counted in `_quick_score` calls so this can be compared
-    with `best_plan` at equal cost, which is the only fair comparison
-    between two search strategies.
+    `pairs` lets two seats change TOGETHER once single-seat sweeps settle
+    -- the one move coordinate ascent structurally cannot make. On a
+    no-level-7 board, both toons on lure/6 scores 366.4 (where the sweep
+    stops), changing either ONE to sound/6 scores 177.8, changing BOTH
+    scores 672.1 -- Sound wakes what Lure put to sleep, so every
+    single-seat edit looks downhill even though the joint edit nearly
+    doubles the score. Over 43 sampled rounds the best plan needed both
+    seats to move 72% of the time; the climb captured 68.4% of the
+    reachable score.
 
-    `pairs` lets two seats change TOGETHER once the single-seat sweeps
-    settle, which is the one move coordinate ascent structurally cannot
-    make. Measured on a real no-level-7 board:
+    OFF, measured on 240 held-out sides: buildings 68.3% -> 70.4%, VP
+    98.8% -> 99.6%, CEO-0 92.5% -> 90.4%, CEO-5 44.2% -> 35.4% (p=0.020),
+    CEO-0-no-7s 21.7% -> 27.5% (p=0.041). Works where predicted, loses
+    where the agent is already good -- both significant, opposite
+    directions.
 
-        366.4   both toons lure/6 -- where the sweep stops
-        177.8   change either ONE to sound/6
-        672.1   change BOTH to sound/6
+    THE GENERAL LESSON, which `probe_tracks` and wider `width` share: a
+    joint move or wider menu gives the search more reach to act on
+    `_quick_score`'s own errors, not just more good options. Where the
+    policy is undertrained (a no-level-7 board) that reach rescues bad
+    proposals; where it's well-trained, the same reach mostly finds the
+    scorer's mistakes instead. The narrow window is a REGULARISER
+    holding an imperfect scorer near a well-trained policy, not a
+    limitation to remove -- widen it only for positions outside the
+    policy's training distribution.
 
-    Sound resolves after Lure and wakes what Lure put to sleep, so the
-    mixed plan is far worse than either pure one. Every single-seat edit
-    is downhill and the joint edit nearly doubles the score, so the
-    sweep sits at 366 and stops. Over 43 sampled no-7 rounds the best
-    plan needed BOTH seats to move 72% of the time, and the climb
-    captured 68.4% of the reachable score.
+    `probe_tracks` offers each seat the best action of every track held,
+    not just the top `width`. ON in a party, OFF solo -- measured on
+    v7_precision, 250 runs/cell, OFF minus ON: building solo +0.4%,
+    building party -1.2%, VP solo +9.2%, VP party -1.2%, CEO party
+    -17.6%. In a party the joint plan space is large enough that a
+    per-seat top-k misses combination moves (`sound/6->all` sat 22nd and
+    16th for two seats on one board); solo there's no combination to
+    miss, so the reach only helps an approximate scorer act on its
+    errors. `None` decides from party size; pass a bool to override.
 
-    This is why widening what each seat is OFFERED never helped --
-    `probe_tracks` and larger `width` were both refuted twice. They add
-    candidates to a menu whose problem is that the two choices have to
-    be made at the same time. Note the pair menu is built BY TRACK for
-    the same reason: `sound/6->all` sits 22nd and 16th for the two seats
-    on the board above, so no top-k reaches it. Each fix alone is
-    blocked by the other wall, which is why both were refuted
-    separately.
-
-    OFF, having been measured on 240 held-out sides a set:
-
-        set              shipped   +pairs
-        buildings          68.3%    70.4%   (= budget control)
-        VP                 98.8%    99.6%
-        CEO 0              92.5%    90.4%
-        CEO 5              44.2%    35.4%   p=0.020
-        CEO 0, no lvl 7s   21.7%    27.5%   p=0.041
-
-    It works exactly where predicted and loses where the agent is
-    already good. Both significant, opposite directions.
-
-    WHY, AND IT IS THE GENERAL LESSON. A joint move lets the search
-    reach plans `_quick_score` rates highly, and `_quick_score` is an
-    approximation -- so more reach means more scope to act on its own
-    errors. On a no-level-7 board the policy has never trained on, its
-    proposals are bad and the extra reach rescues them. Everywhere else
-    the proposals are good and the reach mostly finds the scorer's
-    mistakes.
-
-    So the narrow window is not a limitation to be removed, it is a
-    REGULARISER holding an imperfect scorer near a well-trained policy's
-    suggestions. `probe_tracks`, wider `width` and this are the same
-    move, and all three fail in-distribution for the same reason.
-
-    The prerequisite for any of them is an evaluator worth widening --
-    and `prevented` documents why that cannot be done one term at a
-    time. Turn this on only for positions outside the policy's training
-    distribution, where there is nothing good to stay near.
-
-    `probe_tracks` offers each seat the best action of every track it
-    holds, not just the policy's top `width`. It is ON IN A PARTY AND
-    OFF SOLO, and the story of how it got there is the most useful thing
-    in this file.
-
-    THE SPLIT IS MEASURED. On v7_precision, 250 runs a cell, same seeds,
-    OFF minus ON:
-
-        building solo    +0.4%
-        building party   -1.2%
-        VP solo          +9.2%
-        VP party         -1.2%
-        CEO party       -17.6%
-
-    Solo is the only place turning it off wins, and the CEO is where it
-    earns its keep -- 20.0% with it against 2.4% without. Flipping it
-    globally, which the solo VP number alone argued for, would have cost
-    the CEO almost everything.
-
-    The reason fits the regulariser argument below. In a party the joint
-    plan space is far larger and a per-seat top-k is far more likely to
-    miss the move that only works in combination -- `sound/6->all` sat
-    22nd and 16th for two seats on the board in that note. Solo there is
-    no combination to miss, so the extra reach only gives an approximate
-    scorer more room to act on its errors.
-
-    `None` means decide from the party size. Pass a bool to override.
-
-    IT WAS REFUTED TWICE. The reason was always the same: more reach for
-    an approximate scorer is more scope to act on its errors. On 180
-    buildings it read 66.1% against 63.3% with probes, and on the CEO it
-    lost 7.5 points.
-
-    WHAT CHANGED IS THE SCORER, NOT THE PROBE. A landed attack now wakes
-    a lured cog (`mechanics.LURE_ENDS_ON_DAMAGE`), `prevented` counts
-    what a Lure actually buys instead of multiplying by a duration it
-    never delivers, and `QUICK_W["prevent"]` moved 2 -> 9 for +45 points
-    on the CEO. With the scorer worth widening, the same flag pays, on
-    200 held-out sides a set:
-
-        set          plain   +probes+pairs
-        buildings    65.0%       73.5%      p=0.0002
-        VP           99.0%       99.5%      ns
-        CEO 0        54.0%       88.5%      p<0.0001
-        CEO 2        18.5%       73.5%      p<0.0001
-        CEO 4         7.0%       45.0%      p<0.0001
-
-    WHY IT MATTERS SO MUCH: three tracks were structurally invisible.
-    Trap sat at median rank 25 in the policy's ranking and entered the
-    3-wide window 0 times in 521 seats; Toon-Up at rank 10, 1% of the
-    time. The scorer wanted both -- `Railroad + group Lure` was the
-    highest-scoring plan on the board where it was measured, and heal
-    use goes 0% -> 15% once reachable. No weight could ever have fixed
-    that, which is why the earlier heal sweep read flat at twenty times
-    the weight.
-
-    THE LESSON, WHICH GENERALISES: do not widen a search to compensate
-    for a scorer you have not checked. Fix the model, then the weights,
-    then the reach -- in that order. Reversed, each stage measures the
-    previous stage's errors and refutes the right idea for the wrong
-    reason.
-
-    Budget is counted in `_quick_score` calls so this can be compared
-    with `best_plan` at equal cost, which is the only fair comparison
-    between two search strategies.
+    `probe_tracks` WAS REFUTED TWICE before the scorer caught up (66.1%
+    vs 63.3% with probes on 180 buildings, -7.5 on the CEO) for the same
+    reason above. WHAT CHANGED WAS THE SCORER, NOT THE PROBE: once a
+    landed attack wakes a lured cog (`mechanics.LURE_ENDS_ON_DAMAGE`),
+    `prevented` counts what a Lure actually buys, and
+    `QUICK_W["prevent"]` moved 2 -> 9, the same flag paid on 200 held-out
+    sides: buildings 65.0% -> 73.5% (p=0.0002), CEO-0 54.0% -> 88.5%
+    (p<0.0001), CEO-2 18.5% -> 73.5% (p<0.0001), CEO-4 7.0% -> 45.0%
+    (p<0.0001). Trap and Toon-Up had been structurally invisible before
+    this -- Trap at median rank 25, never in a 3-wide window in 521
+    seats; Toon-Up rank 10, reachable 1% of the time -- no weight could
+    have fixed that, which is why the earlier heal sweep read flat at
+    twenty times the weight. THE LESSON, WHICH GENERALISES: fix the
+    model, then the weights, then the reach, in that order -- reversed,
+    each stage measures the previous one's errors and refutes the right
+    idea for the wrong reason.
 
     GROUP AND SINGLE-TARGET ARE DIFFERENT MOVES, and probing by track
-    alone hid one of them. The menu took the policy's favourite action
-    per TRACK, so on a CEO board seat 1 was offered `Birthday Cake -> c2`
-    for Throw and `TNT -> c2` for Trap -- 342 apiece by `_quick_score`,
-    while `Wedding Cake -> all` scored 1103 and `Railroad -> all` 1159
-    and neither was ever put in front of the judge. A gag that hits four
-    cogs is not a reordering of one that hits one. `_track_key` now keys
-    on (track, group); `GROUP_GAGS_PROBED_SEPARATELY` turns it off.
+    alone hid one of them: the per-track menu offered `Birthday Cake ->
+    c2` (342 by `_quick_score`) over `Wedding Cake -> all` (1103), never
+    putting the group gag in front of the judge. `_track_key` now keys
+    on (track, group); `GROUP_GAGS_PROBED_SEPARATELY` turns it off. ON,
+    paired on identical positions: facilities -0.2/+1.3 (budget 24/36),
+    CEO-0 -1.7/+4.5, CEO-2 +8.8, CEO-4 +9.0. The GAIN scales with cogs
+    alive (what a group gag is for); the COST is fixed (~4 extra menu
+    entries/seat). Starving the budget gets you the cost without the
+    gain: at budget 24 CEO-0 is 88 up/98 down (p=0.51); at 36 it's 100
+    up/73 down (p=0.048). Facilities are untouched at every budget (46
+    discordant games in 1800) -- unlike the three earlier "widen the
+    menu" refutations, this one is neutral where it can't help rather
+    than costly everywhere.
 
-    It is ON, on this evidence, paired on identical positions:
+    WIDTH AND BUDGET ARE COUPLED (`budget` counts judge calls and the
+    loop breaks on `spent >= budget`, so a menu wider than the budget
+    never reaches the probes appended after it -- `_cheapest_kills`,
+    `_cheapest_lures`, the SOS list). On a trapped ambulance chaser:
+    width 16/budget 8 -> Foghorn (wastes the armed trap), width
+    16/budget 24 -> $1 Bill (springs it, the panel's setting), width
+    32/budget 24 -> Small Magnet (starved again), width 32/budget 48 ->
+    $1 Bill. So width 32 scoring worse than width 3 on the VP (+3/-7)
+    was budget starvation, not the approximate-scorer effect above --
+    16 fits inside the panel's budget of 24; wider needs the budget
+    raised with it.
 
-        board            budget 24   budget 36
-        facilities          -0.2        +1.3
-        CEO 0               -1.7        +4.5
-        CEO 2               +8.8         --
-        CEO 4               +9.0         --
-
-    Two effects pulling opposite ways, and they separate cleanly. The
-    GAIN scales with cogs alive, because that is what a group gag is
-    for -- CEO 4 pays at budget 24 where CEO 0 needs 36. The COST is
-    fixed, about four extra menu entries a seat, spent whether they help
-    or not. Starve the search and the cost is all you get: at budget 24
-    the wider menu is 88 up / 98 down on CEO 0 (p=0.51), and at 36 it is
-    100 up / 73 down (p=0.048). The trace that showed why is worth
-    keeping -- on side 92008 the starved arm picked `Geyser -> all` over
-    `Toontanic -> all`, left three cogs alive on 5 hp, and took 75 laff
-    for it.
-
-    Facilities are untouched at every budget: 46 discordant games in
-    1800. Few cogs and often no group gag in the track, so the extra key
-    usually adds no candidate at all. That is the difference from the
-    three earlier refutations of "widen the menu" -- this one is neutral
-    where it cannot help rather than costly everywhere.
-
-    Boss analysis wants budget 36 or better. That is a PARTY result and
-    it does not carry to solo -- measured now, where it used to say the
-    panel's setting was unmeasured.
-
-    Solo VP, 8 cogs a round, ten slips, shipped policy on every arm,
-    paired on identical seeds:
-
-        budget    150 sel.    300 held out
-             3       0.0%
-             4      11.3%
-             6      71.3%           71.0%   +49/-41  p=0.46
-             8      63.3%           68.3%   (the panel's setting)
-            16      47.3%
-            24      47.3%           55.3%   +26/-65  p=0.0001
-            36      47.3%
-
-    RAISING IT HURTS, by thirteen points held out. The reason is the one
-    already written three times above: more reach for an approximate
-    scorer is more scope to act on its errors. In a party the joint plan
-    space is large enough that the extra reach finds moves worth having;
-    solo there is no combination to miss.
-
-    16, 24 and 36 are IDENTICAL on the selection set, which is the tell
-    for what the budget does here. Solo has one seat, so once the
-    single-seat menu is exhausted there is nothing left to spend on --
-    the pair loop below needs two seats. Budget 8 stops partway through
-    that menu, and stopping helps.
-
-    Below 6 it collapses instead -- 11.3% at 4, 0.0% at 3 -- because the
-    climb cannot afford even the first few candidates and returns close
-    to the policy's raw argmax, which is what `PROBE_WHEN_DEGENERATE`
-    exists to rescue.
-
-    6 looked like a free +8 on the selection set and came back +2.7 and
-    p=0.46 held out, so the panel's 8 stays. `advise.DEFAULT_BUDGET` is
-    a different quantity -- seconds for the expectimax path -- and is
-    still unmeasured.
+    Boss analysis wants budget 36+ (a PARTY result, measured, that does
+    not carry to solo). Solo VP, 8 cogs/round, ten slips, paired on
+    identical seeds: budget 3/4/6/8/16/24/36 -> 0.0%/11.3%/71.3% (held
+    out 71.0%, p=0.46)/63.3% (held out 68.3%, the panel's setting)/
+    47.3%/47.3% (held out 55.3%, p=0.0001)/47.3%. Raising it hurts solo
+    by thirteen points held out, for the same reach-vs-errors reason;
+    16/24/36 are identical because solo has one seat, so once the
+    single-seat menu is exhausted (budget 8 stops partway through it,
+    and stopping helps) there's nothing left to spend on without the
+    pair loop. Below 6 it collapses (11.3% at 4, 0.0% at 3) because the
+    climb can't afford even the first few candidates and falls back
+    toward the policy's raw argmax -- what `PROBE_WHEN_DEGENERATE`
+    exists to rescue. 6 looked like a free +8 on the selection set and
+    came back +2.7, p=0.46 held out, so the panel keeps 8.
+    (`advise.DEFAULT_BUDGET` is a different, still-unmeasured quantity:
+    seconds for the expectimax path.)
     """
     if probe_tracks is None:
         # Party only. See the measurements above: solo is the one place
@@ -1249,7 +1003,7 @@ def climb(state: BattleState, rng=random,
     # that uses one has to beat the plan that does not BY MORE than the
     # price, not merely beat it.
     if OFFER_UNITES and allow_unites and not fixed and state.toons:
-    
+
         def _value_of(st):
             inner = climb(st, rng, budget=budget, width=width,
                           probe_tracks=probe_tracks, deep=deep,
@@ -1363,26 +1117,18 @@ def climb(state: BattleState, rng=random,
             queue = [(env_mod.action_at(int(index)), True) for index in order
                      if np.isfinite(values[index])]
             if OFFER_SOS:
-                # Appended, not merged: these have no index and no
-                # logit, so they cannot be ordered against the rest.
-                #
-                # AND NOT CHARGED TO THE BUDGET. They used to be, and
-                # sat at the very end of the queue, so on any board big
-                # enough to fill the sweep they were never reached: the
-                # loop broke on `spent >= budget` first. A four-cog VP
-                # board with seven cards held is past the default 24
-                # before the first card, which is why the panel "never
-                # suggests SOS" -- the judge ranked a card FIRST and
-                # `climb` never asked it. Measured on a recorded run:
-                # at budget 24 the plan is Presentation, at 40 it is the
-                # card the judge preferred all along.
-                #
-                # Not fixed by moving them earlier: `TARGETED_PROBES_FIRST`
-                # records that reversing which sweep gets starved cost
-                # difficulty 9 sixty percent to forty-two. So the sweep
-                # keeps its place and its budget, and the cards -- of
-                # which there are at most a handful, one per distinct
-                # card held -- are simply always judged.
+                # Appended, not merged (no index, no logit to sort by)
+                # and NOT CHARGED TO THE BUDGET: they used to sit at the
+                # end of the queue and never got reached on a board big
+                # enough to fill the sweep -- a four-cog VP with seven
+                # cards held is past the default 24 before the first
+                # card, so the judge ranked a card FIRST and `climb`
+                # never asked it (budget 24 picks Presentation, 40 picks
+                # the card the judge preferred all along). Moving them
+                # earlier instead just starves the other sweep
+                # (`TARGETED_PROBES_FIRST`: difficulty 9 fell 60% to
+                # 42%), so the sweep keeps its place and the handful of
+                # cards are simply always judged.
                 queue += [(action, False)
                           for action in _sos_probes(state, seat)]
             for action, charge in queue:

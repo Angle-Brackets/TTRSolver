@@ -1,59 +1,37 @@
 """Buildings, factories, field offices: fights that come one after another.
 
-WHY THIS EXISTS
----------------
-The solver has only ever modelled a single battle, and `cogs_remaining`
-alone could not fix that. The horizon raised the price of a gag when
-more cogs were coming, but the RL episode still ended when the battle
-ended, so a gag saved was never spent and conserving paid nothing. PPO
-correctly learned to ignore it: over 394 positions, moving the horizon
-from 0 to 30 changed its move 4.3% of the time.
+WHY THIS EXISTS: the solver has only ever modelled a single battle, and
+`cogs_remaining` alone couldn't fix that -- it raised the price of a gag
+when more cogs were coming, but the RL episode still ended when the
+battle ended, so conserving paid nothing and PPO correctly learned to
+ignore it (over 394 positions, moving the horizon from 0 to 30 changed
+its move only 4.3% of the time). This module is the missing half: a
+facility is a sequence of battles sharing one pouch, so a Wedding Cake
+spent on floor one is genuinely absent on floor five.
 
-This module is the missing half. A facility is a sequence of battles
-sharing one pouch, so a Wedding Cake spent on floor one is genuinely
-absent on floor five, and the return contains the evidence.
-
-TWO KINDS OF FIGHT
-------------------
-`BattleKind.STREET` is what the solver already modelled: one battle,
-nothing after it, and a toon who is losing can walk away. That last part
-is why the street stays the low-risk case and why its horizon is fixed
-at zero.
-
+TWO KINDS OF FIGHT: `BattleKind.STREET` is what the solver already
+modelled -- one battle, nothing after it, a toon who is losing can walk
+away, so it stays the low-risk case with its horizon fixed at zero.
 `BattleKind.FACILITY` covers cog buildings, factories, field offices and
-boss fights as one shape, because their differences are scenery. What
-they share is what matters to a solver: several battles back to back, no
-restocking between them, and [CONFIRMED] on the Cog Building page,
-"Toons cannot run to the nearest playground" once inside.
+boss fights as one shape, since their differences are scenery; what they
+share is several battles back to back with no restocking, and
+[CONFIRMED] "Toons cannot run to the nearest playground" once inside.
 
-THE SHAPE OF A FLOOR
---------------------
-At most four cogs are ever present. A floor holding more than four does
-not put them all on the field -- [CONFIRMED] Cog Building: "Each floor
-contains progressively more Cogs that the Toons must battle. As Toons
-continuously battle Cogs, more Cogs may exit from the elevator to join."
+THE SHAPE OF A FLOOR: at most four cogs are ever present. A floor
+holding more does not put them all on the field -- [CONFIRMED] Cog
+Building, "more Cogs may exit from the elevator to join" as slots free.
+So a floor is a battle plus a `holdout`, a materially harder fight than
+the same cogs split into separate battles, since there's no gap to
+regroup in.
 
-So a floor is a battle plus a `holdout`: cogs waiting off-field who walk
-in as slots free. That is a materially harder fight than the same cogs
-split into separate battles, because there is no gap to regroup in, and
-it is the reason this is modelled rather than dividing a pool by four.
-
-WHAT THE WIKI DOES NOT SAY
---------------------------
-Two things here are `[ASSUMED]`, both labelled at their definitions:
-
-* **How many cogs are on a floor.** The wiki's difficulty table gives
-  floors, cog levels and boss level -- all [CONFIRMED] and encoded below
-  -- but never a per-floor count. Only the direction is confirmed,
-  "progressively more".
-* **When a holdout cog walks in.** The wiki says they join, not on what
-  trigger. Filling a freed slot immediately is the reading that the
-  four-cog cap forces; the alternative is a delay, which would only make
-  the fight easier.
-
-Neither feeds advice about a real battle -- they shape the training
-distribution -- but a policy trained on a fiction is a policy tuned to a
-fiction, so they are tagged rather than quietly chosen.
+WHAT THE WIKI DOES NOT SAY, both `[ASSUMED]` and tagged at their
+definitions: how many cogs are on a floor (the difficulty table gives
+floors/levels/boss, [CONFIRMED], but no per-floor count -- only the
+direction, "progressively more"); and when a holdout cog walks in (the
+wiki says they join, not the trigger -- filling a freed slot immediately
+is what the four-cog cap forces, since a delay would only ease the
+fight). Neither feeds advice about a real battle, only the training
+distribution, but a policy trained on a fiction is tuned to a fiction.
 """
 from __future__ import annotations
 
@@ -123,11 +101,10 @@ def floor_size(floor: int, rng) -> int:
 # that took it over, so a street's cog range IS its range of building
 # difficulties.
 #
-# This is what replaced scaling difficulty by party laff. The game does
-# not size a building to whoever walks in -- it sizes it to the street,
-# and you arrive with whatever you have. By the last two playgrounds
-# that means difficulty 5-9 as the ordinary case, on toons who may be
-# under 100 laff with untrained tracks.
+# The game does not size a building to whoever walks in, it sizes it to
+# the street -- by the last two playgrounds that means difficulty 5-9 as
+# the ordinary case, on toons who may be under 100 laff with untrained
+# tracks.
 STREETS = [
     ("Loopy Lane", "Toontown Central", (1, 3)),
     ("Punchline Place", "Toontown Central", (1, 3)),
@@ -361,27 +338,20 @@ def reinforce(state: BattleState) -> int:
     """Walk waiting cogs into freed slots. Returns how many joined.
 
     [ASSUMED] on timing only: a freed slot is filled at once. The wiki
-    confirms that cogs join and not when, and the four-cog cap means
-    they can only ever join as slots open. A delay would make the fight
-    easier, so this is the conservative reading.
+    confirms that cogs join, not when, and the four-cog cap means they
+    can only ever join as slots open -- a delay would only ease the
+    fight, so this is the conservative reading.
 
-    TAKES A VACATED SLOT, rather than extending the list, and this is
-    load-bearing rather than tidy. Appending pushed `state.cogs` past
-    four, so a walk-in sat at index 4 -- but `rl.env.ACTIONS` is built
-    for `MAX_COGS = 4` and only encodes targets 0-3, and `encode` only
-    describes four cogs. Every plan aimed at a reinforcement failed the
-    action lookup and silently became a PASS, so the floor could never
-    be cleared: 42% of building runs stalled until truncation, one cog
-    left at full health, the party holding 131 unspent gags and passing
-    for thirty rounds.
+    TAKES A VACATED SLOT rather than extending the list, which is also
+    what the game does (four battle positions; a walk-in occupies one
+    that's been vacated) and load-bearing: `rl.env.ACTIONS` only encodes
+    targets 0-3 for `MAX_COGS = 4`, so appending past index 4 made every
+    plan aimed at a reinforcement fail the action lookup and silently
+    become a PASS, stalling the floor.
 
-    It is also what the game does. There are four battle positions; a
-    cog that walks in occupies one that has been vacated.
-
-    Mutates `state`, and is called from the party round boundary so the
-    search sees reinforcements too. A search that treated a kill as
-    final progress when another cog immediately replaces it would
-    systematically overvalue killing.
+    Mutates `state`, called from the party round boundary so the search
+    sees reinforcements too -- otherwise a kill where another cog
+    immediately replaces it would be overvalued as final progress.
     """
     joined = 0
     while state.holdout and len(state.active_cogs()) < MAX_PRESENT:

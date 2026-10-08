@@ -1,34 +1,15 @@
 """Where the game is on the screen.
 
-WHY THIS EXISTS, HAVING BEEN RULED OUT ONCE
--------------------------------------------
-The plate reader was built to need no window handle, on the reasoning
-that the teal portrait slot is distinctive enough to find anywhere in a
-frame. That holds inside the game. It does not hold across a desktop:
-played windowed, `Capture` grabs the whole screen, and everything behind
-the game is fair game for the teal mask -- wallpaper, browser chrome,
-another app's theme.
+The teal portrait slot is distinctive inside the game but not across a
+whole desktop: on a 2560x1440 desktop with the game windowed, capturing
+the full screen found 1 "plate" (a 319x190 wallpaper blob) while
+capturing just the window found the real 2 (65x45, 68x47), matching the
+documented plate geometry. Cropping to the window fixes this at the
+source.
 
-Measured on a real 2560x1440 desktop with the game windowed and a
-blue-green wallpaper behind it:
-
-    scope                 plates found
-    whole desktop         1  -- wallpaper, 319x190, aspect 1.68
-    game window only      2  -- 65x45 and 68x47, aspect 1.44 and 1.45
-
-The two real ones are the documented plate geometry almost exactly. The
-detector was never wrong; it was being shown the wrong picture, and the
-wallpaper blob outscored the real plates because it was bigger. Every
-reading came back `level unreadable / unidentified`, because scenery has
-no level to read.
-
-Cropping to the window fixes it at the source and costs nothing else.
-This is Windows-only and degrades to None everywhere else, in which case
-the caller falls back to the full screen and the old behaviour.
-
-Nothing here reads memory, injects, or touches the game process. It asks
-the window manager where a window is, which is the same question a
-screenshot tool asks.
+Windows-only; returns None elsewhere, where the caller falls back to the
+full screen. Reads no memory and touches no process -- just asks the
+window manager where the window is, like any screenshot tool would.
 """
 from __future__ import annotations
 

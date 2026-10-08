@@ -1,10 +1,9 @@
 """
 Battle state representation for the solo-toon-vs-cogs simulator.
 
-Design note: status effects (trap, lure, etc.) are folded into explicit
-state fields rather than tracked via history, so the transition function
-in simulator.py stays a clean Markov step: (state, action) -> next_state.
-See docs/data-confidence.md for why this matters and what it does/doesn't buy you.
+Status effects (trap, lure, etc.) are folded into explicit state fields
+rather than tracked via history, so the transition function in
+simulator.py stays a clean Markov step: (state, action) -> next_state.
 """
 from dataclasses import dataclass, field
 from enum import Enum
@@ -13,17 +12,15 @@ from typing import Optional, Dict, FrozenSet, Tuple, List
 # Level 7 gags are one per pouch and pouch-EXEMPT, so nothing in the
 # ordinary cost machinery restrains them: measured across a `price`
 # sweep of 1.0 / 0.5 / 0.25 / 0, level-7 use did not move at all (38
-# thrown every time). What restrains them today is only that the policy
-# rarely proposes one. Set this False to forbid them outright.
+# thrown every time). Set this False to forbid them outright.
 #
-# IT MUST BE READ AT CALL TIME, not captured at import, so a caller can
-# toggle it between runs. Both `simulator.legal_actions` and
-# `BattleState.can_still_damage` consult it, and they have to agree:
+# Must be read at call time, not captured at import, so a caller can
+# toggle it between runs. `simulator.legal_actions` and
+# `BattleState.can_still_damage` both consult it and must agree:
 # `can_still_damage` keys on TRACKS and ignores levels, so a toon
 # holding nothing but Throw-7 would otherwise be judged able to damage a
-# cog while `legal_actions` offered it nothing -- a position the search
-# treats as playable and cannot play, which breaks the termination
-# argument in `legal_actions`.
+# cog while `legal_actions` offers it nothing to throw -- breaking the
+# termination argument in `legal_actions`.
 ALLOW_LEVEL_7 = True
 
 # Kept here rather than imported from `data.gags` so `state` stays free
@@ -57,47 +54,41 @@ class ToonState:
     laff: int
     max_laff: int
 
-    # track_exp[track] = toon's TRAINING level in that track (0-7).
-    # This is a fixed skill stat, NOT the level of the gag about to be
-    # thrown -- a toon maxed in Throw gets the same trackExp accuracy
-    # bonus whether they throw a Cupcake or a Whole Cream Pie.
-    # Assume 7 (maxed) for owned tracks unless modeling gag training.
+    # track_exp[track] = toon's TRAINING level in that track (0-7). A
+    # fixed skill stat, NOT the level of the gag about to be thrown -- a
+    # toon maxed in Throw gets the same trackExp accuracy bonus whether
+    # they throw a Cupcake or a Whole Cream Pie. Assume 7 (maxed) for
+    # owned tracks unless modeling gag training.
     track_exp: Dict[Track, int] = field(default_factory=dict)
 
     # gag_counts[(track, level)] = number of that gag left in the pouch
     gag_counts: Dict[Tuple[Track, int], int] = field(default_factory=dict)
 
-
-    # Tracks whose gags are organic. Organic is a property of the whole
-    # track, not of an individual gag -- a toon earns an organic track
-    # from a ToonTask and every gag in it is organic thereafter.
-    #
-    # Raises damage for every track, and accuracy for Lure specifically
-    # (see Gag.prop_accuracy). Fixed for the battle, so `clone` shares it
-    # rather than copying, exactly like track_exp.
+    # Tracks whose gags are organic. A property of the whole track, not
+    # an individual gag -- a toon earns an organic track from a ToonTask
+    # and every gag in it is organic thereafter. Raises damage for every
+    # track, and accuracy for Lure specifically (see Gag.prop_accuracy).
+    # Fixed for the battle, so `clone` shares it rather than copying.
     organic_tracks: FrozenSet[Track] = frozenset()
 
     # How many gags (levels 1-6; level 7 is exempt) this toon can carry.
     # A property of the TOON, earned by ToonTask -- see
-    # `data.POUCH_CAPACITIES`, [CONFIRMED] 20 to 80. It is not a
-    # property of where they are standing, which an earlier version had
-    # it as, deriving capacity from the street the building was on.
+    # `data.POUCH_CAPACITIES`, [CONFIRMED] 20 to 80.
     #
-    # Deliberately NOT in `outcomes.state_key`: nothing restocks a pouch
-    # mid-battle or between floors, so capacity cannot change any value
-    # the search computes. It constrains how a toon is BUILT, not how a
-    # battle goes. If restocking is ever modelled, it has to go in the
-    # key -- that is the `free_passes` lesson.
+    # NOT in `outcomes.state_key`: nothing restocks a pouch mid-battle or
+    # between floors, so capacity can't change any value the search
+    # computes. It constrains how a toon is BUILT, not how a battle
+    # goes. If restocking is ever modelled, it has to go in the key --
+    # that's the `free_passes` lesson (see BattleState.free_passes).
     pouch_capacity: int = 80
 
     # How many pink slips a toon can hold. [CONFIRMED] wiki: "Toons can
-    # hold up to 200 pink slips", reduced from 255 on 31 May 2022 by the
-    # rebalancing update of December 2021.
+    # hold up to 200 pink slips", reduced from 255 by the December 2021
+    # rebalancing update.
     #
-    # Same reasoning as `pouch_capacity` above: NOT in `state_key`,
-    # because nothing hands a toon a slip mid-battle, so it cannot
-    # change any value the search computes. It is here so the encoder
-    # has a real number to normalise against instead of a literal.
+    # Same reasoning as `pouch_capacity`: not in `state_key`, since
+    # nothing hands a toon a slip mid-battle. Here so the encoder has a
+    # real number to normalise against instead of a literal.
     fire_capacity: int = 200
 
     # Rounds until this toon may use another unite. [CONFIRMED] wiki:
@@ -107,42 +98,39 @@ class ToonState:
     # identical but for it are not the same position.
     unite_cooldown: int = 0
 
-    # How many unites this toon HOLDS. Zero by default, and that default
-    # is the whole point: the live readers cannot see a unite pouch --
-    # the Local API does not report one and nothing reads it off the
-    # screen -- so an unknown holding must offer nothing rather than
-    # everything. It used to be unbounded, `available` checking only the
-    # cooldown, and solo buildings went 26% -> 100% because the solver
-    # spent about four unites a building it had no evidence of holding.
-    # A harness that wants them sets this explicitly.
+    # How many unites this toon HOLDS. Zero by default, deliberately: the
+    # live readers cannot see a unite pouch (the Local API doesn't report
+    # one and nothing reads it off the screen), so an unknown holding
+    # must offer nothing rather than everything -- unbounded unites once
+    # sent solo buildings from 26% to 100% wins on evidence the solver
+    # never had. A harness that wants them sets this explicitly.
     #
     # [CONFIRMED] wiki: "Toons can hold up to 100 unites per type",
     # which is `CARRY_LIMIT`.
     unites_held: int = 0
 
-    # WHICH unites are held, when that is known: {(kind, track): count},
-    # where kind is "toon_up" or "gag_up" and track is the track slug or
-    # None for a Toon-Up and for the all-tracks Gag-Up.
+    # WHICH unites are held, when known: {(kind, track): count}, kind
+    # "toon_up" or "gag_up", track the slug or None (a Toon-Up, or the
+    # all-tracks Gag-Up).
     #
-    # EMPTY MEANS UNKNOWN, NOT NONE, and that is the one place here the
-    # default is permissive. `unites_held` is the deny -- it is 0 unless
-    # something read a pouch -- so an empty stock beside a nonzero total
+    # Empty means UNKNOWN, not none -- the one field here where the
+    # default is permissive. `unites_held` is the deny (0 unless
+    # something read a pouch), so an empty stock beside a nonzero total
     # can only mean "N unites, kind unrecorded", which is what every
-    # offline harness supplies. Filtering those to nothing would silence
-    # the feature everywhere it is measured.
+    # offline harness supplies.
     #
-    # Mutated COPY-ON-WRITE, never in place: `clone` shares this dict
-    # the way it shares `gag_counts`, and mutating it in place is the
-    # bug that once restocked a real pouch from a discarded candidate.
+    # Mutated copy-on-write, never in place: `clone` shares this dict
+    # like `gag_counts`, and mutating in place would restock a real
+    # pouch from a discarded candidate.
     unite_stock: Dict[tuple, int] = field(default_factory=dict)
 
     # The Toon-Up unites THIS TOON'S GAME issues, or () for TTR's.
     #
     # Per toon because the builds differ and neither may overwrite the
     # other: TTR issues 20/35/50/65/80 ([CONFIRMED] wiki) and Realms
-    # issues 10/20/40/80/MAX ([OWNER] from its menu). docs/realms.md
-    # forbids Realms data becoming the solver's own table, so the
-    # Realms reader sets this on the state instead.
+    # issues 10/20/40/80/MAX ([OWNER] from its menu). Realms data must
+    # not become the solver's own table (docs/realms.md), so the Realms
+    # reader sets this on the state instead.
     toon_up_values: tuple = ()
 
     # SOS cards held, by SOS Toon name. [CONFIRMED] wiki: up to 100 of
@@ -153,14 +141,13 @@ class ToonState:
 
     # Pink slips, "fires". [CONFIRMED] wiki: they fire a targeted cog out
     # of battle with a cannon and eliminate BOTH layers of a Version 2.0.
-    # The owner confirms the rest from play: using one costs the toon's
-    # action for the round, and it cannot miss.
+    # [OWNER] from play: using one costs the toon's action for the round,
+    # and it cannot miss.
     #
-    # LAST FIELD ON PURPOSE. `ToonState` is built positionally all over
-    # the tests and tools, so inserting this between existing fields
-    # shifted every one after it -- `organic_tracks` landed in `fires`
-    # and 26 tests died on "frozenset > int". A new field goes on the
-    # end unless every construction site is keyword-only.
+    # LAST FIELD ON PURPOSE: `ToonState` is built positionally all over
+    # the tests and tools, so a new field goes on the end unless every
+    # construction site is keyword-only, or it silently shifts every
+    # field after it.
     #
     # Defaults to 0, because a fire is strictly better than any gag
     # against any cog and a party holding them does not play the game.
@@ -180,17 +167,16 @@ class CogStatus:
 
     # Rounds of lure left on this cog -- the `currentlyLuredSuits[suitId][0]`
     # counter from the source pseudocode, which gates the wake-up check.
-    # Counts cog phases this cog will skip; decremented every round the lure
-    # holds, and the lure ends when it reaches 0. Set from
-    # mechanics.lure_duration_rounds(), which is [CONFIRMED] against the
-    # TTR wiki: 2/2/3/3/4/4/8 rounds by gag level.
+    # Counts cog phases this cog will skip; decremented every round the
+    # lure holds, ending at 0. Set from mechanics.lure_duration_rounds(),
+    # [CONFIRMED] TTR wiki: 2/2/3/3/4/4/8 rounds by gag level.
     lure_rounds_remaining: int = 0
 
     # The PRE-BONUS accuracy (propAcc + trackExp + tgtDef, no bonus term)
-    # that the Lure landing on this cog was rolled with. This is the input
-    # to mechanics.lure_wakeup_chance(); the source stores it per-cog at the
-    # moment the Lure resolves, because accuracy bonuses must not offset the
-    # wake-up odds. None whenever the cog is not lured.
+    # the Lure landing on this cog was rolled with -- the input to
+    # mechanics.lure_wakeup_chance(). Stored per-cog at the moment the
+    # Lure resolves, since accuracy bonuses must not offset the wake-up
+    # odds. None whenever the cog is not lured.
     lure_acc_before_bonus: Optional[int] = None
 
     # Level of the Lure gag that landed. Needed because whether a lure can
@@ -243,20 +229,20 @@ class CogStatus:
         """A Lure lands on this cog. Returns whether it did anything.
 
         **Re-luring an already-lured cog does NOT refresh its duration.**
-        The existing counter runs down on its original schedule and the new
-        gag is simply wasted on that cog. It doesn't stack either -- TTR
-        3.0.0 "Removed the Lure Stacking Rounds mechanic that allowed the
+        The existing counter runs down on its original schedule and the
+        new gag is simply wasted. It doesn't stack either -- TTR 3.0.0
+        "Removed the Lure Stacking Rounds mechanic that allowed the
         accumulation of Lure rounds ... if multiple Lure Gags are used
-        simultaneously". Neither refresh nor stack: an already-lured cog is
-        untouchable by Lure until its rounds run out.
+        simultaneously". Neither refresh nor stack: an already-lured cog
+        is untouchable by Lure until its rounds run out.
 
-        This is a no-op rather than an illegal action on purpose. A group
-        Lure over a partly-lured battle has to be able to catch the
-        un-lured cogs, so it can't be rejected wholesale -- it just leaves
-        the already-lured ones alone.
+        A no-op rather than an illegal action: a group Lure over a
+        partly-lured battle must still catch the un-lured cogs, so it
+        can't be rejected wholesale -- it just leaves the lured ones
+        alone.
 
-        [UNVERIFIED] The no-refresh rule comes from play knowledge, not the
-        wiki: the wiki documents the simultaneous-stacking removal above and
+        [UNVERIFIED] The no-refresh rule is play knowledge, not the wiki:
+        the wiki documents the simultaneous-stacking removal above and
         says nothing about re-luring across rounds.
         """
         if self.lured:
@@ -277,9 +263,9 @@ class CogStatus:
     def clear_trap(self) -> None:
         """No trap under this cog -- sprung, or cancelled by a second one.
 
-        Every field together, because a stale `trap_level` under a
+        Clears every field together: a stale `trap_level` under a
         `trapped=False` cog is the shape that makes a later Lure look up
-        damage for a trap that is not there.
+        damage for a trap that isn't there.
         """
         self.trapped = False
         self.trap_track = None
@@ -296,23 +282,17 @@ class CogStatus:
             trapped=self.trapped,
             trap_track=self.trap_track,
             trap_level=self.trap_level,
-            # AN SOS TRAP CARRIES ITS DAMAGE HERE AND NOWHERE ELSE.
+            # An SOS trap carries its damage HERE and nowhere else.
             # `Clerk Will` and friends set `trap_damage` and leave
-            # `trap_level` None, because a card's 60/120/180 is not a
-            # gag level. Dropping it left a cog still marked `trapped`
-            # with BOTH fields None, and `_apply_trap_trigger` then
-            # raised `no gag at trap level None` the first time a lure
-            # sprang it. Third instance of this omission, after `fires`
-            # and `suited` below.
+            # `trap_level` None, since a card's 60/120/180 isn't a gag
+            # level. Must be copied or a trapped cog ends up with both
+            # fields None, and `_apply_trap_trigger` raises looking for a
+            # gag at trap level None.
             trap_damage=self.trap_damage,
             trap_organic=self.trap_organic,
             is_dead=self.is_dead,
-            # The outer suit. Omitting it silently un-2.0'd every Version
-            # 2.0 after ONE round -- the flag survived only until the
-            # first copy, so a CEO's second battle, which is entirely
-            # 2.0s, was fought against ordinary cogs with half the health.
-            # Same omission as `fires` in ToonState.clone, found the same
-            # way: a marker that appeared on round one and never again.
+            # The outer suit. Must be copied every round or a Version 2.0
+            # silently loses its second layer after one round.
             suited=self.suited,
             damage_by_toon=(dict(self.damage_by_toon)
                             if self.damage_by_toon else None),
@@ -338,21 +318,16 @@ class CogState:
 
         THE ONE RULE WORTH KNOWING: a hit that destroys the outer suit
         does NOT carry the excess into the Skelecog form. TTR removed
-        carryover damage in the 3.0.0 rebalancing of December 2021, so a
-        Toontanic into a 90 hp suit wastes 90 of its 180.
-
-        That makes v2.0 the only cog in the game that rewards precision
-        over raw damage, and it cuts directly against how both agents
-        play -- they favour group gags and heavy single hits, and a
-        board full of v2.0s punishes exactly that.
+        carryover damage in the 3.0.0 rebalancing, so a Toontanic into a
+        90 hp suit wastes 90 of its 180 -- making v2.0 the only cog that
+        rewards precision over raw damage, against the grain of agents
+        that favour group gags and heavy single hits.
 
         RETURNS THE FULL AMOUNT THROWN, not the part that fitted. Every
-        scorer and the reward function read this as "damage dealt", and
-        returning the clamped value silently redefined that for the whole
-        project -- a 180-damage TNT into a 42 hp cog reported 42, and
-        three organic-damage tests caught it. Overkill is a SCORER's
-        concern (`plan_waste` already charges for it) and must not be
-        smuggled in here.
+        scorer and the reward function read this as "damage dealt", so
+        returning the clamped value would silently redefine that project
+        wide. Overkill is a SCORER's concern (`plan_waste` charges for
+        it) and must not be smuggled in here.
         """
         if amount <= 0 or self.status.is_dead:
             return 0
@@ -380,13 +355,10 @@ class BattleState:
     the rules can be written once and be correct for a party, but the
     search, the evaluator and the live readers are all still solo. What
     changes here is that the *rules* stop assuming a lone toon -- the
-    losing condition especially, which is a statement about the team and
-    was written as a statement about one toon.
+    losing condition especially, which is a statement about the team.
 
-    `toons[0]` is the toon being advised. `toon` is kept as a property
-    for it, because every caller in the project refers to it that way
-    and rewriting them all would bury the parts of this change that
-    matter.
+    `toons[0]` is the toon being advised; `toon` is a property for it so
+    existing solo code reads unchanged.
     """
 
     toons: List[ToonState]
@@ -399,12 +371,11 @@ class BattleState:
     # The solver has always optimised ONE battle, which is why
     # `objective.scarcity_cost` exists: a hand-tuned stand-in for "an
     # irreplaceable gag is worth more than this fight suggests, because
-    # the cost lands in the next one". This is that quantity instead of
-    # a proxy for it. Spending a Railroad on floor one of five is a
-    # different decision from spending it on the last cog of the day,
-    # and nothing in the state could previously tell the two apart.
-    #
-    # Capped around 30, which is roughly a full building plus its boss.
+    # the cost lands in the next one". This field is that quantity
+    # directly, rather than a proxy for it: spending a Railroad on floor
+    # one of five is a different decision from spending it on the last
+    # cog of the day. Capped around 30, roughly a full building plus
+    # its boss.
     cogs_remaining: int = 0
 
     # Cogs waiting off-field to walk into THIS battle as slots free.
@@ -433,89 +404,67 @@ class BattleState:
 
     # Teammates in this battle besides you: 0 solo, up to 3.
     #
-    # PRESENT, NOT SIMULATED, AND THE DISTINCTION IS THE WHOLE DESIGN.
-    # They are a count rather than entries in `toons` for two reasons,
-    # both of which broke when tried the other way round.
+    # PRESENT, NOT SIMULATED. A count rather than entries in `toons`,
+    # for reasons that broke when tried the other way:
     #
-    # `is_terminal` is "every toon sad". Teammates in `toons` that the
-    # search cannot kill mean YOUR going sad no longer ends the battle,
-    # and the search happily evaluates positions from beyond your own
-    # death. That is the shape of bug that once scored a hopeless
-    # position at +47.6.
+    # - `is_terminal` is "every toon sad". Teammates in `toons` that the
+    #   search can't kill mean your own death no longer ends the battle
+    #   -- the shape of bug that once scored a hopeless position +47.6.
+    # - Their laff IS visible (the battle UI shows every toon's meter),
+    #   but their GAGS are not -- the chosen-gag box stays "?" until the
+    #   round resolves. A toon whose pouch is unknown can't be searched
+    #   as a toon, only counted.
+    # - `search/features.py` pools over `toons`, and solo feature
+    #   vectors are bit-identical today, which is what keeps the fitted
+    #   weights valid; stand-in toons would change that vector for
+    #   every live party position.
     #
-    # Their laff would have to come from somewhere, and IT IS ON THE
-    # SCREEN -- the battle UI prints every toon's meter along the
-    # bottom ("80/95", "91/106", ...), not just yours, which is worth
-    # writing down because this file previously implied otherwise. What
-    # is genuinely missing is their GAGS: the box beside each meter is
-    # the gag they have chosen and it stays a "?" until the round
-    # resolves. A toon whose pouch is unknown cannot be searched as a
-    # toon, only counted -- so counted is what this is.
-    #
-    # And `search/features.py` pools over `toons`. Solo feature vectors
-    # are bit-identical today, which is what keeps the fitted weights
-    # valid; putting stand-in toons in the list would change the vector
-    # for every live party position and quietly invalidate them.
-    #
-    # So what this buys is exactly one thing, and it is the one thing a
-    # COUNT determines without knowing anything else about the people
-    # holding the gags: a single-target cog attack now has somewhere
-    # else to land. See `your_target_share`.
-    #
-    # What it deliberately does NOT buy, because a count cannot know it:
-    # teammate gags. No Trap set for someone else's Lure, no stacking a
-    # track for `calc_hp_bonus`, no counting their damage toward the
-    # fight. The advice still plans YOUR pouch alone and is correct to
-    # -- `solver/search/party_search.py` is the module that searches a
-    # party's joint plan, and it needs their loadouts to do it.
+    # What a count buys: a single-target cog attack has somewhere else
+    # to land (see `your_target_share`). What it can't buy, because a
+    # count knows nothing about the gags: teammate coordination -- no
+    # Trap for someone else's Lure, no stacking for `calc_hp_bonus`, no
+    # counting their damage. The advice still plans YOUR pouch alone;
+    # `solver/search/party_search.py` is what searches a joint plan.
     allies_standing: int = 0
 
     # Unlured passes still available. A pass is a real move -- conserving
     # a scarce gag, or in a party declining to hit a cog because
-    # `mechanics.pick_cog_target` makes it prefer whoever damaged it
-    # most, so attacking draws its next swing onto you.
+    # `mechanics.pick_cog_target` prefers whoever damaged it most, so
+    # attacking draws its next swing onto you.
     #
-    # It is BUDGETED rather than free, and that is what keeps `solve()`
-    # exact. Termination rests on a lexicographic measure that must
-    # strictly decrease: (gags remaining, lure rounds remaining, free
-    # passes). An unlured pass spends no gag and ticks no lure, so
-    # without a budget the search could walk pass -> pass -> pass
-    # forever and the state graph would stop being a DAG.
+    # BUDGETED rather than free, which is what keeps `solve()` exact.
+    # Termination rests on a lexicographic measure that must strictly
+    # decrease: (gags remaining, lure rounds remaining, free passes). An
+    # unlured pass spends no gag and ticks no lure, so without a budget
+    # the search could walk pass -> pass -> pass forever, and the state
+    # graph would stop being a DAG.
     #
     # CURRENTLY UNUSED -- `legal_actions` is back to the narrow rule.
+    # Widening it (pass as an ordinary choice) is the right behaviour,
+    # but shipping it broke exact `solve()`: adding `free_passes` to
+    # `outcomes.state_key` was necessary and not sufficient, so
+    # something else in the search caches across it -- caught when a
+    # budget of 2 valued a position at +88.85 and a budget of 1 valued
+    # the same position at +84.30, which passing cannot explain (it only
+    # costs laff and a turn). That has to be found before this returns:
+    # exact `solve()` is what the solo results and every fitted label
+    # rest on.
     #
-    # The widening (pass as an ordinary choice: conserve a scarce gag,
-    # or decline to attack because `pick_cog_target` aims a cog at
-    # whoever hurt it) is right, and shipping it broke exact `solve()`.
-    # With a budget of 2 the solver valued a position at +88.85 and with
-    # 1 at +84.30, choosing to pass in the first -- but passing only
-    # costs laff and a turn, so it cannot CREATE 4.55 points. Working
-    # the same node by hand gives ~79.9, and enumerating its outcomes
-    # directly gives 84.59: three different numbers for one value, which
-    # is a memo serving answers to the wrong question.
-    #
-    # Adding `free_passes` to `outcomes.state_key` was necessary and not
-    # sufficient, so something else in the search caches across it. That
-    # has to be found before this comes back: exact `solve()` is what
-    # the solo results and every fitted label rest on, and a wrong
-    # answer there is worth more than any strategic gain here.
-    #
-    # A pass while lured does NOT draw on this, because a lured pass has
-    # its own decreasing quantity in the lure timer -- that is the
-    # trap-and-wait line, which can need many rounds.
+    # A pass while lured does NOT draw on this budget -- the lure timer
+    # is already the decreasing quantity for the trap-and-wait line,
+    # which can need many rounds.
     free_passes: int = 3
 
-    # Battle-wide timed status effects from SOS Toons. [OWNER] TTR
-    # models Toons Hit and Cogs Miss exactly as it models Lured and
-    # Trapped -- an effect with a round counter -- so they live here
-    # with one, rather than as special cases in a scorer.
+    # Battle-wide timed status effects from SOS Toons. [OWNER] TTR models
+    # Toons Hit and Cogs Miss exactly as it models Lured and Trapped --
+    # an effect with a round counter -- so they live here with one,
+    # rather than as special cases in a scorer.
     #
     # [CONFIRMED] wiki: +75% gag accuracy and -75% cog accuracy, for 3,
     # 4 or 5 rounds depending on the card's tier.
     #
-    # These BELONG in `outcomes.state_key`. Two positions identical but
-    # for a Cogs Miss are not the same position -- that is the
-    # `free_passes` lesson, recorded below.
+    # Belong in `outcomes.state_key`: two positions identical but for a
+    # Cogs Miss are not the same position -- the `free_passes` lesson.
     toons_hit_rounds: int = 0
     cogs_miss_rounds: int = 0
 
@@ -561,10 +510,10 @@ class BattleState:
         leaves (Track enums, the (track, level) tuples used as gag keys) are
         immutable.
 
-        Exists because `copy.deepcopy` dominated the solver's runtime -- it
-        was 91% of a depth-2 search, since expectimax copies a state per
-        outcome branch per node. This is ~20x faster for the same result.
-        Extend it whenever you add a mutable field to any battle dataclass.
+        Exists because `copy.deepcopy` was 91% of a depth-2 search's
+        runtime (expectimax copies a state per outcome branch per node);
+        this is ~20x faster for the same result. Extend it whenever you
+        add a mutable field to any battle dataclass.
         """
         return BattleState(
             toons=[ToonState(
@@ -575,30 +524,25 @@ class BattleState:
                 # for one three-cog depth-2 position -- and copying these
                 # two was most of it.
                 #
-                # track_exp is the toon's training level per track. It is
-                # fixed for the whole battle; nothing mutates it.
-                #
-                # gag_counts does change, but only in
+                # track_exp is fixed for the whole battle; nothing
+                # mutates it. gag_counts does change, but only in
                 # simulator.apply_toon_action, which copies before
-                # writing. Sharing here plus copying there costs one dict
-                # copy per action instead of one per outcome branch.
+                # writing -- so sharing here plus copying there costs one
+                # dict copy per action instead of one per outcome branch.
                 track_exp=t.track_exp,
                 gag_counts=t.gag_counts,
                 organic_tracks=t.organic_tracks,
                 pouch_capacity=t.pouch_capacity,
                 fire_capacity=t.fire_capacity,
                 unite_cooldown=t.unite_cooldown,
-                # SPENT, so carried -- see the note on `fires` below.
+                # SPENT, so carried -- same reason as `fires` below.
                 unites_held=t.unites_held,
                 unite_stock=t.unite_stock,
                 toon_up_values=t.toon_up_values,
                 sos_cards=t.sos_cards,
-                # Pink slips are SPENT, so they must be carried. Omitting
-                # this defaulted every clone to zero and the fires simply
-                # evaporated -- a CEO sweep reported "20 used every run"
-                # which was not usage at all, it was the loss being read
-                # as spending. Anything mutable enough to be spent has to
-                # appear here; the field list is not decoration.
+                # Pink slips are SPENT, so they must be carried. A field
+                # left out of this list defaults to zero on every clone
+                # and silently evaporates across the search.
                 fires=t.fires,
             ) for t in self.toons],
             cogs=[c.copy() for c in self.cogs],
@@ -625,11 +569,10 @@ class BattleState:
         """Won when the field is clear AND nothing is still walking in.
 
         The holdout check is belt and braces: `facility.reinforce` fills
-        freed slots during round resolution, so a state with a live
-        holdout and an empty field should not normally exist. Should one
-        arise on a path that skips reinforcement, calling it a win would
-        end the floor early and hand back a victory the toon has not
-        had -- expensive and silent, so it is checked here too.
+        freed slots during round resolution, so a live holdout beside an
+        empty field shouldn't normally exist. If one arises on a path
+        that skips reinforcement, checking here avoids ending the floor
+        early on a victory the toon hasn't actually had.
         """
         return (bool(self.active_toons())
                 and len(self.active_cogs()) == 0
@@ -643,26 +586,20 @@ class BattleState:
         applied per attack by name against `data.GROUP_ATTACKS`, never
         to a cog's damage as a whole.
 
-        WHY UNIFORM, WHEN `mechanics.pick_cog_target` IS NOT. That
+        WHY UNIFORM, WHEN `mechanics.pick_cog_target` IS NOT: that
         function sends `REVENGE_CHANCE` (75%) of attacks at whoever
-        damaged the cog, weighted by how much, and only the remaining
-        25% uniformly. Uniform is what that resolves to when everyone
-        is throwing gags at roughly equal rates, which is what a real
-        group is doing -- the damage weights are then roughly equal and
-        the revenge branch spreads like the uniform one.
+        damaged the cog, weighted by how much, and only 25% uniformly.
+        Uniform is what that resolves to when everyone throws gags at
+        roughly equal rates, which is the normal case.
 
-        IT IS OPTIMISTIC IN A SPECIFIC, KNOWABLE CASE, and this is the
-        limitation to hold in mind rather than a hidden one: if you are
-        the one dealing the damage -- you dropped a Railroad on a cog
-        your teammates have not touched -- revenge concentrates that
-        cog's attacks on you, and your real share is nearer 0.75 than
-        0.25. The model cannot see it, because it would need each
-        teammate's damage and nothing reports it.
-
-        The alternative was to assume the revenge branch always lands on
-        you, which is safe in that case and badly wrong in every other:
-        at four toons it gives a share of 0.81, so the dilution would be
-        almost nil and the count would not be worth reading.
+        OPTIMISTIC IN A SPECIFIC, KNOWN CASE: if you alone just damaged a
+        cog your teammates haven't touched, revenge concentrates its
+        attacks on you and your real share is nearer 0.75 than 0.25 --
+        invisible here since it would need each teammate's damage and
+        nothing reports it. The alternative, assuming revenge always
+        lands on you, is safe there but wrong everywhere else (at four
+        toons it gives 0.81, making the dilution this field exists for
+        nearly disappear).
         """
         allies = max(0, int(self.allies_standing))
         return 1.0 / (1.0 + allies)
@@ -714,8 +651,8 @@ class BattleState:
         """Whether any sequence of remaining gags can hurt a cog.
 
         A solo toon that cannot damage cogs cannot win, however much laff
-        or however many gags it is holding. Pink slips, damage and restock
-        SOS cards, and Gag-Up unites all count as a way back -- see
+        or however many gags it holds. Pink slips, damage/restock SOS
+        cards, and Gag-Up unites all count as a way back -- see
         `_consumables_can_damage`. So this is the real losing condition,
         and "the pouch is empty" is only its most obvious case.
 
@@ -734,26 +671,22 @@ class BattleState:
           * a cog already trapped, holding only Lure -- NOT lost, the
             Lure springs the existing trap
         """
-        # Pooled across the team, not per toon, and that is the whole
-        # difference between the solo rule and the party one. Eighty
-        # Lures and no attacks loses solo; in a party it is a perfectly
-        # good support loadout, because the damage is somebody else's
-        # job. Asking this toon-by-toon would call a winnable fight lost
-        # the moment one member ran out of attacks.
-        # A pink slip removes a cog outright, so a party holding one can
-        # always still finish the fight even with an empty pouch. This has
-        # to come before the track check or "eighty Lures and no attacks"
-        # would read as lost while a fire sat unused.
+        # Pooled across the team, not per toon -- the whole difference
+        # between the solo rule and the party one. Eighty Lures and no
+        # attacks loses solo; in a party it's a fine support loadout,
+        # because the damage is somebody else's job. Asking toon-by-toon
+        # would call a winnable fight lost the moment one member ran out.
+        #
+        # A pink slip removes a cog outright, checked before the track
+        # check so "eighty Lures and no attacks" doesn't read as lost
+        # while a fire sits unused.
         if any(toon.fires > 0 for toon in self.active_toons()):
             return True
 
-        # CARDS AND UNITES THAT PUT DAMAGE BACK IN REACH. This said they
-        # were "not modelled", and they have been for a while -- so a toon
-        # down to Lure with a Restock All in hand read as LOST, and every
-        # evaluator scored it as a dead position. That is the state a solo
-        # VP reaches after spending its power gags, so the solver could
-        # not even value climbing back out of it: the restock that is the
-        # way out led, as far as it could tell, to a fight already over.
+        # Cards and unites that put damage back in reach -- without this
+        # a toon down to Lure with a Restock All in hand read as LOST,
+        # and the solver couldn't value climbing back out of the very
+        # state a solo VP reaches after spending its power gags.
         if self._consumables_can_damage():
             return True
 
@@ -795,13 +728,13 @@ class Action:
     fire: bool = False
 
     # The name of an SOS Toon, when this action is calling one. An SOS
-    # costs the toon's turn like any gag, so it belongs here rather
-    # than in the wrapper unites needed -- see solver/sos.py.
+    # costs the toon's turn like any gag, so it belongs here -- see
+    # solver/sos.py.
     #
-    # Like a fire, it has no track and no level, so anything guarding
-    # on `is_pass` alone will mistake it for a gag and reach for
-    # `action.track.value`. That exact bug shipped once for fires; the
-    # `is_pass` property below excludes both for the same reason.
+    # Like a fire, it has no track and no level, so anything guarding on
+    # `is_pass` alone will mistake it for a gag and reach for
+    # `action.track.value`; `is_pass` below excludes both for that
+    # reason.
     sos: Optional[str] = None
 
     @property

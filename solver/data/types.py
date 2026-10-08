@@ -1,22 +1,17 @@
 """
 The shapes game data comes in.
 
-Everything in `data/` used to be parallel dicts keyed the same way -- one
-for damage, one for organic damage, one for heals, one for names, one for
-group levels, and Lure in a file of its own because it happened to be
-rewritten first. Finding out what a gag does meant looking it up in six
-places and knowing which of them Lure was exempt from.
+One object per gag, one per cog, one per cog attack, each carrying
+everything known about it, rather than parallel dicts keyed the same
+way. A `None` field means "no source gives this", and accessors raise
+`NotImplementedError` naming the gap rather than returning a silent
+default -- the no-guessing rule lives here, in one place.
 
-These types collapse that: one object per gag, one per cog, one per cog
-attack, each carrying everything known about it. A `None` field still means
-"no source gives this", and accessors raise `NotImplementedError` naming the
-gap rather than returning a silent default -- the no-guessing rule survives
-the refactor, it just lives in one place now.
-
-Levels are 1-indexed everywhere, matching the game and the wiki. Cog attack
-rows are indexed by *relative* level (`cog.rel_index(level)`), because a
-Micromanager's first row is level 4, not level 1 -- `Cog.attack_at` does
-that arithmetic so callers stop repeating `level - levels[0]`.
+Levels are 1-indexed everywhere, matching the game and the wiki. Cog
+attack rows are indexed by *relative* level (`cog.rel_index(level)`),
+since a Micromanager's first row is level 4, not level 1 --
+`Cog.attack_at` does that arithmetic so callers stop repeating
+`level - levels[0]`.
 """
 from dataclasses import dataclass, field
 from typing import Dict, Optional, Sequence, Tuple
@@ -59,28 +54,19 @@ class Gag:
     # left, because its own cap is 3. `min_carry` is the limit on a starting
     # pouch, `max_carry` with every pouch upgrade.
     #
-    # [TODO] NOTHING INTERPOLATES BETWEEN THESE, and `min_carry` is
-    # consequently dead: every consumer in the project reads `max_carry`
-    # and so assumes a fully upgraded pouch. That over-equips exactly the
-    # under-trained toons `env.scrappy_position` exists to model.
+    # [TODO] NOTHING INTERPOLATES BETWEEN THESE, so `min_carry` is dead:
+    # every consumer reads `max_carry` and assumes a fully upgraded
+    # pouch, over-equipping exactly the under-trained toons
+    # `env.scrappy_position` exists to model.
     #
-    # The rule that would fix it is NOT AVAILABLE. Two accounts disagree
-    # and neither is confirmed:
-    #   * this comment says the limit rises with POUCH upgrades (the
-    #     20 -> 80 ToonTasks);
-    #   * the project owner reports it rises with how much of the TRACK
-    #     is unlocked.
-    # Each gag's infobox publishes only the two endpoints (`mincarry`,
-    # `maxcarry`) with no function between them; `Gag pouch` covers the
-    # pouch TOTAL only; and a wiki search for the rule returns patch
-    # notes changing individual caps (TNT 2 -> 3, Trapdoor 5 -> 7) plus a
-    # Sellbot Task Force reward granting "+1 level 7 gag carry capacity",
-    # which is a third mechanism again.
-    #
-    # So this stays unmodelled rather than guessed. Filling it in would
-    # change every scarcity price in the project -- `objective`,
-    # `_quick_score`, `_greedy_score` and `party.py` all divide by
-    # `max_carry` -- so a wrong rule would be expensive and quiet.
+    # The interpolation rule is NOT AVAILABLE: two accounts disagree and
+    # neither is confirmed (this comment says the limit rises with POUCH
+    # upgrades; the owner reports it rises with how much of the TRACK is
+    # unlocked), and the wiki publishes only the two endpoints plus
+    # unrelated patch-note cap changes. Stays unmodelled rather than
+    # guessed -- `objective`, `_quick_score`, `_greedy_score` and
+    # `party.py` all divide by `max_carry`, so a wrong rule would be
+    # expensive and quiet.
     min_carry: Optional[int] = None
     max_carry: Optional[int] = None
 

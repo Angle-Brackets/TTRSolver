@@ -1,51 +1,34 @@
 """Following a battle as it happens, by watching the screen.
 
-Reading one screenshot proves the vision works; it does not help anyone
-mid-fight. This polls instead, so the solver sees the battle as the
-player does.
+Reading one screenshot proves the vision works; polling lets the solver
+see the battle as the player does.
 
-WHAT COUNTS AS A BATTLE
------------------------
-Two mistakes were made here, in opposite directions, and both looked
-like the vision failing.
+WHAT COUNTS AS A BATTLE. Teal plates alone are not sufficient: the slot
+colour isn't unique outside a battle screenshot, and a blue-green
+desktop wallpaper produced plates all day -- so entering a battle also
+requires the gag menu (`in_battle`), on a frame cropped to the game
+window first (`window.game_rect`, `Capture`).
 
-Teal plates are not sufficient. The slot colour is not unique outside a
-battle screenshot, and a blue-green desktop wallpaper produced plates
-all day -- so entering a battle also requires the gag menu
-(`in_battle`), and the frame is cropped to the game window before any
-of this runs (`window.game_rect`, `Capture`).
+Teal plates are not necessary either: when a round resolves, TTR cuts
+the camera to show the attack and takes the menu and every plate with it
+for the length of the animation. Absence means nothing until it outlasts
+one -- see `BATTLE_GRACE` and `_battle_is_over` -- otherwise a single
+fight reports itself starting and ending once per round.
 
-Teal plates are not necessary either, which is the subtler one. When a
-round resolves, TTR cuts the camera to show the attack and takes the
-menu and every plate with it for the length of the animation. Absence
-therefore means nothing until it outlasts one -- see `BATTLE_GRACE` and
-`_battle_is_over`. Before that, a single fight reported itself starting
-and ending once per round.
+COST. Scanning every pixel is the expensive part (~70ms at 1080p, ~280ms
+at 4K, against 33ms to grab the frame), so it is avoided in both states
+the watcher spends its time in: during a battle the scan is confined to
+a padded band around the last-seen plates (1080p 75ms -> 19ms, 4K 281ms
+-> 75ms), and between battles -- almost all the time -- a subsampled
+presence test answers "any teal at all" far cheaper, with the exact scan
+running only once something shows up (1440p 110ms -> 6.7ms). See
+`vision.locate_plates` for why the coarse pass stays yes/no only.
 
-COST
-----
-Scanning every pixel is the expensive part -- ~70ms at 1080p, ~280ms at
-4K, against 33ms to grab the frame -- so it is avoided in both of the
-states the watcher spends its time in.
-
-During a battle, plates barely move, so the scan is confined to a padded
-band of rows around where they were last seen: 1080p 75ms -> 19ms, 4K
-281ms -> 75ms, with one full scan instead of eight.
-
-Between battles there are no plates to narrow to, and that is the state
-the watcher is in almost always. A subsampled presence test answers "is
-there any teal at all" for a fraction of the cost and the exact scan
-runs only once something shows up: 1440p 110ms -> 6.7ms, ~17x. See
-`vision.locate_plates` for why the coarse pass is only ever a yes/no and
-never an enumeration.
-
-STABILITY
----------
-Cogs animate: they lean, they get knocked back, plates fade in and slide.
-A single frame is therefore not evidence. Readings are held until the
-same answer arrives `agree` times in a row before the watcher will call
-it a change, which is what stops a gag animation from being reported as
-four cogs appearing and leaving.
+STABILITY. Cogs animate -- lean, get knocked back, plates fade and slide
+-- so a single frame is not evidence. Readings are held until the same
+answer arrives `agree` times running before the watcher calls it a
+change, which stops a gag animation reading as four cogs appearing and
+leaving.
 """
 from __future__ import annotations
 
@@ -103,27 +86,24 @@ class CogReading:
     health: float
     cog: Optional[str] = None
     slot: Tuple[int, int, int, int] = (0, 0, 0, 0)
-    # Asleep on a Lure. NOT READ FROM THE PLATE YET -- the game draws a
-    # lure indicator and nothing here looks for it, so this arrives only
-    # from the player marking it in the panel.
+    # Asleep on a Lure. Read from the plate via `vision.lure_indicator`,
+    # with the player's mark in `_lured` as an override for a false
+    # negative.
     #
-    # It changes the advice completely, which is why it cannot stay
-    # unmodelled: Throw and Squirt are forced to 100% against a lured cog
-    # and collect the knockback bonus, Drop always misses one, and a
-    # lured cog does not attack. Treating a sleeping cog as awake means
-    # planning every one of those wrong.
+    # It changes the advice completely: Throw and Squirt are forced to
+    # 100% against a lured cog and collect the knockback bonus, Drop
+    # always misses one, and a lured cog does not attack. Treating a
+    # sleeping cog as awake means planning every one of those wrong.
     lured: bool = False
     # A trap laid in front of this cog. TTR floats a banana peel over a
-    # trapped cog -- `ttr_t_gui_bat_statusEffect_icon_trapped` -- so
-    # unlike `lured` this one is readable in principle; see
-    # `ttr_assets.status_icon`.
+    # trapped cog (`ttr_t_gui_bat_statusEffect_icon_trapped`), readable
+    # in principle unlike `lured` -- see `ttr_assets.status_icon`.
     #
-    # WHICH trap is a separate question and this cannot answer it. The
-    # marker is the same peel for Quicksand and for TNT, and
-    # `CogStatus` needs a level (or an explicit damage) before a Lure
-    # can spring it for the right number. So this says "something is
-    # under it" and the level still has to come from the player or from
-    # what the solver itself advised.
+    # WHICH trap is a separate question: the marker is the same peel for
+    # Quicksand and TNT, and `CogStatus` needs a level (or explicit
+    # damage) before a Lure can spring it for the right number. So this
+    # only says "something is under it"; the level comes from the player
+    # or from what the solver itself advised.
     trapped: bool = False
     trap_level: Optional[int] = None
 
@@ -247,14 +227,14 @@ def _outside_the_menu(frame, plates):
 
     A cog plate floats above its cog; the menu is drawn over the lower
     middle of the screen and never contains one. The menu also holds
-    plenty of teal -- cell backgrounds, the empty Drop slot -- and after
+    plenty of teal (cell backgrounds, the empty Drop slot), and after
     the slot floor came down to admit a real plate at 1110 pixels, an
-    80x49 patch inside the TRAP row started passing as a second cog.
-    A false plate is worse than a missed one: the search then plans
+    80x49 patch inside the TRAP row started passing as a second cog. A
+    false plate is worse than a missed one: the search then plans
     against a cog nobody is fighting.
 
     Costs nothing: `find_panel` has already run this poll for the read
-    gate, and its bounds are exactly what is needed.
+    gate, and its bounds are exactly what's needed.
     """
     if not plates:
         return plates
@@ -286,20 +266,15 @@ class BattleWatcher:
                  collect: bool = True, panel_present=None,
                  battle_over=None, force_battle=None):
         self.catalogue = catalogue if catalogue is not None else HeadCatalogue()
-        # Cogs the player named by hand, keyed by PLATE ORDER. The
-        # catalogue has 4 of 32 heads, so `match` usually fails and
-        # `eliminate` usually cannot deduce -- and the player can see the
-        # cog perfectly well.
-        #
-        # NOT keyed on `plate.slot`, which was the first attempt and does
-        # not work: the slot is a detected bounding box and `find_plates`
-        # says itself that antialiased edge pixels move it by a few
-        # pixels between frames. The name matched on the frame it was
-        # given and never again, so the pick appeared to be refused.
-        #
-        # Order is stable frame to frame and unstable across a death, so
-        # `_forget_names` clears them whenever the plate count changes
-        # rather than letting a name slide onto a different cog.
+        # Cogs the player named by hand, keyed by PLATE ORDER -- the
+        # catalogue only knows a few heads, so `match`/`eliminate` often
+        # can't, and the player can see the cog perfectly well. NOT
+        # keyed on `plate.slot`: that's a detected box that drifts a few
+        # pixels between frames from antialiasing, so a name keyed on it
+        # never matched again. Order is stable frame to frame and
+        # unstable across a death, so `_forget_names` clears names when
+        # the plate count changes rather than letting one slide onto a
+        # different cog.
         self._named: dict = {}
         self._low_frames = 0
         # Plates the player has marked as lured, by plate order. Same
@@ -307,13 +282,12 @@ class BattleWatcher:
         self._lured: set = set()
         # Traps the player has marked, plate order -> gag level.
         self._trapped: dict = {}
-        # Levels the player typed in, by plate order. `read_level` gates
-        # on a margin over the runner-up and refuses when a digit could
-        # equally be another -- a live "Level 8" reads at score 0.73 with
-        # a margin of 0.02 against a 0.05 floor. Refusing is right; the
-        # gate exists because a Level 8 was once read as a 6. But the
-        # plate says "Level 8" in plain text to the player, so let them
-        # say so.
+        # Levels the player typed in, by plate order. `read_level`
+        # refuses when a digit could equally be another -- a live
+        # "Level 8" once scored 0.73 with a 0.02 margin against a 0.05
+        # floor, correctly, since a Level 8 was once read as a 6. But
+        # the plate says "Level 8" in plain text, so let the player say
+        # so.
         self._levels: dict = {}
         # Last full read, reused while the board is mid-animation.
         self._cached_readings = None
@@ -321,14 +295,11 @@ class BattleWatcher:
         # Set once per poll and shared, rather than recomputed by every
         # caller that wants it.
         self.menu_visible = False
-        # THE FRAME `menu_visible` AND THE READINGS WERE TAKEN FROM, kept
-        # so the solver reads the same capture the watcher graded. The
-        # overlay used to grab a SECOND frame of its own and hand that to
-        # `read_panel`, so the two ran the identical `find_panel` check on
-        # two different moments -- and mid-animation they disagree. The
-        # panel then said "see: 2 cog plates, gag menu" and "no gag menu
-        # on screen" at the same time, which is not a contradiction the
-        # player can do anything about.
+        # THE FRAME `menu_visible` AND THE READINGS WERE TAKEN FROM, so
+        # the solver reads the same capture the watcher graded -- a
+        # second, separately grabbed frame can disagree mid-animation
+        # (e.g. "2 cog plates, gag menu" and "no gag menu" at once),
+        # which is not a contradiction the player can do anything about.
         self.last_frame = None
         # Slots the player named that are not in the library yet. The
         # panel names a slot without a frame in hand, so the head is
@@ -392,29 +363,25 @@ class BattleWatcher:
         self._forget_names(len(plates))
 
         # RE-READ WHEN THE MENU IS UP, or when the lineup changes.
+        # Identifying a cog (department, level, signature match) is the
+        # expensive part of a poll, and redoing it every frame --
+        # including ones where TTR swings the camera through an attack,
+        # where plates are moving and half-occluded -- produced flicker
+        # that wiped cogs the player had named by hand.
         #
-        # Identifying a cog is the expensive part of a poll -- a
-        # department match, a level match and a signature comparison per
-        # plate -- and it was being redone on every frame, including the
-        # ones where TTR is swinging the camera through an attack. Those
-        # frames are the worst possible input: the plates are moving,
-        # half-occluded, and the readings that come back flicker. That
-        # flicker is not just wasted work, it is what wiped a cog the
-        # player had named by hand.
-        #
-        # The gag menu is up exactly when a decision is due and the board
-        # is still, which makes it a good clock for "look properly now".
-        # But a boss fight walks new cogs in mid-round with the menu
-        # down, so a change in the number of plates forces a look too.
-        # Between those, last round's answer is still this round's
-        # answer: cogs do not change identity.
+        # The gag menu is up exactly when a decision is due and the
+        # board is still, so it's a good clock for "look properly now".
+        # A boss fight can walk new cogs in mid-round with the menu
+        # down, so a plate-count change also forces a look; otherwise
+        # last round's answer still holds, since cogs don't change
+        # identity.
         if REREAD_ONLY_WITH_MENU and self._cached_readings is not None:
-            # PASSED IN, never computed here. `find_panel` sweeps seven
-            # colours over the whole frame; calling it to decide whether
-            # to skip a read cost 33x what the read did -- 495ms a poll
-            # against 15. The caller already needs the answer for its own
-            # "is the menu up" display, so it computes it once and hands
-            # it over. A gate has to be cheaper than what it gates.
+            # PASSED IN, never computed here: calling `find_panel` just
+            # to decide whether to skip a read cost 33x the read itself
+            # (495ms a poll vs 15). The caller already needs this answer
+            # for its own "is the menu up" display, so it's computed
+            # once and handed over -- a gate must be cheaper than what
+            # it gates.
             if menu_visible is None:
                 menu_visible = self.menu_visible
             same_lineup = len(self._cached_readings) == len(plates)
@@ -537,22 +504,16 @@ class BattleWatcher:
     def _forget_names(self, count: int) -> None:
         """Drop hand-named cogs that no longer have a plate.
 
-        ONLY THE OUT-OF-RANGE ONES. The first version cleared every name
-        whenever the plate count changed, which sounds safe and destroyed
-        the feature: `find_plates` is a heuristic on teal pixels and drops
-        a plate for a frame whenever a cog is mid-animation or obscured --
-        one of those, and the pick the player had just made was gone. The
-        panel showing "1 cog plate" with two cogs on screen is the same
-        flicker.
+        ONLY THE OUT-OF-RANGE ONES: clearing every name whenever the
+        plate count changed destroyed the feature, since `find_plates`
+        drops a plate for a frame whenever a cog is mid-animation or
+        obscured, discarding the player's pick on that flicker alone. A
+        name for a gone plate is stale and goes; a name for a plate that
+        still exists is kept even if the count moved.
 
-        A name for a plate that is no longer there is stale and goes. A
-        name for a plate that still exists is kept, even if the count
-        moved, because the alternative is losing every pick to noise.
-
-        Indices do shift when a cog dies, so a surviving name can end up
-        on the wrong cog. That is visible -- the dropdown shows it and the
-        player can change it -- where a silently discarded pick is not.
-        `end_fight` clears the lot.
+        Indices shift when a cog dies, so a surviving name can end up on
+        the wrong cog -- visible in the dropdown and correctable, unlike
+        a silently discarded pick. `end_fight` clears the lot.
         """
         if count < 0:                    # explicit reset
             self._named.clear()
@@ -562,16 +523,13 @@ class BattleWatcher:
             self._levels.clear()
             self._low_frames = 0
             return
-        # NO PLATES AT ALL IS "CANNOT SEE", NOT "COGS GONE", and it must
-        # never forget anything. Between rounds the attack animation
-        # plays for several seconds with no plate on screen, and the
-        # debounce below is five frames at a 0.5s poll -- 2.5s. So every
-        # hand-named cog was dropped on the FIRST round transition after
-        # naming it, which is exactly the reported bug: the selection is
-        # overwritten when the next round comes about.
-        #
-        # A zero count is the reader saying it has no evidence. Acting on
-        # it is the same error as building a state from an empty read.
+        # NO PLATES AT ALL IS "CANNOT SEE", NOT "COGS GONE" -- it must
+        # never forget anything. The attack animation between rounds
+        # hides every plate for several seconds, longer than the
+        # debounce below (5 frames at 0.5s = 2.5s), so acting on a zero
+        # count dropped every hand-named cog on the first round
+        # transition after naming it. A zero count is the reader saying
+        # it has no evidence, not that the cogs are gone.
         if count == 0:
             self._low_frames = 0
             return
@@ -599,14 +557,12 @@ class BattleWatcher:
     def name_plate(self, index, cog: Optional[str], learn: bool = True) -> None:
         """Record what the player says is in this plate slot.
 
-        WRITTEN TO THE HEAD LIBRARY, on the owner's instruction. The
-        default used to be not to: a signature is consulted forever, so a
-        wrong entry poisons every later match, while a wrong name costs
-        one battle. What makes writing acceptable is that `add`
-        overwrites rather than accumulates and keeps the source crop in
-        the catalogue directory, so a mis-click can be seen and
-        corrected -- and the player naming a cog they are looking at is
-        better evidence than a signature match against four known heads.
+        WRITTEN TO THE HEAD LIBRARY, on the owner's instruction: a wrong
+        entry poisons every later match, but `add` overwrites rather
+        than accumulates and keeps the source crop, so a mis-click can
+        be seen and corrected -- and the player naming a cog they're
+        looking at beats a signature match against a handful of known
+        heads.
 
         The write is deferred: this is called from the UI thread with no
         frame in hand, so the head is recorded on the next frame that
@@ -657,26 +613,21 @@ class BattleWatcher:
     def in_battle(self, frame: np.ndarray, plates_seen: bool) -> bool:
         """Is this frame a battle, as opposed to teal-coloured scenery?
 
-        Teal plates alone are not enough evidence and never were. The
-        claim in `vision`'s docstring that the slot colour "appears
-        nowhere else in Toontown's high-key palette" was validated on
-        battle screenshots only, and it is false in the wider game:
-        standing in Donald's Dreamland, 2.1% of the frame matched the
-        teal mask and two blobs cleared both the size and the aspect
-        filter, so the watcher called a battle, then called cogs
-        defeated as the player walked around and the blobs came and
-        went. Every reading it produced was `level unreadable /
-        unidentified`, which is what a false positive looks like from
-        the inside -- plate-shaped scenery has no level to read.
+        Teal plates alone are not enough evidence: standing in Donald's
+        Dreamland, 2.1% of the frame matched the teal mask and two blobs
+        cleared the size and aspect filters, so the watcher called a
+        battle and then cogs defeated as the player walked around --
+        every reading `level unreadable / unidentified`, the signature
+        of plate-shaped scenery with no level to read.
 
-        The gag menu is the honest signal, and it is free: nothing can
-        be advised without it anyway, because gag counts come only from
-        the screen. `find_panel` returns None on the same overworld
-        frame that fools the plate detector.
+        The gag menu is the honest signal, and it's free: nothing can be
+        advised without it anyway, since gag counts come only from the
+        screen, and `find_panel` returns None on the same frame that
+        fools the plate detector.
 
-        Entry is strict and continuation is lenient, because the menu
-        slides away while attack animations play. Requiring it every
-        frame would flap the battle on and off mid-fight.
+        Entry is strict, continuation lenient, because the menu slides
+        away during attack animations -- requiring it every frame would
+        flap the battle on and off mid-fight.
         """
         forced = self.force_battle() if self.force_battle else None
         if forced is False:
@@ -739,52 +690,37 @@ class BattleWatcher:
 
         events = self._diff(self.view.cogs, readings)
 
-        # PLATES GOING AWAY IS NOT THE BATTLE ENDING.
-        #
-        # When a round resolves, TTR cuts the camera to show the attack,
-        # and the gag menu and every plate go with it for the length of
-        # the animation. Treating that as the end reported a battle
-        # starting and ending several times per fight, and each
-        # re-entry re-ran the search on what was the same battle.
-        #
-        # Absence is only evidence once it has outlasted an animation.
-        # The agreement count above is deliberately left to accumulate
-        # meanwhile, so the end fires on the first poll after the grace
-        # expires rather than needing another `agree` frames of a thing
-        # that has already been stable for twenty seconds.
+        # PLATES GOING AWAY IS NOT THE BATTLE ENDING: TTR cuts the
+        # camera and takes the menu and every plate with it for the
+        # length of each attack animation, so treating that as the end
+        # reported a battle starting and ending several times per fight.
+        # Absence is only evidence once it outlasts an animation. The
+        # agreement count above keeps accumulating meanwhile, so the end
+        # fires on the first poll after the grace expires rather than
+        # needing another `agree` frames on top.
         if any(e.kind == "battle_ended" for e in events):
             if not self._battle_is_over():
                 return []
             # THE PLAYER'S MARKS DIE WITH THE FIGHT THEY WERE MADE IN.
+            # Marks are keyed on PLATE ORDER, so without this a name set
+            # at index 0 in one battle stamps onto whatever stands at
+            # index 0 in the next -- and since `read_frame` puts the
+            # player's name FIRST, the stale pick beats a correct read.
+            # Reported from play: a Name Dropper named in one fight
+            # reappeared in the next as a Bean Counter -- 56hp planned
+            # against 72hp actual.
             #
-            # `_forget_names(-1)` used to be reachable ONLY from the
-            # "Fight is over" button, so a fight that ended the normal
-            # way -- cogs defeated, walk into the next one -- left every
-            # hand-set mark in place, keyed on PLATE ORDER. A cog named
-            # at index 0 in one battle was then stamped onto whatever
-            # stood at index 0 in the next, and `read_frame` puts the
-            # player's name FIRST, so the stale pick beat a correct read
-            # rather than losing to it. Reported from play: a Name
-            # Dropper named in one fight reappeared in the next, where
-            # the cog was really a Bean Counter -- 56 hp planned against
-            # 72 hp actual.
-            #
-            # `_lured` and `_levels` carry the same way and are worse,
-            # because nothing on screen contradicts them: a fresh cog
-            # inherits "asleep" and the solver quietly plans the whole
-            # round around a lure that does not exist.
+            # `_lured` and `_levels` carry over the same way and are
+            # worse, since nothing on screen contradicts them: a fresh
+            # cog inherits "asleep" and the solver quietly plans around
+            # a lure that doesn't exist.
             self._forget_names(-1)
-        # BACKSTOP, for an end that was never seen. The reset above is
-        # the one with the right timing -- it runs before any reading of
-        # the next fight -- but it needs the end to have been detected,
-        # and detection can miss one. A fight STARTING is the other
-        # moment nothing may be carried into, and at that point the
-        # player has had no chance to mark anything yet, so there is
-        # nothing of theirs to lose.
-        #
-        # It is a poll late: this frame's readings were already stamped
-        # with the old names above. One frame of a wrong name that then
-        # corrects itself is worth having over a wrong name that never
+        # BACKSTOP, for an end detection missed: a fight STARTING is the
+        # other moment nothing may carry over, and the player hasn't had
+        # a chance to mark anything yet, so there's nothing of theirs to
+        # lose. This runs a poll late -- this frame's readings are
+        # already stamped with the old names above -- but one wrong
+        # frame that then corrects itself beats a wrong name that never
         # does.
         if any(e.kind == "battle_started" for e in events):
             self._forget_names(-1)

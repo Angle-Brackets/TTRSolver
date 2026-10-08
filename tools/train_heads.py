@@ -14,13 +14,11 @@ are learned from the same features.
     the way a WIDE search ranked them (P0). Used to pick the shortlist,
     which is the term search cost is exponential in.
 
-WHY RANKING AND NOT REGRESSION FOR THE POLICY
----------------------------------------------
-The policy never needs a plan's value, only its order, and the values
-themselves are noisy sampled estimates. Training a listwise softmax
-cross-entropy against the teacher's ranking asks for exactly what is
-used and nothing more. Regressing the values would spend capacity
-fitting sampling noise.
+RANKING, NOT REGRESSION, FOR THE POLICY: it never needs a plan's value,
+only its order, and the values themselves are noisy sampled estimates.
+A listwise softmax cross-entropy against the teacher's ranking asks for
+exactly that and nothing more; regressing the values would spend
+capacity fitting sampling noise.
 
 Torch, GPU if available. Training lives in `tools/` and never in
 `solver/`: what ships is a plain-float export (`--export`) so inference
@@ -274,9 +272,8 @@ def main():
                   f"regret@{args.shortlist} {reg:6.2f}  "
                   f"lossless {rz * 100:4.1f}%{mark}")
 
-    # Baseline: how often does the SHIPPED heuristic ordering put the
-    # THE baseline is `_quick_score`, the hand-written ranking the
-    # search actually ships. Beating uniform random proves nothing --
+    # Baseline is `_quick_score`, the hand-written ranking the search
+    # actually ships -- beating uniform random proves nothing.
     # docs/ml-design.md records the same trap in `fit_heuristic`, whose
     # `score()` deliberately compares against the hand-written heuristic
     # so a fit cannot grade itself against its own predecessor.

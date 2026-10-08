@@ -2,36 +2,20 @@
 
     python -m solver.live.realms_lurewatch --seconds 240
 
-WHY THIS EXISTS. Two claims got made about lure and only one of them is
-evidenced.
+Nothing in the DC carries Lure duration (grep-checked: no field names
+it outside `setMembers`' untyped slots), so the panel instead COUNTS
+remaining rounds as "our table's duration minus rounds elapsed". That
+assumes Realms' Lure durations match TTR's, which is doubtful -- TTR
+rebalanced them and Realms is the other branch of that split, so it may
+still carry the pre-rebalance numbers.
 
-  1. NOTHING IN THE DC CARRIES LURE DURATION. This is solid: the whole
-     165KB file contains no field named for lure anywhere outside
-     `setMembers`' untyped slots, and `DistributedSuitBase` publishes
-     only DNA, level, HP, skelecog, revives and virtual. Grep-checked,
-     not remembered.
+This tool measures the real duration instead: watches a battle, counts
+movies (one movie = one round), and reports how many rounds each cog
+actually spent in `suits_lured` after a known-level Lure landed.
 
-  2. So the remaining rounds are COUNTED -- the gag that landed, minus
-     the rounds since. That arithmetic rests on two things nobody has
-     checked: that entering `PlayMovie` is exactly one round, and that
-     a Lure's duration in Realms matches the number in OUR table.
-
-The second is doubtful on its face. `CLAUDE.md` records that the
-QED1224 guide was caught wrong on Lure durations specifically, because
-TTR rebalanced them -- and Realms is the OTHER branch of that split, so
-it plausibly still has the pre-rebalance numbers. Computing "TTR
-duration minus rounds elapsed" in a Realms fight would then be wrong in
-Realms, and wrong in the optimistic direction half the time.
-
-This measures it instead. It watches a battle, counts movies, and
-reports how many rounds each cog spent in `suits_lured` after a Lure of
-a known level landed on it. That is the duration, observed.
-
-WHAT THE ANSWER MAY AND MAY NOT BE USED FOR. It is a measurement of
-Realms, so it may make the Realms harness self-consistent and it may
-NOT go anywhere near `solver/data/` -- see `docs/realms.md`. If it
-disagrees with our table that is a fact about the two games, not a bug
-in the table.
+The answer may make the Realms harness self-consistent but must never
+reach `solver/data/` -- see `docs/realms.md`. A disagreement with our
+table is a fact about the two games, not a bug in the table.
 """
 from __future__ import annotations
 
@@ -72,10 +56,9 @@ def main(argv=None) -> int:             # pragma: no cover - needs a game
     print(f"  attached {realms_mod.MD_HOST}:{realms_mod.MD_PORT}")
     print("  go and Lure a cog; every round is reported\n")
 
-    # The stream carries CHANGES, so anything generated before attaching
-    # has never been described. Ask once up front, then keep asking: a
-    # battle starting later brings cogs that have been walking the
-    # street since before we connected.
+    # The stream only carries changes, so anything generated before we
+    # attached needs an explicit ask -- once now, then on a timer, since
+    # a later battle brings cogs seen before we connected.
     time.sleep(3.0)
     listener.refresh_all()
     listener.refresh_battle_members()
@@ -96,10 +79,9 @@ def main(argv=None) -> int:             # pragma: no cover - needs a game
 
         battles = listener.battles()
         if len(battles) != 1:
-            # SAY SOMETHING WHILE WAITING. A tool that prints nothing is
-            # indistinguishable from a broken one, which is exactly how
-            # the missing `DistributedBattleBase` presented: no output,
-            # no error, and no way to tell which of the two it was.
+            # Heartbeat so silence never reads as "broken" rather than
+            # "waiting" -- a missing `DistributedBattleBase` once looked
+            # exactly like both.
             if time.time() >= heartbeat:
                 heartbeat = time.time() + 5.0
                 note = "  (walk into a cog)" if not battles else ""
