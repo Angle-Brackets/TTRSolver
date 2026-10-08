@@ -25,15 +25,9 @@ from ..state import Track
 # ---------------------------------------------------------------------
 # Tunables
 # ---------------------------------------------------------------------
-#
-# Every number below was MEASURED, and most carry the measurement in
-# their own comment. docs/scoring.md is the inventory and records
-# where the three scorers disagree. Read it before changing one.
-# 
-# They stay module-level and next to the code they govern rather
-# than collected at the top: `_fire_price` reads them at call time
-# so a test can patch `party_search.FIRE_FLOOR`, and tests and
-# tools/fit_scorer.py do exactly that.
+# Every number below was MEASURED; most carry the measurement in their
+# own comment. docs/scoring.md is the inventory of where the three
+# scorers disagree -- read it before changing one.
 
 # Candidate actions kept per track per toon. Two was not enough and the
 # mistake is recorded in docs/party-strategy.md: at two, Sound offered
@@ -76,192 +70,113 @@ QUICK_SCORED_PER_TRACK = 40
 QUICK_W = {
     "heal": 2.0,        # laff restored, capped at headroom
     "armed": 1.0,       # trap laid this round, via `armed_credit`
-    # PER COG KILLED, REGARDLESS OF WHICH, AND NOTHING CHARGES FOR
-    # OVERKILL. Those two facts together are a known defect rather than
-    # a simplification, and they are the explanation for a run of picks
-    # the owner reported as absurd: a Storm Cloud at a lured level 1, a
-    # Birthday Cake at a 20hp Name Dropper with a 196hp Mr. Hollywood
-    # asleep beside it, Cakes into level 7s.
+    # PER COG KILLED, REGARDLESS OF WHICH, WITH NO OVERKILL CHARGE. A
+    # known defect, not a simplification: an organic Cake doing 165 into
+    # a 20hp cog scores the same free 120 points as killing a 196hp one
+    # (the owner reported picks this produced as absurd). `objective.
+    # waste_weight` (20.0 in `balanced`) exists for exactly this, but
+    # `_quick_score` has no objective to read it from, so `hybrid.climb`
+    # cannot avoid overkill in principle.
     #
-    # Killing the smallest cog on the field scores exactly what killing
-    # the largest does, so an organic Cake doing 165 into 20 hp is a
-    # free 120 points. `objective.waste_weight` exists for precisely
-    # this and is 20.0 in `balanced` -- but `_quick_score` takes no
-    # objective, so the scorer that ranks the policy's proposals cannot
-    # read it, and `hybrid.climb` cannot avoid overkill in principle.
-    #
-    # Not fixed here because a weight added by hand is how this table
-    # got its worst entry: `prevent` sat at 2.0 for a long time because
-    # it had been fitted against a term that was itself wrong. A waste
-    # term needs sweeping and confirming on held-out seeds, and until
-    # then the honest advice is `--engine search` with `balanced`, the
-    # one preset that prices waste.
+    # Unfixed here: a hand-fitted waste weight is how `prevent` got its
+    # worst entry for a long time, so a real one needs sweeping and
+    # confirming on held-out seeds first. Until then, `--engine search`
+    # with `balanced` is the preset that actually prices waste.
     "kill": 120.0,      # per cog killed, regardless of which
     "kill_threat": 0.0, # per point of threat the kills removed
-    # 9.0, and the journey there is the point. It sat at 2.0, fitted
-    # against a `prevented` that multiplied by the FULL lure duration
-    # under a rule where a lured cog stayed asleep through damage. That
-    # term wildly overstated Lure, so the fit crushed the weight down to
-    # offset it -- two errors pointing opposite ways, and reading either
-    # alone gave the wrong answer about the other.
-    #
-    # With the rule corrected and the term remodelled, swept and then
-    # confirmed on untouched seeds at 200 sides a cell: CEO at zero
-    # leftovers 9.0% -> 54.0% (+96/-6, p<0.0001), lure share 21% -> 37%,
-    # buildings 66.0% -> 67.0% and VP unchanged. The largest confirmed
-    # effect measured in this project.
+    # 9.0. Was 2.0, fitted against a buggy `prevented` that overstated
+    # Lure (crediting the FULL lure duration under a rule where a lured
+    # cog stayed asleep through damage) -- two errors pointing opposite
+    # ways, each reading wrong alone. Corrected and reswept, confirmed on
+    # untouched seeds at 200 sides/cell: CEO at zero leftovers 9.0% ->
+    # 54.0% (p<0.0001, the largest confirmed effect in this project),
+    # lure share 21% -> 37%, buildings 66.0% -> 67.0%, VP unchanged.
     "prevent": 9.0,     # incoming damage removed, via `prevented`
-    # CHARGED, for damage thrown past what a cog had left. SWEPT, AND
-    # IT STAYS AT ZERO -- 0/20/60/150/400 over three regimes, common
-    # random numbers throughout:
+    # CHARGED for damage thrown past what a cog had left. SWEPT, STAYS AT
+    # ZERO: flat-to-worse for every weight tried, 0-400, across buildings
+    # (d7: 123/150 at zero vs 120 at best, p=0.27-0.51; d9: 0/150
+    # everywhere, can't discriminate) and VP (47/120 at zero vs 50 at
+    # 400, noise). A first pass over that range used a weight scale 2000x
+    # too small to change a single decision; corrected and paired with
+    # `width`=12 (the policy's offered proposals otherwise all being
+    # Birthday Cake, so no weight reaches the cheaper gag), it looked
+    # like a VP gain on selection seeds (72/150 -> 85/150, p=0.092) but
+    # did NOT confirm on 400 held-out seeds (186/400 -> 195/400, p=0.448;
+    # buildings 313 -> 302, p=0.266).
     #
-    #   buildings d7   123/150 at zero, 120 at best, monotonically
-    #                  WORSE with weight, p = 0.27-0.51
-    #   buildings d9   0/150 everywhere; nothing solo clears one, so
-    #                  the cell cannot discriminate and says nothing
-    #   VP, 7 a round  47/120 at zero, 50 at 400, kills and rounds
-    #                  identical to two decimals -- noise
+    # Overkill is real and visible, but not worth fixing: a dead cog
+    # stops attacking, and paying a scarcer gag to end a threat a round
+    # sooner is a trade `kill`'s flat bonus already makes correctly.
+    # Charging for waste instead pushes the scorer onto gags that don't
+    # quite kill, so buildings use MORE gags (14.1 -> 15.0), not fewer.
+    # `width` stays at 3, this at zero.
     #
-    # So overkill is real, visible, and costs nothing measurable. The
-    # reason is worth keeping: a dead cog stops attacking, and with 80
-    # gags in a pouch the binding constraint is LAFF, not gags. Paying
-    # a scarcer gag to remove a threat one round sooner is a trade the
-    # flat `kill` bonus makes correctly, even when the arithmetic looks
-    # wasteful to a human watching it.
+    # `landed` is HP-capped, so overkill is neither credited nor charged:
+    # a 72hp cog dying to a 165-damage Cake or a 120-damage Storm Cloud
+    # score identically, and `price` can't separate them either (it
+    # charges by gag level and carry limit, not damage discarded).
     #
-    # THE FIRST SWEEP WAS INVALID and the correction is the useful part.
-    # It ran 0-400, and the term's natural scale is ~0.06 against a
-    # `kill` bonus of 120 -- so no weight in that range could change a
-    # single decision, and "no effect" measured nothing at all.
-    #
-    # It also cannot work alone. `climb` offers each seat the policy's
-    # top `width`=3 proposals, and on the board that started this the
-    # policy's top three were all Birthday Cake. The scorer can only
-    # rank what it is given, so no weight reaches the cheaper gag; at
-    # 10000 the pick jumps straight to PASS, the only non-Cake option
-    # on the list. The pair had to be swept as a pair, which is the
-    # same trap `prevent` set: two things wrong at once, and reading
-    # either alone gives the wrong answer about the other.
-    #
-    # Swept properly, width 12 with waste 2000 reaches the cheap kill
-    # on the reported board. On the selection seeds it looked like a VP
-    # gain: 72/150 -> 85/150, p=0.092, while costing buildings
-    # 122 -> 114. ON 400 HELD-OUT SEEDS IT DID NOT CONFIRM -- VP
-    # 186/400 -> 195/400 at p=0.448, buildings 313 -> 302 at p=0.266.
-    #
-    # So the overkill is real, visible, and still not worth fixing:
-    # a dead cog stops attacking, and paying a scarcer gag to remove a
-    # threat a round sooner is a trade the flat `kill` bonus makes
-    # correctly. Charging for waste pushes the scorer onto gags that
-    # do not quite kill, and buildings then use MORE gags (14.1 ->
-    # 15.0), not fewer, because the cog survives to be hit again.
-    #
-    # Both stay as they are: `width` at 3, this at zero.
-    #
-    # It exists because `landed` is HP-capped, so overkill is neither
-    # credited nor charged: killing a 72hp cog with a 165-damage Cake
-    # and killing it with a 120-damage Storm Cloud score IDENTICALLY,
-    # and the tie breaks arbitrarily. `price` cannot separate them
-    # either, since it charges by gag level and carry limit rather than
-    # by damage discarded.
-    #
-    # Uses `plan_waste`, the same measure `objective.waste_penalty`
-    # already scales -- weight x wasted_fraction x scarcity -- so a gag
-    # that is the ONLY thing that kills pays almost nothing while the
-    # same gag into a nearly-dead cog pays nearly in full.
+    # Uses `plan_waste` (same measure `objective.waste_penalty` scales):
+    # weight x wasted_fraction x scarcity, so a gag that is the only
+    # thing that kills pays almost nothing.
     "waste": 0.0,
-    # Toons that one round of the WOKEN field would knock out. [OWNER]
-    # "if the expected incoming from the cogs, assuming they are all
-    # unlured, is greater than the current HP, shouldn't we heal", and
-    # "we should heal or kill". `past_the_death_line` is that rule, and
-    # it does behave as stated: on a lured board of four level 11-12
-    # cogs (84 damage when they wake) a toon on 25 is forced to heal,
-    # while a toon on 60 may throw a Wedding Cake instead -- because
-    # that kills two cogs and drops the woken round to 44, under their
-    # laff. Heal OR kill, decided by the board rather than by a laff
-    # threshold.
+    # Toons a round of the WOKEN field would knock out. [OWNER]: "if the
+    # expected incoming ... is greater than the current HP ... we should
+    # heal or kill" -- `past_the_death_line` implements exactly that (a
+    # toon on 25 facing 84 incoming must heal; one on 60 may kill two
+    # cogs instead and drop the woken round under their laff).
     #
-    # SHIPPED AT 0.0, because it changes nothing measurable. Solo VP,
-    # 20 a round, 15 runs a cell on identical seeds, weight 0 against
-    # 300: bare 21.7 -> 21.9 rounds, cards 8.0 -> 8.0, cleared 0.0% in
-    # every cell. That is the same verdict `QUICK_W["risk"]` earned and
-    # for the same recorded reason -- the term is flat while the toon is
-    # healthy and only separates plans once the fight is already lost.
-    #
-    # Kept, wired and tested rather than deleted: it is a rule about the
-    # game that the scorer could not previously express at all, and the
-    # measurement says it does not pay YET, not that it is wrong.
+    # SHIPPED AT 0.0: changes nothing measurable (solo VP, 20/round, 15
+    # runs/cell, weight 0 vs 300: bare 21.7 -> 21.9 rounds, cards
+    # 8.0 -> 8.0, cleared 0.0% everywhere) -- flat while the toon is
+    # healthy, like `risk` below for the same reason. Kept, wired and
+    # tested rather than deleted: a rule the scorer couldn't express
+    # before, not one proven wrong.
     "deadline": 0.0,
     "risk": 0.0,
-    # Rounds of incoming the party's laff covers, capped. The only term
-    # that reads laff LEVEL rather than a delta.
+    # Rounds of incoming the party's laff covers, capped -- the only term
+    # reading laff LEVEL rather than a delta.
     #
-    # IT DOES NOTHING FOR GAG CHOICE AND EVERYTHING FOR UNITES, which
-    # is what `survival_rounds` predicts and what the sweep shows.
-    # Solo VP, 80 runs a cell:
+    # DOES NOTHING FOR GAG CHOICE, EVERYTHING FOR UNITES (`survival_rounds`
+    # predicts this, the sweep confirms it). Solo VP, 80 runs/cell, win
+    # rate at 12 cogs: unites off, weight 0 -> 1600 gives 23.8% -> 21.2%
+    # (flat-to-negative, can't move a choice that doesn't change laff);
+    # unites on, 0 -> 1600 gives 18.8% -> 81.2% (worth sixty points, all
+    # of it unites spent: 5.0/run at the top).
     #
-    #   weight   unites   8 cogs   12 cogs   20 cogs   unites/run @20
-    #        0      off    80.0%     23.8%      0.0%             0.0
-    #     1600      off    77.5%     21.2%      0.0%             0.0
-    #        0       on    83.8%     18.8%      0.0%             0.3
-    #      200       on    88.8%     43.8%      0.0%             1.3
-    #      800       on    96.2%     78.8%      0.0%             3.3
-    #     1600       on    96.2%     81.2%      0.0%             5.0
+    # A PREFERENCE, NOT A TUNING: the owner holds unites as a last resort
+    # since spending them freely "trivializes a lot of stuff", and a
+    # weight that wins by spending five a fight buys wins with a currency
+    # farmed from whole CFO runs. Left at 0.0 for the owner to set.
     #
-    # With unites OFF the term is flat to slightly negative at every
-    # weight -- laff level cannot move a choice that does not change
-    # laff. With them ON it is worth sixty points at 12 cogs, and every
-    # one of those points is a unite being spent: 5.0 a run at the top.
+    # Does not reach a full 20-cog VP: 0.0% at every weight and unite
+    # budget tried (survives 16.1 rounds of the 30.2 needed) -- the wall
+    # there is elsewhere. Solo buildings are bit-identical at every
+    # weight 0-800 (26.0%/27.0%, +0/-0) since `incoming` pinned makes the
+    # term constant across the menu; 12-cog VP with unites climbs
+    # 35.0% -> 95.0%, with a bounded SOS book 27.0% -> 52.5%, plateauing
+    # from 200 for unites and ~600 for SOS (`SOS_PRICE` is double
+    # `UNITE_PRICE`); 400 sits mid-plateau for one, near peak for the
+    # other.
     #
-    # SO THIS IS A PREFERENCE, NOT A TUNING. The owner holds unites as
-    # an absolute last resort because spending them freely "trivializes
-    # a lot of stuff", and a weight that wins by spending five a fight
-    # is buying wins with a currency farmed from whole CFO runs. Left
-    # at 0.0 for the owner to set against how dearly they hold them.
-    #
-    # AND IT DOES NOT REACH THE REAL FIGHT. A 20-cog solo VP stays at
-    # 0.0% at every weight and every unite budget tried, though it
-    # survives 16.1 rounds against 30.2. The wall is somewhere else.
-    # 400, swept. See docs/scoring.md. Two seed blocks of 200 runs a
-    # cell: solo buildings are BIT-IDENTICAL at every weight from 0 to
-    # 800 (26.0% and 27.0%, +0/-0), because with `incoming` pinned this
-    # term is constant across the whole action menu and cannot reorder
-    # it. Solo VP at 12 cogs with unites goes 35.0% -> 95.0% and
-    # 31.5% -> 92.5%; with a bounded book of SOS cards, 27.0% -> 52.5%
-    # and 24.5% -> 49.0%. The unite curve plateaus from 200, SOS climbs
-    # to about 600 because `SOS_PRICE` is double `UNITE_PRICE`; 400 sits
-    # mid-plateau for one and near peak for the other.
-    #
-    # Inert until `OFFER_UNITES` or `OFFER_SOS` is turned on: with
-    # neither, nothing can change a toon's laff mid-plan, so this
-    # contributes the same constant to every candidate.
+    # Inert until `OFFER_UNITES` or `OFFER_SOS` is on: with neither,
+    # nothing changes a toon's laff mid-plan, so this is a constant
+    # across the whole menu.
     "survive": 400.0,      # CHARGED, per standing toon a round could sink
-    # RE-SWEPT ON A VP THAT ACTUALLY FINISHES, and it stays at 1.0.
-    #
-    # The earlier sweeps for this and for `waste` ran before two fixes:
-    # `unites.tick_cooldown` had no caller (one unite a fight) and a VP
-    # floor truncated at 20 rounds. Husbanding a pouch cannot show up in
-    # a fight that ends before the pouch binds, so the question was open
-    # again. [OWNER] reported the behaviour directly -- a level 7 spent
-    # where a 5 would do, and the exact search preferring the cheaper
+    # RE-SWEPT on a VP that actually finishes -- two earlier bugs (a dead
+    # `unites.tick_cooldown` caller, and a VP floor truncated at 20
+    # rounds) had hidden whether husbanding a pouch pays, since the fight
+    # could end before it bound. [OWNER] reported a level 7 spent where a
+    # 5 would do, confirmed by the exact search preferring the cheaper
     # gag on the same board.
     #
-    # Solo VP, 20 a round, fires+unites+SOS, 10 runs a cell, paired:
-    #
-    #   price   cleared   mean gag level   7s used
-    #     1.0       80%             5.68       5.2
-    #     2.0       50%             5.58       4.9
-    #     4.0       60%             5.56       5.0
-    #     8.0        0%             5.21       3.4
-    #
-    #   vs 1.0 paired: +0/-3, +0/-2, +0/-8
-    #
-    # The thrift is REAL and it LOSES. Mean level and sevens both fall,
-    # so the weight does what it says; not one win was gained in any
-    # cell and thirteen were lost. Third independent time this project
-    # has reached that answer, and the mechanism is the one `waste`
-    # already records: a cheaper gag does not quite kill, the cog
-    # survives to swing again, and laff is what runs out.
+    # Solo VP, 20/round, fires+unites+SOS, 10 runs/cell, paired against
+    # 1.0: price 2.0/4.0/8.0 cleared 50%/60%/0% (vs 80% at 1.0, +0/-3,
+    # +0/-2, +0/-8), with mean gag level and sevens-used both falling as
+    # the weight intends. The thrift is real and it loses -- not one win
+    # gained in any cell, thirteen lost. Third time this project has
+    # reached that answer: a cheaper gag doesn't quite kill, the cog
+    # swings again, and laff is what runs out.
     "price": 1.0,       # gags spent, from the pouch
     # CONSUMABLES, priced separately from the pouch. Slips and cards used
     # to ride on `price`, so lowering that to loosen gag thrift also made
@@ -272,61 +187,31 @@ QUICK_W = {
 }
 
 
-# `kill_threat` and `risk` STAY AT ZERO, and `risk` has now been
-# refuted twice -- but only the second refutation is worth anything, and
-# the difference between them is the useful part of this comment.
+# `kill_threat` and `risk` STAY AT ZERO -- `risk` refuted twice, and only
+# the second refutation is real.
 #
-# THE FIRST REFUTATION WAS MEASURING NOTHING. A (1+lambda) ES on
-# 2026-08-17 ran 120 generations with both terms available and returned
-# `kill_threat` 0.044 and `risk` 0.592, against a landed-damage term in
-# the tens. Read as "the optimiser was handed the new directions and
-# declined them". It could not have done anything else: `toons_at_risk`
-# was returning 0.0 on every position in existence -- 0 of 2000 sampled
-# facility starts -- because it divided an already-probability-weighted
-# expectation by the party size and asked whether a toon could survive
-# their share of the average. Sweeping the weight over 0, 2, 5 and 10
-# changed not one decision in 900 paired games. No weight moves a
-# constant. See `toons_at_risk` for the fix.
+# FIRST: measured nothing. `toons_at_risk` returned 0.0 on every one of
+# 2000 sampled positions (it divided an already-probability-weighted
+# expectation by party size, a feature bug since fixed), so an ES run
+# and a 0/2/5/10 sweep could not have moved a single decision either way.
 #
-# THE SECOND ONE IS REAL, and it is also a lesson in how these numbers
-# lie. With the feature fixed and non-zero in 39.4% of positions, a
-# paired sweep over 900 positions looked convincing: monotone in the
-# weight, +0.6/+0.8/+1.0% at 5/10/20, all three sets agreeing in sign,
-# p = 0.012 at 20, and a PLATEAU across 10-40 rather than a spike at one
-# lucky value. Every shape-based argument for believing it was present.
+# SECOND: looked real on a selection sweep (900 positions, monotone,
+# p=0.012 at weight 20, a plateau across 10-40 rather than a spike) and
+# did not replicate on 1600 held-out positions (+0.1%, p=1.000, mixed
+# signs). The plateau looked like protection and wasn't -- a lesson in
+# how convincing a selection sweep can be.
 #
-# It did not replicate. Confirming risk=20 on 1600 positions with seeds
-# it had not been chosen on: +0.1%, 21 discordant games split near
-# evenly, p = 1.000, mixed signs. The +1.0% was the maximum of six
-# values measured on one sample, which is a selection and not a
-# measurement, and the plateau was not the protection it appeared to be.
-#
-# So: 0.0, on evidence this time. What would change the answer is a
-# distribution where the term bites -- it is the low-laff, one-group-
-# attack-from-sad positions that carry it, and sampled facility starts
-# are mostly not those. A 4-toon 22-laff position against level 12s
-# ranks the correct defensive move 6th of 130 at risk=0 and 2nd at
-# risk=20. That is a real improvement on a real position and it is worth
-# nothing here, because tuning a weight until one hand-built case comes
-# out right is how the first refutation happened.
-#
-# On 240 buildings used for neither fitting nor validation:
-#
-#     baseline (hand-tuned)           63.7%
-#     fitted, all seven weights       63.7%
-#     baseline + the two features     63.7%
-#
-# Identical, which says more than "no gain": these weights barely change
-# WHICH PLAN gets picked. `kill` at 120 or at 86, `price` at 1.0 or 0.38,
-# and the same buildings finish.
+# On 240 buildings used for neither fitting nor validation, baseline,
+# fitted (all seven weights), and baseline+these-two-features all score
+# 63.7% -- identical, meaning these weights barely change WHICH PLAN
+# gets picked.
 #
 # Left in, behind zero weights that skip their computation, because the
-# next person to look at these equations will notice the same two gaps.
-#
-# A third gap -- charging for the threat LEFT standing -- is deliberately
-# not a term. `prevented` is already `incoming(before) - incoming(after)`
-# and `before` is fixed while ranking one position's plans, so a
-# residual-threat term would be the same ordering with the sign flipped.
+# next person to look will notice the same two gaps. A third gap
+# (charging for threat LEFT standing) is deliberately not a term:
+# `prevented` is already before-minus-after with `before` fixed while
+# ranking one position's plans, so it would just flip the ordering's
+# sign.
 GREEDY_W = {
     "heal": 2.0,
     "kill": 60.0,
@@ -336,79 +221,24 @@ GREEDY_W = {
 }
 
 
-# How many of a toon's candidate actions get a simulated `_greedy_score`
-# during a rollout. The rest are ranked by arithmetic alone -- see
-# `greedy_plan`.
-#
-# Swept on the battered position. Rollout quality came out at 74.88 for
-# EVERY value from 1 to 6, and search values stayed inside their own
-# seed-to-seed spread, while the cost fell steadily:
-#
-#     shortlist   rollout quality   search    time
-#             1             74.88   +91.84   3.51s
-#             2             74.88   +91.49   4.12s
-#             4             74.88   +91.53   5.25s
-#             6             74.88   +91.32   6.30s
-#
-# Measured separately, `_cheap_score`'s pick agrees with the
-# simulation's on 288 of 328 decisions (88%). So the simulation is
-# mostly confirming the arithmetic, and 2 keeps a second opinion for the
-# 12% at a fifth off the cost.
-#
-# NOT dropped to 1, and checking that on more positions is what settled
-# it. The flat 74.88 above was an artefact of a position where the
-# shortlist never changes the plan at all. Across four positions, with
-# how often the plan differs between k=1 and k=4:
-#
-#     position           plans differ    k=1     k=2     k=4     k=6
-#     maxed vs 4 big            0/6    87.17   87.17   87.17   87.17
-#     midgame vs 3              9/14   75.35   74.49   74.49   74.49
-#     weak vs 2 (long)          0/17   88.35   88.35   88.35   88.35
-#     mixed cog hp              5/5    91.88   93.42   93.42   93.42
-#
-# k >= 2 is identical everywhere, so nothing above 2 is worth paying
-# for. But k=1 loses 1.54 on the mixed-hp position, where the plan
-# differs every single time -- uneven cog health is exactly where
-# choosing between two similar-damage options matters, and where the
-# arithmetic that cannot see knockback or trap triggers goes wrong.
-#
-# So the simulation earns its keep, on the positions that discriminate,
-# and one position showing it flat was not evidence that it does not.
-# The sweep above is GREEDY_SHORTLIST's, not this constant's; the two
-# comment blocks were adjacent and ran together. See `GREEDY_SHORTLIST`.
-#
 # What a restored point of laff is worth against a point of cog damage,
 # for a scorer that has no `objective` to read. Mirrors
-# `objective.laff_weight` in INTENT, which is what `round_reward`
-# charges for laff LOST, so the shortlist and the reward agree on what
-# laff is for -- not in magnitude: `laff_weight` is 1.0 in every preset
-# but SURVIVE (3.0) and GLASS_CANNON (0.25).
+# `objective.laff_weight` in INTENT -- what `round_reward` charges for
+# laff LOST -- but not in magnitude: `laff_weight` is 1.0 in every
+# preset but SURVIVE (3.0) and GLASS_CANNON (0.25).
 #
-# READ BY ONE SCORER, `_cheap_score`, and there for two different
-# things: the Toon-Up branch uses it as a heal weight, and the Trap
-# branch uses it as a PREVENTION weight (`forgone = LAFF_POINT_VALUE * threat
-# * rounds`). The other two scorers price laff restored through
-# `QUICK_W["heal"]` and `GREEDY_W["heal"]`, which both happen to equal
-# this. Three constants, one number, no link between them --
-# docs/scoring.md.
-# Swept over 45 identical buildings, AFTER the reinforcement-slot fix:
+# Read by `_cheap_score` only: a heal weight on the Toon-Up branch, a
+# PREVENTION weight on the Trap branch (`forgone = LAFF_POINT_VALUE *
+# threat * rounds`). `QUICK_W["heal"]` and `GREEDY_W["heal"]` price
+# healing separately and happen to equal this -- three constants, one
+# number, no link between them (docs/scoring.md).
 #
-#     LAFF_POINT_VALUE   floors   finished
-#     0.0 (blind)    2.44      62.2%
-#     0.5            2.51      64.4%
-#     1.0            2.62      66.7%
-#     2.0            2.67      68.9%
-#     3.0            2.58      64.4%
-#
-# An earlier sweep of the same values came back perfectly flat --
-# 15.6% finished at every setting, the same seven buildings each time --
-# because 42% of runs were then locked in a pass loop by the
-# reinforcement bug, which no healing policy could affect. That flatness
-# was the clue that something else was wrong, not evidence that healing
-# does not matter.
-#
-# Differences of a few points across 45 seeds are noise; what the sweep
-# supports is that healing is worth something and that 3.0 overcorrects.
+# Swept on 45 buildings after the reinforcement-slot fix: 0.0/0.5/1.0/
+# 2.0/3.0 -> 62.2%/64.4%/66.7%/68.9%/64.4% finished. (An earlier,
+# perfectly flat sweep was a red herring: 42% of runs were then locked
+# in a pass loop by a reinforcement bug, independent of healing.)
+# Differences of a few points on 45 seeds are noise; what holds up is
+# that healing matters and 3.0 overcorrects.
 LAFF_POINT_VALUE = 2.0
 
 
@@ -425,10 +255,19 @@ TRAP_DISCOUNT = 0.6
 TRACK_PROBES = 3
 
 
-# How many of a toon's candidate actions `greedy_plan` simulates. The
-# sweep that settled it at 2 -- and the four-position table showing k=1
-# losing 1.54 on the mixed-hp board -- is the comment block above
-# `LAFF_POINT_VALUE`, where it ran together with that constant's own note.
+# How many of a toon's candidate actions `greedy_plan` simulates during
+# a rollout; the rest are ranked by arithmetic alone.
+#
+# Swept at 2: `_cheap_score`'s pick agrees with the simulated one on 288
+# of 328 decisions (88%), so simulation mostly confirms arithmetic and 2
+# keeps a second opinion for the rest at a fifth of the cost of going
+# wider.
+#
+# NOT 1: across four test positions, k=1 loses 1.54 points on a
+# mixed-cog-HP board where the plan differs on every decision -- exactly
+# where choosing between similar-damage options matters and arithmetic
+# (blind to knockback/trap triggers) goes wrong. k>=2 was identical
+# everywhere else tested.
 GREEDY_SHORTLIST = 2
 
 
@@ -450,70 +289,44 @@ GREEDY_SHORTLIST = 2
 SCARCITY_UNITS = 20.0
 
 
-# ON, for a reason that is not a measurement. Price a gag's scarcity by
-# how many the toon actually HOLDS rather than by its carry limit.
-# [OWNER] "shouldn't it be scaled by 9 not 15 for magnets, since that's
-# how many magnets I actually have in the pouch."
+# ON, for a reason that is not a measurement. Prices a gag's scarcity by
+# how many the toon actually HOLDS, not its carry limit -- [OWNER]:
+# "shouldn't it be scaled by 9 not 15 for magnets, since that's how many
+# magnets I actually have in the pouch." Nothing restocks mid-run, so
+# held count is the opportunity cost that matches what the solver
+# optimises; `carry_limit` can't express it.
 #
-# `carry_limit` prices how replaceable the gag TYPE is and never moves
-# as the pouch drains. The held count prices what you would miss right
-# now. NOTHING RESTOCKS MID-RUN, so opportunity cost within the run is
-# the notion that matches what the solver is actually optimising, and it
-# is the one `carry_limit` cannot express.
+# Composes with the scarcity term (few left) and
+# `horizon_cost * cogs_remaining` below (much still to fight): dear when
+# scarce and early, cheap when scarce but last.
 #
-# The two halves of the price then compose properly. Scarcity says "few
-# left"; the `horizon_cost * cogs_remaining` scaling below says "and
-# much still to fight". Together: dear when scarce and early, cheap when
-# scarce but last -- which is the rule `FIRE_PRICE` had to be reshaped
-# to get, and the reason its flat version was wrong.
-#
-# MEASURED NEUTRAL, and shipped anyway. Paired on seeds across facility
-# play with and without consumables, two seed blocks, and solo VP at 12,
-# 16 and 20 cogs: +0/-0 in every cell. Not because the flag is inert --
-# a last Big Magnet prices 24.00 against 5.33 -- but because the whole
-# price term is a median 4.79% of `_quick_score` and this moves about
-# 1.24% of it. The lever is too short to steer with either way, so the
+# MEASURED NEUTRAL, shipped anyway: +0/-0 across facility play and solo
+# VP at 12/16/20 cogs. Not inert (a last Big Magnet prices 24.00 vs
+# 5.33) but the whole price term is a median 4.79% of `_quick_score` and
+# this moves ~1.24% of it -- too short a lever to steer with, so the
 # tie-break is which model is true.
 #
-# WATCH THIS IF `QUICK_W["price"]` IS EVER RAISED. At a longer lever the
-# hazard becomes real: your last gag of a kind costs nearly what a
-# Presentation costs, and a gag carried out of a fight unspent is worth
-# exactly nothing.
+# WATCH IF `QUICK_W["price"]` IS EVER RAISED: at a longer lever the
+# hazard becomes real -- your last gag of a kind would cost nearly a
+# Presentation, and an unspent gag is worth nothing.
 SCARCITY_USES_HELD_COUNT = True
 
-# Extra cost for spending your LAST copy of a gag, on top of the
-# scarcity term. Zero is off.
+# Extra cost for spending your LAST copy of a gag, on top of scarcity.
+# Zero is off.
 #
-# `level + SCARCITY_UNITS / limit` prices a Presentation at 27 against a
-# Hypno-goggles at 12.67, and that 14-unit gap loses to a 142-point
-# score gap: on a four-cog VP wave the scorer takes Presentation every
-# time, purely on 95% accuracy against 80%. Duration is not the reason
-# -- `prevented` caps by `reach`, so both lures are credited the same
-# 113.1 -- and raising `QUICK_W["price"]` enough to flip it needs 16x,
-# which distorts every other gag.
+# Without it, a 14-unit scarcity gap (Presentation 27 vs Hypno-goggles
+# 12.67) loses to a 142-point score gap, so the scorer takes
+# Presentation every time on accuracy alone (95% vs 80%) -- not duration,
+# since `prevented` caps both lures at the same 113.1 by `reach`. The
+# missing idea: a one-of-a-kind gag is categorically unlike one you hold
+# three of, and `_quick_score` (one round) can't price keeping the
+# option for a worse board later. This is the crude stand-in.
 #
-# The missing idea is that a one-of-a-kind gag is categorically unlike
-# one you hold three of. `_quick_score` sees one round, so it cannot
-# price the option of still having the thing on a worse board later.
-# This is the crude stand-in for that.
-#
-# SWEPT ON THE VP, where the problem actually shows -- street and
-# facility boards rarely make a level 7 the top pick, and both were
-# unmoved at 40 (+1/-1 and +0/-0 over 150 paired sides each).
-#
-#     units    VP win    discordant      p
-#       0      53.0%     (baseline)
-#      40      57.5%      +21/-12      0.163
-#     100      56.5%      +35/-28      0.450
-#     200      40.0%      +24/-50      0.003
-#
-# 200 is thirteen points WORSE and significantly so: priced that high a
-# last copy never gets thrown, including when it is the only group lure
-# left. A little conservation helps, a lot is hoarding.
-#
-# 40 was the best of three tried, so it was confirmed on a fresh seed
-# base rather than shipped on its selection number: 300 paired sides at
-# 97000, 53.0% -> 60.3%, +45/-23, p = 0.010.
+# Swept on the VP (where the problem shows; street/facility rarely rank
+# a level 7 first): units 0/40/100/200 -> VP win 53.0%/57.5%/56.5%/
+# 40.0%. 200 is thirteen points WORSE and significant (p=0.003) --
+# priced that high, a last copy never gets thrown, even the only group
+# lure left. 40 confirmed on a fresh seed base: 53.0% -> 60.3%, p=0.010.
 LAST_COPY_UNITS = 40.0
 
 
@@ -533,66 +346,41 @@ CHEAP_KILL_BONUS = 60.0
 CHEAP_LURE_VALUE = 25.0
 
 
-# Charge a plan for waking cogs it had asleep. ON, measured.
+# Charge a plan for waking cogs it had asleep. ON, measured: the fourth
+# correction to `prevented` and the first to survive (the previous three
+# were arithmetic refinements to the CREDIT side and each lost 2-3
+# points). This instead charges the SPEND side -- nothing previously
+# charged for waking four sleeping cogs for free.
 #
-# The fourth correction to `prevented` and the first to survive. The
-# three before it were arithmetic refinements to the CREDIT -- how many
-# rounds a lure buys, how to average them -- and each lost 2-3 points.
-# This adds a term that was absent: nothing charged for quiet SPENT, so
-# a plan could hand four sleeping cogs their attacks back for free.
+# Paired, 200 sides/cell, off -> on: buildings 64.5% -> 67.0% and
+# 68.5% -> 71.5% (p=0.031), CEO-0 69.5% -> 73.0%, CEO-2 54.5% -> 61.5%
+# (p=0.038), CEO-4 31.0% -> 36.5%, VP unchanged at ceiling. Pooled 76
+# up / 33 down, p<0.0001.
 #
-# Paired, 200 sides a cell:
-#
-#     cell             off      on
-#     buildings      64.5%   67.0%
-#     buildings      68.5%   71.5%   p=0.031
-#     CEO 0          69.5%   73.0%
-#     CEO 2          54.5%   61.5%   p=0.038
-#     CEO 4          31.0%   36.5%
-#     VP             98.5%   98.5%   at the ceiling
-#     pooled         76 up / 33 down, p<0.0001
-#
-# The weight did NOT need rescaling, which was the obvious guess and was
-# wrong: sweeping `prevent` with this on, 9.0 beats 4, 2, 1 and 0.5
-# monotonically and significantly.
+# The weight did not need rescaling -- sweeping `prevent` with this on,
+# 9.0 still beats 4, 2, 1 and 0.5 monotonically and significantly.
 WAKE_COSTS_PREVENTED = True
 
 
-# A lured cog is credited for the quiet it will ACTUALLY provide,
-# which depends on when the party gets round to waking it. Four
-# sleepers are worth 1 + 2 + 3 + 4 rounds of silence, not
-# 4 + 4 + 4 + 4 -- the one you are about to kill was never going
-# to stay asleep, and the one at the back was. Ordered by
-# remaining health, because that is the order a player clears
-# them: finish the cheap ones, leave the Mr. Hollywood napping.
+# A lured cog is credited for the quiet it will ACTUALLY provide: four
+# sleepers are worth 1+2+3+4 rounds of silence, not 4+4+4+4 -- the one
+# about to die was never going to stay asleep, the one at the back was.
+# Ordered by remaining health, the order a player actually clears them.
+# (Was `PER_COG_REACH`, which named the variable, not the behaviour.)
 #
-# Was `PER_COG_REACH`, which named the local variable rather than
-# the behaviour and meant nothing until you had read the function.
-#
-# THE REASONING IS IN `party_search.prevented`, not here. These four
-# flags are read inside that one function and its docstring argues
-# each of them with its measurement; splitting the prose from the
-# code that acts on it would help nobody. Follow the pointer.
+# Argued and measured in `party_search.prevented`, which reads all four
+# of these flags -- follow the pointer rather than duplicating the case
+# for each here.
 SLEEPERS_WAKE_IN_TURN = True
 
 
-# Whether an already-lured cog buys
-# anything more. It does not: it was paid for when the lure landed.
-#
-# THE REASONING IS IN `party_search.prevented`, not here. These four
-# flags are read inside that one function and its docstring argues
-# each of them with its measurement; splitting the prose from the
-# code that acts on it would help nobody. Follow the pointer.
+# Whether an already-lured cog buys anything more. It does not: it was
+# paid for when the lure landed. See `party_search.prevented`.
 LURE_IS_SPENT_ON_SLEEPERS = True
 
 
-# Whether killing a sleeping cog counts
-# as silencing it. It does not -- it was already quiet.
-#
-# THE REASONING IS IN `party_search.prevented`, not here. These four
-# flags are read inside that one function and its docstring argues
-# each of them with its measurement; splitting the prose from the
-# code that acts on it would help nobody. Follow the pointer.
+# Whether killing a sleeping cog counts as silencing it. It does not --
+# it was already quiet. See `party_search.prevented`.
 LURED_KILL_SILENCES_NOTHING = True
 
 
@@ -601,79 +389,49 @@ LURED_KILL_SILENCES_NOTHING = True
 SURVIVAL_CAP = 4.0
 
 
-# What one pink slip costs the scorers, PER COG STILL TO COME. A slip is finite and nothing restocks it, so it is
-# the same kind of resource as a gag and belongs in the same term --
-# `_cheap_score` used to say outright that "scarcity across a whole
-# fight belongs to the objective's price, which charges nothing for a
-# fire", and left it there.
+# What one pink slip costs the scorers, PER COG STILL TO COME. A slip is
+# finite and nothing restocks it, so it belongs in the same term as a
+# gag's scarcity.
 #
-# Measured, not guessed: with slips free the party spent all ten on the
-# waiter battle and arrived at the Big Cheese holding 0.3 of 10, which
-# is why the CEO sat at 0% for ten banquet leftovers. Battle two alone
-# from full resources clears 93% there, so the fight was never the
-# problem -- arriving disarmed was.
+# Measured, not guessed: with slips free, the party spent all ten on the
+# waiter battle and reached the Big Cheese holding 0.3 of 10 -- CEO sat
+# at 0% for ten banquet leftovers, though battle two alone from full
+# resources clears 93%, so arriving disarmed was the problem, not the
+# fight.
 #
-# PROPORTIONAL TO WHAT IS LEFT, with no constant term, and that shape is
-# the point rather than a detail. A flat price was tried first and it
-# helped at five leftovers (38.0% -> 49.5%, p=0.008) while HURTING at
-# zero (88.5% -> 82.0%, p=0.021), because it also suppressed slips in
-# the last battle -- and a slip carried out of the fight unspent is
-# worth exactly nothing. Scaling by `cogs_remaining` makes the price
-# fall to zero once there is nothing left to save for, so the rule
-# reads: hoard while cogs are still coming, spend freely at the end.
+# PROPORTIONAL TO WHAT'S LEFT, no constant term -- a flat price helped at
+# five leftovers (38.0% -> 49.5%, p=0.008) but HURT at zero (88.5% ->
+# 82.0%, p=0.021) by also suppressing slips in the last battle, where an
+# unspent slip is worth nothing. Scaling by `cogs_remaining` falls to
+# zero once nothing is left to save for: hoard while cogs are coming,
+# spend freely at the end.
 #
-# 20 is directionally supported rather than proven, and the distinction
-# is worth keeping: across 200 CEO sides it is neutral at zero leftovers
-# (88.5% -> 88.0%, p=0.50) and positive but not significant at five
-# (38.0% -> 41.5%, p=0.22). What it clearly does is unstick ten
-# leftovers from exactly 0%, at every non-zero price tried. A 40-side
-# sweep said +7.5 there and 200 sides said +3.5; trust the larger one.
+# 20 is directional, not proven: neutral at zero leftovers (p=0.50),
+# positive but not significant at five (p=0.22) on 200 CEO sides. What
+# it clearly does is unstick ten leftovers from exactly 0% at every
+# non-zero price tried.
 FIRE_PRICE = 20.0
 
 
 # Charged for a slip WHATEVER the horizon, because `cogs_remaining` is 0
-# on every board the panel builds -- it has no way to know what a VP or
-# a building still holds -- and `FIRE_PRICE * cogs_remaining` is then
-# zero, making a slip free. That is how a pink slip got spent on a 6hp
-# level 1 Cold Caller in live play.
+# on every panel-built board (it can't know what a VP or building still
+# holds), making `FIRE_PRICE * cogs_remaining` zero and slips free --
+# how a pink slip got spent on a 6hp level 1 Cold Caller in live play.
 #
-# Swept with `QUICK_W["waste"]`, because the two pull opposite ways:
-# waste charges gags for overkill and skips fires by design, so raising
-# it alone sends the same board back to firing. 150 runs a cell, then
-# 250 on held-out seeds:
+# Swept against `QUICK_W["waste"]` (opposite pulls: waste charges gags
+# for overkill but skips fires by design). First pass, 150 then 250
+# held-out runs/cell: floor 0/20 -> VP 85.6%/86.4% (+9/-7, p=0.80, free)
+# and 0.8 slip cheaper; waste 30 looked worth +2.6 buildings for -2 VP on
+# the selection set but didn't hold out (23.6 -> 24.0, VP cost -4.4,
+# p=0.09) -- stays at zero, gag overkill unfixed.
 #
-#     floor  waste   vp+5slips   slips spent   vp+0   buildings
-#         0      0       85.6%          4.5   55.2%      23.6%
-#        20      0       86.4%          3.7   55.2%      23.6%
-#        60     30       81.2%          3.0   55.2%      24.0%
-#
-# 20 is free: +9/-7 (p=0.80) on the VP and eight tenths of a slip
-# cheaper, and it is enough to stop the pick that prompted this -- a
-# slip spent on a level 1 Cold Caller with 6 hp.
-#
-# Waste at 30 looked worth it on the selection set, +2.6 on buildings
-# for -2 on the VP. Held out the building gain vanished (23.6 -> 24.0)
-# and the VP cost grew to -4.4, +12/-23, p=0.09. So it stays at zero,
-# and GAG overkill remains unfixed -- see `QUICK_W["waste"]`.
-# RE-SWEPT once unites and SOS existed, and 20 no longer holds up. That
-# sweep ran when a solo VP read about 86%; with consumables it reads 94%,
-# and the headroom that appeared was enough to raise the floor for free.
-# 150 runs a cell, then 200 on held-out seeds, everything available in
-# every cell -- 5 slips, 5 unites, all 29 cards:
-#
-#     floor   d3 slips   d5 slips   d9 win    vp win   vp slips
-#        20   .63 /.58  1.16 /1.12  63 / 66%  95 / 95%  4.89 /4.88
-#        60   .00 /.00   .12 / .15  65 / 70%  94 / 94%  4.69 /4.66
-#       120   .00 /.00   .03 / .05  65 / 67%  95 / 94%  3.96 /4.03
-#       200   .00        .03        53%       85%       2.93
-#
-# 120 zeroes the slip spent on easy content -- the owner's rule is that
-# standard play should not need one -- and spends nearly a whole slip
-# LESS per VP at the same win rate, which is the point of keeping them.
-# 200 is too far: d9 falls to 53% and the VP to 85%.
-#
-# d9 is within noise between 60 and 120 (65/70 against 65/67 across the
-# two blocks); the economy is what separates them.
+# RE-SWEPT once unites and SOS existed (solo VP had been ~86%, now ~94%,
+# freeing headroom). 150 then 200 held-out runs/cell, everything
+# available: floor 20/60/120/200 -> d9 win 63/66%, 65/70%, 65/67%, 53%;
+# VP win 95/95%, 94/94%, 95/94%, 85%. 120 zeroes the slip spent on easy
+# content (the owner's rule: standard play shouldn't need one) while
+# spending nearly a whole slip LESS per VP at the same win rate. 200 is
+# too far. d9 is noise between 60 and 120; the economy decides it.
 FIRE_FLOOR = 120.0
 
 
@@ -683,59 +441,48 @@ FIRE_FLOOR = 120.0
 MIN_LEAF_PROB = 1e-3
 
 
-# Rounds a rollout will play before giving up and calling the position
-# unresolved. A real battle ends well inside this; the cap only stops a
-# pathological position (mutual inability to finish) spinning forever.
 # ---------------------------------------------------------------------
 # The greedy scorer and rollouts
 # ---------------------------------------------------------------------
-#
-# A THIRD scorer, ranking single actions by arithmetic alone. It
-# does not share `QUICK_W`; `_gag_units` is the one price both
-# agree on.
+# A THIRD scorer, ranking single actions by arithmetic alone. It does
+# not share `QUICK_W`; `_gag_units` is the one price both agree on.
 
+# Rounds a rollout will play before giving up and calling the position
+# unresolved. A real battle ends well inside this; the cap only stops a
+# pathological position (mutual inability to finish) spinning forever.
 ROLLOUT_ROUNDS = 12
 
 
 # Is a heal worth less while the cogs are still swinging?
 #
-# [OWNER, from play] "if cogs aren't lured, then healing is rather
-# pointless because they'll just attack" -- the laff you put back under
-# fire is handed straight back, so what a heal is really worth is what
-# SURVIVES the round. Lure the field (or land Cogs Miss) and the same
-# heal keeps all of it.
+# [OWNER, from play]: "if cogs aren't lured, then healing is rather
+# pointless because they'll just attack" -- laff put back under fire is
+# handed straight back, so a heal is worth what SURVIVES the round. Lure
+# the field (or land Cogs Miss) and the same heal keeps all of it.
 #
-# `_restored` already caps a heal at the toon's headroom, which is the
-# "worth more when you are low" half. This is the other half, and the
-# two are independent: headroom says how much CAN go in, this says how
-# much STAYS in.
+# `_restored` already caps a heal at headroom (worth more when low);
+# this is the independent other half -- headroom says how much CAN go
+# in, this says how much STAYS in. Charged against the PRE-plan
+# `expected_incoming(state)` (same figure `survival_rounds` reads) so a
+# lure thrown the same round isn't credited twice, once here and once in
+# `prevented`.
 #
-# Charged against `expected_incoming(state)` -- the PRE-plan figure, the
-# same one `survival_rounds` reads, and for the same reason. Using the
-# post-plan board would credit a heal twice for a lure thrown in the
-# same round, once here and once in `prevented`.
-#
-# NOT YET SWEPT. It is a rule the owner states about the game rather
-# than a fitted number, and it is on because of that. If it is ever
-# measured and found to cost play, the honest fix is to turn it off
-# here rather than to bury a compensating constant somewhere else.
+# NOT YET SWEPT -- a rule the owner states about the game, on by default
+# for that reason. If ever measured to cost play, the fix is to turn it
+# off here, not bury a compensating constant elsewhere.
 HEAL_DISCOUNTS_INCOMING = True
 
 
 # Does a sleeping cog still count against how long the party survives?
 #
-# [OWNER, from play] the good play is to lure the field and heal INSIDE
-# that window. The solver could not express it: with everything asleep
-# `expected_incoming` is 0, and `survival_rounds` divides laff by it, so
-# the term saturated at `SURVIVAL_CAP` and 120 laff scored the same as
-# 4. The one term that can see a toon about to die went blind precisely
-# when it was safe to do something about it.
+# [OWNER, from play]: the good play is to lure the field and heal INSIDE
+# that window. Previously unexpressed: with everything asleep,
+# `expected_incoming` is 0, so `survival_rounds` (laff / incoming)
+# saturated at `SURVIVAL_CAP` and 120 laff scored the same as 4 -- blind
+# to a toon about to die exactly when it was safe to help them.
 #
-# On, the survival term falls back to `latent_incoming` -- the same
-# board with the sleepers counted -- whenever nothing is swinging right
-# now. Off, it saturates as before.
-#
-# It does NOT touch `expected_incoming` itself, which is right as it
-# stands: a lured cog really does skip its attack, and `prevented` is
-# built on that.
+# On: the survival term falls back to `latent_incoming` (sleepers
+# counted) whenever nothing is swinging right now; off, it saturates as
+# before. Does NOT touch `expected_incoming` itself -- a lured cog really
+# does skip its attack, and `prevented` is built on that.
 LURE_IS_A_REPRIEVE = True
