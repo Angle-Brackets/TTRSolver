@@ -9,8 +9,7 @@ Layout:
   simulator.py  -- legal_actions() and step()
   data/         -- hand-entered game tables, each tagged with a
                    confidence level (see docs/data-confidence.md)
-  testing.py    -- clearly-labeled synthetic stand-ins for data that is
-                   still TODO, so code paths can be exercised end-to-end
+  testing.py    -- shared battle fixtures for tests and demos
 """
 
 __all__ = ["state", "mechanics", "simulator", "data"]
