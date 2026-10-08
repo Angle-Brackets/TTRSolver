@@ -1,85 +1,47 @@
-"""Train the policy and value heads (P0 / P1) on searched party data.
+"""Train the party value head (P1) on searched party data.
 
-    python tools/train_heads.py --epochs 60
+    python tools/train_heads.py --epochs 60 --export solver/search/party_policy.json
 
-Two heads on one shared trunk, which is the AlphaZero shape and is here
-for the AlphaZero reason: the two questions share almost all of their
-evidence. What makes a position good and what makes a plan good in it
-are learned from the same features.
+A small network from a position's features to its searched value: the
+value of the best plan the teacher search found there. `party_search.
+evaluate(leaf="learned")` uses it as the search leaf in place of
+`rollout_value` -- a forward pass is ~10x quicker than a rollout.
 
-  * VALUE head  -> the position's searched value (P1). Replaces
-    `party_search.rollout_value` as the search leaf. A forward pass is
-    ~10x quicker than a rollout.
-  * POLICY head -> a score per (position, plan), trained to rank plans
-    the way a WIDE search ranked them (P0). Used to pick the shortlist,
-    which is the term search cost is exponential in.
-
-RANKING, NOT REGRESSION, FOR THE POLICY: it never needs a plan's value,
-only its order, and the values themselves are noisy sampled estimates.
-A listwise softmax cross-entropy against the teacher's ranking asks for
-exactly that and nothing more; regressing the values would spend
-capacity fitting sampling noise.
+There used to be a second, policy head (P0) on the same trunk, trained
+to rank plans for the shortlist. It looked strong on held-out regret
+(3.22 vs `_quick_score`'s 9.93) and lost in play at every shortlist size;
+docs/scoring.md has the measurements. It was removed with `policy.rank`.
 
 Torch, GPU if available. Training lives in `tools/` and never in
 `solver/`: what ships is a plain-float export (`--export`) so inference
-stays standard-library only, the same rule `search/fitted.py` follows.
+stays numpy only, the same rule `search/fitted.py` follows.
 """
 import argparse
 import json
-import math
 import random
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from solver import data                                        # noqa: E402
 from solver.search import features                             # noqa: E402
-from solver.state import Action, Track                         # noqa: E402
+from solver.state import Track                                 # noqa: E402
 from visualizer import bridge                                  # noqa: E402
 
 LABELS = Path(__file__).resolve().parents[1] / ".party_labels.json"
 TRACK_ORDER = [Track.TOON_UP, Track.TRAP, Track.LURE, Track.SOUND,
                Track.THROW, Track.SQUIRT, Track.DROP]
 MAX_TOONS, MAX_COGS = 4, 4
-PLAN_DIM = MAX_TOONS * (len(TRACK_ORDER) + 1 + 1 + MAX_COGS + 1)
-
-
-def encode_plan_features(plan_json, state):
-    """One block per toon: track one-hot, level, target one-hot, hold.
-
-    Deliberately flat and per-toon rather than pooled -- toons are not
-    interchangeable (`outcomes.state_key` keys on every toon in order,
-    and a frozenset there would let a memo answer about one party with
-    another's value), so the ordering carries information.
-    """
-    out = []
-    for i in range(MAX_TOONS):
-        entry = plan_json[i] if i < len(plan_json) else None
-        block = [0.0] * (len(TRACK_ORDER) + 1 + 1 + MAX_COGS + 1)
-        if entry is None:
-            block[-1] = 1.0                      # hold (or absent toon)
-        else:
-            name, level, target = entry
-            track = Track[name]
-            block[TRACK_ORDER.index(track)] = 1.0
-            block[len(TRACK_ORDER)] = level / 7.0
-            if target is None:
-                block[len(TRACK_ORDER) + 1] = 1.0        # group gag
-            elif 0 <= target < MAX_COGS:
-                block[len(TRACK_ORDER) + 2 + target] = 1.0
-        out.extend(block)
-    return out
 
 
 def load(path, holdout=0.15, seed=0):
+    """(train, hold-out, teacher) rows of {"pos": features, "value": best}."""
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
     rows = []
     for entry in payload["positions"]:
         state = bridge.state_from_dict(entry["state"])
-        pos = list(features.extract(state))
-        plans = [encode_plan_features(p, state) for p in entry["plans"]]
-        rows.append({"pos": pos, "plans": plans, "values": entry["values"]})
+        rows.append({"pos": list(features.extract(state)),
+                     "value": entry["values"][0]})
     rng = random.Random(seed)
     rng.shuffle(rows)
     cut = int(len(rows) * (1 - holdout))
@@ -87,104 +49,34 @@ def load(path, holdout=0.15, seed=0):
 
 
 class Nets:
-    """Shared trunk, two heads. Built lazily so importing this module
-    does not require torch."""
+    """Trunk plus value head. Built lazily so importing this module does
+    not require torch."""
 
-    def __init__(self, pos_dim, plan_dim, hidden=128, device="cpu"):
+    def __init__(self, pos_dim, hidden=128, device="cpu"):
         import torch.nn as nn
-        import torch
 
-        self.device = device
         self.trunk = nn.Sequential(
             nn.Linear(pos_dim, hidden), nn.ReLU(),
             nn.Linear(hidden, hidden), nn.ReLU()).to(device)
         self.value = nn.Sequential(
             nn.Linear(hidden, 64), nn.ReLU(), nn.Linear(64, 1)).to(device)
-        self.policy = nn.Sequential(
-            nn.Linear(hidden + plan_dim, 128), nn.ReLU(),
-            nn.Linear(128, 64), nn.ReLU(), nn.Linear(64, 1)).to(device)
-        self.torch = torch
 
     def parameters(self):
-        return (list(self.trunk.parameters()) + list(self.value.parameters())
-                + list(self.policy.parameters()))
+        return list(self.trunk.parameters()) + list(self.value.parameters())
 
-    def forward(self, pos, plans):
-        """pos: (B, P). plans: (B, K, PLAN_DIM). -> value (B,), logits (B,K)."""
-        h = self.trunk(pos)
-        value = self.value(h).squeeze(-1)
-        k = plans.shape[1]
-        joined = self.torch.cat(
-            [h.unsqueeze(1).expand(-1, k, -1), plans], dim=-1)
-        logits = self.policy(joined).squeeze(-1)
-        return value, logits
+    def forward(self, pos):
+        return self.value(self.trunk(pos)).squeeze(-1)
+
+    def train(self, on=True):
+        self.trunk.train(on)
+        self.value.train(on)
 
 
-def batches(rows, size, k, rng, torch, device, vmean, vstd):
-    """Pad each position's plan list to exactly k, with a mask.
-
-    Positions have different shortlist lengths, so the loss must ignore
-    padding -- otherwise the model learns that short shortlists have
-    low-scoring tail entries, which is an artefact of batching.
-    """
-    order = list(range(len(rows)))
-    rng.shuffle(order)
-    for start in range(0, len(order), size):
-        chunk = [rows[i] for i in order[start:start + size]]
-        pos = torch.tensor([r["pos"] for r in chunk], dtype=torch.float32)
-        P = torch.zeros(len(chunk), k, PLAN_DIM)
-        T = torch.full((len(chunk), k), -1e9)
-        V = torch.zeros(len(chunk))
-        for bi, r in enumerate(chunk):
-            take = min(k, len(r["plans"]))
-            for pi in range(take):
-                P[bi, pi] = torch.tensor(r["plans"][pi], dtype=torch.float32)
-                T[bi, pi] = r["values"][pi]
-            V[bi] = (r["values"][0] - vmean) / vstd
-        yield (pos.to(device), P.to(device), T.to(device), V.to(device))
-
-
-def evaluate(nets, rows, k, torch, device, vmean, vstd, shortlist=6):
-    """Value MAE, top-k accuracy, and REGRET -- which is the one that
-    matters.
-
-    Top-1 accuracy asks "did the policy pick the teacher's argmax". That
-    is the wrong question twice over: the policy is used to choose a
-    SHORTLIST, not a move, and the teacher's argmax is itself a sampled
-    estimate whose top few plans sit within noise of each other. A policy
-    can miss the argmax every time and still be perfect for our purpose,
-    provided a plan of equal value survives into the shortlist.
-
-    Regret@k is that question: the value the teacher's best plan had,
-    minus the best value among the k plans the policy would have kept.
-    Zero means nothing was lost by searching only those k.
-    """
-    nets.trunk.eval(); nets.value.eval(); nets.policy.eval()
-    abs_err, n, top1, top5 = 0.0, 0, 0, 0
-    regret, regret_zero = 0.0, 0
-    with torch.no_grad():
-        for pos, P, T, V in batches(rows, 128, k, random.Random(1),
-                                    torch, device, vmean, vstd):
-            value, logits = nets.forward(pos, P)
-            abs_err += (value * vstd + vmean
-                        - (V * vstd + vmean)).abs().sum().item()
-            n += len(pos)
-            mask = T > -1e8
-            logits = logits.masked_fill(~mask, -1e9)
-            best_true = T.argmax(dim=1)
-            order = logits.argsort(dim=1, descending=True)
-            top1 += (order[:, 0] == best_true).sum().item()
-            top5 += (order[:, :5] == best_true.unsqueeze(1)).any(1).sum().item()
-            # Regret: value lost by keeping only the policy's top few.
-            kept = order[:, :shortlist]
-            best_kept = T.gather(1, kept).max(dim=1).values
-            best_any = T.masked_fill(~mask, -1e9).max(dim=1).values
-            gap = (best_any - best_kept).clamp(min=0.0)
-            regret += gap.sum().item()
-            regret_zero += (gap < 1e-6).sum().item()
-    nets.trunk.train(); nets.value.train(); nets.policy.train()
-    return (abs_err / max(n, 1), top1 / max(n, 1), top5 / max(n, 1),
-            regret / max(n, 1), regret_zero / max(n, 1))
+def tensors(rows, torch, device, vmean, vstd):
+    pos = torch.tensor([r["pos"] for r in rows], dtype=torch.float32, device=device)
+    val = torch.tensor([(r["value"] - vmean) / vstd for r in rows],
+                       dtype=torch.float32, device=device)
+    return pos, val
 
 
 def main():
@@ -192,13 +84,9 @@ def main():
     ap.add_argument("--labels", default=str(LABELS))
     ap.add_argument("--epochs", type=int, default=60)
     ap.add_argument("--batch", type=int, default=64)
-    ap.add_argument("--plans", type=int, default=48,
-                    help="plans kept per position when batching")
     ap.add_argument("--hidden", type=int, default=128)
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--decay", type=float, default=1e-4)
-    ap.add_argument("--shortlist", type=int, default=6,
-                    help="k for regret@k -- the shortlist the policy would keep")
     ap.add_argument("--export", default=None)
     args = ap.parse_args()
 
@@ -211,128 +99,56 @@ def main():
     train_rows, hold_rows, teacher = load(args.labels)
     print(f"  {len(train_rows)} train / {len(hold_rows)} hold-out positions, "
           f"teacher={teacher}")
-    vals = [r["values"][0] for r in train_rows]
+    vals = [r["value"] for r in train_rows]
     vmean = sum(vals) / len(vals)
     vstd = (sum((v - vmean) ** 2 for v in vals) / len(vals)) ** 0.5 or 1.0
 
-    nets = Nets(len(train_rows[0]["pos"]), PLAN_DIM, args.hidden, device)
-    opt = torch.optim.AdamW(nets.parameters(), lr=args.lr,
-                            weight_decay=args.decay)
-    # Cosine decay. Without a schedule the hold-out bounced 8.35 to
-    # 11.59 between checkpoints and the best regret landed at epoch 20
-    # of 40 -- the run was wandering, not converging, and whatever got
-    # exported would have been whichever epoch it stopped on.
+    nets = Nets(len(train_rows[0]["pos"]), args.hidden, device)
+    opt = torch.optim.AdamW(nets.parameters(), lr=args.lr, weight_decay=args.decay)
+    # Cosine decay: without a schedule the hold-out wandered between
+    # checkpoints instead of converging.
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs)
-    rng = random.Random(0)
+    X, Y = tensors(train_rows, torch, device, vmean, vstd)
+    Xh, Yh = tensors(hold_rows, torch, device, vmean, vstd)
 
-    # Early stopping on REGRET, not on loss. Regret is what the policy
-    # is for; loss includes the value term and a temperature-softened
-    # policy target, neither of which is the thing being bought.
-    best = {"regret": float("inf"), "epoch": 0, "state": None}
+    def hold_mae():
+        nets.train(False)
+        with torch.no_grad():
+            mae = ((nets.forward(Xh) - Yh).abs() * vstd).mean().item()
+        nets.train(True)
+        return mae
 
+    best = {"mae": float("inf"), "epoch": 0, "state": None}
     for epoch in range(1, args.epochs + 1):
-        for pos, P, T, V in batches(train_rows, args.batch, args.plans,
-                                    rng, torch, device, vmean, vstd):
-            value, logits = nets.forward(pos, P)
-            mask = T > -1e8
-            logits = logits.masked_fill(~mask, -1e9)
-
-            # Listwise: softmax the teacher's values into a target
-            # distribution and cross-entropy against it. Temperature
-            # keeps a near-tie from being taught as a hard label, which
-            # matters here because the top plans really are within noise
-            # of each other.
-            target = torch.softmax(T.masked_fill(~mask, -1e9) / 10.0, dim=1)
-            logp = torch.log_softmax(logits, dim=1)
-            policy_loss = -(target * logp).sum(dim=1).mean()
-            value_loss = torch.nn.functional.mse_loss(value, V)
-            loss = value_loss + policy_loss
-
+        perm = torch.randperm(len(X), device=device)
+        for start in range(0, len(X), args.batch):
+            idx = perm[start:start + args.batch]
+            loss = torch.nn.functional.mse_loss(nets.forward(X[idx]), Y[idx])
             opt.zero_grad()
             loss.backward()
             opt.step()
-
         sched.step()
         if epoch % 5 == 0 or epoch == args.epochs:
-            mae, t1, t5, reg, rz = evaluate(nets, hold_rows, args.plans,
-                                            torch, device, vmean, vstd,
-                                            args.shortlist)
-            mark = ""
-            if reg < best["regret"]:
-                best = {"regret": reg, "epoch": epoch, "mae": mae,
-                        "lossless": rz,
+            mae, mark = hold_mae(), ""
+            if mae < best["mae"]:
+                best = {"mae": mae, "epoch": epoch,
                         "state": {name: {k: v.detach().cpu().clone()
                                          for k, v in mod.state_dict().items()}
                                   for name, mod in (("trunk", nets.trunk),
-                                                    ("value", nets.value),
-                                                    ("policy", nets.policy))}}
+                                                    ("value", nets.value))}}
                 mark = "  <- best"
-            print(f"    epoch {epoch:3d}  value MAE {mae:6.2f}  "
-                  f"top-1 {t1 * 100:4.1f}%  top-5 {t5 * 100:4.1f}%  "
-                  f"regret@{args.shortlist} {reg:6.2f}  "
-                  f"lossless {rz * 100:4.1f}%{mark}")
+            print(f"    epoch {epoch:3d}  hold-out value MAE {mae:6.2f}{mark}")
 
-    # Baseline is `_quick_score`, the hand-written ranking the search
-    # actually ships -- beating uniform random proves nothing.
-    # docs/ml-design.md records the same trap in `fit_heuristic`, whose
-    # `score()` deliberately compares against the hand-written heuristic
-    # so a fit cannot grade itself against its own predecessor.
-    from solver.search import party_search as ps
-
-    raw = json.loads(Path(args.labels).read_text(encoding="utf-8"))
-    idx = list(range(len(raw["positions"])))
-    random.Random(0).shuffle(idx)
-    hold_raw = [raw["positions"][i] for i in idx[int(len(idx) * 0.85):]]
-
-    q_regret, q_zero, r_regret, n = 0.0, 0, 0.0, 0
-    for entry in hold_raw:
-        state = bridge.state_from_dict(entry["state"])
-        vals = entry["values"]
-        plans = [[None if a is None
-                  else Action(track=Track[a[0]], level=a[1],
-                              target_index=a[2]) for a in pj]
-                 for pj in entry["plans"]]
-        try:
-            scores = [ps._quick_score(state, pl) for pl in plans]
-        except Exception:
-            continue
-        ranked = sorted(range(len(plans)), key=lambda i: -scores[i])
-        # `top` and not `best` -- `best` is the early-stopping snapshot
-        # a few lines up, and shadowing it turned the export into a
-        # TypeError after a full training run.
-        top = max(vals)
-        kept = max(vals[i] for i in ranked[:args.shortlist])
-        q_regret += max(0.0, top - kept)
-        q_zero += (top - kept) < 1e-6
-        picks = random.Random(n).sample(range(len(vals)),
-                                        min(args.shortlist, len(vals)))
-        r_regret += max(0.0, top - max(vals[i] for i in picks))
-        n += 1
-
-    if n:
-        print("")
-        print(f"  regret@{args.shortlist} on the same hold-out "
-              f"({n} positions), lower is better:")
-        print(f"    _quick_score (the shipped ranking) {q_regret / n:6.2f}"
-              f"   lossless {q_zero / n * 100:5.1f}%")
-        print(f"    uniform random                     {r_regret / n:6.2f}")
-
-    print("")
-    print(f"  best epoch {best['epoch']}: regret@{args.shortlist} "
-          f"{best['regret']:.2f}, value MAE {best['mae']:.2f}, "
-          f"lossless {best['lossless'] * 100:.1f}%")
-
+    print(f"\n  best epoch {best['epoch']}: value MAE {best['mae']:.2f}")
     if args.export:
-        # Plain floats, not a torch checkpoint. Inference must not need
-        # torch -- see requirements-training.txt. `search/policy.py`
-        # reads this with numpy alone and falls back to the hand-written
-        # ranking when numpy is absent.
+        # Plain floats, not a torch checkpoint: `search/policy.py` reads
+        # this with numpy alone.
         payload = {
             "vmean": vmean, "vstd": vstd,
-            "plan_dim": PLAN_DIM, "pos_dim": len(train_rows[0]["pos"]),
+            "pos_dim": len(train_rows[0]["pos"]),
             "track_order": [t.name for t in TRACK_ORDER],
             "max_toons": MAX_TOONS, "max_cogs": MAX_COGS,
-            "regret": best["regret"], "epoch": best["epoch"],
+            "mae": best["mae"], "epoch": best["epoch"],
             "nets": {name: {k: v.tolist() for k, v in mod.items()}
                      for name, mod in best["state"].items()},
         }

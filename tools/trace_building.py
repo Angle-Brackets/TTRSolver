@@ -4,7 +4,7 @@
     python tools/trace_building.py --scan 40      # find divergent buildings
 
 Both agents get the SAME building and the same dice, but each plays its
-own trajectory -- this is not the CRN fork in `tools/disagree.py`, which
+own trajectory -- this is not the CRN fork of the old `tools/disagree.py` (in git history), which
 asks what one substituted action is worth. Here the question is what a
 whole approach looks like.
 

@@ -303,7 +303,7 @@ first move.
 
 ### S1, the MLP (step 2) — beats the linear model on calibration, ties on ordering
 
-`tools/fit_mlp.py`, numpy only, same cache and same `score()` as
+`tools/fit_mlp.py` (deleted; in git history), numpy only, same cache and same `score()` as
 `fit_heuristic` so the comparison is like-for-like.
 
 | model | train MAE | hold-out MAE | hold-out r | hold-out ordering |

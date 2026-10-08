@@ -445,7 +445,7 @@ moved the behaviour and not the result. The search's moves are good *for the
 search's continuation*, not good in themselves, and transplanting them
 transplants nothing.
 
-`tools/disagree.py` is the experiment; `tools/trace_building.py` prints two
+`tools/disagree.py` was the experiment (deleted; in git history); `tools/trace_building.py` prints two
 whole games side by side.
 
 ## Our current read, offered so you can attack it

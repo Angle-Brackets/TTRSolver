@@ -129,8 +129,8 @@ def teal_mask(frame: np.ndarray) -> np.ndarray:
     battle, the box alone and the widened version found the same single
     plate. A wider mask isn't free either: at the loosest thresholds
     tried it invented a third plate on a two-plate frame and dropped a
-    department margin to 0.28. `tools/teal_ab.py` is the check, if a
-    zone ever does defeat the box.
+    department margin to 0.28. `tools/teal_ab.py` (in git history) was
+    the check, if a zone ever does defeat the box.
     """
     delta = np.abs(frame[:, :, :3].astype(np.int16) - np.array(TEAL))
     return np.all(delta < TOLERANCE, axis=2)

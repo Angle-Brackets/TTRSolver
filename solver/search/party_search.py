@@ -1041,8 +1041,8 @@ def _quick_score(state: BattleState, plan, objective=None) -> float:
     """Expected value of the round over every way the dice can fall.
 
     NO SHIPPED CALLER PASSES `objective`: `plans`, `hybrid._judge` (what
-    `hybrid.climb` scores with), `hybrid.best_plan` and
-    `tools/train_heads.py` all call this with two arguments, so
+    `hybrid.climb` scores with) and `hybrid.best_plan` all call this with
+    two arguments, so
     `_score_leaf`'s `waste_penalty` branch is unreachable in practice --
     overkill is charged only through `QUICK_W["waste"]` (0.0). Recorded
     in docs/scoring.md rather than fixed here, since turning it on
