@@ -5,27 +5,21 @@
 Torch, GPU if present. Training lives here and never in `solver/`; what
 ships is a plain-float export, the same rule `fit_heuristic` follows.
 
-WHY PPO RATHER THAN MORE DISTILLATION
--------------------------------------
-The policy head distilled from search (P0) lost end to end, and the
-reason was structural: it can only approach the teacher, and the teacher
-is itself approximate for parties. PPO learns from outcomes, so it has
-no teacher ceiling.
+WHY PPO RATHER THAN MORE DISTILLATION: the policy head distilled from
+search (P0) lost end to end because it can only approach the teacher,
+and the teacher is itself approximate for parties -- PPO learns from
+outcomes, so it has no teacher ceiling. It also sidesteps the real
+bottleneck: a depth-2 party search spends **95% of its time in
+`plans()`** enumerating and ranking joint plans, while a policy samples
+instead of enumerating and never pays that.
 
-It also sidesteps the actual bottleneck. A depth-2 party search spends
-**95% of its time in `plans()`** enumerating and ranking joint plans;
-a policy samples instead of enumerating and never pays that.
-
-TWO THINGS THAT WOULD MAKE THE NUMBERS LIE
-------------------------------------------
-* **Masking must be inside the distribution, not a penalty.** Illegal
-  actions get `-inf` logits so they carry no probability at all. Penalty
-  shaping would let the agent learn to want an illegal move and be
-  taxed for it, which is a different (and worse) problem.
-* **Truncation is not termination.** An episode cut off at the round cap
-  still has value ahead of it and must be bootstrapped; treating it as a
-  terminal zero teaches the agent that surviving to the cap is worthless.
-  `info["truncated"]` distinguishes them.
+TWO THINGS THAT WOULD MAKE THE NUMBERS LIE: masking must be inside the
+distribution (illegal actions get `-inf` logits, no probability at all),
+not a penalty, which would let the agent learn to want an illegal move
+and be taxed for it -- a different, worse problem. And truncation is not
+termination: an episode cut off at the round cap still has value ahead
+of it and must be bootstrapped, or the agent learns that surviving to
+the cap is worthless. `info["truncated"]` distinguishes them.
 """
 from __future__ import annotations
 
@@ -45,12 +39,11 @@ from solver.rl import env as env_mod                           # noqa: E402
 def build(obs_dim, n_actions, hidden, device):
     """SEPARATE trunks for actor and critic.
 
-    Sharing one was the first version and it trained backwards -- eval
-    return fell from +47.9 to +22.5 while the win rate dropped 88% to
-    78%. Returns here run to about +/-100, so the value loss is of order
-    10,000 against a policy loss of order 0.1: the shared trunk followed
-    the critic and the policy was noise riding on top of it. Separate
-    towers, plus reward scaling, keep the two gradients comparable.
+    A shared trunk trained backwards (eval return +47.9 -> +22.5, win
+    rate 88% -> 78%): returns run to about +/-100, so the value loss sits
+    four orders of magnitude above the policy loss and the shared trunk
+    just followed the critic. Separate towers, plus reward scaling, keep
+    the two gradients comparable.
     """
     import torch.nn as nn
 
@@ -339,23 +332,15 @@ def main():
 
     n_actions = len(env_mod.ACTIONS)
 
-    # WHICH TRACK EACH ACTION BELONGS TO, so the entropy bonus can be put
-    # on the track marginal instead of the flat 246-way distribution.
-    #
-    # The measured problem: sweeping the flat entropy coefficient 0.01 /
-    # 0.04 / 0.10 moved gag entropy not at all -- 3.79 at every setting.
-    # An action is (track, level, target) and there are five targets per
-    # gag, so the policy satisfies a flat entropy bonus by spreading
-    # probability over WHICH COG to hit while staying committed to
-    # Throw. Entropy over actions is not entropy over tracks.
-    #
-    # The pass gets its own slot at the end, so "hold" is something the
-    # track-entropy term can encourage too.
-    # Pass gets a slot, and so does FIRE -- a pink slip has no track and
-    # is not a hold, so it belongs in neither bucket. Without its own
-    # slot this raised "None is not in list" the moment fires entered the
-    # action table, which is the right failure: the mapping has to say
-    # what every action is.
+    # WHICH TRACK EACH ACTION BELONGS TO, so the entropy bonus can sit on
+    # the track marginal instead of the flat 246-way distribution: an
+    # action is (track, level, target) with five targets a gag, so a flat
+    # bonus is satisfied by spreading probability over WHICH COG while
+    # staying committed to Throw -- sweeping the coefficient 0.01/0.04/0.10
+    # left gag entropy at 3.79 regardless. Pass and FIRE each get their
+    # own slot (a pink slip has no track and isn't a hold either) so
+    # every action maps to something -- leaving fire out raised "None is
+    # not in list" the moment fires entered the action table.
     track_of = torch.zeros(n_actions, dtype=torch.long, device=device)
     for _i, _a in enumerate(env_mod.ACTIONS):
         if _a is not None and _a.fire:
@@ -464,20 +449,15 @@ def main():
     print(f"  baseline (uniform random over legal actions): "
           f"return {base_ret:+7.2f}  win {base_win * 100:5.1f}%")
 
-    # RUNNING REWARD NORMALISATION.
-    #
-    # A flat 0.01 scale kept the value loss in range and destroyed the
-    # signal it was meant to preserve: gag prices run 0.23 to 4.70
-    # against a win bonus of 100, so after scaling the entire
-    # gag-scarcity range is 2-5% of the win signal. Measured over 120
-    # battles, PPO spent 4.49 of gag value against the search's 2.81 and
-    # reached nearly a level higher, while WINNING LESS -- it was not
-    # trading resources for wins, it simply could not hear the price.
-    #
-    # Dividing by a running standard deviation keeps the loss in range
+    # RUNNING REWARD NORMALISATION. A flat 0.01 scale kept the value loss
+    # in range but destroyed the signal: gag prices run 0.23-4.70 against
+    # a win bonus of 100, so scaling left the whole gag-scarcity range at
+    # 2-5% of the win signal -- over 120 battles PPO spent 4.49 of gag
+    # value against the search's 2.81 while WINNING LESS, unable to hear
+    # the price. Dividing by a running std keeps the loss in range
     # without flattening the ratios: a Railroad still costs twenty times
-    # a Cupcake afterwards, where a fixed scale made both indistinguish-
-    # able from zero next to a win.
+    # a Cupcake, where a fixed scale made both indistinguishable from
+    # zero next to a win.
     class RunningScale:
         def __init__(self):
             self.n, self.mean, self.m2 = 0, 0.0, 0.0
@@ -631,12 +611,10 @@ def main():
         "hidden": args.hidden,
         "trunk": {k: v.detach().cpu().tolist()
                   for k, v in trunk.state_dict().items()},
-        # The VALUE trunk too. The critic reads from its own tower since
-        # the shared-trunk fix, so exporting `critic` without `vtrunk`
-        # saved a head with nothing to feed it -- the policy's moves
-        # reloaded fine and its grades were simply unrecoverable, which
-        # is the sort of gap that hides until someone asks the model
-        # what it thinks a position is worth.
+        # The VALUE trunk too -- the critic reads its own tower since the
+        # shared-trunk fix, so exporting `critic` without `vtrunk` once
+        # saved a head with nothing to feed it: moves reloaded fine but
+        # its grades were unrecoverable.
         "vtrunk": {k: v.detach().cpu().tolist()
                    for k, v in vtrunk.state_dict().items()},
         "actor": {k: v.detach().cpu().tolist()
@@ -650,15 +628,10 @@ def main():
         # misreads its input, because OBS_DIM does not move when a
         # slot's scale does. See `env.OBS_VERSION`.
         "obs_version": env_mod.OBS_VERSION,
-        # THE REWARD THIS WAS TRAINED AGAINST. Without it a shipped
-        # policy cannot be told apart from one trained with different
-        # shaping, and the question "was the reward coupled to
-        # `_quick_score`?" has no answer from the artifact -- it had to
-        # be reasoned from the defaults instead, which is not evidence.
-        #
-        # All of these default to 0.0, so a plain run records zeros and
-        # says so, which is the point: silence and "off" stop looking
-        # alike.
+        # THE REWARD THIS WAS TRAINED AGAINST -- without it a shipped
+        # policy can't be told apart from one trained with different
+        # shaping. These default to 0.0, so a plain run records zeros
+        # and says so: silence and "off" stop looking alike.
         "reward": {
             "precision": args.precision,
             "fire_cost": args.fire_cost,

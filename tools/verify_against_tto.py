@@ -7,24 +7,18 @@ Compares every cog attack row we hold against `SuitAttributes` in
 SuitBattleGlobals.py from Open Toontown (<https://github.com/open-toontown>),
 an open-source continuation carrying the original Toontown Online data.
 
-WHAT THIS DOES AND DOESN'T PROVE
---------------------------------
-This is *not* a TTR source. It is the pre-rebalance ancestor of the values
-the QED1224 strategy guide gave us, so it cannot tell us what TTR changed.
-What it does is separate two failure modes that otherwise look identical:
-
-  - a value we transcribed wrong  ->  shows up here as a mismatch
-  - a value TTR rebalanced        ->  shows up here as a mismatch too, BUT
-                                      the wiki will already have flagged it
-
-So a row that matches TTO and matches the wiki is solid. A row that differs
-from TTO exactly where the wiki said TTR changed it is confirmation from
-both ends. A row that differs from TTO *without* a wiki explanation would be
-a transcription bug -- and at the time of writing there are none.
-
-It also settles questions the wiki can't, because the wiki publishes no cog
-frequency or accuracy at all: those columns are pure TTO, and this verifies
-we hold them faithfully even though TTR has since moved them.
+WHAT THIS DOES AND DOESN'T PROVE: this is *not* a TTR source -- it's the
+pre-rebalance ancestor of the values the QED1224 guide gave us, so it
+can't say what TTR changed. What it does is separate two failure modes
+that otherwise look identical: a value we transcribed wrong shows up
+here as a mismatch, and so does a value TTR rebalanced, but the wiki
+will already have flagged the latter. So a row matching both TTO and the
+wiki is solid; a row differing from TTO exactly where the wiki says TTR
+changed it is confirmation from both ends; a row differing from TTO
+*without* a wiki explanation would be a transcription bug (none, at the
+time of writing). It also settles what the wiki can't: it publishes no
+cog frequency or accuracy at all, so those columns are pure TTO and this
+verifies we hold them faithfully even though TTR has since moved them.
 
 Requires network on first run; caches the download next to this file.
 """

@@ -2,27 +2,22 @@
 
     python tools/eval_policies.py CEO0 a.json b.json c.json ...
 
-WHY PARALLEL, AND WHY IT IS SAFE
---------------------------------
-One evaluation pins about one core: the network is tiny and the time
-goes to the pure-Python environment. Running twelve policies one after
-another left eleven cores idle for the better part of an hour.
+WHY PARALLEL, AND WHY IT IS SAFE: one evaluation pins about one core (a
+tiny network, the time goes to the pure-Python environment), so running
+twelve policies one after another left eleven cores idle for most of an
+hour. `hybrid` loads its policy from a module-level `_EXPORT` path,
+which one process can only point at one file at a time -- the sequential
+harnesses handle that by copying over `solver/rl/ppo_facility.json` and
+resetting `_MODEL`, but a shared file is exactly what can't be
+parallelised, so each worker here repoints `_EXPORT` at its own policy
+before the first load instead.
 
-`hybrid` loads the policy from a module-level `_EXPORT` path, which a
-single process can only point at one file at a time -- that is why the
-sequential harnesses copy over `solver/rl/ppo_facility.json` and reset
-`_MODEL`. Copying a shared file is exactly what cannot be parallelised,
-so each worker instead repoints `_EXPORT` at its OWN policy before the
-first load. No shared mutable file, no clobbering.
-
-WHAT THE NUMBERS MEAN
----------------------
-Boss rates carry enormous seed variance -- 23.3% to 62.5% across eight
-policies differing only in their training seed -- so the ranking this
-prints is mostly a ranking of luck. Read it to find candidates and
-large regressions, then confirm the shortlist on seeds it did not
-choose them on. Picking the maximum here and shipping it is the mistake
-4b7da34 already recorded.
+WHAT THE NUMBERS MEAN: boss rates carry enormous seed variance (23.3% to
+62.5% across eight policies differing only in training seed), so this
+ranking is mostly a ranking of luck. Use it to find candidates and large
+regressions, then confirm the shortlist on seeds it wasn't chosen on --
+picking the maximum here and shipping it is the mistake 4b7da34 already
+recorded.
 """
 import random
 import sys

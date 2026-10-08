@@ -2,41 +2,32 @@
 
     python tools/fit_heuristic.py --positions 400
 
-Labels are ground truth, not bootstrapped estimates. Every action spends
+Labels are ground truth, not bootstrapped estimates: every action spends
 a gag, so the state graph is a DAG and `expectimax.solve` plays a
-position to the end of the battle exactly. That is unusual and it is the
-main reason this is worth doing at all.
+position to the end of the battle exactly. That is the main reason this
+is worth doing at all.
 
 Needs numpy, which the solver core does not. Nothing here ships: the
 output is a block of plain floats to paste into
 `solver/search/fitted.py`, so inference stays pure standard library.
 
-THE RISK THIS CANNOT DESIGN AWAY
---------------------------------
-`solve` is only tractable on small positions, and small positions are
-where the heuristic matters least, because the search reaches a terminal
-state without ever consulting it. Anything fitted here has to extrapolate
-to crowded fights with full pouches. `--holdout-big` scores a separate
-sample of larger positions for exactly that reason; a model that wins on
-training and loses there has not earned anything.
+THE RISK THIS CAN'T DESIGN AWAY: `solve` is only tractable on small
+positions, which is exactly where the heuristic matters least (the
+search reaches a terminal state without consulting it). Anything fitted
+here has to extrapolate to crowded fights with full pouches --
+`--holdout-big` scores a separate sample of larger positions for that
+reason, and a model that wins on training but loses there has earned
+nothing.
 
-KEEPING IT FAST
----------------
-The first version took about forty minutes, and nearly all of that was
-positions that were never going to finish. Three things fix it.
-
-Cost is governed by the *total gag count*, not by cogs: every action
-spends a gag, so that number bounds the depth of the DAG. Measured, the
-median position solves in 39ms, but timeouts go 1-in-40 at three gags,
-1-in-5 at four, and 1-in-2 at six. Sampling within a gag cap avoids
-paying a full second to discover a position is intractable.
-
-Labelling is cached. Features are the part that gets iterated on, and
-re-labelling to change a feature is pure waste -- the cache stores
-positions and their exact values, so a refit after a feature change is
-seconds rather than a coffee break.
-
-And labelling parallelises perfectly, since positions are independent.
+KEEPING IT FAST: the first version took forty minutes, almost all of it
+positions that were never going to finish. Cost is governed by the
+*total gag count*, not by cogs, since every action spends one and that
+number bounds the DAG's depth -- median solve is 39ms, but timeouts hit
+1-in-40 at three gags, 1-in-5 at four, 1-in-2 at six, so sampling within
+a gag cap avoids paying a full second to discover a position is
+intractable. Labelling is also cached (positions and their exact values,
+so refitting after a feature change is seconds, not a re-label) and
+parallelises perfectly, since positions are independent.
 """
 import argparse
 import json
@@ -61,21 +52,16 @@ CACHE = Path(__file__).resolve().parents[1] / ".heuristic_labels.json"
 
 # Files whose contents determine what an exact label means. The cache key
 # includes a digest of them, so changing the rules invalidates the labels
-# instead of silently reusing values computed under the old ones.
-#
-# This is not hypothetical. Trap damage was being taken from the wrong end
-# of its range; fixing it moved 1.75% of the cached labels by up to 10
-# points, and nothing would have noticed -- the key was only the sample
-# parameters.
+# instead of silently reusing stale ones -- not hypothetical: a Trap
+# damage fix once moved 1.75% of cached labels by up to 10 points with
+# nothing to notice, since the key was only the sample parameters.
 RULE_FILES = [
     "solver/simulator.py", "solver/mechanics.py", "solver/outcomes.py",
     "solver/data/gags.py", "solver/data/cogs.py", "solver/data/accuracy.py",
-    # state.py decides when a battle is over and objective.py decides what
-    # a round is worth. Both were missing here, which is worse than the
-    # Trap-damage case above that prompted the digest: `can_still_damage`
-    # turns a whole class of position from an estimate into a loss, so a
-    # cache surviving that change would be full of labels for a different
-    # game.
+    # state.py (when a battle ends) and objective.py (what a round is
+    # worth) were missing here too -- worse than the Trap case, since
+    # `can_still_damage` turns a whole class of position from an
+    # estimate into a loss.
     "solver/state.py", "solver/search/objective.py",
 ]
 
@@ -96,18 +82,16 @@ GAGS = [(Track.THROW, 3), (Track.THROW, 4), (Track.THROW, 5),
         (Track.SOUND, 4), (Track.LURE, 3), (Track.TRAP, 3)]
 
 
-# Cog counts per band. The hold-out band is wider than the training one
-# on purpose: it is still exactly labelled, but larger than anything the
-# model was fitted on, which is the extrapolation this whole approach is
-# exposed to.
+# Cog counts per band. Hold-out is wider than training on purpose --
+# still exactly labelled, but larger than anything fitted on, which is
+# the extrapolation this whole approach is exposed to.
 #
-# NOT tightened for speed. An earlier version squeezed positions down to
-# 2-4 gags against 2-3 cogs to cut labelling time, which made almost
-# every sample hopeless and quietly changed what was being measured --
-# the hand-written heuristic's bias fell from -81.7 to -13.3, not
-# because it improved but because a toon with three gags against three
-# cogs really is losing. Speed comes from parallelism and the cache, not
-# from sampling positions nobody plays.
+# NOT tightened for speed: an earlier version squeezed to 2-4 gags
+# against 2-3 cogs to cut labelling time, which made almost every sample
+# hopeless and changed what was measured (the hand-written heuristic's
+# bias fell from -81.7 to -13.3, not from improving but because a toon
+# that outnumbered really is losing). Speed comes from parallelism and
+# the cache, not from sampling positions nobody plays.
 TRAIN_COGS = [1, 1, 2]
 HOLDOUT_COGS = [1, 2, 2, 3]
 

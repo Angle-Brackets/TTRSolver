@@ -2,54 +2,34 @@
 
     python tools/fit_scorer.py --generations 120
 
-WHY BLACK-BOX AND NOT REGRESSION
---------------------------------
-`tools/fit_heuristic.py` fits the LEAF evaluator by regression, and it
-can: a solo battle is finite, so `expectimax.solve` gives exact labels
-to fit against. A party plan has no such thing. Exact solve cannot
-reach a party position, and every attempt in this project to
-manufacture labels from a stronger search has lost end to end -- the P0
-ranking head in `docs/ml-design.md`, and expert iteration, which
-cloned the search's own play and finished 7.5% of buildings against
-PPO's 35%.
+Black-box, not regression: unlike `tools/fit_heuristic.py`'s leaf
+evaluator, a party plan has no exact-solve labels to fit against --
+`expectimax.solve` cannot reach a party position, and every attempt to
+manufacture labels from a stronger search has lost end to end (the P0
+ranking head in `docs/ml-design.md`; expert iteration, which cloned the
+search's own play and finished 7.5% of buildings against PPO's 35%). So
+this optimises buildings finished directly, with no label in between.
 
-So the objective here is the thing actually wanted -- buildings
-finished -- measured directly. That side-steps the proxy problem
-entirely: no label, no distillation, no ranking loss standing in for
-play.
+Cheap because `hybrid.climb` is deterministic -- it walks the policy's
+ranked logits rather than sampling, so two weight vectors on identical
+seeds differ with no sampling noise. One evaluation over 180 buildings
+takes about three seconds.
 
-WHY THIS IS CHEAPER THAN IT SOUNDS
-----------------------------------
-`hybrid.climb` is deterministic: it walks the policy's ranked logits
-rather than sampling, so the same weights on the same seeds give the
-same answer every time. One evaluation over 180 buildings takes about
-three seconds. Two coefficient vectors compared on identical seeds
-differ EXACTLY -- there is no sampling noise to average away, which is
-why a coarse grid earlier showed clean monotone gradients.
+Determinism is not generalisation, though: tuning and reporting on the
+same seed set once produced 69.4% for a configuration that was 66.1% on
+fresh buildings. So the fit and validation seed sets are disjoint, the
+validation set is never optimised against, and a candidate is only
+reported if it holds on both.
 
-WHAT STILL GOES WRONG, AND THE GUARD FOR IT
--------------------------------------------
-Determinism is not generalisation. Tuning on one seed set and reporting
-the same set produced 69.4% for a configuration that was 66.1% on fresh
-buildings -- a fitted result that evaporated. So the fit set and the
-validation set are disjoint, validation is never optimised against, and
-a candidate is only worth reporting if it holds on both.
+Fits `ps_weights.QUICK_W` (what `_quick_score`, and therefore climb,
+uses). `GREEDY_W` is deliberately NOT fitted here -- it grades the
+rollouts the search scores plans against, wants its own objective (the
+search's finish rate), and costs about a hundred times as much a run.
 
-WHICH WEIGHTS
--------------
-`ps_weights.QUICK_W`, which `_quick_score` uses and therefore the
-hybrid climb uses. `GREEDY_W` is deliberately NOT fitted here: it plays
-the rollouts the SEARCH grades plans against, so it wants its own
-objective (the search's finish rate) and its own run, at about a
-hundred times the cost per evaluation.
-
-THE OPTIMISER
--------------
-A (1+lambda) evolution strategy with one-fifth-rule step adaptation.
-Not CMA-ES, which is not installed and would be better; not a genetic
-algorithm, which suits combinatorial or rugged spaces rather than five
-smooth continuous weights. Restarts from the incumbent whenever the
-step size collapses, so a plateau does not end the run early.
+Optimiser: a (1+lambda) evolution strategy with one-fifth-rule step
+adaptation -- not CMA-ES (not installed), not a GA (suited to rugged
+combinatorial spaces rather than five smooth continuous weights).
+Restarts from the incumbent whenever the step size collapses.
 """
 from __future__ import annotations
 
@@ -71,37 +51,29 @@ from solver.search import weights as ps_weights                  # noqa: E402
 KEYS = ("heal", "armed", "kill", "kill_threat", "prevent", "risk", "price")
 
 # Step scale per weight, so a move means the same thing to `kill` at 120
-# as to `heal` at 2 -- and so the two new terms, which start at zero,
-# can actually travel. A cog threatens 8-15 damage a round, so a
+# as to `heal` at 2. A cog threatens 8-15 damage a round, so a
 # `kill_threat` of 5 is worth about half a flat kill; `risk` is charged
 # per toon, against a landed-damage term in the tens.
 SCALE = {"heal": 2.0, "armed": 1.0, "kill": 120.0, "kill_threat": 5.0,
          "prevent": 6.0, "risk": 20.0, "price": 1.0}
 
-# `prevent` was 2.0 with a scale of 2.0. It is now 9.0, found by a sweep
-# after `prevented` was remodelled, and a scale of 2.0 gives steps of
-# +/-0.6 at sigma 0.30 -- too small to cross its own range, so the fit
-# would have reported it converged when it had barely moved. A scale is
-# a statement about how far a weight might travel, and it goes stale
-# when the weight does.
+# `prevent`'s scale was widened 2.0 -> 6.0 after a sweep moved its
+# shipped weight from 2.0 to 9.0: at 2.0 a step is only +/-0.6 (sigma
+# 0.30), too small to cross that range, so the fit would have reported
+# convergence when the weight had barely moved. A scale goes stale when
+# the weight it's sized for does.
 
 
 def play(seed, sampler, budget: int) -> bool:
     """One side, at the current weights. True if it cleared.
 
-    TWO BUGS LIVED HERE and both mattered for what this fits.
-
-    The round was detected with `all(a is None for a in e.pending)`. A
-    seat that HOLDS stores None, so that cannot tell "nobody has chosen
-    yet" from "everyone so far held", and the plan was recomputed
-    mid-round whenever seat 0 held -- see the same warning in
-    `tools/trace_building.py`. `e.rounds` is the round number and says
-    it directly.
-
-    And fire actions had no branch, so a pink slip silently became a
-    pass. That made every boss position unscoreable: the fitter would
-    have graded a CEO side by watching the party decline to use the
-    twenty slips it was holding.
+    Two fixed bugs mattered for what this fits: the round used to be
+    detected with `all(a is None for a in e.pending)`, which can't tell
+    "nobody has chosen" from "everyone held" (a HOLD also stores None --
+    see `tools/trace_building.py`), so `e.rounds` is used instead. And
+    fire actions had no branch, silently becoming a pass -- which made
+    every boss position unscoreable, since the fitter graded a CEO side
+    by watching the party ignore the slips it held.
     """
     e = env_mod.BattleEnv(rng=random.Random(seed), sampler=sampler,
                           coordinated=True)
@@ -151,14 +123,11 @@ def finished(seeds, budget: int, sets=None) -> float:
 
 
 def evaluate(vector, seeds, budget: int, sets=None) -> float:
-    # MERGED, NOT REPLACED. `KEYS` is the seven weights this fits, and
-    # `QUICK_W` has nine -- `waste` and `survive` are not fitted here.
-    # Rebinding the dict to just the seven dropped those two, and
-    # `_score_leaf` reads both, so the next call raised
-    # `KeyError: 'waste'`. Fitting crashed the scorer it was fitting.
-    #
-    # Merging keeps the unfitted weights at their shipped values, which
-    # is what "fit these seven" always meant.
+    # MERGED, NOT REPLACED. `KEYS` is the seven weights fitted here, but
+    # `QUICK_W` has nine; rebinding to just the seven used to drop
+    # `waste` and `survive`, which `_score_leaf` reads, crashing the
+    # scorer with `KeyError: 'waste'`. Merging keeps the unfitted two at
+    # their shipped values.
     fitted = {k: float(v) for k, v in zip(KEYS, vector)}
     ps_weights.QUICK_W = dict(ps_weights.QUICK_W, **fitted)
     return finished(seeds, budget, sets)

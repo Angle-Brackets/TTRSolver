@@ -2,54 +2,37 @@
 
     python tools/disagree.py --buildings 60
 
-THE QUESTION THIS ANSWERS
--------------------------
-The policy and the search finish the same fraction of buildings (65.9%
-against 65.0%, inside the noise). They do NOT play the same way, and the
-usage tables only say so in aggregate: the policy holds 11.9% of rounds
-and the search 11.0%, which is agreement about the RATE of holding and
-says nothing about whether they hold in the same POSITIONS. A policy can
-match every marginal and still hold in all the wrong rounds.
+THE QUESTION
+--------------
+The policy and the search finish about the same fraction of buildings
+(65.9% vs 65.0%, inside the noise) without playing the same way -- e.g.
+they hold on a similar RATE of rounds (11.9% vs 11.0%) but that says
+nothing about whether it's the same rounds. So: replay held-out
+buildings, find every round where the two disagree, and measure what the
+disagreement is worth. That splits the gap into harmless style and real
+cost, and only the second is worth more work.
 
-So: replay held-out buildings, find every round where the two disagree,
-and measure what the disagreement is worth. That splits the difference
-between them into two piles -- harmless style, and real cost -- and only
-the second pile is worth any more work.
+COMMON RANDOM NUMBERS
+------------------------
+Playing branch A (policy) and branch B (search) independently measures
+mostly dice -- this game's outcome variance is enormous (one missed 95%
+gag loses a floor), which is exactly how a past rollout judge came to be
+worth -3.3 to -3.8: it was reading noise. CRN fixes this: fork the state,
+play A's action in one copy and B's in the other, then continue BOTH
+under one fixed policy (`greedy_plan`) with an identical random stream.
+Whatever difference survives is caused by the action.
 
-COMMON RANDOM NUMBERS, AND WHY WITHOUT THEM THIS MEASURES NOTHING
------------------------------------------------------------------
-The naive version plays branch A (the policy's action) and branch B (the
-search's), then compares. But this game's outcome variance is enormous --
-one missed 95% gag loses a floor -- so the difference between two
-independently-rolled branches is mostly dice. It is exactly how the PPO
-rollout judge came to be worth -3.3 to -3.8: it was reading noise.
-
-CRN gives both branches the SAME dice. Fork the state, play A's action in
-one and B's in the other, then continue BOTH under one fixed policy
-(`greedy_plan`) with an identical random stream. Whatever difference
-survives is caused by the action, because nothing else differed. It is a
-trial on identical twins rather than on two strangers.
-
-THE COUPLING IS PER ROUND, AND THAT IS A DELIBERATE COMPROMISE
---------------------------------------------------------------
-Perfect coupling is not available through this simulator's interface.
-`apply_party_round` draws accuracy per attack AS IT RESOLVES, because the
-stun bonus depends on what has already landed, so the number of draws a
-round makes depends on what was thrown. The moment branch A throws where
-branch B holds, a single shared stream DESYNCHRONISES and every later
-round is comparing strangers again.
-
-Re-seeding both branches identically at the START OF EACH ROUND bounds
-that: within a round the two may diverge, but they resynchronise at the
-next boundary rather than drifting apart for twelve rounds. The residual
-is real and is the reason `--repeats` exists -- averaging a few streams
-removes what the coupling could not.
+Perfect coupling isn't available through this simulator: accuracy is
+rolled per attack AS IT RESOLVES (`apply_party_round`), so the moment one
+branch throws where the other holds, a shared stream desyncs and later
+rounds compare strangers again. Re-seeding both branches at the START of
+each round bounds the drift to within a round; `--repeats` averages out
+the residual.
 
 WHAT IT FOUND
--------------
+---------------
 500 forks over 47 held-out buildings, paired, cluster-bootstrapped by
-BUILDING because ten forks from one building are not ten independent
-observations.
+building (ten forks from one building are not ten independent samples):
 
     bucket    greedy continuation          policy continuation
     overall   +2.29 [+0.32, +4.30] *       +0.75 [-0.80, +2.43]
@@ -58,37 +41,26 @@ observations.
     hold      -0.18 [-2.52, +2.39]         -0.01 [-1.36, +1.37]
     sign test 78-47 to search, p=0.007     59-51, p=0.50
 
-Three results, in descending order of how much they should change what
-anyone does next.
+Three findings, most to least actionable:
 
-**THE AGENTS DISAGREE ALMOST ALWAYS AND IT ALMOST NEVER MATTERS.** They
-pick the same joint plan on 5.3% of rounds and three quarters of their
-disagreements are worth under a point. Two agents playing what is very
-nearly a different game, finishing the same fraction of buildings.
-
-**HOLDING IS WORTH NOTHING**, on 233 samples with a tight interval around
-zero under both continuations. Reward shaping, hold-variants, the wider
-observation and four attempts to teach `_quick_score` patience were all
-aimed at reproducing the search's 11% hold rate. It does not pay.
-
-**AND THE SEARCH'S APPARENT EDGE IS AN ARTIFACT OF WHO PLAYS ON.** Under
-`greedy_plan` the search leads by +2.29 and target selection by +5.94,
-both surviving a sign test and a cluster bootstrap. Swap the continuation
-for the climb and every one of those intervals covers zero. The reason is
-that `greedy_plan` IS THE SEARCH'S OWN ROLLOUT POLICY: its moves were
-chosen assuming that follow-up and were then scored under it, while the
-policy's moves were chosen assuming the policy continues. A fourth
-instance of the judge sharing the proposer's assumptions, and the most
-expensive to have nearly missed.
-
-Neither continuation is neutral -- greedy flatters the search, the climb
-flatters the policy -- so the honest reading is not "no difference" but
-something sharper: **the better move depends on who is playing after it.**
-That is why every attempt to move the policy's behaviour toward the
-search moved the behaviour and not the result. The search's moves are
-good *for the search's continuation*, not good in themselves, and
-transplanting them into a different player transplants nothing.
-
+1. **The agents disagree almost always and it almost never matters.**
+   They pick the same joint plan on 5.3% of rounds, yet three quarters of
+   their disagreements are worth under a point.
+2. **Holding is worth nothing** (233 samples, interval tight around zero
+   under both continuations) -- despite reward shaping, hold-variants,
+   wider observations and four attempts to teach `_quick_score` patience,
+   all aimed at reproducing the search's 11% hold rate.
+3. **The search's apparent edge is an artifact of who plays on.** Under
+   `greedy_plan` the search leads (+2.29 overall, +5.94 on target
+   selection); swap the continuation to climb and every interval covers
+   zero. `greedy_plan` IS the search's own rollout policy, so the search's
+   moves were chosen assuming that follow-up while the policy's assumed
+   itself continuing -- the judge sharing the proposer's assumptions,
+   again. Neither continuation is neutral (greedy flatters the search,
+   climb flatters the policy), so the honest reading is sharper than "no
+   difference": **the better move depends on who plays after it.** That's
+   why nudging the policy toward the search's behaviour moved the
+   behaviour and not the result.
 """
 from __future__ import annotations
 
@@ -136,32 +108,22 @@ def branch_outcome(env, plan, dice, objective, continuation="greedy",
                    budget=8, max_steps=250):
     """Fork the ENV, force `plan` this round, then play the rest out.
 
-    The first version of this forked the STATE and scored one battle with
-    `apply_party_round`. Every fork came back at exactly +0.00, and the
-    reason is worth keeping: a battle is not the task. `apply_party_round`
-    does not advance floors -- that is the env's job -- so the building
-    collapsed to its first fight, both agents won it, and the score
-    saturated at "all cogs dead plus the win bonus" no matter what was
-    thrown. The whole point of a building is that the pouch and the laff
-    carry to the next floor, and that was exactly what got discarded.
+    Forks the ENV rather than scoring one battle with `apply_party_round`
+    directly -- that call doesn't advance floors (the env's job), so an
+    earlier version collapsed every building to its first fight and both
+    agents saturated the score at "all cogs dead". The value here is the
+    thing actually wanted: did the building clear, and how far.
 
-    So the fork is a deepcopy of the env, the continuation plays every
-    remaining floor, and the value is the thing actually wanted: did the
-    building get cleared, and how far did it get.
-
-    WHICH POLICY CONTINUES IS NOT A DETAIL.
-    `greedy_plan` is THE SEARCH'S OWN ROLLOUT POLICY. Scoring both
-    branches under it asks "whose action is better for a greedy
-    follow-up", and the search picked its action assuming exactly that
-    follow-up while the policy picked its own assuming it would keep
-    playing. That is the judge sharing the proposer's assumptions, which
-    this project has now been bitten by three times, so the continuation
-    is a flag and the comparison is only worth believing if it survives
-    both settings.
+    `continuation` is not a detail: `greedy_plan` is the search's OWN
+    rollout policy, so scoring both branches under it asks "whose action
+    suits a greedy follow-up" -- which flatters whichever branch assumed
+    that follow-up when it chose. The judge sharing the proposer's
+    assumptions has bitten this project three times, so the continuation
+    is a flag and a result is only trusted if it survives both settings.
     """
     e = copy.deepcopy(env)
-    # Both branches get the same dice from the fork onward. This is the
-    # coupling; without it the comparison is two strangers again.
+    # Same dice for both branches from the fork onward -- the coupling;
+    # without it the comparison is two strangers again.
     e.rng = random.Random(dice)
     forced, steps = list(plan), 0
     while steps < max_steps:
@@ -187,12 +149,10 @@ def branch_outcome(env, plan, dice, objective, continuation="greedy",
             index = env_mod.PASS_INDEX
         _obs, _mask, _r, done, info = e.step(index)
         # The round has resolved exactly when `pending` is empty again.
-        # Detecting it on `actor == 0` instead was wrong for any party of
-        # more than one: the flag was only ever set on the FIRST seat, so
-        # `forced` never cleared, both branches replayed the fork plan
-        # every round, the mask rejected the spent gags, and the two
-        # degenerated into passing -- which is why the deltas came back
-        # at zero a second time.
+        # Checking `actor == 0` instead was wrong for any party bigger
+        # than one (true only on the first seat), which left `forced`
+        # never clearing and both branches replaying the fork plan
+        # forever -- the second way the deltas came back at zero.
         if all(a is None for a in e.pending):
             forced = None            # back to the rollout policy
         if done:
