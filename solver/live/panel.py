@@ -11,24 +11,21 @@ someone drew.
 
 WHY THE LOGIC DID NOT MOVE
 --------------------------
-`overlay.Model` stays where it is and stays Tk-free, and `overlay.Worker`
-is reused verbatim. This module is a second VIEW over them. Every
-decision the panel makes -- whether a fight can be confirmed, what the
-evidence line says, when advice goes stale -- is still in `Model` and
-still tested without a display.
-
-So `Model.to_json` is the whole interface. If the JS needs something the
-model does not expose, the fix is a property on `Model`, not a
-calculation in JavaScript. Two implementations of "may the player
-confirm a battle" would drift, and the one in the UI would be the one
-nobody tests.
+`overlay.Model` stays where it is, Tk-free, and `overlay.Worker` is
+reused verbatim; this module is a second VIEW over them. Every decision
+the panel makes -- whether a fight can be confirmed, what the evidence
+line says, when advice goes stale -- is still in `Model` and still
+tested without a display. If the JS needs something `Model` doesn't
+expose, the fix is a property there, not a calculation in JavaScript:
+two implementations of "may the player confirm a battle" would drift,
+and the UI's copy is the one nobody tests.
 
 BUILT ASSETS ARE COMMITTED
 --------------------------
 `overlay_ui/dist` is in the repo, so running this needs Node no more
-than running the solver needs a compiler. `npm run build` in
-`overlay_ui/` is only for changing the UI. If `dist` is missing, this
-says so and points at that command rather than opening a blank window.
+than the solver needs a compiler. `npm run build` in `overlay_ui/` is
+only for changing the UI; if `dist` is missing, this says so and points
+at that command rather than opening a blank window.
 """
 from __future__ import annotations
 
@@ -59,14 +56,11 @@ def _icon_uri(getter) -> str:
 def _lure_icon_uri() -> str:
     """The game's own lure magnet, as a data URI for the page.
 
-    Read from the player's installation at runtime and handed over
-    inline. It is deliberately NOT bundled into `overlay_ui`: that would
-    put TTR's artwork in this repository, which `ttr_assets` exists to
-    avoid, and would go stale the next time the game is patched.
-
-    Returns "" when the game is not installed or PIL is missing, and the
-    panel falls back to a text badge. A missing decoration must never
-    stop the panel starting.
+    Read from the player's installation at runtime rather than bundled
+    into `overlay_ui`, which would put TTR's artwork in this repository
+    and go stale at the next patch. Returns "" when the game isn't
+    installed or PIL is missing; a missing decoration must never stop
+    the panel starting.
     """
     import base64
 
@@ -215,41 +209,17 @@ class Api:
     def correct_feedback(self, target_index=None, discard=False) -> None:
         """Present because the PAGE IS SHARED, and does nothing here.
 
-        This front end records no feedback, so there is no row to amend.
-        The control it belongs to is never reachable either: the strip
-        renders on `feedback_showing`, which needs a move this panel
-        never writes -- so this is the arity contract being honoured,
-        not a feature quietly switched off.
-
-        Recording here is a decision that has not been taken. This panel
-        reads the board off the screen, so a row would carry a read that
-        can be wrong in ways the other front end's cannot, and the
-        labels would not be comparable.
+        This front end records no feedback, so there's no row to amend,
+        and its control is unreachable anyway: the strip renders on
+        `feedback_showing`, which needs a move this panel never writes.
+        Deliberately not recording -- a screen-read board can be wrong in
+        ways the other front end's can't, so the labels wouldn't compare.
         """
 
     def prefer_engine(self, name) -> None:
         """Swap which engine's answer is on screen."""
         # Delegate to the worker handling engine preference.
         self._worker.prefer_engine(name)
-
-    def _set_cap(self, name, count) -> None:
-        """A player-supplied holding. See `session.build_state`.
-
-        On TTR these boxes are the COUNT, not a cap on a count: nothing
-        the client exposes can say how many slips or unites a toon
-        holds, so the number typed here is the whole story. That is the
-        same footing `allies` has always been on, and it is an assertion
-        rather than a guess.
-
-        A client that CAN report the holding treats the box as a cap on
-        it instead. This panel is not that client, and does not name it.
-        """
-        try:
-            value = max(0, min(99, int(count)))
-        except (TypeError, ValueError):
-            return
-        setattr(self._worker.model, name, value)
-        self._worker.ask_now()
 
     def set_max_fires(self, count) -> None:
         self._worker.set_max_fires(count)
