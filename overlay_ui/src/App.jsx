@@ -953,7 +953,10 @@ export default function App() {
         <div className="toontown-card-panel p-2 space-y-2 rounded-xl">
           {/* Row 1: Objective Preset (Left) + Toon Party (Right) */}
           <div className="flex items-center justify-between gap-2.5">
-            <div className="flex-1 min-w-0 space-y-0.5">
+            <div
+              className="flex-1 min-w-0 space-y-0.5"
+              title="How to play: Survive guards laff, Conserve saves gags, Speedrun ends fights fast, Glass Cannon spends freely. Shapes the Search and Playout rows; PPO always plays the same way."
+            >
               <label className="block text-[8.5px] font-black uppercase tracking-wide text-amber-900/60">Preset</label>
               <select
                 className="select select-xs h-[26px] min-h-0 w-full bg-amber-50 font-extrabold text-[10.5px] text-amber-950 border-2 border-amber-900/15 rounded-lg cursor-pointer focus:outline-none focus:border-sky-500 px-1.5"

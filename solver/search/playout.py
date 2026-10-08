@@ -293,20 +293,79 @@ def pouch_value(state: BattleState) -> float:
     return total
 
 
+# THE PANEL'S PRESET (an `Objective`; None is Balanced). It reaches the
+# playouts as three changes to `value`, each RELATIVE TO BALANCED, so
+# Balanced is exactly the measured engine and every other preset moves by
+# its own numbers rather than new ones:
+#   caution  LAFF_WEIGHT x laff_weight / Balanced's (glass x0.25, survive x3)
+#   thrift   the pouch weight x what the preset charges for this pouch over
+#            what Balanced does (glass 0: spend freely; conserve > 1)
+#   speed    (turn_cost - Balanced's) / win_bonus of a whole fight per round
+#            (speedrun only)
+# A setting of the process: `chunk_in_child` sets it every call, because
+# pool workers are reused.
+STYLE = None
+
+
+def set_style(objective) -> None:
+    global STYLE
+    STYLE = objective
+
+
+def _style():
+    from .objective import BALANCED
+    return STYLE or BALANCED
+
+
+def _laff_weight() -> float:
+    from .objective import BALANCED
+    return LAFF_WEIGHT * _style().laff_weight / BALANCED.laff_weight
+
+
+def _thrift(state: BattleState) -> float:
+    """What the preset charges for this pouch, over what Balanced does."""
+    from .objective import BALANCED
+
+    style = _style()
+    if style is BALANCED:
+        return 1.0
+    mine = base = 0.0
+    for toon in state.toons:
+        for (track, level), count in toon.gag_counts.items():
+            if count:
+                unlocked = toon.track_exp.get(track, 6) or 6
+                mine += count * style.gag_price(track, level, unlocked=unlocked)
+                base += count * BALANCED.gag_price(track, level, unlocked=unlocked)
+    return mine / base if base > 0 else 1.0
+
+
+def _turn_charge(total: int) -> float:
+    """Cogs a round costs under the preset, beyond what Balanced charges."""
+    from .objective import BALANCED
+
+    style = _style()
+    extra = style.turn_cost - BALANCED.turn_cost
+    return max(0.0, extra) / style.win_bonus * total if style.win_bonus else 0.0
+
+
 def value(state: BattleState, total: int, pouch_start: float = 0.0,
-          pouch_weight: float = 0.0) -> float:
+          pouch_weight: float = 0.0, rounds: int = 0) -> float:
     toons = [t for t in state.toons if getattr(t, "max_laff", 0)]
     laff = (sum(max(0, t.laff) for t in toons)
             / float(sum(t.max_laff for t in toons))) if toons else 0.0
-    score = total - _left(state) + LAFF_WEIGHT * laff
+    score = total - _left(state) + _laff_weight() * laff
     if pouch_weight and pouch_start > 0:
         score += pouch_weight * pouch_value(state) / pouch_start
+    if rounds:
+        score -= _turn_charge(total) * rounds
     return score
 
 
 def _carry(state: BattleState, horizon) -> Tuple[float, float]:
     """(pouch value now, its weight) for a playout of `state`."""
     weight = 0.0 if horizon is not None else POUCH_WEIGHT.get(state.kind, 0.0)
+    if weight:
+        weight *= _thrift(state)
     return (pouch_value(state) if weight else 0.0), weight
 
 
@@ -389,7 +448,7 @@ def rollout(state, plan, horizon, seed: int) -> float:
         if nxt is None:
             break
         done, _info = step_round(env, nxt)
-    return value(env.state, total, pouch_start, pouch_weight)
+    return value(env.state, total, pouch_start, pouch_weight, rounds=guard + 1)
 
 
 def candidates(state: BattleState, top_k: int = TOP_K, reject=None):
@@ -500,7 +559,8 @@ def _seed(k: int) -> int:
 
 
 def chunk_in_child(state: BattleState, horizon, reject, allow_level_7: bool,
-                   k_from: int, k_to: int, only=None, wide: bool = True):
+                   k_from: int, k_to: int, only=None, wide: bool = True,
+                   style: Optional[str] = None):
     """Rollouts k_from..k_to-1 for each candidate: (pairs, note).
 
     `pairs` is [(plan, [cogs defeated, one per rollout])], the scorer's
@@ -520,6 +580,8 @@ def chunk_in_child(state: BattleState, horizon, reject, allow_level_7: bool,
     from . import hybrid
 
     state_mod.ALLOW_LEVEL_7 = bool(allow_level_7)
+    from .objective import PRESETS
+    set_style(PRESETS.get(style or "balanced"))
     if not hybrid.available() or state.is_terminal():
         return None, "unavailable"
     # A board with teammates on it is PICKUP: your move from the menu,
@@ -873,7 +935,7 @@ def rollout_pickup(state: BattleState, plan, horizon, seed: int) -> float:
             nxt = (fastplayer.act(mine) if use_net
                    else climb_with_unite(mine, policy_rng, budget=ROLLOUT_BUDGET))
         done, _info = step_round(env, nxt)
-    return value(env.state, total, pouch_start, pouch_weight)
+    return value(env.state, total, pouch_start, pouch_weight, rounds=guard + 1)
 
 
 def pick_pickup(state: BattleState, horizon=None, seed: int = 0,

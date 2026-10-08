@@ -702,3 +702,55 @@ class TeammateUniteTest(unittest.TestCase):
         self.assertEqual(1, len(view.toons))
         self.assertEqual(20, view.toons[0].laff)
         self.assertEqual(1, view.allies_standing)
+
+
+class StyleTest(unittest.TestCase):
+    """The panel's preset reaches the playouts, relative to Balanced."""
+
+    def tearDown(self):
+        playout.set_style(None)
+
+    def _scored(self, preset, rounds=0):
+        from solver.search import objective
+
+        board = _board(cogs=2, laff=137, seed=7)
+        board.toons[0].laff = 68
+        playout.set_style(objective.PRESETS[preset])
+        return playout.value(board, total=4, rounds=rounds)
+
+    def test_balanced_is_the_measured_engine(self):
+        board = _board(cogs=2, laff=137, seed=7)
+        board.toons[0].laff = 68
+        playout.set_style(None)
+        unset = playout.value(board, total=4, rounds=30)
+        self.assertEqual(unset, self._scored("balanced", rounds=30))
+        self.assertAlmostEqual(4 - 2 + playout.LAFF_WEIGHT * 68 / 137, unset)
+
+    def test_survive_values_laff_three_times_as_much(self):
+        base = self._scored("balanced") - 2
+        self.assertAlmostEqual(3 * base, self._scored("survive") - 2)
+
+    def test_glass_cannon_puts_no_value_on_gags_left(self):
+        from solver.search import objective
+
+        board = _board(cogs=2, seed=7)
+        board.kind = "facility"
+        playout.set_style(objective.PRESETS["glass cannon"])
+        self.assertEqual((0.0, 0.0), playout._carry(board, None))
+        playout.set_style(objective.PRESETS["conserve"])
+        self.assertGreater(playout._carry(board, None)[1],
+                           playout.POUCH_WEIGHT["facility"])
+
+    def test_only_speedrun_charges_for_rounds(self):
+        for preset in ("balanced", "survive", "conserve", "glass cannon"):
+            self.assertEqual(self._scored(preset), self._scored(preset, rounds=20), preset)
+        self.assertLess(self._scored("speedrun", rounds=20), self._scored("speedrun"))
+
+    def test_a_child_process_takes_the_panels_preset(self):
+        from solver.search import objective
+
+        playout.chunk_in_child(_board(cogs=1), None, None, True, 0, 0,
+                               only=[], style="survive")
+        self.assertIs(objective.PRESETS["survive"], playout.STYLE)
+        playout.chunk_in_child(_board(cogs=1), None, None, True, 0, 0, only=[])
+        self.assertIs(objective.PRESETS["balanced"], playout.STYLE)

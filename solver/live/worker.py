@@ -603,8 +603,9 @@ class AdviceWorker(threading.Thread):
                 return None, note
         workers = max(1, min(PLAYOUT_WORKERS, len(keys)))
         parts = [keys[i::workers] for i in range(workers)]
+        style = getattr(self, "objective_name", "balanced")
         futures = [pool.submit(playout_mod.chunk_in_child, state, horizon,
-                               reject, allow7, k_from, k_to, part)
+                               reject, allow7, k_from, k_to, part, True, style)
                    for part in parts]
         merged, order = None, None
         for future in futures:

@@ -34,6 +34,7 @@ ARMS  (`name` or `name:key=value,key=value`)
             mates=off  (the ENGINE assumes teammates never use their unites;
                         in the fight itself they always do)
             mode=coordinated|pickup  (`playout.GROUP_MODE`)
+            style=<preset>  (the panel's preset, e.g. survive, "glass cannon")
 
 Each board is shown to the engine as the live panel would see it: no
 holdout, and in a boss fight the horizon the boss tracker would give.
@@ -160,6 +161,8 @@ def play(job):
     # only the engine's own rollouts drop them.
     model_mates = opts.get("mates", "on") != "off"
     playout.GROUP_MODE = opts.get("mode", "coordinated")
+    from solver.search import objective as objective_mod
+    playout.set_style(objective_mod.PRESETS[opts.get("style", "balanced")])
     stages = tuple(int(x) for x in opts.get("stages", "8/16/32").split("/"))
 
     sample, coordinated, cap = _sampler(regime)
@@ -222,11 +225,13 @@ def main() -> int:
             for arm in args.arms for i in range(args.n)]
     wins = {arm: {} for arm in args.arms}
     cost = {arm: [] for arm in args.arms}
+    lengths = {arm: [] for arm in args.arms}
     t0 = time.time()
     with ProcessPoolExecutor(max_workers=args.workers) as pool:
-        for seed, arm, won, _rounds, per in pool.map(play, jobs, chunksize=2):
+        for seed, arm, won, rounds, per in pool.map(play, jobs, chunksize=2):
             wins[arm][seed] = won
             cost[arm].append(per)
+            lengths[arm].append(rounds)
     seeds = sorted(set.intersection(*(set(v) for v in wins.values())))
     print(f"{args.regime}: {len(seeds)} paired seeds from {args.base}, "
           f"{time.time() - t0:.0f}s")
@@ -234,7 +239,8 @@ def main() -> int:
     for arm in args.arms:
         w = sum(wins[arm][s] for s in seeds)
         line = (f"  {arm:28s} {w:4d}/{len(seeds)}  {100.0 * w / len(seeds):5.1f}%"
-                f"   {statistics.mean(cost[arm]):.2f}s a decision")
+                f"   {statistics.mean(cost[arm]):.2f}s a decision"
+                f"   {statistics.mean(lengths[arm]):.1f} rounds")
         if arm != first:
             up = sum(1 for s in seeds if wins[arm][s] and not wins[first][s])
             dn = sum(1 for s in seeds if wins[first][s] and not wins[arm][s])

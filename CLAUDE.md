@@ -407,6 +407,10 @@ Things that hold it together, each measured:
   Playout row could not advise one. `step_round` now applies it, and
   the menu offers climb's move both with and without it. The fast
   network still never uses one inside a rollout.
+- **The panel's preset reaches it** (`playout.STYLE`, set per chunk):
+  laff weight, pouch weight and a per-round charge, each scaled by the
+  preset's own numbers RELATIVE TO BALANCED, so Balanced is exactly the
+  measured engine. The PPO row still ignores the preset.
 - **More than 32 rollouts per move did not pay** (146 vs 139/200, p 0.46).
 - **No peeking.** Unseen cogs are redrawn from the level band in each
   rollout, in the numbers `boss.Horizon` gives. Without a horizon the
