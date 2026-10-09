@@ -3,6 +3,7 @@
     python tools/search_bench.py depth --limit 60          # time per depth by cog count
     python tools/search_bench.py agree --depth 3 --beam 6 --cogs 1 2  # a shortcut vs exact
     python tools/search_bench.py fight --depth 3           # per-decision time over fights
+    python tools/search_bench.py stable --max-depth 6      # does the move change with depth?
 
 POSITIONS are fixed by seed: a maxed toon (every track but Toon-Up) with the
 owner's VP pouch partly spent, 30-137 laff, and 1-4 cogs of level 6-12 at
@@ -136,6 +137,32 @@ def cmd_fight(args):
               f"mean {statistics.mean(times):.2f}s, median {statistics.median(times):.2f}s")
 
 
+def cmd_stable(args):
+    """How often the chosen move changes from one depth to the next."""
+    opts = _shortcuts(args)
+    changes = {d: 0 for d in range(2, args.max_depth + 1)}
+    final = {d: 0 for d in range(1, args.max_depth + 1)}
+    n = 0
+    for cogs in args.cogs:
+        for seed in range(args.n):
+            st, memo, moves = position(seed, cogs), {}, []
+            for depth in range(1, args.max_depth + 1):
+                _v, a = search(st.clone(), depth, 1e9, memo=memo, **dict(opts))
+                moves.append(repr(a))
+            for d in range(2, args.max_depth + 1):
+                changes[d] += moves[d - 1] != moves[d - 2]
+            for d in range(1, args.max_depth + 1):
+                final[d] += moves[d - 1] == moves[-1]
+            n += 1
+            print(f"    {cogs} cogs seed {seed}: " + " ".join(
+                str(1 + sorted(set(moves), key=moves.index).index(m)) for m in moves),
+                flush=True)
+    print(f"  {n} positions; move changed going to depth d:")
+    print("    " + "  ".join(f"d{d}: {100 * changes[d] / n:4.0f}%" for d in changes))
+    print(f"  same move as depth {args.max_depth}:")
+    print("    " + "  ".join(f"d{d}: {100 * final[d] / n:4.0f}%" for d in final))
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -157,8 +184,15 @@ def main() -> int:
     f.add_argument("--cogs", type=int, default=2)
     f.add_argument("--depth", type=int, default=3)
     f.add_argument("--limit", type=float, default=120.0)
+    st = sub.add_parser("stable")
+    st.add_argument("--n", type=int, default=20)
+    st.add_argument("--cogs", type=int, nargs="+", default=[1, 2])
+    st.add_argument("--max-depth", type=int, default=6)
+    st.add_argument("--beam", type=int, default=6)
+    st.add_argument("--exact-plies", type=int, default=0)
     args = ap.parse_args()
-    {"depth": cmd_depth, "agree": cmd_agree, "fight": cmd_fight}[args.cmd](args)
+    {"depth": cmd_depth, "agree": cmd_agree, "fight": cmd_fight,
+     "stable": cmd_stable}[args.cmd](args)
     return 0
 
 

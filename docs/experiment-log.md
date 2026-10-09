@@ -1455,3 +1455,23 @@ depth 4 and two at depth 5 inside the same budget. Not switched on yet:
 agreement is measured, play is not, and the older note in advise.py
 (extra depth changed nothing over 42 three-cog battles) says depth alone
 may not show up as wins -- which is what the value network is for.
+
+### Is depth 5 enough? The move stops changing at depth 4
+
+`search_bench.py stable`: the move chosen at each depth (collapse + k=6),
+same street positions:
+
+    cogs  n    move changed going to depth d          depth 4 = deepest
+    1     20   d2 50%  d3 15%  d4 5%  d5-d7 0%          100% (deepest 7)
+    2     10   d2 10%  d3 0%   d4 40% d5-d6 0%          100% (deepest 6)
+    3      6   d2 33%  d3 17%  d4-d5 0%                 100% (deepest 5)
+
+In a single battle with nothing arriving, depth 4 already gives the
+deepest search's move on every position; 5-7 never changed it. The panel
+reaches 4 at two cogs and 3 at three or four (where 3 matched 5 on 6/6),
+so it is already at the tactical plateau -- consistent with the older
+finding that extra depth changed nothing over 42 three-cog battles.
+Stability is not correctness (a biased leaf can be shared by every
+depth), and nothing here covers the horizon past the battle -- a VP's
+waves, a building's floors -- which no depth reaches. The gain left is
+in the leaf: the value network.
