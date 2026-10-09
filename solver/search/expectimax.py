@@ -232,6 +232,13 @@ def distinct_actions(state: BattleState) -> List[Action]:
 BEAM: Optional[int] = None
 _TOP: List = [None]
 
+# ORDER: try moves best-first by the same one-round look-ahead, keeping
+# every one. Exact -- *-minimax cuts most when the best move comes first,
+# and order changes only how much it cuts, never the value. Measured:
+# 1.24x on fully exact depth 3 (16/16 identical), 1.06x with collapse and
+# BEAM=6 at depth 4 (12/12 identical). *-minimax itself is worth 9x there.
+ORDER = True
+
 
 def _beam(state, actions, objective, width, keep):
     """The `width` best actions by one-round look-ahead, plus `keep`, with
@@ -325,6 +332,9 @@ def evaluate(state: BattleState, depth: int, objective=None,
     if (BEAM and not probe_only and depth >= 2 and _TOP[0] is not None
             and depth < _TOP[0] and len(actions) > BEAM):
         actions, pre = _beam(state, actions, objective, BEAM,
+                             hit[1] if hit is not None else None)
+    elif ORDER and not probe_only and depth >= 2 and len(actions) > 1:
+        actions, pre = _beam(state, actions, objective, len(actions),
                              hit[1] if hit is not None else None)
 
     unevaluable = []
@@ -657,6 +667,7 @@ def best_action_iterative(state: BattleState, depth: int = 4,
                            time_budget: Optional[float] = None,
                            exact_plies: Optional[int] = None,
                            memo: Optional[Dict] = None,
+                           prune: bool = True,
                            ) -> Tuple[float, Optional[Action]]:
     """Search 1..depth, reusing the table between passes.
 
@@ -697,8 +708,8 @@ def best_action_iterative(state: BattleState, depth: int = 4,
         _TOP[0] = d
         try:
             value, action = evaluate(state, d, objective, memo=memo,
-                                     epsilon=epsilon, deadline=deadline,
-                                     exact_plies=exact_plies)
+                                     prune=prune, epsilon=epsilon,
+                                     deadline=deadline, exact_plies=exact_plies)
         except SearchTimeout:
             # Keep the last completed pass. Predicting the next ply's cost
             # from the previous one does not work here -- depth 1 to 2 on

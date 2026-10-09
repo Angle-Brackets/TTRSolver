@@ -54,12 +54,17 @@ def search(state, depth, budget, **opts):
     from solver.search import expectimax, objective
 
     expectimax.BEAM = opts.pop("beam", None) or None
+    expectimax.ORDER = bool(opts.pop("order", True))
+    prune = opts.pop("prune", True)
+    if not prune:
+        opts["prune"] = False
     try:
         return expectimax.best_action_iterative(
             state, depth=depth, objective=objective.BALANCED, time_budget=budget,
             epsilon=opts.pop("epsilon", 0.0), **opts)
     finally:
         expectimax.BEAM = None
+        expectimax.ORDER = True
 
 
 def _shortcuts(args) -> dict:
@@ -69,6 +74,10 @@ def _shortcuts(args) -> dict:
         opts["beam"] = args.beam
     if getattr(args, "exact_plies", None) is not None:
         opts["exact_plies"] = args.exact_plies
+    if getattr(args, "no_order", False):
+        opts["order"] = False
+    if getattr(args, "no_prune", False):
+        opts["prune"] = False
     return opts
 
 
@@ -99,9 +108,14 @@ def cmd_agree(args):
         for seed in range(args.n):
             st = position(seed, cogs)
             t0 = time.perf_counter()
-            v0, a0 = search(st.clone(), args.depth, 1e9)
+            base = {}
+            if args.base_exact_plies is not None:
+                base["exact_plies"] = args.base_exact_plies
+            if args.base_beam:
+                base["beam"] = args.base_beam
+            v0, a0 = search(st.clone(), args.depth, 1e9, **base)
             t1 = time.perf_counter()
-            v1, a1 = search(st.clone(), args.depth, 1e9, **opts)
+            v1, a1 = search(st.clone(), args.depth, 1e9, **dict(opts))
             t2 = time.perf_counter()
             slow += t1 - t0
             fast += t2 - t1
@@ -179,6 +193,11 @@ def main() -> int:
     a.add_argument("--beam", type=int, default=0)
     a.add_argument("--cogs", type=int, nargs="+", default=[1, 2, 3, 4])
     a.add_argument("--exact-plies", type=int, default=None)
+    a.add_argument("--no-order", action="store_true", help="generation-order moves (ORDER off)")
+    a.add_argument("--no-prune", action="store_true", help="turn *-minimax off")
+    a.add_argument("--base-beam", type=int, default=0)
+    a.add_argument("--base-exact-plies", type=int, default=None,
+                   help="the reference search's collapse setting (default fully exact)")
     f = sub.add_parser("fight")
     f.add_argument("--n", type=int, default=5)
     f.add_argument("--cogs", type=int, default=2)

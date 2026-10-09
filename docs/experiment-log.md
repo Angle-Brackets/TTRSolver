@@ -1475,3 +1475,18 @@ Stability is not correctness (a biased leaf can be shared by every
 depth), and nothing here covers the horizon past the battle -- a VP's
 waves, a building's floors -- which no depth reaches. The gain left is
 in the leaf: the value network.
+
+### *-minimax and move order
+
+Star1/star2 were already on. What they are worth, and whether ordering
+adds to them (agree mode; every row 100% same move, |dv| 0.000):
+
+    depth 4, collapse + BEAM 6, 2-3 cogs   pruning off      89s -> 823s  (9.2x)
+    depth 3, fully exact, 1-2 cogs         ORDER on         641s -> 518s (1.24x)
+    depth 4, collapse + BEAM 6, 2-3 cogs   ORDER on         85s -> 80s   (1.06x)
+
+`expectimax.ORDER` (best-first by the one-round look-ahead, every move
+kept) is exact and never slower, so it is on by default. The other half
+of star1 is the bounds: the floor is depth-aware, the ceiling is always a
+win (+100). A tighter ceiling ("cannot win inside the horizon") would help
+mostly in losing positions, where the leaf is already low -- not tried.
