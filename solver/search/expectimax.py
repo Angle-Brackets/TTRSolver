@@ -239,6 +239,10 @@ _TOP: List = [None]
 # BEAM=6 at depth 4 (12/12 identical). *-minimax itself is worth 9x there.
 ORDER = True
 
+# Fall back to the previous, shallower pass's best move for ordering and
+# for star2's probe. Exact; measured in docs/experiment-log.md.
+HINT_FROM_SHALLOWER = True
+
 
 def _beam(state, actions, objective, width, keep):
     """The `width` best actions by one-round look-ahead, plus `keep`, with
@@ -254,8 +258,10 @@ def _beam(state, actions, objective, width, keep):
                        action))
     scored.sort(key=lambda va: -va[0])
     chosen = [a for _v, a in scored[:width]]
-    if keep is not None and keep in actions and keep not in chosen:
-        chosen.insert(0, keep)
+    if keep is not None and keep in actions:
+        # A move a search has already found best goes first, ahead of
+        # any one-round guess.
+        chosen = [keep] + [a for a in chosen if a != keep]
     return chosen, pre
 
 
@@ -319,23 +325,28 @@ def evaluate(state: BattleState, depth: int, objective=None,
 
     # Try the transposition table's move first: a good first move makes the
     # window tight immediately, and every later cutoff depends on that.
+    # Entries are keyed by depth, so without a hint at THIS depth the move
+    # the previous, shallower pass found here is the next best guess --
+    # the whole point of iterative deepening, and one that only the root
+    # used to get. Order only, so exact; it also picks star2's probe move.
+    hint = hit[1] if hit is not None else None
+    if hint is None:
+        cached = memo.get(key) if probe_only else None
+        hint = cached[1] if cached is not None else None
+    if hint is None and HINT_FROM_SHALLOWER and depth > 1:
+        shallower = memo.get((key[0], depth - 1) + key[2:])
+        hint = shallower[1] if shallower is not None else None
     actions = distinct_actions(state)
-    if hit is not None and hit[1] is not None and hit[1] in actions:
-        actions = [hit[1]] + [a for a in actions if a != hit[1]]
-    elif probe_only:
-        cached = memo.get(key)
-        if cached is not None and cached[1] in actions:
-            actions = [cached[1]]       # probe the move we already like
+    if hint is not None and hint in actions:
+        actions = [hint] + [a for a in actions if a != hint]
     if probe_only:
         actions = actions[:1]
     pre = {}
     if (BEAM and not probe_only and depth >= 2 and _TOP[0] is not None
             and depth < _TOP[0] and len(actions) > BEAM):
-        actions, pre = _beam(state, actions, objective, BEAM,
-                             hit[1] if hit is not None else None)
+        actions, pre = _beam(state, actions, objective, BEAM, hint)
     elif ORDER and not probe_only and depth >= 2 and len(actions) > 1:
-        actions, pre = _beam(state, actions, objective, len(actions),
-                             hit[1] if hit is not None else None)
+        actions, pre = _beam(state, actions, objective, len(actions), hint)
 
     unevaluable = []
     for action in actions:

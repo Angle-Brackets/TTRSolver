@@ -55,6 +55,7 @@ def search(state, depth, budget, **opts):
 
     expectimax.BEAM = opts.pop("beam", None) or None
     expectimax.ORDER = bool(opts.pop("order", True))
+    expectimax.HINT_FROM_SHALLOWER = bool(opts.pop("hint", True))
     prune = opts.pop("prune", True)
     if not prune:
         opts["prune"] = False
@@ -65,6 +66,7 @@ def search(state, depth, budget, **opts):
     finally:
         expectimax.BEAM = None
         expectimax.ORDER = True
+        expectimax.HINT_FROM_SHALLOWER = True
 
 
 def _shortcuts(args) -> dict:
@@ -78,6 +80,8 @@ def _shortcuts(args) -> dict:
         opts["order"] = False
     if getattr(args, "no_prune", False):
         opts["prune"] = False
+    if getattr(args, "no_hint", False):
+        opts["hint"] = False
     return opts
 
 
@@ -113,6 +117,8 @@ def cmd_agree(args):
                 base["exact_plies"] = args.base_exact_plies
             if args.base_beam:
                 base["beam"] = args.base_beam
+            if args.base_no_hint:
+                base["hint"] = False
             v0, a0 = search(st.clone(), args.depth, 1e9, **base)
             t1 = time.perf_counter()
             v1, a1 = search(st.clone(), args.depth, 1e9, **dict(opts))
@@ -195,6 +201,8 @@ def main() -> int:
     a.add_argument("--exact-plies", type=int, default=None)
     a.add_argument("--no-order", action="store_true", help="generation-order moves (ORDER off)")
     a.add_argument("--no-prune", action="store_true", help="turn *-minimax off")
+    a.add_argument("--no-hint", action="store_true", help="no shallower-pass move hint")
+    a.add_argument("--base-no-hint", action="store_true", help="reference without the hint")
     a.add_argument("--base-beam", type=int, default=0)
     a.add_argument("--base-exact-plies", type=int, default=None,
                    help="the reference search's collapse setting (default fully exact)")

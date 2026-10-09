@@ -1490,3 +1490,40 @@ kept) is exact and never slower, so it is on by default. The other half
 of star1 is the bounds: the floor is depth-aware, the ceiling is always a
 win (+100). A tighter ceiling ("cannot win inside the horizon") would help
 mostly in losing positions, where the leaf is already low -- not tried.
+
+### Optimising *-minimax itself
+
+**Tighter star1 bounds: no extra pruning, removed.** The fitted leaf's
+floor was `LOSS_VALUE - max_laff` (-237) at every node, so star1 saw each
+unseen branch somewhere in roughly [-280, +100] while nodes really took
+values within ~25 points (depth 1: 75..98). A jointly-minimised,
+provably admissible horizon bound on the linear evaluator lifted the
+leaf floor to 17..85 and passed every admissibility check (exhaustive
+values inside the bounds; 200+ random-playout leaves inside the range;
+pruned == exhaustive). It searched EXACTLY the same 1,134,228 nodes on a
+two-cog depth-3 position and cost 186s in bound arithmetic against 7s
+(fully exact 447s -> 1784s; with collapse + BEAM 6, 76s -> 96s). Reason:
+star2 probes each child with a real search and raises the floor to the
+probed value, which is always at least as tight as any static floor;
+the static floor only matters where probes do not run (one ply above the
+leaves). The ceiling stayed at +100 because a win inside the horizon is
+almost always possible. Removed rather than left in, slower and unused.
+
+**The shallower pass's move as the hint: 1.4-1.85x, exact.** Memo
+entries are keyed by depth, so iterative deepening's main benefit --
+trying the previous pass's best move first -- reached only the root.
+`HINT_FROM_SHALLOWER` falls back to the depth-1 entry's move for move
+ordering and for star2's probe move, and ordering keeps a hinted move
+first ahead of the one-round look-ahead. On the two-cog position: nodes
+1,134,228 -> 509,131, 66s -> 36s, same value and move. Benchmarks (every
+row 100% same move, |dv| 0.000):
+
+    fully exact, depth 3, 16 positions       512s -> 361s   (1.42x)
+    collapse + BEAM 6, depth 4, 12 positions  83s ->  76s   (1.09x)
+
+    collapse + BEAM 6 + hint, mean of 3:
+    cogs   d4      d5      d6
+    1      0.5s    1.7s    4.5s     (d5 was 3.0s)
+    2      3.0s    9.5s    23.5s    (d5 was 12.9s)
+    3      8.1s    26s     ~56s     (d5 was 30.5s)
+    4      22s     ~53s
