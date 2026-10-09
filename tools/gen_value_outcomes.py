@@ -84,8 +84,24 @@ def _play_out(env, objective, rng_seed) -> float:
     return total
 
 
+def _play_out_playout_units(env, rng_seed) -> float:
+    """Cogs defeated from the board in `env` to the end, plus LAFF_WEIGHT x
+    the laff fraction left -- the playouts' own score, from here."""
+    from solver.search import fastplayer, playout
+
+    env.rng = random.Random(rng_seed)
+    left0 = playout._left(env.state)
+    guard, done = 0, False
+    while not done and guard < 400:
+        guard += 1
+        done, _info = playout.step_round(env, fastplayer.act(playout._view(env.state)))
+    toon = env.state.toons[0]
+    laff = max(0, toon.laff) / float(toon.max_laff or 1)
+    return (left0 - playout._left(env.state)) + playout.LAFF_WEIGHT * laff
+
+
 def episode(job):
-    seed, rollouts, loss_penalty = job
+    seed, rollouts, loss_penalty, units = job
     import dataclasses
     from solver.search import fastplayer, objective, playout
 
@@ -105,7 +121,9 @@ def episode(job):
         cogs = sum(1 for c in view.cogs if not c.status.is_dead)
         if cogs and not env.state.is_terminal() and rng.random() < TAKE:
             try:
-                ys = [_play_out(copy.deepcopy(env), obj, seed * 7919 + k)
+                ys = [(_play_out_playout_units(copy.deepcopy(env), seed * 7919 + k)
+                       if units == "playout" else
+                       _play_out(copy.deepcopy(env), obj, seed * 7919 + k))
                       for k in range(rollouts)]
             except Exception:               # noqa: BLE001
                 ys = []
@@ -127,12 +145,14 @@ def main() -> int:
     ap.add_argument("--out", required=True)
     ap.add_argument("--loss-penalty", type=float, default=None,
                     help="score a lost fight at -this (Balanced: 100)")
+    ap.add_argument("--units", choices=("search", "playout"), default="search",
+                    help="search: Objective rewards; playout: cogs defeated + laff")
     ap.add_argument("--workers", type=int, default=10)
     args = ap.parse_args()
 
     from concurrent.futures import ProcessPoolExecutor
 
-    jobs = [(args.base + i, args.rollouts, args.loss_penalty)
+    jobs = [(args.base + i, args.rollouts, args.loss_penalty, args.units)
             for i in range(args.episodes)]
     rows, t0 = [], time.time()
     with ProcessPoolExecutor(max_workers=args.workers) as pool:

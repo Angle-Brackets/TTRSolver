@@ -35,6 +35,8 @@ ARMS  (`name` or `name:key=value,key=value`)
       keys: stages=8/16/32  pouch=<weight>  player=net|climb  rollouts=<n>
             net=<weights.json>  (the fast network's weights, default shipped)
             kit=owner  (restock every toon with `vp.OWNER_VP_POUCH` first)
+            trunc=<rounds> vnet=<weights>  (shortened playouts: stop after
+                        <rounds> and ask a playout-units value net)
             unites=<n>  (every toon holds n unites, of any kind)
             mates=off  (the ENGINE assumes teammates never use their unites;
                         in the fight itself they always do)
@@ -163,6 +165,12 @@ def play(job):
     playout.ROLLOUT_PLAYER = opts.get("player", "net")
     playout.POUCH_WEIGHT["facility"] = float(opts.get("pouch", 2.0))
     fastplayer.use(opts.get("net") or fastplayer.DEFAULT_WEIGHTS)
+    playout.ROLLOUT_DEPTH = int(opts["trunc"]) if "trunc" in opts else None
+    if "vnet" in opts:
+        from solver.search import valuenet as _vn
+        playout.ROLLOUT_VALUE = _vn.load(opts["vnet"])
+    else:
+        playout.ROLLOUT_VALUE = None
     # `mates=off` changes what the ENGINE assumes, never the fight: the
     # real round always lets teammates use what they hold (the game), and
     # only the engine's own rollouts drop them.

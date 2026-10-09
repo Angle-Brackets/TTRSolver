@@ -410,6 +410,15 @@ def step_round(env, plan):
     return done, info
 
 
+# SHORTENED PLAYOUTS: after ROLLOUT_DEPTH rounds, stop and ask
+# ROLLOUT_VALUE (a `valuenet.load` model trained on the playouts' own units:
+# cogs defeated from a board to the end plus LAFF_WEIGHT x laff left, under
+# the fast network -- `tools/gen_value_outcomes.py --units playout`) for
+# the rest. Off (None) by default; solo playouts only.
+ROLLOUT_DEPTH: Optional[int] = None
+ROLLOUT_VALUE = None
+
+
 def rollout(state, plan, horizon, seed: int) -> float:
     """`value` at the end of one playout that opens with `plan`."""
     from . import hybrid
@@ -430,6 +439,11 @@ def rollout(state, plan, horizon, seed: int) -> float:
         use_net = fastplayer.available()
     while not done and guard < ROUND_CAP:
         guard += 1
+        if (use_net and ROLLOUT_DEPTH is not None and ROLLOUT_VALUE is not None
+                and guard > ROLLOUT_DEPTH):
+            from . import valuenet
+            return (total - _left(env.state)
+                    + valuenet.predict(ROLLOUT_VALUE, _view(env.state)))
         if use_net:
             nxt = fastplayer.act(_view(env.state))
         else:

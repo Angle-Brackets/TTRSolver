@@ -52,6 +52,30 @@ def use(path=None) -> bool:
     return True
 
 
+def load(path):
+    """A separate model, (layers, scale), for a caller other than the
+    search's leaf -- `playout.ROLLOUT_VALUE` uses one in its own units."""
+    import numpy as np
+
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    return ([(np.array(w, dtype=float), np.array(b, dtype=float))
+             for w, b in payload["layers"]], float(payload.get("scale", 100.0)))
+
+
+def predict(model, state: BattleState) -> float:
+    """`model`'s raw output for `state`, in its training units."""
+    import numpy as np
+    from . import fastplayer
+
+    layers, scale = model
+    h = np.array(fastplayer.features(state)[0], dtype=float)
+    for i, (w, b) in enumerate(layers):
+        h = h @ w + b
+        if i < len(layers) - 1:
+            h = np.tanh(h)
+    return float(h[0]) * scale
+
+
 def active() -> bool:
     return USE and (_MODEL is not None or use())
 
