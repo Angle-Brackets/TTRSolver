@@ -178,8 +178,10 @@ def heuristic_value(state: BattleState) -> float:
     `hand_written_value` otherwise, so the solver always has something to
     score with. Callers monkeypatch *this* name to benchmark a candidate.
     """
-    from . import fitted
+    from . import fitted, valuenet
 
+    if valuenet.USE and valuenet.active():
+        return valuenet.value(state)
     if fitted.is_fitted():
         return fitted.value(state)
     return hand_written_value(state)
@@ -465,8 +467,10 @@ def heuristic_floor(state: BattleState, at_risk: float = 0.0) -> float:
     evidence that has nothing to do with laff, which is the whole reason
     it is better, and the price is a looser bound.
     """
-    from . import fitted
+    from . import fitted, valuenet
 
+    if valuenet.USE and valuenet.active():
+        return valuenet.value_floor(state)
     if fitted.is_fitted():
         return fitted.value_floor(state)
     max_laff = float(state.toon.max_laff) or 1.0

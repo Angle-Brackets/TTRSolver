@@ -27,6 +27,9 @@ ARMS  (`name` or `name:key=value,key=value`)
   playout       the Playout row: `playout.pick_wide` with shipped settings
   top3          `playout.pick` -- the scorer's top three, played out
   net           the fast network alone, one forward pass a decision (solo)
+  search        the Search row: `expectimax.best_action_iterative`, collapse,
+                epsilon 0.03 (keys budget=<s> depth=<max> beam=<k>
+                leaf=<value-net weights> eps=<e> loss=<loss penalty>; solo)
   mcts          `mcts.pick` -- open-loop tree search over your decisions
                 (keys iters=<n> c=<puct> k=<menu size>; solo, else playouts)
       keys: stages=8/16/32  pouch=<weight>  player=net|climb  rollouts=<n>
@@ -171,6 +174,9 @@ def play(job):
     from solver import party as party_mod
     teammates = {"prior": None, "net": party_mod.NetTeammate()}
     playout.TEAMMATE_MODEL = teammates[opts.get("assume", "prior")]
+    from solver.search import expectimax, valuenet
+    expectimax.BEAM = None
+    valuenet.USE = False
     from solver.search import objective as objective_mod
     playout.set_style(objective_mod.PRESETS[opts.get("style", "balanced")])
     stages = tuple(int(x) for x in opts.get("stages", "8/16/32").split("/"))
@@ -215,6 +221,26 @@ def play(job):
                 res = mcts.pick(view, _horizon(env, state), seed=seed * 1000 + rounds,
                                 iterations=int(opts.get("iters", mcts.ITERATIONS)))
                 plan = res.plan if res else None
+            elif name == "search":
+                # The Search row: expectimax with the panel's settings
+                # (collapse, epsilon 0.03), a time budget, optionally the
+                # BEAM shortcut and the value network at the leaves.
+                expectimax.BEAM = int(opts.get("beam", 0)) or None
+                if opts.get("leaf"):
+                    valuenet.use(opts["leaf"])
+                    valuenet.USE = True
+                import dataclasses
+                search_obj = objective_mod.PRESETS[opts.get("style", "balanced")]
+                if "loss" in opts:
+                    search_obj = dataclasses.replace(search_obj, loss_penalty=float(opts["loss"]))
+                _v, act = expectimax.best_action_iterative(
+                    view.clone(), depth=int(opts.get("depth", 6)),
+                    objective=search_obj,
+                    time_budget=float(opts.get("budget", 2.0)),
+                    exact_plies=0, epsilon=float(opts.get("eps", 0.03)))
+                expectimax.BEAM = None
+                valuenet.USE = False
+                plan = [act] if act is not None else None
             elif name == "net":
                 plan = fastplayer.act(view) if len(view.toons) == 1 else None
             elif name != "climb":
