@@ -1595,3 +1595,13 @@ swings from 16 to 0; a full playout plays every one of them.
 
 The missing input was the cause. k=8 is level or better in 24% less
 time; a 200-seed confirmation on fresh seeds (100100-) follows.
+
+Confirmation, 200 fresh solo VPs (seeds 100100-):
+
+    full 126/200 (2.61s)   k=8 134/200 (1.88s)   +41/-33  p 0.42
+    all 260:  full 163   k=8 175   +56/-44   p 0.27
+
+Level or better on wins, never shown worse, and 28% less time a decision.
+Not switched on: the gain on wins is not established, and the two-player
+VP has not been re-measured with this network. The case for shipping is
+the time -- the same advice faster, or more playouts in the same time.
