@@ -1585,3 +1585,13 @@ Worse, and worse the earlier the cut -- a bias more playouts cannot
 average away. The likely cause: the net sees the board as the panel does,
 without the holdout (cogs still to walk into this wave), which in a VP
 swings from 16 to 0; a full playout plays every one of them.
+
+**5. Shortened playouts with the holdout and later-wave counts as inputs
+(`gen_value_outcomes --extras`).** Held-out error barely moved (1.34 vs
+1.37 cogs), but play did:
+
+    solo VP 60   full 37 (2.54s)   k=8 41 (1.94s, +15/-11, p 0.56)
+                                   k=4 30 (1.13s; 19 without the counts)
+
+The missing input was the cause. k=8 is level or better in 24% less
+time; a 200-seed confirmation on fresh seeds (100100-) follows.
