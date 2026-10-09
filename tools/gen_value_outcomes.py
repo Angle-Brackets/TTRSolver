@@ -101,7 +101,7 @@ def _play_out_playout_units(env, rng_seed) -> float:
 
 
 def episode(job):
-    seed, rollouts, loss_penalty, units = job
+    seed, rollouts, loss_penalty, units, extras = job
     import dataclasses
     from solver.search import fastplayer, objective, playout
 
@@ -128,7 +128,11 @@ def episode(job):
             except Exception:               # noqa: BLE001
                 ys = []
             if ys:
-                rows.append({"x": fastplayer.features(view)[0], "y": sum(ys) / len(ys),
+                x = fastplayer.features(view)[0]
+                if extras:
+                    from solver.search import valuenet
+                    x = x + valuenet.extras(len(env.state.holdout), env.state.cogs_remaining)
+                rows.append({"x": x, "y": sum(ys) / len(ys),
                              "cogs": cogs, "regime": regime, "state": pickle.dumps(view)})
         try:
             done, _ = playout.step_round(env, fastplayer.act(view))
@@ -147,12 +151,14 @@ def main() -> int:
                     help="score a lost fight at -this (Balanced: 100)")
     ap.add_argument("--units", choices=("search", "playout"), default="search",
                     help="search: Objective rewards; playout: cogs defeated + laff")
+    ap.add_argument("--extras", action="store_true",
+                    help="add the holdout and later-wave counts to the inputs")
     ap.add_argument("--workers", type=int, default=10)
     args = ap.parse_args()
 
     from concurrent.futures import ProcessPoolExecutor
 
-    jobs = [(args.base + i, args.rollouts, args.loss_penalty, args.units)
+    jobs = [(args.base + i, args.rollouts, args.loss_penalty, args.units, args.extras)
             for i in range(args.episodes)]
     rows, t0 = [], time.time()
     with ProcessPoolExecutor(max_workers=args.workers) as pool:

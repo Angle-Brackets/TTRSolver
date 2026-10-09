@@ -62,13 +62,23 @@ def load(path):
              for w, b in payload["layers"]], float(payload.get("scale", 100.0)))
 
 
-def predict(model, state: BattleState) -> float:
-    """`model`'s raw output for `state`, in its training units."""
+def extras(holdout: int, cogs_remaining: int) -> list:
+    """What the panel's board does not show but a playout knows: cogs still
+    to walk into this wave, and cogs in the waves after it."""
+    return [holdout / 20.0, cogs_remaining / 40.0]
+
+
+def predict(model, state: BattleState, holdout: int = 0) -> float:
+    """`model`'s raw output for `state`, in its training units. A model with
+    two more inputs than `fastplayer.features` also gets `extras`."""
     import numpy as np
     from . import fastplayer
 
     layers, scale = model
-    h = np.array(fastplayer.features(state)[0], dtype=float)
+    x = fastplayer.features(state)[0]
+    if layers[0][0].shape[0] == len(x) + 2:
+        x = x + extras(holdout, state.cogs_remaining)
+    h = np.array(x, dtype=float)
     for i, (w, b) in enumerate(layers):
         h = h @ w + b
         if i < len(layers) - 1:

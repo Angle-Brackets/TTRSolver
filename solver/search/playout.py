@@ -443,7 +443,8 @@ def rollout(state, plan, horizon, seed: int) -> float:
                 and guard > ROLLOUT_DEPTH):
             from . import valuenet
             return (total - _left(env.state)
-                    + valuenet.predict(ROLLOUT_VALUE, _view(env.state)))
+                    + valuenet.predict(ROLLOUT_VALUE, _view(env.state),
+                                       holdout=len(env.state.holdout)))
         if use_net:
             nxt = fastplayer.act(_view(env.state))
         else:
