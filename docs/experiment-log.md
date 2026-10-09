@@ -1570,3 +1570,18 @@ six noisy continuations cannot rank sibling moves.
 Not switched on. What is left to try is the original phase 2: a value net
 in the PLAYOUT's units, trained on the same fast-network continuations
 the playouts already use, to cut those playouts short.
+
+**4. Shortened playouts (`playout.ROLLOUT_DEPTH`, the playouts' own
+units).** 68,030 boards labelled with cogs defeated from the board to the
+end plus LAFF_WEIGHT x laff left, under the fast network (6 continuations
+each); held-out error 1.37 cogs (median 0.99). Each playout stops after k
+rounds and asks the net for the rest, with twice the playouts:
+
+    duo VP 60    full 33 (1.04s)   k=4 31 (0.95s)   k=8 28 (1.38s)
+    solo VP 60   full 37 (2.53s)   k=4 19 (1.21s)   k=8 30 (1.89s)
+                                   (k=4 vs full: +1/-19)
+
+Worse, and worse the earlier the cut -- a bias more playouts cannot
+average away. The likely cause: the net sees the board as the panel does,
+without the holdout (cogs still to walk into this wave), which in a VP
+swings from 16 to 0; a full playout plays every one of them.
