@@ -1405,3 +1405,53 @@ the network's argmax below the root until a node is well visited.
 The other finding: flat playouts gained 11 wins from 2x budget on duo
 VPs, so cheaper playouts are strength -- which is what a value network
 that truncates rollouts would buy.
+
+## Squeezing depth out of the exact search
+
+`tools/search_bench.py` (depth / agree / fight). Positions: maxed toon,
+owner pouch partly spent, 30-137 laff, 1-4 cogs of level 6-12 at random
+health, street battles. Fully exact, time per decision:
+
+    cogs   d1      d2      d3      d4
+    1      0.01s   0.24s   6s      >60s
+    2      0.02s   2.8s    >60s
+    3      0.07s   22s     >60s
+    4      0.11s   42s     >60s
+
+What changed and what it bought:
+
+  * Profiled hot spots, exact: `can_still_damage` (a third of a search)
+    checks the common case first; `features` caches its pouch-only
+    answers per toon. 60/60 answers identical, 1.5x.
+  * A memo kept across a fight's rounds (`best_action_iterative(memo=)`):
+    exact, but barely helps -- median 6.5s -> 4.7s, mean unchanged --
+    because the new board's NEXT level was never searched before; only
+    the cheap shallow work is reused.
+  * Cog-order symmetry: not done -- permuted boards only collide when
+    the cogs are identical, which the key already merges.
+  * `expectimax.BEAM`: below the root, only the top k moves by a one-
+    round look-ahead. Against fully exact search at depth 3:
+        1 cog,  k=6: 100% same move, |dv| 0.003, 1.75x
+        1 cog,  k=4:  93%,                       1.9x
+        2 cogs, k=4 and k=6: 100%, |dv| 0.000, 2x
+  * The cog-damage collapse the panel already uses (`exact_plies=0`)
+    plus k=6, against fully exact at depth 3:
+        1 cog:  100% same move, |dv| 0.004, 86s -> 4.6s
+        2 cogs: 100% same move, |dv| 0.005, 534s -> 6.4s
+    Keeping the first ply exact was no more accurate and 4-13x slower.
+
+Depth reached (mean of 3 positions, 60s cap):
+
+                     collapse only            collapse + k=6
+    cogs   d3     d4      d5            d3     d4      d5
+    1      0.3s   1.9s    9.6s          0.2s   0.8s    3.0s
+    2      1.0s   5.5s    27s           1.0s   4.0s    13s
+    3      2.9s   14s     >60s          2.9s   10s     30s
+    4      6.7s   35s     >60s          7.1s   23s     ~55s
+
+The panel already collapses (depth 4 cap, 15s budget), so live it reaches
+depth 4 at two cogs and 3 at three or four. k=6 would put three cogs at
+depth 4 and two at depth 5 inside the same budget. Not switched on yet:
+agreement is measured, play is not, and the older note in advise.py
+(extra depth changed nothing over 42 three-cog battles) says depth alone
+may not show up as wins -- which is what the value network is for.

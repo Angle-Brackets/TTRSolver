@@ -692,6 +692,16 @@ class BattleState:
         if any(toon.fires > 0 for toon in self.active_toons()):
             return True
 
+        # An attack gag in hand is the common case, so it is checked
+        # before the cards: the answer is an OR of these tests, so their
+        # order changes only the cost (this was a third of a search).
+        for toon in self.active_toons():
+            for (track, level), n in toon.gag_counts.items():
+                if (n > 0 and track in _ATTACK_TRACKS
+                        and toon.track_exp.get(track, 0) > 0
+                        and (ALLOW_LEVEL_7 or level != LEVEL_SEVEN)):
+                    return True
+
         # Cards and unites that put damage back in reach -- without this
         # a toon down to Lure with a Restock All in hand read as LOST,
         # and the solver couldn't value climbing back out of the very
@@ -712,6 +722,9 @@ class BattleState:
             if any(c.status.trapped for c in self.active_cogs()):
                 return True
         return False
+
+
+_ATTACK_TRACKS = frozenset({Track.THROW, Track.SQUIRT, Track.SOUND, Track.DROP})
 
 
 @dataclass

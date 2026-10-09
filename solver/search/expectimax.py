@@ -223,6 +223,35 @@ def distinct_actions(state: BattleState) -> List[Action]:
 # Search
 # ---------------------------------------------------------------------
 
+# BEAM: below the root, search only the `BEAM` moves a one-round look-ahead
+# (reward plus the leaf heuristic) ranks highest. Off (None) by default --
+# it is a shortcut, so `tools/search_bench.py agree` measures how often it
+# changes the answer before anything uses it. The root always gets every
+# move. Only `best_action_iterative` marks the root (`_TOP`), so a direct
+# `evaluate`/`solve` call is never trimmed.
+BEAM: Optional[int] = None
+_TOP: List = [None]
+
+
+def _beam(state, actions, objective, width, keep):
+    """The `width` best actions by one-round look-ahead, plus `keep`, with
+    the outcomes computed for the ranking, to be reused."""
+    scored, pre = [], {}
+    for action in actions:
+        try:
+            branches = outcomes_mod.action_outcomes(state, action, objective)
+        except NotImplementedError:
+            continue
+        pre[id(action)] = branches
+        scored.append((sum(p * (r + heuristic_value(n)) for p, n, r in branches),
+                       action))
+    scored.sort(key=lambda va: -va[0])
+    chosen = [a for _v, a in scored[:width]]
+    if keep is not None and keep in actions and keep not in chosen:
+        chosen.insert(0, keep)
+    return chosen, pre
+
+
 def evaluate(state: BattleState, depth: int, objective=None,
              discount: float = 1.0, memo: Optional[Dict] = None,
              alpha: float = float("-inf"), beta: float = float("inf"),
@@ -267,7 +296,7 @@ def evaluate(state: BattleState, depth: int, objective=None,
     # exact_plies belongs in the key: the same state searched with
     # collapsed chance nodes is a different computation, and answering one
     # from the other would silently mix the two.
-    key = (outcomes_mod.state_key(state), depth, epsilon, exact_plies)
+    key = (outcomes_mod.state_key(state), depth, epsilon, exact_plies, BEAM)
     hit = None if probe_only else memo.get(key)
     if hit is not None:
         value, action, flag = hit
@@ -292,11 +321,18 @@ def evaluate(state: BattleState, depth: int, objective=None,
             actions = [cached[1]]       # probe the move we already like
     if probe_only:
         actions = actions[:1]
+    pre = {}
+    if (BEAM and not probe_only and depth >= 2 and _TOP[0] is not None
+            and depth < _TOP[0] and len(actions) > BEAM):
+        actions, pre = _beam(state, actions, objective, BEAM,
+                             hit[1] if hit is not None else None)
 
     unevaluable = []
     for action in actions:
         try:
-            branches = outcomes_mod.action_outcomes(state, action, objective)
+            branches = pre.get(id(action))
+            if branches is None:
+                branches = outcomes_mod.action_outcomes(state, action, objective)
         except NotImplementedError as exc:
             # Gag or cog data still marked TODO -- skip this action rather
             # than let a data gap take down the whole search.
@@ -612,10 +648,15 @@ def best_action(state: BattleState, depth: int = 3,
     return evaluate(state, depth, objective)[1]
 
 
+# A kept memo is cleared past this many entries: memory, not correctness.
+MEMO_CAP = 3_000_000
+
+
 def best_action_iterative(state: BattleState, depth: int = 4,
                            objective=None, epsilon: float = 0.0,
                            time_budget: Optional[float] = None,
                            exact_plies: Optional[int] = None,
+                           memo: Optional[Dict] = None,
                            ) -> Tuple[float, Optional[Action]]:
     """Search 1..depth, reusing the table between passes.
 
@@ -634,14 +675,26 @@ def best_action_iterative(state: BattleState, depth: int = 4,
 
     Each pass is complete before its result is used, so a budget never
     yields a half-searched answer -- only a shallower one.
+
+    `memo`, kept by the caller across a fight's rounds, carries the work
+    forward: next round's board was searched one level shallower inside
+    this round's tree, and entries are keyed by depth, so reusing them is
+    exact. It is wiped if the objective changes (the key does not hold it)
+    and past `MEMO_CAP` entries.
     """
-    memo: Dict = {}
+    if memo is None:
+        memo = {}
+    tag = ("__objective__", repr(objective))
+    if tag not in memo or len(memo) > MEMO_CAP:
+        memo.clear()
+        memo[tag] = True
     value, action = 0.0, None
     deadline = None
     if time_budget is not None:
         deadline = [time.monotonic() + time_budget, DEADLINE_CHECK_INTERVAL]
 
     for d in range(1, depth + 1):
+        _TOP[0] = d
         try:
             value, action = evaluate(state, d, objective, memo=memo,
                                      epsilon=epsilon, deadline=deadline,
@@ -653,6 +706,8 @@ def best_action_iterative(state: BattleState, depth: int = 4,
             # budget has to be enforced inside the search, not guessed at
             # between passes.
             break
+        finally:
+            _TOP[0] = None
     return value, action
 
 

@@ -80,6 +80,62 @@ def _fighting(state: BattleState):
     return state.active_toons() or state.toons
 
 
+# Pouch-only answers, cached per toon: thousands of search leaves share a
+# pouch, and these were recomputed at every one (a third of a search).
+_POUCH_CACHE: dict = {}
+
+
+def _toon_key(toon):
+    return (frozenset((k, n) for k, n in toon.gag_counts.items() if n > 0),
+            frozenset(toon.track_exp.items()), toon.organic_tracks,
+            frozenset(toon.organic_levels.items()))
+
+
+def _cached(key, compute):
+    hit = _POUCH_CACHE.get(key)
+    if hit is None:
+        if len(_POUCH_CACHE) > 200_000:
+            _POUCH_CACHE.clear()
+        hit = _POUCH_CACHE[key] = compute()
+    return hit
+
+
+def _pouch_damage(toon, n_alive: int, has_lure: bool) -> int:
+    total = 0
+    for (track, level), count in toon.gag_counts.items():
+        if count <= 0 or track in (Track.TOON_UP, Track.LURE):
+            continue
+        if track == Track.TRAP and not has_lure:
+            continue
+        if toon.track_exp.get(track, 0) <= 0:
+            continue
+        try:
+            damage = data.gag(track, level).damage_at(
+                1.0, organic=toon.is_organic(track, level))
+        except (NotImplementedError, ValueError):
+            continue
+        if not damage:
+            continue
+        reach = n_alive if simulator.is_group_action(track, level) else 1
+        total += damage * count * reach
+    return total
+
+
+def _toon_best_damage(toon) -> int:
+    best = 0
+    for (track, level), count in toon.gag_counts.items():
+        if count <= 0 or track in (Track.TOON_UP, Track.LURE, Track.TRAP):
+            continue
+        try:
+            damage = data.gag(track, level).damage_at(
+                1.0, organic=toon.is_organic(track, level))
+        except (NotImplementedError, ValueError):
+            continue
+        if damage and damage > best:
+            best = damage
+    return best
+
+
 def _damage_budget(state: BattleState) -> int:
     """Total damage the whole pouch can still deal, if every gag lands.
 
@@ -113,22 +169,8 @@ def _damage_budget(state: BattleState) -> int:
             except (NotImplementedError, ValueError, KeyError):
                 pass
     for toon in toons:
-        for (track, level), count in toon.gag_counts.items():
-            if count <= 0 or track in (Track.TOON_UP, Track.LURE):
-                continue
-            if track == Track.TRAP and not has_lure:
-                continue
-            if toon.track_exp.get(track, 0) <= 0:
-                continue
-            try:
-                damage = data.gag(track, level).damage_at(
-                    1.0, organic=toon.is_organic(track, level))
-            except (NotImplementedError, ValueError):
-                continue
-            if not damage:
-                continue
-            reach = n_alive if simulator.is_group_action(track, level) else 1
-            total += damage * count * reach
+        total += _cached(("budget", _toon_key(toon), n_alive, has_lure),
+                         lambda t=toon: _pouch_damage(t, n_alive, has_lure))
     return total
 
 
@@ -144,16 +186,8 @@ def _best_damage(state: BattleState) -> int:
     """
     best = 0
     for toon in _fighting(state):
-        for (track, level), count in toon.gag_counts.items():
-            if count <= 0 or track in (Track.TOON_UP, Track.LURE, Track.TRAP):
-                continue
-            try:
-                damage = data.gag(track, level).damage_at(
-                    1.0, organic=toon.is_organic(track, level))
-            except (NotImplementedError, ValueError):
-                continue
-            if damage and damage > best:
-                best = damage
+        best = max(best, _cached(("best", _toon_key(toon)),
+                                 lambda t=toon: _toon_best_damage(t)))
     return best
 
 
