@@ -1527,3 +1527,46 @@ row 100% same move, |dv| 0.000):
     2      3.0s    9.5s    23.5s    (d5 was 12.9s)
     3      8.1s    26s     ~56s     (d5 was 30.5s)
     4      22s     ~53s
+
+## A learned leaf for the Search row: three tries, none better in play
+
+`search/valuenet.py` (off by default), judged by the `search` sweep arm at
+2s a decision against the fitted leaf, paired:
+
+**1. Deep-search labels (the ladder's first rung).** 27,667 boards from
+streets, solo and owner buildings and solo VPs, labelled by depth 5/4/4/3
+with collapse and BEAM 6. Held-out error 11.5 against the fitted leaf's
+36.6 (3.2x better; 1 cog 6.9 vs 14.9, 4 cogs 10.4 vs 40.6). In play:
+    my-building 200   fitted 146   net 145   (+3/-4)
+    solo-building 200 fitted  21   net  16   (+1/-6, p 0.13)
+    duo VP 60         fitted   6   net   8   (+6/-4)
+A move-agreement check against the deep search was biased in the fitted
+leaf's favour (the reference used it, and for 4-cog boards WAS the depth-3
+fitted search), so it is not evidence either way. Lower absolute error
+did not buy better choices: picking a move needs the differences between
+sibling boards, often under a point, against a median error of 3.7.
+
+**The finding that matters: the Search row is far weaker than the
+Playout row in multi-wave fights.** Duo VP sides: Search 6-8/60,
+Playout 33/60 (+28/-1). Buildings: level (146 vs 149 of 200). The search
+sees only the cogs on the field, so labels from it carry the same blind
+spot -- the ladder can only teach what depth can see, and depth already
+settles single battles by 4.
+
+**2. Whole-fight labels.** 68,030 boards labelled by the reward collected
+to the END of the fight under the fast network (6 continuations each,
+`gen_value_outcomes.py`; 20,000 episodes in ~10 minutes). Worse in play:
+    duo VP 60         fitted   7   net   4   (fights 8.1 rounds vs 15.8)
+    my-building 200   fitted 146   net 138   (+3/-11, p 0.06)
+    solo-building 200 fitted  21   net  21   (4.3 rounds vs 5.7)
+Fights ended sooner: in the search's units (1 a point of laff, 100 for a
+lost fight) a long fight's damage outweighs losing, so dying early
+scores better. **3. The same with a lost fight at 1000:** still worse --
+duo VP 8 vs 3 (+0/-5, p 0.06, 9.5 rounds), my-building 144 vs 140. So the
+units were not the whole story: the labels describe the FAST NETWORK's
+play (it loses most VPs alone), which makes most boards look alike, and
+six noisy continuations cannot rank sibling moves.
+
+Not switched on. What is left to try is the original phase 2: a value net
+in the PLAYOUT's units, trained on the same fast-network continuations
+the playouts already use, to cut those playouts short.
