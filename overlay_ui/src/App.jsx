@@ -1087,11 +1087,11 @@ export default function App() {
           />
           <StepperRow
             label="Resistance Unites"
-            badge="Inert on TTR"
+            subtitle="How many you have"
             icon={<UniteFist size="size-4.5" />}
             value={model.max_unites}
             onChange={(val) => call('set_max_unites', val)}
-            title="Max Unites allowed (0 = never unite) — Inert on TTR"
+            title="Unites you hold. The advice plans around them and may suggest one beside the gag (0 = never unite)."
           />
           <StepperRow
             label="SOS Cards"

@@ -24,7 +24,7 @@ class SlowThinker(A.Thinker):
 
     def _run(self, token, frame, readings, snapshot, objective, depth,
              budget=None, ignore_checksum=False, allies=0,
-             fires=0, reject=None, boss=None):
+             fires=0, reject=None, boss=None, unites=0):
         # The signature MIRRORS `Thinker._run` and has to keep doing so.
         # `submit` starts a thread with these as positional args, so an
         # arity that has drifted raises at call time -- outside `_run`'s
@@ -66,6 +66,23 @@ class ThinkerTest(unittest.TestCase):
         start = time.time()
         t.submit("frame", [], None, None, 1)
         self.assertLess(time.time() - start, 0.1)
+
+
+class UnitesTest(unittest.TestCase):
+    """The player's Unite count reaches the board the solver sees."""
+
+    def test_the_count_lands_on_the_toon(self):
+        from types import SimpleNamespace
+        from solver.state import BattleState, ToonState
+
+        res = SimpleNamespace(state=BattleState(toons=[ToonState(50, 50, {}, {})], cogs=[]))
+        A._with_unites(res, 3)
+        self.assertEqual(3, res.state.toons[0].unites_held)
+        A._with_unites(res, -2)
+        self.assertEqual(0, res.state.toons[0].unites_held)
+
+    def test_no_board_is_left_alone(self):
+        A._with_unites(None, 3)
 
 
 class BudgetTest(unittest.TestCase):

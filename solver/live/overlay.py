@@ -641,7 +641,8 @@ class Worker(AdviceWorker):
                                    allies=max(0, self.toon_count - 1),
                                    fires=self.remaining("fires"),
                                    reject=self._rejected,
-                                   boss=self.boss_tracker().frozen())
+                                   boss=self.boss_tracker().frozen(),
+                                   unites=self.remaining("unites"))
                 self._post()
                 time.sleep(max(0.0, POLL_INTERVAL - (time.time() - cycle)))
         finally:

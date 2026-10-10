@@ -186,18 +186,18 @@ class Thinker:
 
     def submit(self, frame, readings, snapshot, objective, depth,
                budget=DEFAULT_BUDGET, ignore_checksum=False,
-               allies=0, fires=0, reject=None, boss=None) -> None:
+               allies=0, fires=0, reject=None, boss=None, unites=0) -> None:
         with self._lock:
             token = next(self._generation)
             self._current = token
         threading.Thread(target=self._run, daemon=True,
                          args=(token, frame, readings, snapshot, objective,
                                depth, budget, ignore_checksum,
-                               allies, fires, reject, boss)).start()
+                               allies, fires, reject, boss, unites)).start()
 
     def _run(self, token, frame, readings, snapshot, objective, depth,
              budget, ignore_checksum=False, allies=0, fires=0, reject=None,
-             boss=None):
+             boss=None, unites=0):
         try:
             snap = snapshot or _snapshot()
             pnl = _panel(frame)
@@ -208,6 +208,7 @@ class Thinker:
             res = build_state(snapshot=snap, panel=pnl, readings=readings,
                               ignore_checksum=ignore_checksum, allies=allies,
                               fires=fires)
+            _with_unites(res, unites)
             if res is None or res.state is None:
                 with self._lock:
                     superseded = token != self._current
@@ -373,6 +374,14 @@ def _panel(frame):
 # so it cannot ride back inside the action, and every caller of this
 # already unpacks a fixed 3-tuple.
 LAST_UNITE = None
+
+
+def _with_unites(res, unites) -> None:
+    """Give the built board the player's own count of unites: nothing on
+    screen or in the Local API reports them. The kind is unknown, which the
+    solver reads as "any" (`ToonState.unite_stock`)."""
+    if res is not None and res.state is not None and res.state.toons:
+        res.state.toons[0].unites_held = max(0, int(unites or 0))
 
 
 def advise(frame, readings, snapshot=None, objective=None,
