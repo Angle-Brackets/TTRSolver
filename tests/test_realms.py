@@ -405,6 +405,22 @@ class LureAgeTest(unittest.TestCase):
         one._note_chosen_attacks(9, ([100000001], [2], [5], [255], [0]))
         self.assertIsNone(one.trap_on(11), "the trap has been spent")
 
+    def test_a_boss_fight_s_two_battles_do_not_hide_the_lure(self):
+        """THE VP BUG. A boss fight has a battle object per side, and the
+        lookups used to give up unless there was exactly one -- so every
+        Lure in a VP read as unseen and the panel refused to advise the
+        moment a cog was lured. Each cog is found in its own battle."""
+        one = self.listener()
+        one.store.enter(8, "DistributedBattle", 0, 1, {
+            "setMembers": ([21, 22], "", "", "00", "", "99",
+                           [100000002], "", "", "0", "", 1)})
+        one._note_chosen_attacks(9, ([100000001], [2], [5], [255], [0]))
+        self.assertEqual(one.lure_age(11), (6, 0))
+        self.assertEqual(one.lure_age(12), (6, 0))
+        self.assertIsNone(one.lure_age(21), "nothing was thrown on the other side")
+        one._note_chosen_attacks(8, ([100000002], [1], [4], [0], [0]))
+        self.assertEqual(one.trap_on(21), 5)
+
     def test_a_single_lure_spends_only_that_cog_s_trap(self):
         one = self.listener()
         one._note_chosen_attacks(9, ([100000001], [1], [5], [0], [0]))

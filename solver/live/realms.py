@@ -1215,12 +1215,10 @@ class RealmsListener(threading.Thread):
         because that is what springs a trap -- keeping it would have the
         solver plan a combo whose damage has already been collected.
         """
-        battles = self.battles()
-        if len(battles) != 1:
+        found = self._battle_of(cog_do_id)
+        if found is None:
             return None
-        members = parse_members(battles[0].get("setMembers"))
-        if members is None:
-            return None
+        _battle, members = found
 
         if cog_do_id in members.lured_suits():
             # Lured and still standing means the Lure found no trap
@@ -1246,21 +1244,36 @@ class RealmsListener(threading.Thread):
         None means this reader did not see the Lure land, which is the
         case whenever it attached mid-fight.
         """
-        battles = self.battles()
-        if len(battles) != 1:
+        found = self._battle_of(cog_do_id)
+        if found is None:
             return None
+        battle, _members = found
         entry = self.chosen_lures.get(cog_do_id)
         if entry is None:
             # Fall back to the last Lure thrown in this battle: right for
             # a group Lure or a solo fight, wrong only for two different
             # Lure levels in one party round, which can't be searched yet
             # anyway.
-            entry = self.last_lure.get(battles[0].do_id)
+            entry = self.last_lure.get(battle.do_id)
         if entry is None:
             return None
         level, thrown_in = entry
-        now = self.battle_rounds.get(battles[0].do_id, thrown_in)
+        now = self.battle_rounds.get(battle.do_id, thrown_in)
         return level, max(0, now - thrown_in)
+
+    def _battle_of(self, cog_do_id: int):
+        """(battle, members) for the battle this cog stands in, or None.
+
+        By roster, not by counting battles: a VP has TWO battle objects,
+        one per side, and requiring exactly one made every Lure and Trap
+        in a boss fight read as unseen -- the panel then refused to advise
+        the moment a cog was lured.
+        """
+        for battle in self.battles():
+            members = parse_members(battle.get("setMembers"))
+            if members is not None and cog_do_id in members.suits:
+                return battle, members
+        return None
 
     def _record(self, do_id: int, field, value) -> None:
         name = field.getName()
