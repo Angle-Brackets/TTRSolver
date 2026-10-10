@@ -5,6 +5,7 @@ Status effects (trap, lure, etc.) are folded into explicit state fields
 rather than tracked via history, so the transition function in
 simulator.py stays a clean Markov step: (state, action) -> next_state.
 """
+import dataclasses
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional, Dict, FrozenSet, Tuple, List
@@ -49,8 +50,33 @@ GROUP_TRACKS = {Track.TOON_UP, Track.SOUND, Track.LURE}  # can hit all cogs
 # Throw/Squirt only go multi-target at level 7 (Wedding Cake / Geyser).
 
 
+def _restore(obj, state) -> None:
+    """Unpickle a slotted state class by NAME, defaulting fields added since.
+
+    Slotted objects pickle their slots by name and nothing more, so a
+    field added after a board was saved came back missing, and the first
+    `clone()` of an old feedback log raised. Every field ever added did
+    this to every older pickle; `sos_calls` was merely the one noticed.
+    """
+    if isinstance(state, tuple) and len(state) == 2:
+        values = dict(state[0] or {})
+        values.update(state[1] or {})
+    else:
+        values = dict(state or {})
+    for f in dataclasses.fields(obj):
+        if f.name in values:
+            object.__setattr__(obj, f.name, values[f.name])
+        elif f.default is not dataclasses.MISSING:
+            object.__setattr__(obj, f.name, f.default)
+        elif f.default_factory is not dataclasses.MISSING:
+            object.__setattr__(obj, f.name, f.default_factory())
+
+
 @dataclass(slots=True)
 class ToonState:
+    def __setstate__(self, state):
+        _restore(self, state)
+
     laff: int
     max_laff: int
 
@@ -183,6 +209,9 @@ class ToonState:
 
 @dataclass(slots=True)
 class CogStatus:
+    def __setstate__(self, state):
+        _restore(self, state)
+
     lured: bool = False
 
     # Rounds of lure left on this cog -- the `currentlyLuredSuits[suitId][0]`
@@ -321,6 +350,9 @@ class CogStatus:
 
 @dataclass(slots=True)
 class CogState:
+    def __setstate__(self, state):
+        _restore(self, state)
+
     cog_type: str          # key into data/ cog tables, e.g. "flunky"
     department: str        # "bossbot" | "sellbot" | "cashbot" | "lawbot"
     level: int              # absolute level, e.g. 3
@@ -369,6 +401,9 @@ class CogState:
 
 @dataclass(slots=True)
 class BattleState:
+    def __setstate__(self, state):
+        _restore(self, state)
+
     """A battle: one to four toons against one to four cogs.
 
     ONE TOON IS STILL THE ONLY SEARCHED CASE. The state holds a list so
@@ -494,6 +529,12 @@ class BattleState:
     # on the board; TTR's numbers stay the default (docs/realms.md).
     sos_one_round: bool = False
 
+    # REALMS ONLY, AND ONLY FOR THE LOG: which battle of a boss fight this
+    # board came from, its cogs' skelecog flags and the tracker's count.
+    # See `RealmsWorker._context_of`. Not carried by `clone`: no engine
+    # reads it, and a searched board is not the one that was on screen.
+    realms_context: Optional[dict] = None
+
     def __init__(self, cogs: List[CogState], toon: Optional[ToonState] = None,
                  toons: Optional[List[ToonState]] = None,
                  round_num: int = 0, free_passes: int = 3,
@@ -512,6 +553,7 @@ class BattleState:
         self.toons_hit_rounds = toons_hit_rounds
         self.cogs_miss_rounds = cogs_miss_rounds
         self.sos_one_round = sos_one_round
+        self.realms_context = None
         self.cogs_remaining = cogs_remaining
         self.holdout = list(holdout) if holdout else []
         self.kind = kind

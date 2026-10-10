@@ -1077,3 +1077,32 @@ class ObservedSpendingTest(unittest.TestCase):
         w._cap_holdings(SimpleNamespace(state=None))
         self.assertIsNone(w._fight_start)
         self.assertEqual(0, w.spent_sos)
+
+
+class BossContextTest(unittest.TestCase):
+    """Each logged board says which battle it came from, so a log can
+    tell the second side's battle from the skelecog round."""
+
+    def test_the_board_carries_its_battle(self):
+        from types import SimpleNamespace
+        from solver.live.realms_panel import RealmsWorker
+        from solver.live.realms_session import BossBattle
+
+        w = RealmsWorker.__new__(RealmsWorker)
+        w._boss = None
+        objs = {11: {"setSkelecog": (1,)}, 12: {"setSkelecog": (0,)}}
+        w.listener = SimpleNamespace(store=SimpleNamespace(get=objs.get))
+        result = SimpleNamespace(battle_id=9, suit_ids=(11, 12),
+                                 boss=BossBattle("vp", 5, 2, 1, 1))
+        ctx = w._context_of(result)
+        self.assertEqual((9, [True, False], "vp", 2, 1),
+                         (ctx["battle_id"], ctx["skelecog"], ctx["boss_kind"],
+                          ctx["battle_number"], ctx["side"]))
+
+    def test_it_never_raises(self):
+        from solver.live.realms_panel import RealmsWorker
+
+        w = RealmsWorker.__new__(RealmsWorker)
+        w._boss = None
+        w.listener = None
+        self.assertIsInstance(w._context_of(object()), dict)

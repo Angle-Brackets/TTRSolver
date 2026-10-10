@@ -437,6 +437,8 @@ class RealmsWorker(AdviceWorker):
         model = self.model
         self._allies = tuple(getattr(result, "allies", ()) or ())
         self._track_boss(result)
+        if result.state is not None:
+            result.state.realms_context = self._context_of(result)
         self._boss_into(model, on_field=len(result.state.cogs)
                         if result.state else 0)
         model.window_found = True
@@ -492,6 +494,37 @@ class RealmsWorker(AdviceWorker):
             model.thinking = True
             self._search(state)
         self._post()
+
+    def _context_of(self, result) -> dict:
+        """Where this board sits in a boss fight, for the feedback log.
+
+        Rides on the board (`state.realms_context`), which every row
+        pickles whole. The first logged VP could not say whether a fresh
+        wave after a lull was the other side's battle or the skelecog
+        round, nor how many cogs round one held: the stream states both
+        and nothing wrote them down. Never raises.
+        """
+        try:
+            boss = getattr(result, "boss", None)
+            store = getattr(self.listener, "store", None)
+            skelecog = []
+            for do_id in getattr(result, "suit_ids", ()) or ():
+                obj = store.get(do_id) if store is not None else None
+                value = obj.get("setSkelecog") if obj is not None else None
+                if isinstance(value, (tuple, list)):
+                    value = value[0] if value else None
+                skelecog.append(None if value is None else bool(value))
+            return {"battle_id": getattr(result, "battle_id", None),
+                    "suit_ids": list(getattr(result, "suit_ids", ()) or ()),
+                    "skelecog": skelecog,
+                    "boss_kind": getattr(boss, "kind", None),
+                    "boss_id": getattr(boss, "boss_id", None),
+                    "battle_number": getattr(boss, "battle_number", None),
+                    "side": getattr(boss, "side", None),
+                    "players": getattr(boss, "players", None),
+                    "defeated": self.boss_tracker().defeated}
+        except Exception:                      # noqa: BLE001
+            return {}
 
     def _track_boss(self, result) -> None:
         """Which boss fight this is and how many cogs it has lost.
