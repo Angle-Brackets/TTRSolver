@@ -609,10 +609,6 @@ class Worker(AdviceWorker):
                                         model.unite or None)
                         self._feedback_round_over()
                     model.turn = turn
-                # Not between a boss fight's rounds: the pouch does not
-                # refill there, so neither do the holdings.
-                if not model.in_battle and not self.boss_tracker().kind:
-                    self.reset_spending()
                 model.fires_left = self.remaining("fires")
                 model.unites_left = self.remaining("unites")
                 model.sos_left = self.remaining("sos")

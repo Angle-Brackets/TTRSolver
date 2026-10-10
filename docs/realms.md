@@ -308,6 +308,14 @@ The counts in this capture (998/999 per unite, 100 per card) are a
 maxed-out sandbox toon on an offline build, not typical play. They show
 the FORMAT, and nothing about what a real player carries.
 
+The boxes are a SESSION budget [OWNER]: what the panel may plan with
+while it is open. Each slip, unite or card that really leaves the toon
+ticks its box down, on screen too, and when one runs out the player
+raises it. Nothing resets. Per-fight baselines were tried first and
+broke twice -- a second VP inherited the first one's spending, and a
+VP's intermission could read as the fight ending -- because a fight's
+boundary is something the panel has to infer, and the session's is not.
+
 The SOS cap is ONE POOL. "Five SOS this fight" used to reach the solver
 as five of every card held, so a playout with sixteen card types could
 call eighty -- and did, suggesting Lil Oldman or Moe Zart on most boards

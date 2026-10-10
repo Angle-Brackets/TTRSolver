@@ -349,9 +349,9 @@ def toon_from_object(obj, max_fires: int = 0, max_unites: int = 0,
             # Bessie x2 and Clumsy Ned x28 crowded out Professor Pete
             # (Restock All), Flippy and Daffy Don entirely.
             #
-            # The cap still bounds CALLS, not card types: a toon calls at
-            # most one a round, and `AdviceWorker.note_spent` charges each
-            # against `remaining("sos")`.
+            # The cap still bounds CALLS, not card types: the panel ticks
+            # its SOS box down by each card that really leaves the toon
+            # (`RealmsWorker._cap_holdings`) and sets `sos_calls` from it.
             budget = int(max_sos)
             toon.sos_cards = {name: min(int(count), budget)
                               for name, count in cards.items() if count > 0}

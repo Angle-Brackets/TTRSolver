@@ -1018,17 +1018,21 @@ class TheSosCapNeverDeletesACardTypeTest(unittest.TestCase):
 
 
 class ObservedSpendingTest(unittest.TestCase):
-    """On this client the toon's real holdings are read, so spending is
-    counted from them -- advice is never charged."""
+    """[OWNER] The boxes are a session budget: what really leaves the toon
+    ticks its box down, on screen too, and nothing resets -- the player
+    raises a box when it runs out."""
 
     def _worker(self):
         from solver.live.realms_panel import RealmsWorker
 
         w = RealmsWorker.__new__(RealmsWorker)
         w.max_fires = w.max_unites = w.max_sos = 5
-        w.spent_fires = w.spent_unites = w.spent_sos = 0
+        w.model = Model()
         w._boss = None
-        w._fight_start = None
+        w._held_last = None
+        w._boss_obj = w._boss_battle = None
+        w._boss_players = 0
+        w._boss_manual = None
         return w
 
     def _result(self, fires, unites, cards):
@@ -1039,7 +1043,7 @@ class ObservedSpendingTest(unittest.TestCase):
         toon.fires, toon.unites_held, toon.sos_cards = fires, unites, dict(cards)
         return SimpleNamespace(state=BattleState(toons=[toon], cogs=[]))
 
-    def test_only_what_really_left_the_toon_is_spent(self):
+    def test_only_what_really_left_the_toon_ticks_the_box_down(self):
         w = self._worker()
         first = self._result(9, 4000, {"Flippy": 2, "Moe Zart": 2})
         w._cap_holdings(first)
@@ -1047,20 +1051,55 @@ class ObservedSpendingTest(unittest.TestCase):
         self.assertEqual({"Flippy": 2, "Moe Zart": 2}, first.state.toons[0].sos_cards)
         later = self._result(9, 3999, {"Flippy": 1, "Moe Zart": 2})
         w._cap_holdings(later)
-        self.assertEqual((0, 1, 1), (w.spent_fires, w.spent_unites, w.spent_sos))
+        self.assertEqual((5, 4, 4), (w.max_fires, w.max_unites, w.max_sos))
+        self.assertEqual((4, 4), (w.model.max_unites, w.model.max_sos),
+                         "the box the player sees ticks down too")
         self.assertEqual(4, later.state.toons[0].unites_held)
 
-    def test_a_spent_budget_plans_no_more_calls(self):
+    def test_an_empty_box_plans_no_more_calls(self):
         w = self._worker()
+        w.max_sos = 1
         w._cap_holdings(self._result(0, 0, {"Flippy": 9}))
-        out = self._result(0, 0, {"Flippy": 4})
+        out = self._result(0, 0, {"Flippy": 8})
         w._cap_holdings(out)
+        self.assertEqual(0, w.max_sos)
         self.assertEqual({}, out.state.toons[0].sos_cards)
 
+    def test_raising_the_box_is_how_the_player_refills_it(self):
+        w = self._worker()
+        w.max_sos = 1
+        w._settings_changed = lambda: None
+        import threading
+        w._lock = threading.Lock()
+        w._cap_holdings(self._result(0, 0, {"Flippy": 9}))
+        w._cap_holdings(self._result(0, 0, {"Flippy": 8}))
+        w.set_max_sos(3)
+        out = self._result(0, 0, {"Flippy": 8})
+        w._cap_holdings(out)
+        self.assertEqual({"Flippy": 3}, out.state.toons[0].sos_cards)
+
+    def test_a_reward_grants_nothing(self):
+        """A count that rises is what the toon HOLDS, not what the player
+        chose to spend."""
+        w = self._worker()
+        w._cap_holdings(self._result(0, 10, {}))
+        w._cap_holdings(self._result(0, 20, {}))
+        self.assertEqual(5, w.max_unites)
+
+    def test_nothing_resets_between_rounds_or_fights(self):
+        """The intermission, a second VP, a street battle: no boundary is
+        detected, so none can be got wrong."""
+        from types import SimpleNamespace
+        w = self._worker()
+        w._cap_holdings(self._result(0, 0, {"Moe Zart": 9}))
+        w._cap_holdings(self._result(0, 0, {"Moe Zart": 6}))
+        for _ in range(3):
+            w._cap_holdings(SimpleNamespace(state=None))
+        w._cap_holdings(self._result(0, 0, {"Moe Zart": 6}))
+        self.assertEqual(2, w.max_sos)
+
     def test_the_budget_is_one_pool_across_every_card(self):
-        """THE PLAYOUTS' SOS SPAM: a budget of 5 became 5 of EACH card,
-        so a playout could call Lil Oldman five times and Moe Zart five
-        times in the same fight."""
+        """THE PLAYOUTS' SOS SPAM: a budget of 5 became 5 of EACH card."""
         from solver.simulator import apply_toon_action, legal_actions
         from solver.state import Action, CogState
 
@@ -1076,76 +1115,28 @@ class ObservedSpendingTest(unittest.TestCase):
         self.assertEqual(0, board.toons[0].sos_calls)
         self.assertFalse([a for a in legal_actions(board) if a.sos])
 
-    def test_a_second_vp_gets_a_fresh_budget(self):
-        """THE OWNER'S SECOND RUN. Two VPs without closing the panel: the
-        board never vanished with no boss known, so the first fight's
-        spending carried into the second."""
-        from solver.live.realms_session import BossBattle
-
-        w = self._worker()
-        w._boss_obj = w._boss_battle = None
-        w._boss_players = 0
-        w._boss_manual = None
-
-        def board(boss_id, moe, battle=9, number=1):
-            res = self._result(0, 0, {"Moe Zart": moe, "Flippy": 9})
-            res.boss = BossBattle("vp", boss_id, number, 0, 1)
-            res.battle_id, res.suit_ids = battle, ()
-            w._track_boss(res)
-            w._cap_holdings(res)
-            return res
-
-        board(500, 9)
-        board(500, 6)                       # three calls in round one
-        self.assertEqual(3, w.spent_sos)
-        board(500, 6, battle=10, number=2)  # [OWNER] round two: no reset
-        self.assertEqual(3, w.spent_sos)
-        fresh = board(501, 6)               # the next VP: a fresh budget
-        self.assertEqual(0, w.spent_sos)
-        self.assertEqual({"Moe Zart": 5, "Flippy": 5}, fresh.state.toons[0].sos_cards)
-
-    def test_the_intermission_between_rounds_resets_nothing(self):
-        """[OWNER] between a VP's rounds the panel detects no fight for a
-        while, and round two's first board may arrive before its link to
-        the boss. Neither may restart the count or the budget."""
+    def test_the_intermission_keeps_the_boss_count(self):
+        """[OWNER] between a VP's rounds no fight is detected for a while,
+        and round two's first board may arrive before its link to the
+        boss: neither may restart the cog count."""
         from types import SimpleNamespace
         from solver.live.realms_session import BossBattle
 
         w = self._worker()
-        w._boss_obj = w._boss_battle = None
-        w._boss_players = 0
-        w._boss_manual = None
 
-        def tick(res):
-            w._track_boss(res)
-            w._cap_holdings(res)
-
-        def board(moe, boss=True, number=1, battle=9):
-            res = self._result(0, 0, {"Moe Zart": moe, "Flippy": 9})
+        def board(boss=True, number=1, battle=9):
+            res = self._result(0, 0, {})
             res.boss = BossBattle("vp", 500, number, 0, 1) if boss else None
             res.battle_id, res.suit_ids, res.boss_room = battle, (), True
             return res
 
-        tick(board(9))
-        tick(board(6))                                  # three calls
-        w.boss_tracker().defeated = 20                  # round one done
-        nothing = SimpleNamespace(state=None)
-        tick(nothing)
-        tick(nothing)                                   # the intermission
-        tick(board(6, boss=False, battle=10))           # boss not linked yet
-        tick(nothing)
-        tick(board(6, number=2, battle=10))             # round two proper
-        self.assertEqual(3, w.spent_sos)
+        w._track_boss(board())
+        w.boss_tracker().defeated = 20
+        w._track_boss(SimpleNamespace(state=None))
+        w._track_boss(board(boss=False, battle=10))      # not linked yet
+        w._track_boss(board(number=2, battle=10))
         self.assertEqual(20, w.boss_tracker().defeated)
         self.assertEqual("vp", w.boss_tracker().kind)
-
-    def test_the_baseline_resets_between_fights(self):
-        w = self._worker()
-        w._cap_holdings(self._result(0, 0, {"Flippy": 9}))
-        from types import SimpleNamespace
-        w._cap_holdings(SimpleNamespace(state=None))
-        self.assertIsNone(w._fight_start)
-        self.assertEqual(0, w.spent_sos)
 
 
 class BossContextTest(unittest.TestCase):

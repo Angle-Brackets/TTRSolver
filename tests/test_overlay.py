@@ -1084,7 +1084,6 @@ class SpentBudgetRunsDownTest(unittest.TestCase):
         w.max_fires = holdings.get("fires", 0)
         w.max_unites = holdings.get("unites", 0)
         w.max_sos = holdings.get("sos", 0)
-        w.spent_fires = w.spent_unites = w.spent_sos = 0
         return w
 
     def test_a_fire_comes_off_the_count(self):
@@ -1142,14 +1141,15 @@ class SpentBudgetRunsDownTest(unittest.TestCase):
         w.set_max_fires(3)
         self.assertEqual(3, w.remaining("fires"))
 
-    def test_a_new_fight_restores_everything(self):
+    def test_the_box_on_screen_ticks_down(self):
+        """[OWNER] a session budget: the player sees it fall and raises it
+        when it runs out. Nothing resets it between fights."""
         from solver.state import Action
 
         w = self._worker(fires=5, sos=2)
         w.note_spent(Action(track=None, sos="Flippy"))
         w.note_spent(Action(track=None, target_index=0, fire=True))
-        w.reset_spending()
-        self.assertEqual((5, 2), (w.remaining("fires"), w.remaining("sos")))
+        self.assertEqual((4, 1), (w.model.max_fires, w.model.max_sos))
 
     def test_the_solver_is_given_what_is_left(self):
         """Not `max_fires`. The whole point: a spent slip must not be

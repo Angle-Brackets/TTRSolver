@@ -87,14 +87,6 @@ class AdviceWorker(threading.Thread):
         # `reconsider` has to reject the move rather than its wording.
         self._rl_action = None
         self._search_action = None
-        # SPENT SO FAR IN THIS FIGHT. The boxes are what the player
-        # says they are carrying; these are what the advice has already
-        # used up, so the solver plans with what is LEFT and the page can
-        # show it. Without this the panel offered five pink slips on
-        # every round of a fight in which it had already advised five.
-        self.spent_fires = 0
-        self.spent_unites = 0
-        self.spent_sos = 0
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._asked = threading.Event()
@@ -182,30 +174,44 @@ class AdviceWorker(threading.Thread):
             self.toon_count = max(1, min(4, value))
         self._post()
 
+    # THE BOXES ARE A SESSION BUDGET [OWNER]: what the panel may still
+    # plan with while it is open. Every spend ticks its box down, on
+    # screen too, and when one runs out the player raises it. Nothing
+    # resets -- there is no fight boundary to detect, so none to get
+    # wrong. Per-fight baselines were tried and broke twice: a second VP
+    # inherited the first one's spending, and a VP's intermission could
+    # read as the fight ending.
+
     def remaining(self, name: str) -> int:
-        """What is left of one holding: what you carry, minus what the
-        advice has already spent. Never below zero."""
-        return max(0, int(getattr(self, "max_" + name, 0))
-                   - int(getattr(self, "spent_" + name, 0)))
+        """What is left of one holding: its box. Never below zero."""
+        return max(0, int(getattr(self, "max_" + name, 0)))
+
+    def spend(self, name: str, count: int = 1) -> None:
+        """Tick one box down by `count`, in the model the page draws too."""
+        box = "max_" + name
+        left = max(0, int(getattr(self, box, 0)) - max(0, int(count)))
+        setattr(self, box, left)
+        model = getattr(self, "model", None)
+        if model is not None:
+            setattr(model, box, left)
 
     def note_spent(self, action, unite=None) -> None:
-        """Charge a round's advice against the holdings.
+        """Charge a round's advice against the boxes.
 
-        Called once per ROUND, not once per recomputation -- the same
-        move is re-scored several times while the player thinks, and
-        charging every score would empty the pouch with nothing thrown.
-        It's an ASSUMPTION that the player took the advice, but a
-        correctable one: the box stays a control the player can put a
-        number back into.
+        For a client that cannot SEE a slip, unite or card leave the toon
+        (TTR's screen): it ASSUMES the advice was taken. Called once per
+        ROUND, not once per recomputation -- the same move is re-scored
+        several times while the player thinks. Correctable: the box is a
+        control the player can put a number back into.
         """
         if unite is not None:
-            self.spent_unites += 1
+            self.spend("unites")
         if action is None:
             return
         if getattr(action, "fire", False):
-            self.spent_fires += 1
+            self.spend("fires")
         elif getattr(action, "sos", None):
-            self.spent_sos += 1
+            self.spend("sos")
 
     # -- the boss fight ----------------------------------------------------
 
@@ -287,10 +293,6 @@ class AdviceWorker(threading.Thread):
         left = tracker.left_in_fight(on_field) if tracker.kind else None
         model.cogs_left = -1 if left is None else left
 
-    def reset_spending(self) -> None:
-        """A new fight starts with everything the player says they hold."""
-        self.spent_fires = self.spent_unites = self.spent_sos = 0
-
     def _set_holding(self, name: str, count) -> None:
         """One player-declared consumable count, clamped and mirrored.
 
@@ -305,10 +307,6 @@ class AdviceWorker(threading.Thread):
         with self._lock:
             setattr(self, name, value)
             setattr(self.model, name, value)
-            # The player correcting the box is also correcting what we
-            # thought had been spent -- they can see the pouch and we
-            # cannot.
-            setattr(self, "spent_" + name[4:], 0)
         self._settings_changed()
 
     def set_max_fires(self, count) -> None:

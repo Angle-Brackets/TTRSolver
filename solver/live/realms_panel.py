@@ -384,35 +384,35 @@ class RealmsWorker(AdviceWorker):
                 self._post()
             time.sleep(max(0.0, POLL_INTERVAL - (time.time() - cycle)))
 
-    # Holdings at the start of the current fight, as the server reports them;
-    # None between fights. A boss fight keeps its baseline across battles.
-    _fight_start = None
+    # The toon's REAL holdings at the last poll that read them; None until
+    # the first. See `_cap_holdings`.
+    _held_last = None
 
     def _cap_holdings(self, result) -> None:
-        """Cap the board's slips, unites and SOS calls at what the boxes
-        allow minus what has REALLY been spent this fight.
+        """Tick the boxes down by what REALLY left the toon, then cap the
+        board's slips, unites and SOS calls at them.
 
-        The screen-reading panel cannot see a slip, unite or card leave
-        the toon, so it charges the advice and assumes it was taken. This
-        client can: the toon's own counts arrive every poll. Charging
-        advice here emptied a five-card SOS budget within a few rounds of
-        a VP without a card being called, after which no SOS was ever
-        planned again. So spent = held at the fight's start - held now.
+        The boxes are a session budget (`AdviceWorker.remaining`). The
+        screen-reading panel cannot see a slip, unite or card leave the
+        toon, so it charges the advice; this client can -- the toon's own
+        counts arrive every poll -- so it charges only what was really
+        spent. Charging advice here once emptied a five-card SOS budget
+        within a few rounds of a VP without a card being called. A count
+        that RISES (a reward, a restock) grants nothing: the box is what
+        the player chose to spend, not what they hold.
         """
         state = getattr(result, "state", None)
         if state is None or not state.toons:
-            if not self.boss_tracker().kind:
-                self._fight_start = None
-                self.spent_fires = self.spent_unites = self.spent_sos = 0
             return
         toon = state.toons[0]
         now = {"fires": int(toon.fires), "unites": int(toon.unites_held),
                "sos": sum(max(0, int(n)) for n in (toon.sos_cards or {}).values())}
-        if self._fight_start is None:
-            self._fight_start = dict(now)
-        for name in now:
-            setattr(self, "spent_" + name,
-                    max(0, self._fight_start[name] - now[name]))
+        last = self._held_last
+        self._held_last = now
+        if last is not None:
+            for name, held in now.items():
+                if last[name] > held:
+                    self.spend(name, last[name] - held)
         toon.fires = min(toon.fires, self.remaining("fires"))
         toon.unites_held = min(toon.unites_held, self.remaining("unites"))
         calls = self.remaining("sos")
@@ -557,12 +557,6 @@ class RealmsWorker(AdviceWorker):
         if boss is not None and boss.boss_id != self._boss_obj:
             if self._boss_obj is not None:
                 tracker.reset()
-            # A NEW FIGHT, so a fresh budget. Without this a second VP in
-            # the same session inherited the first one's spending -- the
-            # owner's second run began with two SOS calls and no unites
-            # left by the panel's books.
-            self._fight_start = None
-            self.spent_fires = self.spent_unites = self.spent_sos = 0
             tracker.party_size = 1
             self._boss_obj = boss.boss_id
             self._boss_battle = None
