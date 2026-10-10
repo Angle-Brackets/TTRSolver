@@ -143,6 +143,18 @@ class ToonState:
     # toon that holds one.
     sos_cards: Dict[str, int] = field(default_factory=dict)
 
+    # CALLS LEFT THIS FIGHT, across every card, or None for no limit
+    # beyond the cards themselves. A budget is one pool -- "five SOS this
+    # VP" -- and spreading it as five of EACH card let a playout call
+    # eighty: Lil Oldman five times, Moe Zart five times, all free.
+    sos_calls: Optional[int] = None
+
+    def sos_held(self, name: str) -> int:
+        """How many of `name` this toon may still call."""
+        if self.sos_calls is not None and self.sos_calls <= 0:
+            return 0
+        return self.sos_cards.get(name, 0)
+
     # Pink slips, "fires". [CONFIRMED] wiki: they fire a targeted cog out
     # of battle with a cannon and eliminate BOTH layers of a Version 2.0.
     # [OWNER] from play: using one costs the toon's action for the round,
@@ -476,6 +488,12 @@ class BattleState:
     toons_hit_rounds: int = 0
     cogs_miss_rounds: int = 0
 
+    # REALMS PLAYS THOSE TWO AS TOONTOWN ONLINE DID: [OWNER] 100% to hit,
+    # or every cog missing, for the ONE turn after the call -- not TTR's
+    # 75% for 3-5. A property of the server, so the Realms reader sets it
+    # on the board; TTR's numbers stay the default (docs/realms.md).
+    sos_one_round: bool = False
+
     def __init__(self, cogs: List[CogState], toon: Optional[ToonState] = None,
                  toons: Optional[List[ToonState]] = None,
                  round_num: int = 0, free_passes: int = 3,
@@ -483,7 +501,8 @@ class BattleState:
                  holdout: Optional[List[CogState]] = None,
                  kind: str = "street", street: str = "",
                  allies_standing: int = 0,
-                 toons_hit_rounds: int = 0, cogs_miss_rounds: int = 0):
+                 toons_hit_rounds: int = 0, cogs_miss_rounds: int = 0,
+                 sos_one_round: bool = False):
         if (toon is None) == (toons is None):
             raise ValueError("pass exactly one of `toon` or `toons`")
         self.toons = list(toons) if toons is not None else [toon]
@@ -492,6 +511,7 @@ class BattleState:
         self.free_passes = free_passes
         self.toons_hit_rounds = toons_hit_rounds
         self.cogs_miss_rounds = cogs_miss_rounds
+        self.sos_one_round = sos_one_round
         self.cogs_remaining = cogs_remaining
         self.holdout = list(holdout) if holdout else []
         self.kind = kind
@@ -549,6 +569,7 @@ class BattleState:
                 unite_stock=t.unite_stock,
                 toon_up_values=t.toon_up_values,
                 sos_cards=t.sos_cards,
+                sos_calls=t.sos_calls,
                 # Pink slips are SPENT, so they must be carried. A field
                 # left out of this list defaults to zero on every clone
                 # and silently evaporates across the search.
@@ -564,6 +585,7 @@ class BattleState:
             allies_standing=self.allies_standing,
             toons_hit_rounds=self.toons_hit_rounds,
             cogs_miss_rounds=self.cogs_miss_rounds,
+            sos_one_round=self.sos_one_round,
         )
 
     def active_cogs(self) -> List[CogState]:
@@ -636,9 +658,9 @@ class BattleState:
             for (track, _level), n in toon.gag_counts.items())
         for toon in self.active_toons():
             trained = {t for t in attack if toon.track_exp.get(t, 0) > 0}
-            for name, count in (getattr(toon, "sos_cards", {}) or {}).items():
+            for name in (getattr(toon, "sos_cards", {}) or {}):
                 card = sos_mod.BY_NAME.get(name)
-                if card is None or count <= 0:
+                if card is None or toon.sos_held(name) <= 0:
                     continue
                 if card.kind in (sos_mod.DAMAGE_ALL, sos_mod.DAMAGE_UNLURED):
                     return True

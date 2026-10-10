@@ -307,3 +307,36 @@ runs without being asked. All three default to 0.
 The counts in this capture (998/999 per unite, 100 per card) are a
 maxed-out sandbox toon on an offline build, not typical play. They show
 the FORMAT, and nothing about what a real player carries.
+
+The SOS cap is ONE POOL. "Five SOS this fight" used to reach the solver
+as five of every card held, so a playout with sixteen card types could
+call eighty -- and did, suggesting Lil Oldman or Moe Zart on most boards
+of a VP. `ToonState.sos_calls` carries the pool; `sos_held` is how every
+engine asks what it may call.
+
+## What Realms plays differently from TTR
+
+**Toons Hit and Cogs Miss are Toontown Online's.** [OWNER] every gag
+hits, or every cog misses, for the ONE turn after the call -- not TTR's
+75% for 3-5 rounds. `BattleState.sos_one_round`, set by the Realms
+reader and nowhere else; `sos.active` reads the counters under either
+rule. TTR's numbers stay the default.
+
+## Reading a VP live: three things the first log turned up
+
+**A killed cog stays on the field at 0 HP**, through its death animation
+and into the next turn -- and on a lured hit the knockback bonus is not
+in the HP until then either [OWNER]. Fourteen of the first log's 34
+boards had one, and every engine advised group gags and SOS cards into
+the corpses. `cog_from_object` marks a 0 HP cog dead (unless it has a
+revive left), keeping its index so targets still match the roster.
+
+**Rounds are counted on ENTERING the movie state**, not per datagram.
+Every datagram arrives twice, and counting each aged every Lure two
+rounds a round: a $10 Bill read 2 rounds left after one round of four,
+a Presentation 4 of 8, and the engines planned around lures about to
+lapse.
+
+**Every row records all three engines**, stated rows included -- they
+used to drop the Playout row's move, which is why the first log could
+not compare it on six boards.

@@ -73,6 +73,18 @@ class _Bare(unittest.TestCase):
 
 
 @unittest.skipUnless(HAVE_MODULE, "solver.live.realms did not import")
+class RoundCountTest(_Bare):
+    """A round is one ENTRY into the movie state."""
+
+    def test_the_doubled_datagram_counts_once(self):
+        obj = self.listener(index=object())
+        for name in ("WaitForInput", "PlayMovie", "PlayMovie",
+                     "WaitForInput", "WaitForInput", "PlayMovie", "PlayMovie"):
+            obj._note_state(9, (name, 0))
+        self.assertEqual(2, obj.battle_rounds[9])
+
+
+@unittest.skipUnless(HAVE_MODULE, "solver.live.realms did not import")
 class FramingTest(_Bare):
 
     def test_a_split_datagram_is_held_not_parsed(self):

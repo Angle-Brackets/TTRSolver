@@ -179,6 +179,14 @@ arrangements of pale metal. Matching on shape alone gave margins of
 0.07–0.22 and got 720p wrong; with tint it is 0.21–0.61 and correct from
 854x480 to 4K.
 
+**Never hand an engine the live board.** `hybrid.climb` applies the
+unite it chooses to the board it is given -- right inside a simulation,
+where that board is about to be played. Both panels once passed their
+live board, which the Search row, the explanations and the feedback log
+then read: a Toon-Up unite PPO merely considered turned 12 laff into 92,
+and a Gag-Up invented the "extra Birthday Cakes" both rows planned with.
+Engines get `state.clone()`.
+
 `solver/live/session.py` joins the sources into a `BattleState` and
 `solver/live/advise.py` runs the solver on it. Each source is
 authoritative for one thing and must not be substituted for another:
@@ -443,6 +451,17 @@ Things that hold it together, each measured:
   with most of the pouch unthrown. The owner calls that fight trivial,
   so the gap points at cog damage or attack rate, not at the search.
 
+- **SOS cards are one pool** (`ToonState.sos_calls`, read through
+  `sos_held`): a five-call budget once reached the solver as five of
+  every card, and the Playout row called an SOS on 13 of 28 boards of a
+  Realms VP. A per-call price on top only delayed calls and lost (43,
+  38, 30 of 100 at 0, 0.5, 1 cog), so `SOS_CALL_PRICE` is 0.
+- **Wasted reach is charged by all three engines**
+  (`simulator.wasted_reach`, [OWNER] preference): any hit-all, gag or
+  card, on cogs it cannot reach (Drop on lured, Lure on lured, Trap on
+  trapped) or whose lure it undoes (a Trap waking lured cogs). It costs
+  no wins: 43 and 43 of 100 Realms VPs with it and without (+2/-2).
+
 The panel runs it anytime: chunks of rollouts across `PLAYOUT_WORKERS`
 processes, the best move posted after each chunk, a challenger replacing
 it only when it leads by a paired standard error.
@@ -494,9 +513,14 @@ plain arrays.
 ## Tools for measuring
 
 - `tools/sweep.py` -- paired sweeps over the same simulated fights
-  (`--regime solo-vp|solo-building|my-building|party-building|duo-vp|party-vp|ceo`,
+  (`--regime solo-vp|solo-building|my-building|party-building|duo-vp|party-vp|ceo|realms-vp`,
   `--arms climb playout top3 playout:pouch=0 ...`). The harness behind the
   playout figures.
+- `tools/round_parity.py` -- the three implementations of a round (exact
+  `outcomes`, solo `simulator.step`, `party.step`) held against each
+  other on random positions; any expected outcome that differs beyond
+  sampling error is a rule one path is missing. Run it after touching a
+  rule; `tests/test_round_parity.py` is the small fixed-seed version.
 - `tools/ground_truth.py` -- the playout-labelled benchmark (`build`) and
   a split-half score for any judge (`score`).
 - `tools/video_scan.py` -- the screen readers over a recording; needs an

@@ -701,8 +701,12 @@ class AdviceWorker(threading.Thread):
                 model.gag_at = time.time()
                 model.track = model.playout_track or None
                 model.gag_level = model.playout_gag_level or None
-                model.unite = model.playout_unite
                 model.engine = "playout"
+            if model.engine == "playout":
+                # OUTSIDE the gag-changed test: a later chunk often keeps
+                # the move and adds (or drops) its unite, and gating this
+                # on the gag left the unite off screen until a swap.
+                model.unite = model.playout_unite
             self._sync_explanation(model)
         self._post()
 

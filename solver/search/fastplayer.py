@@ -111,14 +111,14 @@ def features(state: BattleState) -> Tuple[List[float], List[bool]]:
     from ..rl import env as env_mod
 
     x = list(env_mod.encode(state, 0, [None] * len(state.toons)))
-    held = getattr(state.toons[0], "sos_cards", None) or {}
-    names = sos_names()
-    x += [min(int(held.get(n, 0)), 3) / 3.0 for n in names]
     toon = state.toons[0]
+    names = sos_names()
+    held = {n: toon.sos_held(n) for n in names}
+    x += [min(int(held[n]), 3) / 3.0 for n in names]
     x += [min(int(getattr(toon, "unites_held", 0)), UNITES_SCALE) / UNITES_SCALE,
           int(getattr(toon, "unite_cooldown", 0)) / 3.0]
     mask = list(env_mod.legal_mask(state, 0))
-    mask += [int(held.get(n, 0)) > 0 for n in names]
+    mask += [int(held[n]) > 0 for n in names]
     return x, mask
 
 

@@ -419,6 +419,9 @@ class RealmsWorker(AdviceWorker):
         toon.sos_cards = ({name: min(int(n), calls)
                            for name, n in (toon.sos_cards or {}).items() if n > 0}
                           if calls else {})
+        # ONE POOL: the cap above stops any single card exceeding the
+        # budget, this stops them together exceeding it.
+        toon.sos_calls = calls
 
     def tick(self) -> None:
         """One poll. Split out from `run` so it is testable with a fake
@@ -793,6 +796,7 @@ class RealmsWorker(AdviceWorker):
                 state=state,
                 rl=self._rl_action,
                 search=self._search_action,
+                playout=getattr(self, "_playout_action", None),
                 preferred=action,
                 engine_shown=self.model.engine or "",
                 rejected=tuple(sorted(map(repr, self._rejected))),
@@ -917,7 +921,11 @@ class RealmsWorker(AdviceWorker):
             # 88.8%->98.4% and 85.2%->99.2%, p<0.001 both, and fewer
             # slips spent (18.4->14.5). Costs 5ms against a poll
             # interval measured in hundreds.
-            plan = hybrid.climb(state, random.Random(0), budget=PANEL_BUDGET,
+            # A COPY: `climb` applies its unite in place, and this board
+            # is the one the Search row, the explanations and the log read
+            # next -- see `advise.first_answer`.
+            plan = hybrid.climb(state.clone(), random.Random(0),
+                                budget=PANEL_BUDGET,
                                 reject=frozenset(self._rejected))
             # The unite `climb` chose, if any. Read straight after the
             # call: it's a module global the next call overwrites.

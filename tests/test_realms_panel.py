@@ -1051,6 +1051,25 @@ class ObservedSpendingTest(unittest.TestCase):
         w._cap_holdings(out)
         self.assertEqual({}, out.state.toons[0].sos_cards)
 
+    def test_the_budget_is_one_pool_across_every_card(self):
+        """THE PLAYOUTS' SOS SPAM: a budget of 5 became 5 of EACH card,
+        so a playout could call Lil Oldman five times and Moe Zart five
+        times in the same fight."""
+        from solver.simulator import apply_toon_action, legal_actions
+        from solver.state import Action, CogState
+
+        w = self._worker()
+        w.max_sos = 2
+        out = self._result(0, 0, {"Moe Zart": 9, "Lil Oldman": 9, "Flippy": 9})
+        w._cap_holdings(out)
+        board = out.state
+        board.cogs = [CogState("flunky", "bossbot", 12, 200, 200)]
+        self.assertEqual(2, board.toons[0].sos_calls)
+        apply_toon_action(board, Action(track=None, sos="Flippy"), hit=True)
+        apply_toon_action(board, Action(track=None, sos="Lil Oldman"), hit=True)
+        self.assertEqual(0, board.toons[0].sos_calls)
+        self.assertFalse([a for a in legal_actions(board) if a.sos])
+
     def test_the_baseline_resets_between_fights(self):
         w = self._worker()
         w._cap_holdings(self._result(0, 0, {"Flippy": 9}))

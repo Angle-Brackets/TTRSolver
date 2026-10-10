@@ -177,8 +177,8 @@ class Decision:
         """
         out: Dict[str, Optional[bool]] = {}
         mine = self.player_move()
-        for name in ("rl", "search"):
-            proposed = getattr(self, name)
+        for name in ("rl", "search", "playout"):
+            proposed = getattr(self, name, None)
             if mine is None or proposed is None:
                 out[name] = None
             else:

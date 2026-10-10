@@ -551,12 +551,13 @@ def _sos_probes(state, seat: int):
     `SOS_PRICE` charged per call, a card that is not clearly better than
     the gag it displaces loses on its own.
     """
-    held = getattr(state.toons[seat], "sos_cards", None)
+    toon = state.toons[seat]
+    held = getattr(toon, "sos_cards", None)
     if not held:
         return []
     return [Action(track=None, sos=name)
-            for name, count in held.items()
-            if count > 0 and name in sos_mod.BY_NAME]
+            for name in held
+            if toon.sos_held(name) > 0 and name in sos_mod.BY_NAME]
 
 
 def _cheapest_lures(state, seat: int, legal=None):

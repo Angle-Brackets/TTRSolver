@@ -931,6 +931,20 @@ def _score_leaf(state: BattleState, plan, hits, record=None,
                     if a is not None and getattr(a, "sos", None))
     if sos_calls:
         spend_price += sos_mod.SOS_PRICE * sos_calls
+    # REACH THROWN AWAY: the wasted share of a card's price, or of a
+    # group gag's. See `simulator.wasted_reach`.
+    for seat, action in enumerate(plan):
+        waste = simulator.wasted_reach(state, action)
+        if not waste:
+            continue
+        if action.sos:
+            spend_price += sos_mod.SOS_PRICE * waste
+        elif seat < len(state.toons):
+            toon = state.toons[seat]
+            gag_price += waste * _gag_units(
+                action.track, action.level,
+                toon.track_exp.get(action.track, 0),
+                held=toon.gag_counts.get((action.track, action.level), 0))
     return (landed
             + weights.QUICK_W["heal"] * restored
             + weights.QUICK_W["armed"] * armed_credit(state, probe)
@@ -1107,7 +1121,7 @@ def _playable(state: BattleState, plan) -> bool:
             # the plan is rejected as unplayable before it is ever
             # scored. Which is exactly what happened: every SOS came
             # back at -inf.
-            if toon.sos_cards.get(action.sos, 0) <= 0:
+            if toon.sos_held(action.sos) <= 0:
                 return False
             continue
         if toon.gag_counts.get((action.track, action.level), 0) <= 0:

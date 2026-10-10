@@ -178,7 +178,19 @@ ACCURACY_SWING = 75
 SOS_PRICE = 250.0
 
 
-def describe(card: Card, recipients: int = 1) -> str:
+def active(state, field: str) -> bool:
+    """Whether the Toons Hit / Cogs Miss counter `field` is in force.
+
+    TTR's counter covers the round it is called and the rounds after;
+    under `sos_one_round` it is set to 2 and only the round after counts.
+    """
+    rounds = getattr(state, field, 0)
+    if getattr(state, "sos_one_round", False):
+        return rounds == 1
+    return rounds > 0
+
+
+def describe(card: Card, recipients: int = 1, one_round: bool = False) -> str:
     """One phrase naming the card and what it will do.
 
     For the advice line, so a player reads "Flippy -- 180 laff to you"
@@ -206,6 +218,10 @@ def describe(card: Card, recipients: int = 1) -> str:
                 else card.track.value.replace("_", "-").title())
         return (f"{card.name} -- restocks {card.amount} gags of "
                 f"{what}, highest first")
+    if card.kind == TOONS_HIT and one_round:
+        return f"{card.name} -- every gag hits next turn"
+    if card.kind == COGS_MISS and one_round:
+        return f"{card.name} -- every cog misses next turn"
     if card.kind == TOONS_HIT:
         rounds = "round" if card.amount == 1 else "rounds"
         return (f"{card.name} -- +{ACCURACY_SWING}% gag accuracy for "
@@ -337,6 +353,12 @@ def apply(card: Card, state, caller: int = 0, rng=None) -> Dict[str, int]:
     if card.kind in (TOONS_HIT, COGS_MISS):
         field = ("toons_hit_rounds" if card.kind == TOONS_HIT
                  else "cogs_miss_rounds")
+        if getattr(state, "sos_one_round", False):
+            # 2, ticked to 1 by this round's cog phase: `active` reads
+            # only 1 under this rule, so the effect covers exactly the
+            # NEXT round's toons and cogs, never this one's.
+            setattr(state, field, 2)
+            return {"rounds": 1, "effect": card.kind}
         setattr(state, field, card.amount)
         return {"rounds": card.amount, "effect": card.kind}
 

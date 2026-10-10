@@ -203,7 +203,8 @@ def forced_accuracy(track: Track, target_cogs):
 
 def calc_toon_accuracy(track: Track, level: int, toon: ToonState,
                         target_cogs, lure_tree_planted: bool = False,
-                        all_cogs=None, toons_hit: bool = False) -> int:
+                        all_cogs=None, toons_hit: bool = False,
+                        toons_always_hit: bool = False) -> int:
     """Full atkAcc, bonus included, capped at 95. This is the value the
     hit/miss roll uses. For the wake-up input, use
     lure_accuracy_before_bonus() instead -- it is a different number.
@@ -219,6 +220,8 @@ def calc_toon_accuracy(track: Track, level: int, toon: ToonState,
     forced = forced_accuracy(track, target_cogs)
     if forced is not None:
         return forced
+    if toons_hit and toons_always_hit:
+        return 100    # Realms plays Toons Hit as TTO did: every gag lands
 
     acc = (calc_prop_acc(track, level, lure_tree_planted)
            + calc_track_exp(toon, track)

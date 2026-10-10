@@ -451,6 +451,7 @@ def _party_cog_phase(state: BattleState, healed: List[int], rng) -> None:
     same shape as a toon's group gag: it either connects or it does not.
     """
     damage_taken = [0 for _ in state.toons]
+    miss_factor = simulator.cogs_miss_factor(state)
     for cog in state.active_cogs():
         if cog.status.lured and not simulator._tick_lure(cog, rng):
             continue    # lure held: cog skips its attack
@@ -458,6 +459,7 @@ def _party_cog_phase(state: BattleState, healed: List[int], rng) -> None:
         attack_name = mechanics.pick_cog_attack(cog, rng)
         damage, accuracy = mechanics.cog_attack_damage_and_accuracy(
             cog, attack_name, rng)
+        accuracy = int(round(accuracy * miss_factor))
         if not mechanics.roll_hit(accuracy, rng):
             continue
         if data.is_group_attack(attack_name):

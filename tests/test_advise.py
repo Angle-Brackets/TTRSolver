@@ -85,6 +85,33 @@ class UnitesTest(unittest.TestCase):
         A._with_unites(None, 3)
 
 
+class FirstAnswerAliasingTest(unittest.TestCase):
+    """THE EXTRA BIRTHDAY CAKES. `climb` applies its unite to the board it
+    is handed; handed the live board, a unite PPO merely considered healed
+    the laff and restocked the pouch that the Search row then planned on."""
+
+    def test_the_board_comes_back_untouched(self):
+        try:
+            import numpy  # noqa: F401
+        except ImportError:
+            self.skipTest("the policy needs numpy")
+        from solver import data
+        from solver.state import BattleState, CogState, ToonState, Track
+
+        toon = ToonState(12, 100, {Track.THROW: 7, Track.SQUIRT: 7, Track.LURE: 7},
+                         {(Track.THROW, 5): 3, (Track.SQUIRT, 5): 3, (Track.LURE, 4): 2})
+        toon.unites_held = 3
+        hp = data.cog_max_hp(10)
+        board = BattleState(toons=[toon], cogs=[
+            CogState("mr_hollywood", "sellbot", 10, hp, hp) for _ in range(3)])
+        before = (toon.laff, toon.unites_held, dict(toon.gag_counts), toon.unite_cooldown)
+        _act, unite = A.first_answer(board)
+        if not unite:
+            self.skipTest("the policy chose no unite here; nothing to alias")
+        t = board.toons[0]
+        self.assertEqual(before, (t.laff, t.unites_held, dict(t.gag_counts), t.unite_cooldown))
+
+
 class BudgetTest(unittest.TestCase):
 
     def test_latency_is_bounded_by_time_not_depth(self):

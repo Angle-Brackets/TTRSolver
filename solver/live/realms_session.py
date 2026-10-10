@@ -170,6 +170,16 @@ def cog_from_object(obj, lured: bool = False,
         except (AttributeError, TypeError, ValueError):
             pass
 
+    if cog.hp <= 0 and not getattr(cog.status, "revives", 0):
+        # DYING, NOT ALIVE. [OWNER] a cog killed this round stays on the
+        # field at 0 HP through its death animation, into the next turn.
+        # Read as alive it drew every engine toward group gags and SOS
+        # cards that "killed" cogs already dead: Moe Zart into a Mr.
+        # Hollywood and three corpses. Marked rather than dropped so the
+        # indices still match the roster the player targets by.
+        cog.hp = 0
+        cog.status.is_dead = True
+
     if trap_level is not None and not lured:
         # A trap is WATCHED, not read: `setMembers`' slot is only
         # re-broadcast on a membership change, so one laid mid-round
@@ -494,7 +504,7 @@ def build_state(listener, player_do_id: Optional[int] = None,
     return RealmsBuild(
         BattleState(toon=toon, cogs=cogs, round_num=round_num,
                     allies_standing=members.allies_standing,
-                    kind=battle_kind(battle)), [],
+                    kind=battle_kind(battle), sos_one_round=True), [],
         boss=boss_of(listener, battle),
         battle_id=getattr(battle, "do_id", None),
         suit_ids=tuple(members.suits),

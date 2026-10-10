@@ -3005,7 +3005,7 @@
     1.0
    ],
    "legal": 17,
-   "quick": 1199.977,
+   "quick": 1195.7547,
    "incoming": 8.9475,
    "survival": 2.7941,
    "at_risk": 0.0,
@@ -4345,7 +4345,7 @@
     1.0
    ],
    "legal": 27,
-   "quick": 966.9988,
+   "quick": 944.6654,
    "incoming": 22.145,
    "survival": 1.3096,
    "at_risk": 0.0,
@@ -4680,7 +4680,7 @@
     1.0
    ],
    "legal": 32,
-   "quick": 181.673,
+   "quick": 178.5064,
    "incoming": 18.7275,
    "survival": 0.0534,
    "at_risk": 1.0,
@@ -9705,7 +9705,7 @@
     1.0
    ],
    "legal": 11,
-   "quick": 1605.1192,
+   "quick": 1571.6192,
    "incoming": 4.2175,
    "survival": 4.0,
    "at_risk": 0.0,
@@ -11380,7 +11380,7 @@
     1.0
    ],
    "legal": 19,
-   "quick": 266.4882,
+   "quick": 232.9882,
    "incoming": 5.6025,
    "survival": 0.714,
    "at_risk": 1.0,
@@ -15065,7 +15065,7 @@
     1.0
    ],
    "legal": 27,
-   "quick": 117.4292,
+   "quick": 114.2625,
    "incoming": 11.9175,
    "survival": 0.0839,
    "at_risk": 1.0,
@@ -19755,7 +19755,7 @@
     1.0
    ],
    "legal": 14,
-   "quick": 862.8233,
+   "quick": 829.3233,
    "incoming": 3.3825,
    "survival": 2.3651,
    "at_risk": 0.0,
@@ -25115,7 +25115,7 @@
     1.0
    ],
    "legal": 20,
-   "quick": 1646.0718,
+   "quick": 1636.5718,
    "incoming": 3.435,
    "survival": 4.0,
    "at_risk": 0.0,
@@ -29146,7 +29146,7 @@
     0.0,
     1.0
    ],
-   "pick": "lure/2/None"
+   "pick": "sound/4/None"
   },
   {
    "obs": [
@@ -30140,7 +30140,7 @@
     1.0
    ],
    "legal": 26,
-   "quick": 1451.2275,
+   "quick": 1417.7275,
    "incoming": 5.92,
    "survival": 4.0,
    "at_risk": 0.0,
@@ -32820,7 +32820,7 @@
     1.0
    ],
    "legal": 17,
-   "quick": 1122.3406,
+   "quick": 1100.0073,
    "incoming": 11.3475,
    "survival": 2.2031,
    "at_risk": 0.0,
@@ -33825,7 +33825,7 @@
     1.0
    ],
    "legal": 33,
-   "quick": 841.1481,
+   "quick": 824.3981,
    "incoming": 20.5725,
    "survival": 1.118,
    "at_risk": 1.0,
@@ -36840,7 +36840,7 @@
     1.0
    ],
    "legal": 25,
-   "quick": 246.8436,
+   "quick": 224.5103,
    "incoming": 28.58,
    "survival": 0.5948,
    "at_risk": 2.0,

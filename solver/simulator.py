@@ -106,7 +106,8 @@ def legal_actions(state: BattleState) -> List[Action]:
     # SOS TOONS, offered only when held. An SOS costs the turn, so it's
     # an ordinary action beside the gags, and finite and strictly
     # decreasing like a pink slip.
-    for name, held in getattr(toon, "sos_cards", {}).items():
+    for name in getattr(toon, "sos_cards", {}):
+        held = toon.sos_held(name)
         # `name in BY_NAME` is not paranoia: the live readers build
         # `sos_cards` from what the game sends, and an unknown name would
         # otherwise be offered here and raise in `apply_toon_action` --
@@ -179,6 +180,48 @@ def legal_actions(state: BattleState) -> List[Action]:
         actions.append(Action(track=None, level=0, target_index=None))
 
     return actions
+
+
+def wasted_reach(state: BattleState, action: Action) -> float:
+    """Share of the live cogs a group gag or SOS card cannot reach.
+
+    [OWNER] "a waste": Barnacle Bessie with two of four cogs lured drops
+    two pianos on nothing. Every engine already sees what the card DOES;
+    this prices what it throws away, so a card that clears two cogs is
+    not rated as if its other two pianos were free. A preference, the
+    same kind as `Objective.sos_cost`, charged by all three engines.
+
+        reaches nothing on   group Drop / Bessie-type cards: lured cogs
+                             group Lure / lure cards: cogs already lured
+                             group Trap / trap cards: cogs already trapped
+        undoes a lure on     group Trap / trap cards: lured cogs, which
+                             it wakes ([OWNER] "a penalty for unluring")
+
+    Every hit-all, gag or card alike. Not Sound or Moe Zart waking a
+    lured cog: they still land on it, which a Drop does not.
+    """
+    live = [c for c in state.cogs if not c.status.is_dead]
+    if not live or action is None:
+        return 0.0
+    if getattr(action, "sos", None):
+        card = sos_mod.BY_NAME.get(action.sos)
+        kind = getattr(card, "kind", None)
+        shape = {sos_mod.DAMAGE_UNLURED: Track.DROP, sos_mod.LURE: Track.LURE,
+                 sos_mod.TRAP: Track.TRAP}.get(kind)
+    elif (action.track is not None and action.target_index is None
+          and not action.fire and is_group_action(action.track, action.level)):
+        shape = action.track
+    else:
+        return 0.0
+    if shape == Track.DROP:
+        missed = sum(1 for c in live if c.status.lured)
+    elif shape == Track.LURE:
+        missed = sum(1 for c in live if c.status.lured)
+    elif shape == Track.TRAP:
+        missed = sum(1 for c in live if c.status.trapped or c.status.lured)
+    else:
+        return 0.0
+    return missed / float(len(live))
 
 
 def is_productive(state: BattleState, action: Action) -> bool:
@@ -302,7 +345,8 @@ def toon_action_accuracy(state: BattleState, action: Action,
         action.track, action.level, toon,
         _targets_for(state, action), all_cogs=state.cogs,
         lure_tree_planted=toon.is_organic(action.track, action.level),
-        toons_hit=state.toons_hit_rounds > 0)
+        toons_hit=sos_mod.active(state, "toons_hit_rounds"),
+        toons_always_hit=state.sos_one_round)
 
 
 def apply_toon_action(state: BattleState, action: Action,
@@ -338,14 +382,16 @@ def apply_toon_action(state: BattleState, action: Action,
         # places something a later Lure collects.
         from . import sos as sos_mod
 
-        held = toon.sos_cards.get(action.sos, 0)
+        held = toon.sos_held(action.sos)
         if held <= 0:
             raise KeyError(
                 f"toon was told to call {action.sos} and holds none -- "
                 f"the plan cannot be played")
         cards = dict(toon.sos_cards)
-        cards[action.sos] = held - 1
+        cards[action.sos] = toon.sos_cards[action.sos] - 1
         toon.sos_cards = cards
+        if toon.sos_calls is not None:
+            toon.sos_calls -= 1
         did = sos_mod.apply(sos_mod.BY_NAME[action.sos], state)
         # Reported as (laff healed, 0 damage): every scorer reads this
         # tuple's second element as damage dealt by the TOON, and an SOS
@@ -556,15 +602,21 @@ def _tick_lure(cog: CogState, rng=random) -> bool:
     return False
 
 
-def _resolve_cog_phase(state: BattleState) -> int:
-    """Returns total damage dealt to the toon this round."""
-    total_dmg = 0
+def cogs_miss_factor(state: BattleState) -> float:
+    """This round's multiplier on cog accuracy, and tick the SOS timers.
+
+    Call ONCE per round, at the cog phase -- solo and party both, which
+    is why it is one function: the party phase once skipped it, so Cogs
+    Miss did nothing in a group and Toons Hit never ran out.
+    """
     # COGS MISS. [CONFIRMED] wiki: an SOS reduces cog attack accuracy by
     # 75% for 3-5 rounds. Applied as a multiplier on the roll rather
     # than a subtraction, since "by 75%" is a reduction OF the accuracy,
     # not 75 points off it -- a 90% attack becomes 22.5%, not 15%.
     miss_factor = (1.0 - sos_mod.ACCURACY_SWING / 100.0
-                   if state.cogs_miss_rounds > 0 else 1.0)
+                   if sos_mod.active(state, "cogs_miss_rounds") else 1.0)
+    if state.sos_one_round and miss_factor < 1.0:
+        miss_factor = 0.0     # Realms: every cog misses
     # The SOS effects run down with the round, like a lure. Ticked
     # here, once, alongside the lure timers -- the cog phase is the one
     # place every round passes through exactly once.
@@ -572,6 +624,13 @@ def _resolve_cog_phase(state: BattleState) -> int:
         state.toons_hit_rounds -= 1
     if state.cogs_miss_rounds > 0:
         state.cogs_miss_rounds -= 1
+    return miss_factor
+
+
+def _resolve_cog_phase(state: BattleState) -> int:
+    """Returns total damage dealt to the toon this round."""
+    total_dmg = 0
+    miss_factor = cogs_miss_factor(state)
 
     for cog in state.active_cogs():
         if cog.status.lured and not _tick_lure(cog):
@@ -871,6 +930,12 @@ def apply_party_round(state: BattleState,
             # what gave an always-hit Trap a 5% miss and let a Drop land
             # on a lured cog -- see mechanics.forced_accuracy.
             forced = mechanics.forced_accuracy(action.track, target_cogs)
+            if forced is None and state.sos_one_round and sos_mod.active(
+                    state, "toons_hit_rounds"):
+                # Realms' Toons Hit is a certainty too, and capping it
+                # here at 95 undid it for every party round -- found by
+                # holding this path against the solo and exact ones.
+                forced = 100
             if forced is not None:
                 accuracy = forced
             else:

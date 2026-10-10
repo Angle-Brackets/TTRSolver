@@ -611,6 +611,24 @@ class UniteTest(unittest.TestCase):
         w.prefer_engine("rl")
         self.assertEqual("35 Toon-Up unite", w.model.unite)
 
+    def test_a_unite_added_to_the_same_move_appears_without_a_swap(self):
+        """THE LIVE BUG: a later chunk kept the move and added a unite,
+        and the unite only showed once the player swapped rows."""
+        from solver.state import Action
+
+        w = _worker()
+        w.model.preferred_engine = "playout"
+        say = lambda a, s: ("Pass", "", 0)    # noqa: E731
+        w._deliver_playout(_board(), Action(track=None), "", say)
+        self.assertEqual("playout", w.model.engine)
+        self.assertEqual("", w.model.unite)
+        w._deliver_playout(_board(), Action(track=None), "", say,
+                           unite=("toon_up", 80))
+        self.assertTrue(w.model.unite)
+        self.assertEqual(w.model.playout_unite, w.model.unite)
+        w._deliver_playout(_board(), Action(track=None), "", say)
+        self.assertEqual("", w.model.unite)
+
 
 @unittest.skipUnless(HAVE, "the policy needs numpy")
 class PlayableTest(unittest.TestCase):

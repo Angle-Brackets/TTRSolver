@@ -62,8 +62,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 DECK = {"Professor Pete": 2, "Flippy": 2, "Daffy Don": 2, "Moe Zart": 1,
         "Barnacle Bessie": 1, "Julius Wheezer": 1, "Sticky Lou": 1}
+# The owner's Realms toon: sixteen cards, five calls a fight in all.
+REALMS_DECK = ("Melody Wavers", "Professor Pete", "Barnacle Bessie",
+               "Franz Neckvein", "Moe Zart", "Sid Sonata", "Barbara Seville",
+               "Lil Oldman", "Stinky Ned", "Nancy Gas", "Clerk Clara",
+               "Flippy", "Daffy Don", "Madam Chuckle", "Soggy Bottom",
+               "Julius Wheezer")
 REGIMES = ("solo-vp", "solo-building", "my-building", "party-building",
-           "duo-vp", "party-vp", "ceo")
+           "duo-vp", "party-vp", "ceo", "realms-vp")
 # Toons in the whole boss fight where this side is not everyone.
 PLAYERS = {"duo-vp": 2}
 
@@ -82,6 +88,19 @@ def _sampler(regime):
             toon.fires = 3
             toon.sos_cards = {k: v for k, v in DECK.items() if k in sos_mod.BY_NAME}
             st.toons = [toon]
+            return st
+        return sample, True, 400
+    if regime == "realms-vp":
+        def sample(rng):
+            st = vp_mod.vp_position(rng)
+            have = [t for t in Track if t is not Track.TOON_UP]
+            toon = vp_mod.maxed_toon(rng, tracks=have, laff=100)
+            toon.fires = 0
+            toon.sos_cards = {k: 5 for k in REALMS_DECK}
+            toon.sos_calls = 5
+            toon.unites_held = 5
+            st.toons = [toon]
+            st.sos_one_round = True
             return st
         return sample, True, 400
     if regime == "solo-building":
@@ -164,6 +183,9 @@ def play(job):
     # one each job, or one arm's setting leaks into the next arm's fights.
     playout.ROLLOUT_PLAYER = opts.get("player", "net")
     playout.POUCH_WEIGHT["facility"] = float(opts.get("pouch", 2.0))
+    playout.SOS_CALL_PRICE = float(opts.get("sosprice", 0.0))
+    playout.SOS_REACH_PRICE = float(opts.get("sosreach", 0.5))
+    playout.GAG_REACH_PRICE = float(opts.get("reach", 0.1))
     fastplayer.use(opts.get("net") or fastplayer.DEFAULT_WEIGHTS)
     # Shipped: shortened playouts (8 rounds, the repo's value net). trunc=0
     # plays in full; vnet=<weights> swaps the net.
@@ -207,6 +229,7 @@ def play(job):
         for toon in env.state.toons:
             toon.unites_held = int(opts["unites"])
     rng = random.Random(seed)
+    sos_start = playout._sos_left(env.state)
     done, info, rounds, spent = False, {}, 0, 0.0
     while not done and rounds < 400:
         state = env.state
@@ -263,7 +286,8 @@ def play(job):
         playout.TEAMMATE_UNITES = True
         done, info = playout.step_round(env, plan)
         rounds += 1
-    return seed, spec, bool(info.get("win")), rounds, spent / max(1, rounds)
+    calls = max(0, sos_start - playout._sos_left(env.state))
+    return seed, spec, bool(info.get("win")), rounds, spent / max(1, rounds), calls
 
 
 def main() -> int:
@@ -282,9 +306,11 @@ def main() -> int:
     wins = {arm: {} for arm in args.arms}
     cost = {arm: [] for arm in args.arms}
     lengths = {arm: [] for arm in args.arms}
+    calls = {arm: [] for arm in args.arms}
     t0 = time.time()
     with ProcessPoolExecutor(max_workers=args.workers) as pool:
-        for seed, arm, won, rounds, per in pool.map(play, jobs, chunksize=2):
+        for seed, arm, won, rounds, per, sos in pool.map(play, jobs, chunksize=2):
+            calls[arm].append(sos)
             wins[arm][seed] = won
             cost[arm].append(per)
             lengths[arm].append(rounds)
@@ -296,7 +322,8 @@ def main() -> int:
         w = sum(wins[arm][s] for s in seeds)
         line = (f"  {arm:28s} {w:4d}/{len(seeds)}  {100.0 * w / len(seeds):5.1f}%"
                 f"   {statistics.mean(cost[arm]):.2f}s a decision"
-                f"   {statistics.mean(lengths[arm]):.1f} rounds")
+                f"   {statistics.mean(lengths[arm]):.1f} rounds"
+                f"   {statistics.mean(calls[arm]):.2f} SOS")
         if arm != first:
             up = sum(1 for s in seeds if wins[arm][s] and not wins[first][s])
             dn = sum(1 for s in seeds if wins[first][s] and not wins[arm][s])

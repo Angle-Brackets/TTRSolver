@@ -157,6 +157,22 @@ class BuildStateTest(unittest.TestCase):
         self.assertEqual(state.cogs[0].level, 3)
         self.assertEqual(state.cogs[0].hp, 20)
 
+    def test_a_cog_at_zero_is_dying_not_alive(self):
+        """[OWNER] a killed cog stays on the field at 0 HP through its
+        death animation; read as alive it drew group gags at corpses."""
+        members = ([11, 12], "", "", "01", "", "99",
+                   [100000001], "", "", "0", "", 1)
+        listener = FakeListener([battle(members)],
+                                [cog(11, "sdt" + NUL + "l", 2, 0, 20),
+                                 cog(12, "sdt" + NUL + "l", 2, 20, 20),
+                                 toon()])
+        result = realms_session.build_state(listener)
+        self.assertTrue(result, result.problems)
+        dying, alive = result.state.cogs
+        self.assertTrue(dying.status.is_dead)
+        self.assertFalse(alive.status.is_dead)
+        self.assertEqual([alive], result.state.active_cogs())
+
     def test_party_size_comes_from_the_roster(self):
         """The TTR panel has to ask the player for this. Here the game
         states it, and it drives `allies_standing`."""

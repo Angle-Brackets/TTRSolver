@@ -97,7 +97,12 @@ def first_answer(state, reject=None):
         from ..search import hybrid
 
         hybrid.LAST_UNITE = None
-        plan = hybrid.climb(state, random.Random(0), budget=24,
+        # A COPY: `climb` applies its unite to the board it is handed, and
+        # this board is the one the Search row and the explanations read
+        # next. Handed the live one, a Toon-Up unite PPO only considered
+        # raised the laff everything else saw, and a Gag-Up invented gags
+        # -- the "extra Birthday Cakes" both rows planned with.
+        plan = hybrid.climb(state.clone(), random.Random(0), budget=24,
                             reject=frozenset(reject or ()))
         chosen = hybrid.LAST_UNITE
         unite_str = ""
@@ -500,7 +505,8 @@ def _render(action, state) -> str:
         if card is None:
             return f"call {action.sos}"
         standing = sum(1 for t in state.toons if t.laff > 0) or 1
-        return "call " + sos_mod.describe(card, standing)
+        return "call " + sos_mod.describe(
+            card, standing, one_round=getattr(state, "sos_one_round", False))
     gag = data.gag(action.track, action.level)
     if action.target_index is None:
         return f"{gag.display} on all cogs"

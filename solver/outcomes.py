@@ -244,7 +244,21 @@ def lure_end_probability(cog: CogState) -> float:
     return min(100, max(0, mechanics.lure_wakeup_chance(acc))) / 100.0
 
 
-def cog_phase_outcomes(state: BattleState
+def _miss_scaled(dist: Dict[int, float], factor: float) -> Dict[int, float]:
+    """`dist` with every hit's chance scaled by `factor` (Cogs Miss)."""
+    if factor >= 1.0:
+        return dist
+    out: Dict[int, float] = {}
+    for dmg, p in dist.items():
+        if dmg:
+            out[dmg] = out.get(dmg, 0.0) + p * factor
+            out[0] = out.get(0, 0.0) + p * (1.0 - factor)
+        else:
+            out[0] = out.get(0, 0.0) + p
+    return out
+
+
+def cog_phase_outcomes(state: BattleState, miss_factor: float = 1.0
                         ) -> List[Tuple[float, int, frozenset, frozenset]]:
     """[(probability, total_damage_to_toon, lures_ended, lures_held)].
 
@@ -273,12 +287,12 @@ def cog_phase_outcomes(state: BattleState
                 branches.append((1.0 - p_end, 0, False, True))
             if p_end > 0:
                 branches += [(p_end * p, d, True, False)
-                             for d, p in cog_damage_distribution(
-                                 cog, allies).items()]
+                             for d, p in _miss_scaled(cog_damage_distribution(
+                                 cog, allies), miss_factor).items()]
         else:
             branches = [(p, d, False, False)
-                        for d, p in cog_damage_distribution(
-                            cog, allies).items()]
+                        for d, p in _miss_scaled(cog_damage_distribution(
+                            cog, allies), miss_factor).items()]
 
         nxt: Dict[Tuple[int, frozenset, frozenset], float] = {}
         for (dmg_so_far, ended, held), p_so_far in combined.items():
@@ -318,6 +332,7 @@ def action_outcomes(state: BattleState, action: Action,
     results: Dict[Tuple, List] = {}
 
     p_hit = _toon_hit_probability(state, action)
+    waste = simulator.wasted_reach(state, action)
     hit_branches = []
     if p_hit > 0:
         hit_branches.append((p_hit, True))
@@ -329,10 +344,15 @@ def action_outcomes(state: BattleState, action: Action,
         simulator.apply_toon_action(after_toon, action, hit)
 
         if after_toon.is_terminal():
-            _accumulate(results, p_toon, after_toon, 0, action, objective)
+            _accumulate(results, p_toon, after_toon, 0, action, objective,
+                        waste)
             continue
 
-        for p_cogs, laff_lost, ended, held in cog_phase_outcomes(after_toon):
+        # Ticks the SOS timers on `after_toon`, which every `final`
+        # below is cloned from -- once per round, as in the simulator.
+        miss_factor = simulator.cogs_miss_factor(after_toon)
+        for p_cogs, laff_lost, ended, held in cog_phase_outcomes(
+                after_toon, miss_factor):
             if p_cogs <= 0:
                 continue
             final = after_toon.clone()
@@ -341,13 +361,13 @@ def action_outcomes(state: BattleState, action: Action,
             for idx in held:
                 final.cogs[idx].status.lure_rounds_remaining -= 1
             _accumulate(results, p_toon * p_cogs, final, laff_lost,
-                        action, objective)
+                        action, objective, waste)
 
     return [(p, st, r) for p, st, r in results.values()]
 
 
 def _accumulate(results, prob, state_after, laff_lost, action,
-                 objective) -> None:
+                 objective, waste: float = 0.0) -> None:
     """Apply laff loss, advance the round, compute reward, and merge into
     `results` -- identical resulting states have their probabilities summed
     so the solver doesn't explore the same node twice."""
@@ -364,7 +384,11 @@ def _accumulate(results, prob, state_after, laff_lost, action,
         # or it scores a hopeless position with the heuristic instead.
         lost=state_after.is_terminal() and not state_after.is_win())
     if getattr(action, "sos", None):
-        reward -= getattr(objective, "sos_cost", 0.0)
+        reward -= getattr(objective, "sos_cost", 0.0) * (1.0 + waste)
+    elif waste:
+        # The wasted share of a group gag -- `simulator.wasted_reach`.
+        # Priced exactly as `step_reward` prices the gag itself.
+        reward -= waste * objective.gag_price(action.track, action.level)
 
     key = merge_key(state_after)
     existing = results.get(key)
@@ -486,7 +510,10 @@ def _cog_key(state: BattleState) -> Tuple:
                   c.status.lured, c.status.lure_rounds_remaining,
                   c.status.lure_acc_before_bonus, c.status.lure_level,
                   c.status.trapped, c.status.trap_level,
-                  c.status.trap_organic, c.status.suited)
+                  c.status.trap_organic, c.status.suited,
+                  # An SOS trap carries its damage here, not in its level:
+                  # Clerk Will's 60 and Clerk Clara's 180 were one key.
+                  c.status.trap_damage)
                  for c in state.cogs)
 
 
@@ -515,6 +542,13 @@ def merge_key(state: BattleState) -> Tuple:
     if len(state.toons) == 1:
         return (state.toon.laff, _cog_key(state))
     return (tuple(t.laff for t in state.toons), _cog_key(state))
+
+
+def _sos_key(toon):
+    """The SOS cards a toon may still call, for the memo key."""
+    cards = getattr(toon, "sos_cards", None) or {}
+    return (frozenset((n, c) for n, c in cards.items() if c > 0),
+            getattr(toon, "sos_calls", None))
 
 
 def state_key(state: BattleState) -> Tuple:
@@ -553,6 +587,9 @@ def state_key(state: BattleState) -> Tuple:
             # so a toon holding two is a different node from one holding
             # none.
             toon.fires,
+            # SOS cards likewise: without them a board that has spent its
+            # Lil Oldman and one that has not were the same memo entry.
+            _sos_key(toon),
             _cog_key(state),
             state.free_passes,
             state.cogs_remaining,
@@ -566,7 +603,7 @@ def state_key(state: BattleState) -> Tuple:
         tuple((t.laff,
                frozenset((tr, lvl, n)
                          for (tr, lvl), n in t.gag_counts.items() if n > 0),
-               t.fires)
+               t.fires, _sos_key(t))
               for t in state.toons),
         _cog_key(state),
         state.free_passes,

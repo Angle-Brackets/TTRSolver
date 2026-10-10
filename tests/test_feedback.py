@@ -130,11 +130,12 @@ class DecisionTest(unittest.TestCase):
         return feedback.Decision(**base)
 
     def test_it_reports_which_engines_were_departed_from(self):
-        self.assertEqual({"rl": True, "search": False}, self._dec().beats())
+        self.assertEqual({"rl": True, "search": False, "playout": None},
+                         self._dec().beats())
 
     def test_an_unknown_comparison_is_none_not_false(self):
         """A missing comparison and a tie are different facts."""
-        self.assertEqual({"rl": None, "search": None},
+        self.assertEqual({"rl": None, "search": None, "playout": None},
                          self._dec(observed=None).beats())
         self.assertIsNone(self._dec(rl=None).beats()["rl"])
 

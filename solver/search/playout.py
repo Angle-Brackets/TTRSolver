@@ -142,7 +142,10 @@ def playable(state: BattleState, plan) -> bool:
         toon = board.toons[seat]
         if action.sos is not None:
             need[(seat, "sos", action.sos)] += 1
-            if need[(seat, "sos", action.sos)] > toon.sos_cards.get(action.sos, 0):
+            need[(seat, "sos")] += 1
+            if need[(seat, "sos", action.sos)] > toon.sos_held(action.sos):
+                return False
+            if toon.sos_calls is not None and need[(seat, "sos")] > toon.sos_calls:
                 return False
         elif action.fire:
             need[(seat, "fire")] += 1
@@ -219,6 +222,44 @@ LAFF_WEIGHT = 0.5
 # that kills it. A thousandth of a cog a round cannot outweigh a cog or a
 # point of laff fraction; it only separates moves that tie on both.
 ROUND_TIEBREAK = 0.001
+
+# WHAT AN SOS CALL COSTS, in cogs, charged per call anywhere in the
+# playout. ZERO, MEASURED: the Realms VP's "SOS on every board" came from
+# a five-call budget read as five of EVERY card (`ToonState.sos_calls`
+# fixed that). Pricing calls on top only delayed them -- every arm still
+# spent ~4.3 of 5 -- and lost: 43, 38, 30 wins of 100 at 0, 0.5, 1
+# (tools/sweep.py --regime realms-vp; 1 vs 0 p=0.035).
+SOS_CALL_PRICE = 0.0
+
+# REACH THROWN AWAY by the move being judged, in cogs per whole move
+# wasted -- `simulator.wasted_reach`. A preference, [OWNER] "what a
+# waste": a card is charged up to half a cog for the share it wastes, a
+# group gag a small nudge, since a gag's price is the pouch term's.
+# Costs no wins: 43 and 43 of 100 Realms VPs, on and off (+2/-2).
+SOS_REACH_PRICE = 0.5
+GAG_REACH_PRICE = 0.1
+
+
+def _sos_left(state: BattleState) -> int:
+    toon = state.toons[0] if state.toons else None
+    if toon is None:
+        return 0
+    held = sum(max(0, n) for n in (toon.sos_cards or {}).values())
+    calls = getattr(toon, "sos_calls", None)
+    return held if calls is None else min(held, max(0, calls))
+
+
+def spend_charge(start: BattleState, end: BattleState, plan) -> float:
+    """Cogs charged for SOS calls made between `start` and `end`, and for
+    reach `plan` threw away on `start`."""
+    from .. import simulator
+
+    charge = SOS_CALL_PRICE * max(0, _sos_left(start) - _sos_left(end))
+    for action in plan or ():
+        waste = simulator.wasted_reach(start, action)
+        if waste:
+            charge += waste * (SOS_REACH_PRICE if action.sos else GAG_REACH_PRICE)
+    return charge
 
 # WHAT THE POUCH IS WORTH when a playout stops before the fight does: in
 # a building the next floor's cogs are unknown, so without this, gags
@@ -475,7 +516,8 @@ def rollout(state, plan, horizon, seed: int) -> float:
                 from . import valuenet
                 return (total - _left(env.state)
                         + valuenet.predict(model, _view(env.state),
-                                           holdout=len(env.state.holdout)))
+                                           holdout=len(env.state.holdout))
+                        - spend_charge(state, env.state, plan))
         if use_net:
             nxt = fastplayer.act(_view(env.state))
         else:
@@ -494,7 +536,8 @@ def rollout(state, plan, horizon, seed: int) -> float:
         if nxt is None:
             break
         done, _info = step_round(env, nxt)
-    return value(env.state, total, pouch_start, pouch_weight, rounds=guard + 1)
+    return (value(env.state, total, pouch_start, pouch_weight, rounds=guard + 1)
+            - spend_charge(state, env.state, plan))
 
 
 def candidates(state: BattleState, top_k: int = TOP_K, reject=None):
@@ -1017,7 +1060,8 @@ def rollout_pickup(state: BattleState, plan, horizon, seed: int) -> float:
             nxt = (fastplayer.act(mine) if use_net
                    else climb_with_unite(mine, policy_rng, budget=ROLLOUT_BUDGET))
         done, _info = step_round(env, nxt)
-    return value(env.state, total, pouch_start, pouch_weight, rounds=guard + 1)
+    return (value(env.state, total, pouch_start, pouch_weight, rounds=guard + 1)
+            - spend_charge(state, env.state, plan))
 
 
 def pick_pickup(state: BattleState, horizon=None, seed: int = 0,

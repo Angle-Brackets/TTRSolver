@@ -863,6 +863,9 @@ class RealmsListener(threading.Thread):
         # battle doId -> how many movies it has played. One movie is one
         # round. See `_note_state`.
         self.battle_rounds: Dict[int, int] = {}
+        # battle doId -> its last state, so a round is counted on ENTERING
+        # the movie state rather than on every datagram naming it.
+        self._battle_state: Dict[int, str] = {}
         # msgtype -> count, for everything `handle` does not recognise.
         # A wrong constant then shows up as a number rather than silence.
         self._unknown: Dict[int, int] = {}
@@ -1199,9 +1202,16 @@ class RealmsListener(threading.Thread):
         name = value[0] if isinstance(value, (tuple, list)) and value else value
         if isinstance(name, (bytes, bytearray)):
             name = bytes(name).decode("latin-1", "replace")
-        if name == MOVIE_STATE:
+        # ON ENTRY, NOT PER DATAGRAM. Every datagram arrives twice (see
+        # `apply_movie`), so counting each one aged every Lure two rounds
+        # a round: a live VP read a $10 Bill (4 rounds) as 2 left after
+        # one round and a Presentation (8) as 4 -- and the engines then
+        # planned around lures about to lapse.
+        last = self.__dict__.setdefault("_battle_state", {})
+        if name == MOVIE_STATE and last.get(battle_do_id) != MOVIE_STATE:
             self.battle_rounds[battle_do_id] = (
                 self.battle_rounds.get(battle_do_id, 0) + 1)
+        last[battle_do_id] = name
 
     def trap_on(self, cog_do_id: int) -> Optional[int]:
         """The level of the Trap under a cog, or None.
