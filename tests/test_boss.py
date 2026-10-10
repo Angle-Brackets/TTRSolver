@@ -444,3 +444,36 @@ class OwnerPouchTest(unittest.TestCase):
         vp.owner_vp_pouch(toon)
         self.assertTrue(all(t in (Track.THROW, Track.SQUIRT, Track.DROP)
                             for t, _ in toon.gag_counts))
+
+
+class PlayoutLeadsInBossFightsTest(unittest.TestCase):
+    """The Playout row is shown in a boss fight unless the player chose."""
+
+    def _worker(self):
+        from solver.live import overlay
+
+        w = overlay.Worker.__new__(overlay.Worker)
+        w.model = overlay.Model()
+        w._boss = None
+        w._boss_manual = None
+        return w
+
+    def test_a_boss_fight_switches_to_the_playouts_and_back(self):
+        w = self._worker()
+        w.boss_tracker().set_kind("vp")
+        w._boss_into(w.model)
+        self.assertEqual("playout", w.model.preferred_engine)
+        w.boss_tracker().set_kind(None)
+        w._boss_into(w.model)
+        self.assertEqual("rl", w.model.preferred_engine)
+
+    def test_a_players_choice_is_never_overridden(self):
+        import threading
+
+        w = self._worker()
+        w._lock = threading.Lock()
+        w._post = lambda: None
+        w.prefer_engine("search")
+        w.boss_tracker().set_kind("vp")
+        w._boss_into(w.model)
+        self.assertEqual("search", w.model.preferred_engine)

@@ -39,6 +39,7 @@ from __future__ import annotations
 import copy
 import random
 import time
+from pathlib import Path
 from typing import List, NamedTuple, Optional, Sequence, Tuple
 
 from ..state import Action, BattleState
@@ -413,10 +414,31 @@ def step_round(env, plan):
 # SHORTENED PLAYOUTS: after ROLLOUT_DEPTH rounds, stop and ask
 # ROLLOUT_VALUE (a `valuenet.load` model trained on the playouts' own units:
 # cogs defeated from a board to the end plus LAFF_WEIGHT x laff left, under
-# the fast network -- `tools/gen_value_outcomes.py --units playout`) for
-# the rest. Off (None) by default; solo playouts only.
-ROLLOUT_DEPTH: Optional[int] = None
-ROLLOUT_VALUE = None
+# the fast network, seeing the holdout and later-wave counts --
+# `tools/gen_value_outcomes.py --units playout --extras`) for the rest.
+# Solo playouts only. "auto" loads `PLAYOUT_VALUE_WEIGHTS` when numpy and
+# the file are there and plays in full otherwise; None turns it off.
+# Measured with HALVING doubled: solo VP 175 vs 163 of 260 in 28% less
+# time a decision, duo VP 57 vs 52 of 100 (1.72s vs 1.37s -- short fights
+# save less than the extra playouts cost).
+ROLLOUT_DEPTH: Optional[int] = 8
+ROLLOUT_VALUE = "auto"
+PLAYOUT_VALUE_WEIGHTS = (Path(__file__).resolve().parents[1] / "rl"
+                         / "playout_value.json")
+_AUTO_VALUE: list = []
+
+
+def _rollout_value():
+    """The model shortened playouts use, or None to play in full."""
+    if ROLLOUT_VALUE != "auto":
+        return ROLLOUT_VALUE
+    if not _AUTO_VALUE:
+        try:
+            from . import valuenet
+            _AUTO_VALUE.append(valuenet.load(PLAYOUT_VALUE_WEIGHTS))
+        except Exception:                  # noqa: BLE001 -- no numpy or no file
+            _AUTO_VALUE.append(None)
+    return _AUTO_VALUE[0]
 
 
 def rollout(state, plan, horizon, seed: int) -> float:
@@ -439,12 +461,13 @@ def rollout(state, plan, horizon, seed: int) -> float:
         use_net = fastplayer.available()
     while not done and guard < ROUND_CAP:
         guard += 1
-        if (use_net and ROLLOUT_DEPTH is not None and ROLLOUT_VALUE is not None
-                and guard > ROLLOUT_DEPTH):
-            from . import valuenet
-            return (total - _left(env.state)
-                    + valuenet.predict(ROLLOUT_VALUE, _view(env.state),
-                                       holdout=len(env.state.holdout)))
+        if use_net and ROLLOUT_DEPTH is not None and guard > ROLLOUT_DEPTH:
+            model = _rollout_value()
+            if model is not None:
+                from . import valuenet
+                return (total - _left(env.state)
+                        + valuenet.predict(model, _view(env.state),
+                                           holdout=len(env.state.holdout)))
         if use_net:
             nxt = fastplayer.act(_view(env.state))
         else:
@@ -564,7 +587,7 @@ def pick_in_child(state: BattleState, horizon, budget: float,
 #
 # Chunks are at most four rollouts so a deadline is overshot by one short
 # chunk at worst -- a 16-rollout chunk on a VP opening took five seconds.
-SCHEDULE = (2, 4, 8, 12, 16, 20, 24, 28, 32)
+SCHEDULE = (2, 4, 8) + tuple(range(12, 65, 4))
 
 
 def _seed(k: int) -> int:
@@ -666,9 +689,10 @@ WIDE_CAP = 10
 #
 # (8, 16, 32): the equal-time measurement above, with the net playing.
 # (2, 4, 8) was the first measured setting, with climb playing.
-# Doubling to (16, 32, 64) did not pay: 146 vs 139 wins of 200, +36/-29,
-# p = 0.46, cogs -0.14 (se 0.53), at twice the time. Thirty-two stays.
-HALVING = (8, 16, 32)
+# Doubling to (16, 32, 64) did not pay with full playouts: 146 vs 139 wins
+# of 200, +36/-29, p = 0.46, at twice the time. With shortened playouts
+# (ROLLOUT_DEPTH) each one is cheap enough that it does -- see there.
+HALVING = (16, 32, 64)
 HALVING_KEEP_AT_LEAST = 2
 
 

@@ -262,9 +262,24 @@ class AdviceWorker(threading.Thread):
         kind = detected or self._boss_manual
         self.boss_tracker().set_kind(kind)
 
+    # THE PLAYOUT ROW LEADS IN A BOSS FIGHT unless the player has picked an
+    # engine themselves: on duo VP sides the Search row won 6/60 and the
+    # Playout row 33/60 (docs/experiment-log.md), because only the playouts
+    # see the waves after the one on the field. Back to the default when
+    # the fight ends.
+    _engine_chosen = False      # the player pressed an engine
+    _engine_auto = False        # this worker switched to the playouts
+
     def _boss_into(self, model, on_field: int = 0) -> None:
         """Mirror the tracker onto the model the page draws."""
         tracker = self.boss_tracker()
+        if not self._engine_chosen:
+            if tracker.kind and model.preferred_engine != "playout":
+                model.preferred_engine = "playout"
+                self._engine_auto = True
+            elif not tracker.kind and self._engine_auto:
+                model.preferred_engine = "rl"
+                self._engine_auto = False
         model.boss_kind = tracker.kind or ""
         model.boss_manual = self._boss_manual or ""
         model.boss_players = max(1, tracker.party_size)
@@ -332,6 +347,8 @@ class AdviceWorker(threading.Thread):
         with self._lock:
             model = self.model
             model.preferred_engine = choice
+            self._engine_chosen = True
+            self._engine_auto = False
             swapped = False
             ready = (bool(model.rl_gag) if choice == "rl"
                      else getattr(model, choice + "_ready", False))

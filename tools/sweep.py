@@ -36,7 +36,7 @@ ARMS  (`name` or `name:key=value,key=value`)
             net=<weights.json>  (the fast network's weights, default shipped)
             kit=owner  (restock every toon with `vp.OWNER_VP_POUCH` first)
             trunc=<rounds> vnet=<weights>  (shortened playouts: stop after
-                        <rounds> and ask a playout-units value net)
+                        <rounds> and ask a value net; shipped 8, trunc=0 is full)
             unites=<n>  (every toon holds n unites, of any kind)
             mates=off  (the ENGINE assumes teammates never use their unites;
                         in the fight itself they always do)
@@ -165,12 +165,15 @@ def play(job):
     playout.ROLLOUT_PLAYER = opts.get("player", "net")
     playout.POUCH_WEIGHT["facility"] = float(opts.get("pouch", 2.0))
     fastplayer.use(opts.get("net") or fastplayer.DEFAULT_WEIGHTS)
-    playout.ROLLOUT_DEPTH = int(opts["trunc"]) if "trunc" in opts else None
+    # Shipped: shortened playouts (8 rounds, the repo's value net). trunc=0
+    # plays in full; vnet=<weights> swaps the net.
+    trunc = int(opts.get("trunc", 8))
+    playout.ROLLOUT_DEPTH = trunc or None
     if "vnet" in opts:
         from solver.search import valuenet as _vn
         playout.ROLLOUT_VALUE = _vn.load(opts["vnet"])
     else:
-        playout.ROLLOUT_VALUE = None
+        playout.ROLLOUT_VALUE = "auto"
     # `mates=off` changes what the ENGINE assumes, never the fight: the
     # real round always lets teammates use what they hold (the game), and
     # only the engine's own rollouts drop them.
@@ -187,7 +190,8 @@ def play(job):
     valuenet.USE = False
     from solver.search import objective as objective_mod
     playout.set_style(objective_mod.PRESETS[opts.get("style", "balanced")])
-    stages = tuple(int(x) for x in opts.get("stages", "8/16/32").split("/"))
+    stages = (tuple(int(x) for x in opts["stages"].split("/")) if "stages" in opts
+              else playout.HALVING)
 
     sample, coordinated, cap = _sampler(regime)
     env = env_mod.BattleEnv(rng=random.Random(seed), sampler=sample,
