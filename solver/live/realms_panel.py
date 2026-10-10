@@ -433,10 +433,12 @@ class RealmsWorker(AdviceWorker):
         big = 10 ** 6
         result = realms_session.build_state(self.listener, max_fires=big,
                                             max_unites=big, max_sos=big)
-        self._cap_holdings(result)
         model = self.model
         self._allies = tuple(getattr(result, "allies", ()) or ())
+        # Boss first: a new fight resets the spending baseline, and that
+        # has to land before this board is capped by it.
         self._track_boss(result)
+        self._cap_holdings(result)
         if result.state is not None:
             result.state.realms_context = self._context_of(result)
         self._boss_into(model, on_field=len(result.state.cogs)
@@ -548,6 +550,12 @@ class RealmsWorker(AdviceWorker):
         if boss is not None and boss.boss_id != self._boss_obj:
             if self._boss_obj is not None:
                 tracker.reset()
+            # A NEW FIGHT, so a fresh budget. Without this a second VP in
+            # the same session inherited the first one's spending -- the
+            # owner's second run began with two SOS calls and no unites
+            # left by the panel's books.
+            self._fight_start = None
+            self.spent_fires = self.spent_unites = self.spent_sos = 0
             tracker.party_size = 1
             self._boss_obj = boss.boss_id
             self._boss_battle = None

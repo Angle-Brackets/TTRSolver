@@ -65,6 +65,12 @@ def worker(listener):
     # it survived. `max_fires` is the pink slip cap.
     obj.engine = "both"
     obj.max_fires = 0
+    # RECORDED, NOT RUN: a real `_search` starts search and playout
+    # process pools, and Python waits on their workers at exit -- which
+    # sometimes hung this file for minutes. These tests read the board
+    # and the model; the search has its own tests, which call it directly.
+    obj.searched = []
+    obj._search = obj.searched.append
     obj._rejected = set()
     obj.record_to = None
     obj.record_error = None
@@ -1069,6 +1075,34 @@ class ObservedSpendingTest(unittest.TestCase):
         apply_toon_action(board, Action(track=None, sos="Lil Oldman"), hit=True)
         self.assertEqual(0, board.toons[0].sos_calls)
         self.assertFalse([a for a in legal_actions(board) if a.sos])
+
+    def test_a_second_vp_gets_a_fresh_budget(self):
+        """THE OWNER'S SECOND RUN. Two VPs without closing the panel: the
+        board never vanished with no boss known, so the first fight's
+        spending carried into the second."""
+        from solver.live.realms_session import BossBattle
+
+        w = self._worker()
+        w._boss_obj = w._boss_battle = None
+        w._boss_players = 0
+        w._boss_manual = None
+
+        def board(boss_id, moe, battle=9, number=1):
+            res = self._result(0, 0, {"Moe Zart": moe, "Flippy": 9})
+            res.boss = BossBattle("vp", boss_id, number, 0, 1)
+            res.battle_id, res.suit_ids = battle, ()
+            w._track_boss(res)
+            w._cap_holdings(res)
+            return res
+
+        board(500, 9)
+        board(500, 6)                       # three calls in round one
+        self.assertEqual(3, w.spent_sos)
+        board(500, 6, battle=10, number=2)  # [OWNER] round two: no reset
+        self.assertEqual(3, w.spent_sos)
+        fresh = board(501, 6)               # the next VP: a fresh budget
+        self.assertEqual(0, w.spent_sos)
+        self.assertEqual({"Moe Zart": 5, "Flippy": 5}, fresh.state.toons[0].sos_cards)
 
     def test_the_baseline_resets_between_fights(self):
         w = self._worker()
