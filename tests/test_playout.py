@@ -754,3 +754,32 @@ class StyleTest(unittest.TestCase):
         self.assertIs(objective.PRESETS["survive"], playout.STYLE)
         playout.chunk_in_child(_board(cogs=1), None, None, True, 0, 0, only=[])
         self.assertIs(objective.PRESETS["balanced"], playout.STYLE)
+
+
+@unittest.skipUnless(HAVE, "the policy needs numpy")
+class UniteVariantTest(unittest.TestCase):
+    """A unite reaches the playouts' menu whether or not climb pays its price."""
+
+    def _board(self, laff=33, held=5, cooldown=0):
+        board = _board(cogs=3, laff=100, seed=3)
+        toon = board.toons[0]
+        toon.laff, toon.unites_held, toon.unite_cooldown = laff, held, cooldown
+        return board
+
+    def test_a_heal_and_a_restock_are_offered(self):
+        from solver.state import Action, Track
+
+        plan = [Action(Track.THROW, 5, 0)]
+        kinds = {playout.unite_of(p)[0] for p in playout._unite_variants(self._board(), plan)}
+        self.assertEqual({"toon_up", "gag_up"}, kinds)
+
+    def test_none_held_or_cooling_down_offers_none(self):
+        from solver.state import Action, Track
+
+        plan = [Action(Track.THROW, 5, 0)]
+        self.assertEqual([], playout._unite_variants(self._board(held=0), plan))
+        self.assertEqual([], playout._unite_variants(self._board(cooldown=2), plan))
+
+    def test_the_menu_carries_a_unite_when_one_is_held(self):
+        menu = playout.wide_candidates(self._board())
+        self.assertTrue(any(playout.unite_of(p) for p in menu))

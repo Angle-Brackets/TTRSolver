@@ -312,7 +312,9 @@ def _snapshot(force: bool = False):
 
     if _SESSION["client"] is None:
         if now - _SESSION["tried"] < REDISCOVER_AFTER:
-            return _SESSION["snapshot"]
+            # Not connected: a snapshot past its TTL is old laff, and
+            # advice built on it plans for a toon that is not there.
+            return None
         _SESSION["tried"] = now
         try:
             sessions = discover()
@@ -326,8 +328,9 @@ def _snapshot(force: bool = False):
         snap = _SESSION["client"].snapshot()
     except LocalAPIError:
         # The game may have closed or the toon logged out. Drop the
-        # client so the next attempt rediscovers, after the backoff.
-        _SESSION["client"] = None
+        # client so the next attempt rediscovers, after the backoff, and
+        # the snapshot with it.
+        _SESSION.update(client=None, snapshot=None)
         return None
     _SESSION.update(snapshot=snap, taken=now)
     return snap

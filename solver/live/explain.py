@@ -135,6 +135,11 @@ def reason(detail: Dict) -> str:
     if detail.get("accuracy") == 0:
         return "always misses a lured cog"
     kills = detail.get("kills") or 0
+    targets = detail.get("targets") or 0
+    if kills and targets > kills:
+        # A group gag: "kills it" read as killing the cog the move named,
+        # when one of four died (seen live on Opera Singer).
+        return "kills %d of %d" % (kills, targets)
     if kills == 1:
         return "kills it"
     if kills > 1:

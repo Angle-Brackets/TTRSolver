@@ -384,15 +384,53 @@ class RealmsWorker(AdviceWorker):
                 self._post()
             time.sleep(max(0.0, POLL_INTERVAL - (time.time() - cycle)))
 
+    # Holdings at the start of the current fight, as the server reports them;
+    # None between fights. A boss fight keeps its baseline across battles.
+    _fight_start = None
+
+    def _cap_holdings(self, result) -> None:
+        """Cap the board's slips, unites and SOS calls at what the boxes
+        allow minus what has REALLY been spent this fight.
+
+        The screen-reading panel cannot see a slip, unite or card leave
+        the toon, so it charges the advice and assumes it was taken. This
+        client can: the toon's own counts arrive every poll. Charging
+        advice here emptied a five-card SOS budget within a few rounds of
+        a VP without a card being called, after which no SOS was ever
+        planned again. So spent = held at the fight's start - held now.
+        """
+        state = getattr(result, "state", None)
+        if state is None or not state.toons:
+            if not self.boss_tracker().kind:
+                self._fight_start = None
+                self.spent_fires = self.spent_unites = self.spent_sos = 0
+            return
+        toon = state.toons[0]
+        now = {"fires": int(toon.fires), "unites": int(toon.unites_held),
+               "sos": sum(max(0, int(n)) for n in (toon.sos_cards or {}).values())}
+        if self._fight_start is None:
+            self._fight_start = dict(now)
+        for name in now:
+            setattr(self, "spent_" + name,
+                    max(0, self._fight_start[name] - now[name]))
+        toon.fires = min(toon.fires, self.remaining("fires"))
+        toon.unites_held = min(toon.unites_held, self.remaining("unites"))
+        calls = self.remaining("sos")
+        toon.sos_cards = ({name: min(int(n), calls)
+                           for name, n in (toon.sos_cards or {}).items() if n > 0}
+                          if calls else {})
+
     def tick(self) -> None:
         """One poll. Split out from `run` so it is testable with a fake
         listener and no cluster at all."""
         from . import realms_session
 
-        result = realms_session.build_state(self.listener,
-                                            max_fires=self.remaining("fires"),
-                                            max_unites=self.remaining("unites"),
-                                            max_sos=self.remaining("sos"))
+        # Read the toon's REAL holdings (uncapped), then cap them by what
+        # this fight may still spend -- see `_cap_holdings`.
+        big = 10 ** 6
+        result = realms_session.build_state(self.listener, max_fires=big,
+                                            max_unites=big, max_sos=big)
+        self._cap_holdings(result)
         model = self.model
         self._allies = tuple(getattr(result, "allies", ()) or ())
         self._track_boss(result)
@@ -442,9 +480,9 @@ class RealmsWorker(AdviceWorker):
                 # THE BOARD MOVED, so the last advice has been played.
                 # Charge it against the holdings -- but not on the
                 # `_asked` arm, which recomputes the SAME round.
-                if self._last_key:
-                    self.note_spent(self.displayed_action(),
-                                    self.model.unite or None)
+                # Nothing is charged here: this client reports the toon's
+                # real slips, unites and cards, so spending is OBSERVED
+                # in `_cap_holdings` rather than assumed from the advice.
             self._prev_state = state
             self._last_key = key
             self._asked.clear()
@@ -551,6 +589,7 @@ class RealmsWorker(AdviceWorker):
                 state=before,
                 rl=self._rl_action,
                 search=self._search_action,
+                playout=getattr(self, "_playout_action", None),
                 observed=observed,
                 unreadable=why,
                 engine_shown=self.model.engine or "",

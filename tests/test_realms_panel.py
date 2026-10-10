@@ -1009,3 +1009,52 @@ class TheSosCapNeverDeletesACardTypeTest(unittest.TestCase):
 
     def test_a_cap_of_zero_still_means_no_cards(self):
         self.assertEqual({}, self._toon(self.DECK, cap=0).sos_cards)
+
+
+class ObservedSpendingTest(unittest.TestCase):
+    """On this client the toon's real holdings are read, so spending is
+    counted from them -- advice is never charged."""
+
+    def _worker(self):
+        from solver.live.realms_panel import RealmsWorker
+
+        w = RealmsWorker.__new__(RealmsWorker)
+        w.max_fires = w.max_unites = w.max_sos = 5
+        w.spent_fires = w.spent_unites = w.spent_sos = 0
+        w._boss = None
+        w._fight_start = None
+        return w
+
+    def _result(self, fires, unites, cards):
+        from types import SimpleNamespace
+        from solver.state import BattleState, ToonState
+
+        toon = ToonState(80, 100, {}, {})
+        toon.fires, toon.unites_held, toon.sos_cards = fires, unites, dict(cards)
+        return SimpleNamespace(state=BattleState(toons=[toon], cogs=[]))
+
+    def test_only_what_really_left_the_toon_is_spent(self):
+        w = self._worker()
+        first = self._result(9, 4000, {"Flippy": 2, "Moe Zart": 2})
+        w._cap_holdings(first)
+        self.assertEqual((5, 5), (first.state.toons[0].fires, first.state.toons[0].unites_held))
+        self.assertEqual({"Flippy": 2, "Moe Zart": 2}, first.state.toons[0].sos_cards)
+        later = self._result(9, 3999, {"Flippy": 1, "Moe Zart": 2})
+        w._cap_holdings(later)
+        self.assertEqual((0, 1, 1), (w.spent_fires, w.spent_unites, w.spent_sos))
+        self.assertEqual(4, later.state.toons[0].unites_held)
+
+    def test_a_spent_budget_plans_no_more_calls(self):
+        w = self._worker()
+        w._cap_holdings(self._result(0, 0, {"Flippy": 9}))
+        out = self._result(0, 0, {"Flippy": 4})
+        w._cap_holdings(out)
+        self.assertEqual({}, out.state.toons[0].sos_cards)
+
+    def test_the_baseline_resets_between_fights(self):
+        w = self._worker()
+        w._cap_holdings(self._result(0, 0, {"Flippy": 9}))
+        from types import SimpleNamespace
+        w._cap_holdings(SimpleNamespace(state=None))
+        self.assertIsNone(w._fight_start)
+        self.assertEqual(0, w.spent_sos)

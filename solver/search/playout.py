@@ -683,7 +683,7 @@ def leads(challenger: Sequence[float], incumbent: Sequence[float]) -> bool:
 
 WIDE_SCORER_TOP = 2      # the scorer's favourites
 WIDE_POLICY_TOP = 2      # the network's favourites
-WIDE_CAP = 10
+WIDE_CAP = 12             # 10, plus room for the two unite variants
 # Successive halving: everyone gets HALVING[0] rollouts, the better half
 # goes on to HALVING[1], and so on -- with the same seeds throughout.
 #
@@ -707,6 +707,36 @@ def _kind(action) -> tuple:
     if action.fire:
         return ("fire",)
     return (action.track, action.target_index is None)
+
+
+def _unite_variants(state: BattleState, chosen) -> list:
+    """climb's gags opened with each kind of unite worth trying, for the
+    playouts to judge by outcome.
+
+    climb proposes a unite only when it clears `unites.UNITE_PRICE` (200,
+    against ~2 a point of laff healed), so short of near-death it never
+    does, and a unite then never reached the menu at all: seen live, a toon
+    at 33/100 laff with five unites and no cooldown was offered none. The
+    playouts charge no price -- a unite is worth what it changes about how
+    the fight ends -- so the biggest Toon-Up worth its heal and the
+    all-tracks Gag-Up go on the menu whenever one could be used.
+    """
+    from .. import unites as unites_mod
+
+    if not state.toons or chosen is None or unite_of(chosen) is not None:
+        return []
+    toon = state.toons[0]
+    if not unites_mod.available(toon):
+        return []
+    options = unites_mod.candidates(toon)
+    picks = []
+    heal = next((c for c in options if c[0] == "toon_up"), None)
+    if heal is not None:
+        picks.append(heal)
+    restock = next((c for c in options if c[0] == "gag_up"), None)
+    if restock is not None:
+        picks.append(restock)
+    return [with_unite(list(chosen), c) for c in picks]
 
 
 def wide_candidates(state: BattleState, reject=None,
@@ -746,6 +776,8 @@ def wide_candidates(state: BattleState, reject=None,
     add(chosen)
     if unite_of(chosen) is not None:
         add(list(chosen))      # the same gags without it: the unite must earn its use
+    for plan in _unite_variants(state, chosen):
+        add(plan)
     for plan in ranked[:WIDE_SCORER_TOP]:
         add(plan)
     if len(state.active_toons()) > 1:

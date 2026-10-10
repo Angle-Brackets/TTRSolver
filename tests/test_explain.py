@@ -140,3 +140,13 @@ class SerialisedTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GroupKillWordingTest(unittest.TestCase):
+    """\"kills it\" names one cog; a group gag says how many of how many."""
+
+    def test_a_group_gag_says_which_share_dies(self):
+        from solver.live import explain
+
+        self.assertEqual("kills 1 of 4", explain.reason({"kills": 1, "targets": 4}))
+        self.assertEqual("kills it", explain.reason({"kills": 1, "targets": 1}))
