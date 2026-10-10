@@ -333,10 +333,14 @@ than letting the search estimate one.
 
 The pass (`Action(track=None)`) is the exception that keeps (3) honest:
 Trap + Lure against an already-lured cog has nothing useful to do but is
-still winnable by waiting. It is deliberately offered *only* when a cog
-is lured and nothing else is productive — widening it breaks both
-shallow play and the termination argument. `simulator.legal_actions`
-explains why; don't widen it without reading that.
+still winnable by waiting. `simulator.legal_actions` offers it whenever
+a cog is lured and otherwise while `free_passes` lasts (the termination
+guard) -- so it is legal almost everywhere, and in a party that is how a
+toon conserves gags while a teammate covers [OWNER]. A lone toon's
+Playout menu offers it only when nothing else is productive
+(`playout.PASS_ON_MENU`): on a lured board a pass costs nothing this
+round, and offered everywhere it won by luck -- "pass and let the lure
+lapse", which is never the move.
 
 ## Gag pouch
 

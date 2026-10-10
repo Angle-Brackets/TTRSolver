@@ -482,7 +482,10 @@ def track_of(action) -> Optional[str]:
 
 def _render(action, state) -> str:
     if action.is_pass:
-        return "pass -- wait for the lure to lapse"
+        # Just the move. This once read "wait for the lure to lapse" for
+        # every pass -- a plan nobody should want, printed whatever the
+        # engine's reason was.
+        return "pass this round"
     if getattr(action, "fire", False):
         # A FIRE HAS NO TRACK AND NO LEVEL, and `is_pass` is False for
         # it, so every renderer that guards only on `is_pass` reaches

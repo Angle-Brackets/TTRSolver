@@ -862,8 +862,34 @@ def wide_candidates(state: BattleState, reject=None,
         best_of_kind.setdefault(_kind(plan[0] if plan else None), plan)
     for plan in best_of_kind.values():
         add(plan)
-    add([Action(track=None)])
+    if PASS_ON_MENU == "always" or _pass_is_needed(state):
+        add([Action(track=None)])
     return out
+
+
+# WHEN A LONE TOON'S MENU OFFERS A PASS: "needed" -- only when nothing
+# else on the board is productive (the Trap-and-Lure wait: every cog
+# lured, nothing to do but let it lapse and trap again) -- or "always".
+# A pass is LEGAL almost everywhere (`legal_actions`: any lured cog, or
+# while `free_passes` lasts), and on a lured board it costs no laff and
+# no gag this round; what it throws away, a lure round and its
+# knockback, is small next to playout noise, so offered everywhere it
+# sometimes won by luck and the owner was told to "pass and let the
+# lure lapse". A PARTY is untouched: its joint plans keep the pass,
+# which is how a toon conserves gags while a teammate covers [OWNER].
+# Measured neutral: 41 against 43 of 100 Realms VPs, the two differing
+# on 2 fights (p=0.5) -- it rarely decides a fight, and it stops advice
+# no player should follow.
+PASS_ON_MENU = "needed"
+
+
+def _pass_is_needed(state: BattleState) -> bool:
+    from .. import simulator
+    try:
+        others = [a for a in simulator.legal_actions(state) if not a.is_pass]
+        return not any(simulator.is_productive(state, a) for a in others)
+    except Exception:                      # noqa: BLE001
+        return False
 
 
 def pick_wide(state: BattleState, horizon=None, seed: int = 0,

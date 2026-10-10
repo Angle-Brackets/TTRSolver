@@ -463,8 +463,6 @@ class PartyTest(unittest.TestCase):
         self.assertEqual(1, len(res.plan))
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class PouchValueTest(unittest.TestCase):
@@ -805,3 +803,36 @@ class UniteVariantTest(unittest.TestCase):
     def test_the_menu_carries_a_unite_when_one_is_held(self):
         menu = playout.wide_candidates(self._board())
         self.assertTrue(any(playout.unite_of(p) for p in menu))
+
+
+class PassOnTheMenuTest(unittest.TestCase):
+    """A lone toon's menu offers a pass only when nothing else is
+    productive. Offered everywhere, it won by luck on lured boards and the
+    owner was told to "pass and let the lure lapse"."""
+
+    def _board(self, counts, lured):
+        from solver import data
+        from solver.state import BattleState, CogState, ToonState
+
+        hp = data.cog_max_hp(10)
+        cogs = [CogState("mr_hollywood", "sellbot", 10, hp, hp) for _ in lured]
+        for cog, is_lured in zip(cogs, lured):
+            if is_lured:
+                cog.status.apply_lure(90, 3, level=6)
+        toon = ToonState(80, 100, {t: 7 for t, _ in counts}, {k: 3 for k in counts})
+        return BattleState(toons=[toon], cogs=cogs)
+
+    def test_no_pass_while_there_is_something_to_throw(self):
+        from solver.data.types import Track
+        board = self._board([(Track.THROW, 5)], [True, True])
+        self.assertFalse(playout._pass_is_needed(board))
+        self.assertFalse(playout._pass_is_needed(self._board([(Track.THROW, 5)], [False])))
+
+    def test_the_trap_and_lure_wait_keeps_it(self):
+        from solver.data.types import Track
+        board = self._board([(Track.TRAP, 5), (Track.LURE, 4)], [True, True])
+        self.assertTrue(playout._pass_is_needed(board))
+
+
+if __name__ == "__main__":
+    unittest.main()
