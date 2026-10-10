@@ -474,8 +474,10 @@ with company, 10 + 10 per side; CEO round one is 20 per side, so 40
 solo (the owner's "I think"); CFO, CJ and CEO round two are [TODO] --
 and counts cogs defeated against it. Round sizes depend on the toons in
 the WHOLE fight, which one battle cannot see: alone on screen is a solo
-VP or one side of a duo. TTR's panel asks ("Toons in Fight"); Realms
-reads the boss's `setToonIds` where present. That is information a player has, signed off by the owner;
+VP or one side of a duo. The toon-count pill is the
+whole fight's count; in a two-sided fight (`boss.TWO_SIDED`) your battle
+holds your share (`toons_in_battle`). Realms reads the boss's
+`setToonIds` where present and takes the pill as a floor. That is information a player has, signed off by the owner;
 a building's next floor is not, and stays unknown. Realms names the boss
 from the battle object; TTR has no boss zone string yet
 (`boss.TTR_BOSS_ZONES` is empty until one is observed) and uses the

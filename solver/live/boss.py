@@ -30,6 +30,24 @@ from typing import Dict, Iterable, NamedTuple, Optional, Set, Tuple
 
 BOSS_KINDS = ("vp", "ceo", "cfo", "cj")
 
+# Fights whose toons split across TWO battles. [OWNER] a VP's toons "get
+# split evenly across both sides", and the CEO's round one is 20 a side.
+# The CFO and CJ are [TODO], so they keep everyone in one battle.
+TWO_SIDED = ("vp", "ceo")
+
+
+def toons_in_battle(kind: Optional[str], players: int) -> int:
+    """Toons in YOUR battle, counting you, of `players` in the whole fight.
+
+    Evenly split in a two-sided fight; an odd count is rounded up, so
+    three toons put you with one teammate rather than none -- the side
+    that overstates help rather than danger is the less surprising one.
+    """
+    players = max(1, int(players))
+    if kind in TWO_SIDED:
+        return (players + 1) // 2
+    return players
+
 
 def rounds_for(kind: Optional[str], players: int) -> Optional[Tuple]:
     """Each round's cogs ON ONE SIDE, in order, for a fight of `players`

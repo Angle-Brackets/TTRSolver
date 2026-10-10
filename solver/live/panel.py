@@ -125,7 +125,6 @@ def model_json(model: Model) -> str:
         "toon_count": model.toon_count,
         "boss_kind": model.boss_kind,
         "boss_manual": model.boss_manual,
-        "boss_players": model.boss_players,
         "cogs_defeated": model.cogs_defeated,
         "cogs_left": model.cogs_left,
         "engine": model.engine,
@@ -328,10 +327,6 @@ class Api:
     def set_cogs_defeated(self, count) -> None:
         """Correct the cogs-defeated count."""
         self._worker.set_cogs_defeated(count)
-
-    def set_boss_players(self, count) -> None:
-        """How many toons are in the boss fight, both sides."""
-        self._worker.set_boss_players(count)
 
     def set_height(self, height: int) -> None:
         """Size the window to the page, rather than guessing at it.

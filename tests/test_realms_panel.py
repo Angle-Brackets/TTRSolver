@@ -208,12 +208,17 @@ class ApiTest(unittest.TestCase):
             self.assertIsNotNone(method, f"the page can call {name}")
             self.assertIsNone(method(api, 0, True))
 
-    def test_set_toon_count_exists_but_is_inert(self):
-        """The page is shared, so the click has to land somewhere -- but
-        party size is read here and a click must not override it."""
-        self.assertTrue(hasattr(realms_panel.RealmsApi, "set_toon_count"))
+    def test_the_pill_is_a_floor_on_the_boss_fight(self):
+        """Your battle's party is read and a click never overrides it; the
+        pill only says how many are in the whole boss fight, which a duo
+        VP hides by putting you alone on a side."""
+        from types import SimpleNamespace
+
+        calls = []
         api = realms_panel.RealmsApi.__new__(realms_panel.RealmsApi)
-        self.assertIsNone(realms_panel.RealmsApi.set_toon_count(api, 3))
+        api._worker = SimpleNamespace(set_boss_players=calls.append)
+        realms_panel.RealmsApi.set_toon_count(api, 2)
+        self.assertEqual([2], calls)
 
 
 @unittest.skipUnless(HAVE_MODULE, "realms panel unavailable")

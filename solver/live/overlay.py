@@ -634,7 +634,7 @@ class Worker(AdviceWorker):
                     thinker.submit(frame, list(watcher.view.cogs), None,
                                    self.objective, self.depth, self.budget,
                                    self.ignore_checksum,
-                                   allies=max(0, self.toon_count - 1),
+                                   allies=self.allies_in_battle(),
                                    fires=self.remaining("fires"),
                                    reject=self._rejected,
                                    boss=self.boss_tracker().frozen(),
@@ -663,7 +663,8 @@ class Worker(AdviceWorker):
             self._observe_boss(boss_mod.boss_from_location(zone))
         if any(e.kind in ("cog_defeated", "battle_ended") for e in events):
             tracker.note_defeated(boss_mod.died_plates(before, after))
-        tracker.party_size = max(self.toon_count, self._boss_players)
+        # The pill is the whole fight's toon count (`allies_in_battle`).
+        tracker.party_size = self.toon_count
         self._boss_into(model, on_field=len(after))
 
     def _should_retry(self, model, now: float) -> bool:

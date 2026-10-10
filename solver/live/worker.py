@@ -241,8 +241,21 @@ class AdviceWorker(threading.Thread):
             self.boss_tracker().set_kind(kind)
         self._settings_changed()
 
+    def allies_in_battle(self) -> int:
+        """Teammates in your battle, from the toon-count pill.
+
+        The pill is the toons in the WHOLE fight -- the one count a player
+        knows. In a two-sided boss fight your battle holds your share of
+        them (`boss.toons_in_battle`); anywhere else, all of them.
+        """
+        from . import boss as boss_mod
+
+        return max(0, boss_mod.toons_in_battle(
+            self.boss_tracker().kind, self.toon_count) - 1)
+
     def set_boss_players(self, count) -> None:
-        """The player saying how many toons are in the fight, both sides."""
+        """A floor on the toons in the whole boss fight, for a client that
+        reads your battle's party itself: a duo VP leaves you alone in it."""
         try:
             value = max(1, min(8, int(count)))
         except (TypeError, ValueError):

@@ -469,6 +469,10 @@ class RealmsWorker(AdviceWorker):
         model.pouch = _pouch_of(state)
         model.cogs = [f"{r.name} (level {r.level})" for r in model.rows]
         model.toon_count = state.allies_standing + 1
+        if self.boss_tracker().kind:
+            # The pill shows the WHOLE fight in a boss room, as it is set.
+            model.toon_count = max(model.toon_count,
+                                   self.boss_tracker().party_size)
 
         key = _position_key(state)
         if key != self._last_key or self._asked.is_set():
@@ -1282,11 +1286,11 @@ class RealmsApi:
         return None
 
     def set_toon_count(self, count) -> None:
-        """Accepted and ignored: party size is READ here, from
-        `setMembers`. Letting a click override the server would be
-        strictly worse data; the method exists only because the page
-        is shared and a missing one would raise."""
-        return None
+        """The pill: toons in the whole fight. Your battle's party is READ
+        here, from `setMembers`, and a click never overrides it -- but in a
+        boss fight a duo VP leaves you alone in your battle, so the pill
+        is a floor on the fight's size, where the server says less."""
+        self._worker.set_boss_players(count)
 
     def set_boss(self, kind) -> None:
         """Name the boss fight by hand, or "" to use detection."""
@@ -1295,11 +1299,6 @@ class RealmsApi:
     def set_cogs_defeated(self, count) -> None:
         """Correct the cogs-defeated count."""
         self._worker.set_cogs_defeated(count)
-
-    def set_boss_players(self, count) -> None:
-        """The player's count of toons in the boss fight. A floor, not an
-        override: where the server names more, the server wins."""
-        self._worker.set_boss_players(count)
 
     def ask_now(self) -> None:
         """Recompute now. The page's "Work it out" button."""

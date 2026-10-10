@@ -384,17 +384,23 @@ class ScreenCountingTest(unittest.TestCase):
         w._track_boss(w.model, [], [], [])
         self.assertEqual(20, w.model.cogs_left)
 
-    def test_alone_on_screen_is_not_alone_in_the_fight(self):
-        """One toon in your battle may be one side of a two-player VP;
-        only the player can say which."""
+    def test_the_pill_is_the_whole_fight(self):
+        """One pill, the toons in the whole fight [OWNER]. In a duo VP each
+        toon is alone on a side: 10 + 10 a side, and no teammate in your
+        battle to share the cogs' attacks."""
         w = self._worker()
         w.set_boss("vp")
         w._track_boss(w.model, [], [], [])
         self.assertEqual(40, w.model.cogs_left)
-        w.set_boss_players(2)
+        w.toon_count = 2
         w._track_boss(w.model, [], [], [])
         self.assertEqual(20, w.model.cogs_left)
-        self.assertEqual(2, w.model.boss_players)
+        self.assertEqual(0, w.allies_in_battle())
+
+    def test_off_a_boss_the_pill_is_your_battle(self):
+        w = self._worker()
+        w.toon_count = 3
+        self.assertEqual(2, w.allies_in_battle())
 
     def test_no_boss_zone_is_known_yet(self):
         """Filled only from an observed string, never a plausible one."""
