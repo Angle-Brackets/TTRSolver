@@ -47,6 +47,10 @@ class RealmsBuild(NamedTuple):
     # modelled); everything else still counts them as `allies_standing`.
     # A teammate who cannot be read is left out, not guessed at.
     allies: Tuple[ToonState, ...] = ()
+    # The battle is a boss-room one, whether or not `boss` resolved. A
+    # boss room's battle can arrive before its link to the boss does --
+    # "unknown", which must not read as "not a boss fight".
+    boss_room: bool = False
 
     def __bool__(self) -> bool:
         return self.state is not None
@@ -507,5 +511,6 @@ def build_state(listener, player_do_id: Optional[int] = None,
                     kind=battle_kind(battle), sos_one_round=True), [],
         boss=boss_of(listener, battle),
         battle_id=getattr(battle, "do_id", None),
+        boss_room=getattr(battle, "dclass", None) == BOSS_BATTLE_CLASS,
         suit_ids=tuple(members.suits),
         allies=tuple(allies))

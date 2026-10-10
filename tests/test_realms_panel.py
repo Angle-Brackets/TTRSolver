@@ -1104,6 +1104,41 @@ class ObservedSpendingTest(unittest.TestCase):
         self.assertEqual(0, w.spent_sos)
         self.assertEqual({"Moe Zart": 5, "Flippy": 5}, fresh.state.toons[0].sos_cards)
 
+    def test_the_intermission_between_rounds_resets_nothing(self):
+        """[OWNER] between a VP's rounds the panel detects no fight for a
+        while, and round two's first board may arrive before its link to
+        the boss. Neither may restart the count or the budget."""
+        from types import SimpleNamespace
+        from solver.live.realms_session import BossBattle
+
+        w = self._worker()
+        w._boss_obj = w._boss_battle = None
+        w._boss_players = 0
+        w._boss_manual = None
+
+        def tick(res):
+            w._track_boss(res)
+            w._cap_holdings(res)
+
+        def board(moe, boss=True, number=1, battle=9):
+            res = self._result(0, 0, {"Moe Zart": moe, "Flippy": 9})
+            res.boss = BossBattle("vp", 500, number, 0, 1) if boss else None
+            res.battle_id, res.suit_ids, res.boss_room = battle, (), True
+            return res
+
+        tick(board(9))
+        tick(board(6))                                  # three calls
+        w.boss_tracker().defeated = 20                  # round one done
+        nothing = SimpleNamespace(state=None)
+        tick(nothing)
+        tick(nothing)                                   # the intermission
+        tick(board(6, boss=False, battle=10))           # boss not linked yet
+        tick(nothing)
+        tick(board(6, number=2, battle=10))             # round two proper
+        self.assertEqual(3, w.spent_sos)
+        self.assertEqual(20, w.boss_tracker().defeated)
+        self.assertEqual("vp", w.boss_tracker().kind)
+
     def test_the_baseline_resets_between_fights(self):
         w = self._worker()
         w._cap_holdings(self._result(0, 0, {"Flippy": 9}))

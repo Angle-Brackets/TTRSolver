@@ -545,6 +545,13 @@ class RealmsWorker(AdviceWorker):
         if result.state is None:
             return
         boss = getattr(result, "boss", None)
+        if boss is None and getattr(result, "boss_room", False):
+            # A BOSS ROOM WHOSE BOSS HAS NOT RESOLVED -- the first board
+            # after a VP's intermission can arrive before its link to the
+            # boss. Read as "no boss" it would clear the kind, restarting
+            # the count (twice, once more when the boss resolves) and, on
+            # the next empty poll, the fight's budget. Unknown: keep both.
+            return
         tracker = self.boss_tracker()
         self._observe_boss(boss.kind if boss else None)
         if boss is not None and boss.boss_id != self._boss_obj:
