@@ -724,7 +724,8 @@ class StyleTest(unittest.TestCase):
         playout.set_style(None)
         unset = playout.value(board, total=4, rounds=30)
         self.assertEqual(unset, self._scored("balanced", rounds=30))
-        self.assertAlmostEqual(4 - 2 + playout.LAFF_WEIGHT * 68 / 137, unset)
+        self.assertAlmostEqual(4 - 2 + playout.LAFF_WEIGHT * 68 / 137
+                               - playout.ROUND_TIEBREAK * 30, unset)
 
     def test_survive_values_laff_three_times_as_much(self):
         base = self._scored("balanced") - 2
@@ -742,8 +743,11 @@ class StyleTest(unittest.TestCase):
                            playout.POUCH_WEIGHT["facility"])
 
     def test_only_speedrun_charges_for_rounds(self):
+        """Every preset pays the tie-break (a thousandth of a cog a round);
+        only Speedrun pays a real charge on top."""
         for preset in ("balanced", "survive", "conserve", "glass cannon"):
-            self.assertEqual(self._scored(preset), self._scored(preset, rounds=20), preset)
+            self.assertAlmostEqual(self._scored(preset) - playout.ROUND_TIEBREAK * 20,
+                                   self._scored(preset, rounds=20), msg=preset)
         self.assertLess(self._scored("speedrun", rounds=20), self._scored("speedrun"))
 
     def test_a_child_process_takes_the_panels_preset(self):

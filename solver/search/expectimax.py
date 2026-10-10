@@ -519,7 +519,9 @@ def _value_bounds(state: BattleState, depth: int,
 
     # Dearest a single gag can be: highest level, and the scarcity term
     # peaks at a gag you can only hold one of.
-    worst_gag = gag_cost * 7.0 + scarcity
+    # ...or an SOS card, priced separately (`Objective.sos_cost`).
+    worst_gag = max(gag_cost * 7.0 + scarcity,
+                    getattr(objective, "sos_cost", 0.0))
 
     # The battle can only be lost inside the horizon if the damage
     # available in it can actually reach zero laff.

@@ -40189,17 +40189,17 @@
     0.0,
     1.0
    ],
-   "legal": 8,
-   "quick": 1523.6775,
+   "legal": 7,
+   "quick": 1717.3333,
    "incoming": 0.0,
    "survival": 4.0,
    "at_risk": 0.0,
-   "prevented": -1.7025,
-   "killed_threat": 0.0,
-   "armed": 6.0,
+   "prevented": 0.0,
+   "killed_threat": 1.7025,
+   "armed": 0.0,
    "waste": [
-    0.0,
-    1.0
+    70.0,
+    0.3333
    ],
    "pick": "squirt/4/0"
   }

@@ -150,6 +150,14 @@ class Objective:
     # another. SPEEDRUN overrides upward to make the round charge
     # dominate.
     turn_cost: float = 1.0
+
+    # What calling an SOS card costs. It was 0 -- a card has no track, so
+    # `gag_price` charged nothing -- and the Search row then called a
+    # restock card to top up a pouch beside a cog one pie from dead (seen
+    # live: Melody Wavers against 26 hp). CHOSEN, not derived: about twice
+    # BALANCED's level 7 (4.7), because a card cannot be restocked in the
+    # fight at all.
+    sos_cost: float = 10.0
     # Multiplier on laff lost. Raise it to play defensively.
     laff_weight: float = 1.0
 

@@ -363,6 +363,8 @@ def _accumulate(results, prob, state_after, laff_lost, action,
         # BattleState.can_still_damage -- and the search has to be told,
         # or it scores a hopeless position with the heuristic instead.
         lost=state_after.is_terminal() and not state_after.is_win())
+    if getattr(action, "sos", None):
+        reward -= getattr(objective, "sos_cost", 0.0)
 
     key = merge_key(state_after)
     existing = results.get(key)

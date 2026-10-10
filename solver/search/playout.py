@@ -212,6 +212,14 @@ def build_env(state: BattleState, horizon, rng):
 # score cogs alone.
 LAFF_WEIGHT = 0.5
 
+# SOONER BEATS LATER, BUT ONLY TO BREAK A TIE. On a board every playout
+# wins, every move scored the same cogs and nearly the same laff, so a
+# move that wastes the round tied with the one that ends it -- seen live,
+# a Railroad over a lone lured cog at 26 hp rated level with the Cream Pie
+# that kills it. A thousandth of a cog a round cannot outweigh a cog or a
+# point of laff fraction; it only separates moves that tie on both.
+ROUND_TIEBREAK = 0.001
+
 # WHAT THE POUCH IS WORTH when a playout stops before the fight does: in
 # a building the next floor's cogs are unknown, so without this, gags
 # left over were worth nothing (a Foghorn beat a Whole Cream Pie on a
@@ -358,7 +366,7 @@ def value(state: BattleState, total: int, pouch_start: float = 0.0,
     if pouch_weight and pouch_start > 0:
         score += pouch_weight * pouch_value(state) / pouch_start
     if rounds:
-        score -= _turn_charge(total) * rounds
+        score -= (_turn_charge(total) + ROUND_TIEBREAK) * rounds
     return score
 
 

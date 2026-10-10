@@ -128,6 +128,12 @@ def legal_actions(state: BattleState) -> List[Action]:
             continue
 
         if is_group_action(track, level):
+            if track == Track.TRAP and all(
+                    c.status.lured for c in state.cogs if not c.status.is_dead):
+                # [CONFIRMED] by the owner: a Railroad needs ONE unlured cog
+                # to go down; with every cog lured it cannot be placed
+                # (it was offered live over a lone lured cog).
+                continue
             actions.append(Action(track=track, level=level, target_index=None))
             continue
 
@@ -201,7 +207,11 @@ def is_productive(state: BattleState, action: Action) -> bool:
         # Drop always misses a lured cog, so a Drop with no un-lured
         # target is a gag thrown away.
         return any(not cog.status.lured for cog in targets)
-    # Trap arms something, and the damage tracks damage something.
+    if action.track == Track.TRAP:
+        # A Trap goes down only in front of an unlured cog -- a Railroad
+        # needs one to be placed at all.
+        return any(not cog.status.lured for cog in targets)
+    # The damage tracks damage something.
     return bool(targets)
 
 
@@ -414,10 +424,11 @@ def apply_toon_action(state: BattleState, action: Action,
         # placed Trap gags rather than fizzling out".
         #
         # THE RAILROAD WAKES THE FIELD TO LAY ITSELF. [CONFIRMED] by the
-        # owner from play: a group Trap needs only ONE unlured cog to go
-        # down, and placing it un-lures every lured cog so the track can
-        # be laid under all of them. A single-target Trap cannot do this
-        # and is still refused on a lured cog.
+        # owner from play: a group Trap needs ONE unlured cog to go down,
+        # and placing it un-lures every lured cog so the track is laid
+        # under all of them. With every cog lured it cannot be placed --
+        # `legal_actions` does not offer it. A single-target Trap cannot
+        # do this and is refused on a lured cog.
         #
         # That is what makes Railroad-then-Lure work IN ONE ROUND: Trap
         # resolves before Lure, the Railroad wakes and arms the field,
