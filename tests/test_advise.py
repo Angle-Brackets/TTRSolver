@@ -137,3 +137,55 @@ class BudgetTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StartupApiTest(unittest.TestCase):
+    """The panel connects to the Local API as it opens, and an unanswered
+    consent prompt is never answered with a second one."""
+
+    def setUp(self):
+        self.saved = dict(A._SESSION)
+
+    def tearDown(self):
+        A._SESSION.clear()
+        A._SESSION.update(self.saved)
+
+    def test_a_pending_prompt_keeps_the_same_client(self):
+        from solver.live.ttr_local import ConsentRequired
+
+        class Pending:
+            def snapshot(self):
+                raise ConsentRequired("prompt still up")
+        client = Pending()
+        A._SESSION.update(client=client, snapshot=None, taken=0.0, tried=0.0)
+        found = []
+        import solver.live.ttr_local as T
+        saved_discover = T.discover
+        T.discover = lambda *a, **k: found.append(1) or []
+        try:
+            self.assertIsNone(A._snapshot())
+            self.assertIsNone(A._snapshot(force=True))
+        finally:
+            T.discover = saved_discover
+        self.assertIs(client, A._SESSION["client"], "kept, so no new prompt")
+        self.assertEqual([], found, "no rediscovery while the prompt is up")
+
+    def test_the_panel_connects_as_it_opens(self):
+        import threading
+        import time as _time
+        from solver.live.overlay import Worker
+
+        w = Worker.__new__(Worker)
+        w._stop = threading.Event()
+        calls = []
+        saved = A._snapshot
+        A._snapshot = lambda *a, **k: calls.append(1)
+        try:
+            w._keep_api_fresh()
+            deadline = _time.time() + 2
+            while not calls and _time.time() < deadline:
+                _time.sleep(0.02)
+        finally:
+            w._stop.set()
+            A._snapshot = saved
+        self.assertTrue(calls, "asked straight away, not at the first battle")

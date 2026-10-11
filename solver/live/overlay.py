@@ -542,6 +542,7 @@ class Worker(AdviceWorker):
         memory = PanelMemory()
         thinker.panel_memory = memory
         self._start_relay()
+        self._keep_api_fresh()
         try:
             while not self._stop.is_set():
                 cycle = time.time()
@@ -718,6 +719,29 @@ class Worker(AdviceWorker):
                 self._floors_state("blocked")
         except Exception:                      # noqa: BLE001 -- no pipes here
             self._relay = None
+
+    def _keep_api_fresh(self) -> None:
+        """Connect to the Local API the moment the panel opens, and keep
+        the snapshot fresh from then on.
+
+        It used to connect only when the panel first thought about a move,
+        so until the first battle the location read "Local API
+        Disconnected" and the slip count was unknown. One request per
+        SNAPSHOT_TTL; discovery still runs at most once per
+        REDISCOVER_AFTER and only while disconnected, so the consent prompt
+        appears once and is not repeated (see `advise._snapshot`).
+        """
+        import threading
+        from . import advise as advise_mod
+
+        def run():
+            while not self._stop.is_set():
+                try:
+                    advise_mod._snapshot()
+                except Exception:              # noqa: BLE001 -- retried next tick
+                    pass
+                self._stop.wait(advise_mod.SNAPSHOT_TTL)
+        threading.Thread(target=run, daemon=True).start()
 
     def _floors_state(self, state: str) -> None:
         """What the page says about reading floors: "on", "blocked" (Discord

@@ -290,6 +290,9 @@ class Thinker:
 # not re-discovered on a whim -- only after a failure, and not more
 # often than REDISCOVER_AFTER seconds.
 _SESSION = {"client": None, "snapshot": None, "taken": 0.0, "tried": 0.0}
+# One caller at a time: the panel's refresher and the move-thinker both ask,
+# and two discoveries at once would be two clients -- two consent prompts.
+_SESSION_LOCK = threading.Lock()
 SNAPSHOT_TTL = 5.0          # seconds; laff and training move slowly
 REDISCOVER_AFTER = 15.0     # seconds between attempts when not connected
 
@@ -300,6 +303,12 @@ def reset_session() -> None:
 
 
 def _snapshot(force: bool = False):
+    """Local API state, cached, or None. Thread-safe; see `_SESSION_LOCK`."""
+    with _SESSION_LOCK:
+        return _snapshot_locked(force)
+
+
+def _snapshot_locked(force: bool = False):
     """Local API state, cached, or None.
 
     Returns the cached snapshot unless it is older than SNAPSHOT_TTL.
@@ -308,7 +317,7 @@ def _snapshot(force: bool = False):
     mid-battle, and laff is worth one request every few seconds rather
     than one every poll.
     """
-    from .ttr_local import LocalAPIError, discover
+    from .ttr_local import ConsentRequired, LocalAPIError, discover
 
     now = time.time()
     if not force and _SESSION["snapshot"] is not None \
@@ -331,6 +340,11 @@ def _snapshot(force: bool = False):
 
     try:
         snap = _SESSION["client"].snapshot()
+    except ConsentRequired:
+        # THE PROMPT IS STILL UP. Keep this client: the game ties its
+        # consent to the client's token, so dropping it and rediscovering
+        # would pop a fresh prompt over the unanswered one, every backoff.
+        return None
     except LocalAPIError:
         # The game may have closed or the toon logged out. Drop the
         # client so the next attempt rediscovers, after the backoff, and
