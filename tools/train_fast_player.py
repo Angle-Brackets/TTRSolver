@@ -34,6 +34,8 @@ def main() -> int:
     ap.add_argument("--batch", type=int, default=1024)
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--holdout", type=float, default=0.05)
+    ap.add_argument("--init", default="",
+                    help="weights to fine-tune from (an export of this script)")
     ap.add_argument("--temp", type=float, default=0.02,
                     help="soft-target temperature, in cogs: rows carrying the "
                          "playouts' per-move means train on softmax(mean/temp) "
@@ -116,6 +118,23 @@ def main() -> int:
     act_head = nn.Linear(args.hidden, n_out).to(dev)
     unite_head = (nn.Linear(args.hidden, MU.shape[1]).to(dev)
                   if have_unites else None)
+    if args.init:
+        # FINE-TUNING: start from an export of this script (same widths)
+        # rather than from random -- keep what it learned, then adjust.
+        start = json.loads(Path(args.init).read_text(encoding="utf-8"))
+        linears = [m for m in trunk if isinstance(m, nn.Linear)] + [act_head]
+        if len(start["layers"]) != len(linears):
+            raise SystemExit(f"--init has {len(start['layers'])} layers, "
+                             f"this network {len(linears)}")
+        with torch.no_grad():
+            for m, (w, b) in zip(linears, start["layers"]):
+                m.weight.copy_(torch.tensor(w, dtype=torch.float32).T)
+                m.bias.copy_(torch.tensor(b, dtype=torch.float32))
+            if unite_head is not None and start.get("unite"):
+                w, b = start["unite"]
+                unite_head.weight.copy_(torch.tensor(w, dtype=torch.float32).T)
+                unite_head.bias.copy_(torch.tensor(b, dtype=torch.float32))
+        print(f"  started from {args.init}")
     params = list(trunk.parameters()) + list(act_head.parameters())
     if unite_head is not None:
         params += list(unite_head.parameters())
