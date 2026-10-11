@@ -241,6 +241,12 @@ def play(job):
             toon.unites_held = int(opts["unites"])
     rng = random.Random(seed)
     sos_start = playout._sos_left(env.state)
+
+    def _left(st):
+        """Cogs still to beat: on the field, waiting, in later waves."""
+        return (sum(1 for c in st.cogs if c.hp > 0) + len(st.holdout)
+                + int(getattr(st, "cogs_remaining", 0) or 0))
+    cogs_start = _left(env.state)
     done, info, rounds, spent = False, {}, 0, 0.0
     while not done and rounds < 400:
         state = env.state
@@ -299,7 +305,11 @@ def play(job):
         done, info = playout.step_round(env, plan)
         rounds += 1
     calls = max(0, sos_start - playout._sos_left(env.state))
-    return seed, spec, bool(info.get("win")), rounds, spent / max(1, rounds), calls
+    # COGS DEFEATED: the yardstick where nobody wins -- a lone toon in a
+    # CEO falls either way, and falling at cog 25 beats falling at cog 15.
+    defeated = max(0, cogs_start - _left(env.state))
+    return (seed, spec, bool(info.get("win")), rounds, spent / max(1, rounds),
+            calls, defeated)
 
 
 def main() -> int:
@@ -319,10 +329,12 @@ def main() -> int:
     cost = {arm: [] for arm in args.arms}
     lengths = {arm: [] for arm in args.arms}
     calls = {arm: [] for arm in args.arms}
+    beaten = {arm: {} for arm in args.arms}
     t0 = time.time()
     with ProcessPoolExecutor(max_workers=args.workers) as pool:
-        for seed, arm, won, rounds, per, sos in pool.map(play, jobs, chunksize=2):
+        for seed, arm, won, rounds, per, sos, defeated in pool.map(play, jobs, chunksize=2):
             calls[arm].append(sos)
+            beaten[arm][seed] = defeated
             wins[arm][seed] = won
             cost[arm].append(per)
             lengths[arm].append(rounds)
@@ -335,7 +347,8 @@ def main() -> int:
         line = (f"  {arm:28s} {w:4d}/{len(seeds)}  {100.0 * w / len(seeds):5.1f}%"
                 f"   {statistics.mean(cost[arm]):.2f}s a decision"
                 f"   {statistics.mean(lengths[arm]):.1f} rounds"
-                f"   {statistics.mean(calls[arm]):.2f} SOS")
+                f"   {statistics.mean(calls[arm]):.2f} SOS"
+                f"   {statistics.mean(beaten[arm][s] for s in seeds):.1f} cogs")
         if arm != first:
             up = sum(1 for s in seeds if wins[arm][s] and not wins[first][s])
             dn = sum(1 for s in seeds if wins[first][s] and not wins[arm][s])
