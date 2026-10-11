@@ -42,7 +42,13 @@ def main() -> int:
     import torch.nn.functional as F
 
     rows, unite_rows = [], []
-    for path in args.data:
+    # `path*k` repeats that file's rows k times: expert iteration trains on
+    # many cheap climb labels with the scarce playout labels weighted up.
+    sources = []
+    for spec in args.data:
+        path, _, times = spec.partition("*")
+        sources += [path] * max(1, int(times or 1))
+    for path in sources:
         for row in pickle.load(open(path, "rb")):
             if len(row) == 3:
                 # From before the unite inputs: those fights held no

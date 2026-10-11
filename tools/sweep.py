@@ -279,7 +279,8 @@ def play(job):
                 valuenet.USE = False
                 plan = [act] if act is not None else None
             elif name == "net":
-                plan = fastplayer.act(view) if len(view.toons) == 1 else None
+                plan = (fastplayer.act(view, holdout=len(state.holdout))
+                        if len(view.toons) == 1 else None)
             elif name != "climb":
                 raise ValueError(f"unknown arm {name!r}")
             spent += time.perf_counter() - t0

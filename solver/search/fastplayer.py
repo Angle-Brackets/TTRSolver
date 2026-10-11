@@ -38,6 +38,9 @@ DEFAULT_WEIGHTS = Path(__file__).resolve().parents[1] / "rl" / "fast_player.json
 _MODEL = None
 _UNITE = None
 _PATH: Optional[Path] = None
+# Whether the loaded weights take the HORIZON inputs (see `horizon`).
+_HORIZON = False
+HORIZON_DIM = 3
 
 # Unites held are scaled against this; more than it reads as "plenty".
 UNITES_SCALE = 5.0
@@ -106,8 +109,32 @@ def n_outputs() -> int:
     return len(env_mod.ACTIONS) + len(sos_names())
 
 
-def features(state: BattleState) -> Tuple[List[float], List[bool]]:
-    """(input vector, legal mask) for seat 0."""
+def horizon(state: BattleState, holdout: Optional[int] = None) -> List[float]:
+    """What is still to come, which the board alone does not show: cogs
+    waiting to walk into this wave, cogs in the waves or floors after it,
+    and SOS calls left this fight.
+
+    The playouts' value net was useless until it saw the first two -- it
+    could not tell 16 cogs to come from none -- and a policy that is to
+    play like the playouts needs them for the same reason. A rollout plays
+    on a view with the holdout stripped (`playout._view`), so callers pass
+    the real count as `holdout`.
+    """
+    toon = state.toons[0]
+    waiting = len(state.holdout) if holdout is None else int(holdout)
+    calls = getattr(toon, "sos_calls", None)
+    if calls is None:
+        calls = sum(max(0, int(n)) for n in (toon.sos_cards or {}).values())
+    return [min(waiting, 40) / 20.0,
+            min(int(getattr(state, "cogs_remaining", 0) or 0), 80) / 40.0,
+            min(int(calls), 10) / 5.0]
+
+
+def features(state: BattleState, holdout: Optional[int] = None,
+             with_horizon: bool = False) -> Tuple[List[float], List[bool]]:
+    """(input vector, legal mask) for seat 0. `with_horizon` appends
+    `horizon` -- off by default, because the playouts' value net reads this
+    same vector at its own fixed width."""
     from ..rl import env as env_mod
 
     x = list(env_mod.encode(state, 0, [None] * len(state.toons)))
@@ -117,6 +144,8 @@ def features(state: BattleState) -> Tuple[List[float], List[bool]]:
     x += [min(int(held[n]), 3) / 3.0 for n in names]
     x += [min(int(getattr(toon, "unites_held", 0)), UNITES_SCALE) / UNITES_SCALE,
           int(getattr(toon, "unite_cooldown", 0)) / 3.0]
+    if with_horizon:
+        x += horizon(state, holdout)
     mask = list(env_mod.legal_mask(state, 0))
     mask += [int(held[n]) > 0 for n in names]
     return x, mask
@@ -153,7 +182,7 @@ def action_of(index: int) -> Action:
 
 def use(path) -> bool:
     """Load weights from `path` (an export of `tools/train_fast_player.py`)."""
-    global _MODEL, _UNITE, _PATH
+    global _MODEL, _UNITE, _PATH, _HORIZON
     path = Path(path)
     if _PATH == path and _MODEL is not None:
         return True
@@ -170,16 +199,19 @@ def use(path) -> bool:
         _MODEL, _UNITE, _PATH = None, None, path
         return False
     width = len(features_dim_probe())
+    takes_horizon = layers[0][0].shape[0] == width + HORIZON_DIM
+    if takes_horizon:
+        width += HORIZON_DIM
     if layers[0][0].shape[0] == width - 2:
         # Weights from before the unite inputs: zero rows for them keep
         # the network exactly as trained, blind to unites.
         w0, b0 = layers[0]
         layers[0] = (np.vstack([w0, np.zeros((2, w0.shape[1]))]), b0)
-    if layers[0][0].shape[0] != len(features_dim_probe()) or \
+    if layers[0][0].shape[0] != width or \
             layers[-1][0].shape[1] != n_outputs() or             (unite is not None and unite[0].shape[1] != len(unite_slots())):
         _MODEL, _UNITE, _PATH = None, None, path
         return False
-    _MODEL, _UNITE, _PATH = layers, unite, path
+    _MODEL, _UNITE, _PATH, _HORIZON = layers, unite, path, takes_horizon
     return True
 
 
@@ -204,7 +236,7 @@ def _trunk(x):
     return h
 
 
-def choose_unite(state: BattleState):
+def choose_unite(state: BattleState, holdout: Optional[int] = None):
     """The unite to open this round with, or None."""
     import numpy as np
 
@@ -213,13 +245,14 @@ def choose_unite(state: BattleState):
     mask = unite_mask(state)
     if not any(mask[1:]):
         return None
-    x, _ = features(state)
+    x, _ = features(state, holdout, _HORIZON)
     w, b = _UNITE
     logits = np.where(np.array(mask), _trunk(x) @ w + b, -np.inf)
     return _choice_of(state.toons[0], int(np.argmax(logits)))
 
 
-def ranked(state: BattleState, k: int = 4) -> List[Tuple[list, float]]:
+def ranked(state: BattleState, k: int = 4,
+           holdout: Optional[int] = None) -> List[Tuple[list, float]]:
     """The network's top `k` legal one-seat plans with their probabilities
     (renormalised over the k), each carrying the unite it opens with.
     The move head reads the board after the unite, as `act` does."""
@@ -229,12 +262,12 @@ def ranked(state: BattleState, k: int = 4) -> List[Tuple[list, float]]:
 
     if not available():
         raise RuntimeError("no fast player weights")
-    unite = choose_unite(state)
+    unite = choose_unite(state, holdout)
     board = state
     if unite is not None:
         board = state.clone()
         unites_mod.apply(board.toons[0], unite)
-    x, mask = features(board)
+    x, mask = features(board, holdout, _HORIZON)
     w, b = _MODEL[-1]
     logits = np.where(np.array(mask), _trunk(x) @ w + b, -np.inf)
     order = [int(i) for i in np.argsort(-logits)[:k] if np.isfinite(logits[i])]
@@ -246,7 +279,7 @@ def ranked(state: BattleState, k: int = 4) -> List[Tuple[list, float]]:
     return [(with_unite([action_of(i)], unite), float(p)) for i, p in zip(order, probs)]
 
 
-def act(state: BattleState) -> List[Optional[Action]]:
+def act(state: BattleState, holdout: Optional[int] = None) -> List[Optional[Action]]:
     """A one-seat plan: the network's best legal move, carrying the unite
     it opens with (`playout.Plan`). `state` is not changed."""
     import numpy as np
@@ -255,12 +288,12 @@ def act(state: BattleState) -> List[Optional[Action]]:
 
     if not available():
         raise RuntimeError("no fast player weights")
-    unite = choose_unite(state)
+    unite = choose_unite(state, holdout)
     board = state
     if unite is not None:
         board = state.clone()
         unites_mod.apply(board.toons[0], unite)
-    x, mask = features(board)
+    x, mask = features(board, holdout, _HORIZON)
     w, b = _MODEL[-1]
     h = np.where(np.array(mask), _trunk(x) @ w + b, -np.inf)
     return with_unite([action_of(int(np.argmax(h)))], unite)

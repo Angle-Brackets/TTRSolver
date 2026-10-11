@@ -552,7 +552,7 @@ def rollout(state, plan, horizon, seed: int) -> float:
                                            holdout=len(env.state.holdout))
                         - spend_charge(state, env.state, plan))
         if use_net:
-            nxt = fastplayer.act(_view(env.state))
+            nxt = fastplayer.act(_view(env.state), holdout=len(env.state.holdout))
         else:
             view = _view(env.state)
             if party:
@@ -1116,7 +1116,7 @@ def rollout_pickup(state: BattleState, plan, horizon, seed: int) -> float:
             nxt = [None]                   # you are out; the others play on
         else:
             mine = solo_view(env.state)
-            nxt = (fastplayer.act(mine) if use_net
+            nxt = (fastplayer.act(mine, holdout=len(env.state.holdout)) if use_net
                    else climb_with_unite(mine, policy_rng, budget=ROLLOUT_BUDGET))
         done, _info = step_round(env, nxt)
     return (value(env.state, total, pouch_start, pouch_weight, rounds=guard + 1)

@@ -165,3 +165,52 @@ class UniteHeadTest(unittest.TestCase):
         board = _board()
         board.toons[0].laff, board.toons[0].unites_held = 20, 2
         self.assertIsNone(playout.unite_of(fastplayer.act(board)))
+
+
+@unittest.skipUnless(HAVE, "needs numpy and the shipped weights")
+class HorizonInputsTest(unittest.TestCase):
+    """Expert iteration's student sees what is still to come -- cogs
+    waiting, later waves, SOS calls left -- which the board does not show.
+    Weights decide: three more inputs than the board means they take it."""
+
+    def tearDown(self):
+        fastplayer.use(fastplayer.DEFAULT_WEIGHTS)
+
+    def _weights(self, extra):
+        n_in = len(fastplayer.features_dim_probe()) + extra
+        n_out = fastplayer.n_outputs()
+        payload = {"layers": [[[[0.0] * 4] * n_in, [0.0] * 4],
+                              [[[0.0] * n_out] * 4, [0.0] * n_out]]}
+        path = os.path.join(tempfile.mkdtemp(), f"w{extra}.json")
+        with open(path, "w") as fh:
+            json.dump(payload, fh)
+        return path
+
+    def test_the_horizon_values(self):
+        board = _board()
+        board.cogs_remaining = 20
+        board.toons[0].sos_calls = 3
+        self.assertEqual([0.6, 0.5, 0.6], [round(v, 2) for v in fastplayer.horizon(board, holdout=12)])
+
+    def test_weights_that_take_it_get_it(self):
+        self.assertTrue(fastplayer.use(self._weights(fastplayer.HORIZON_DIM)))
+        self.assertTrue(fastplayer._HORIZON)
+        seen = []
+        real = fastplayer.features
+
+        def spy(state, holdout=None, with_horizon=False):
+            seen.append((holdout, with_horizon))
+            return real(state, holdout, with_horizon)
+        fastplayer.features = spy
+        try:
+            fastplayer.act(_board(), holdout=9)
+        finally:
+            fastplayer.features = real
+        self.assertIn((9, True), seen, "the real waiting count reached the inputs")
+
+    def test_old_weights_do_not(self):
+        self.assertTrue(fastplayer.use(self._weights(0)))
+        self.assertFalse(fastplayer._HORIZON)
+        self.assertEqual(len(fastplayer.features_dim_probe()),
+                         len(fastplayer.features(_board())[0]),
+                         "the value net reads this width too")

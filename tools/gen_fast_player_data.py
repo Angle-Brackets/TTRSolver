@@ -84,7 +84,8 @@ def _teach(env, view, seed, rounds, teacher, rng):
 
 
 def episode(job):
-    seed, kind, player, teacher, unites = job
+    seed, kind, player, teacher, unites = job[:5]
+    with_horizon = bool(job[5]) if len(job) > 5 else False
     from solver import unites as unites_mod
     from solver.rl import env as env_mod
     from solver.search import fastplayer, playout
@@ -102,6 +103,7 @@ def episode(job):
     rows, done, rounds = [], False, 0
     while not done and rounds < 400:
         view = playout._view(env.state)
+        waiting = len(env.state.holdout)       # the view strips it
         try:
             plan = _teach(env, view, seed, rounds, teacher, rng)
         except Exception:                # noqa: BLE001
@@ -111,16 +113,17 @@ def episode(job):
         if any(umask[1:]):
             slot = fastplayer._slot_of(view.toons[0], unite)
             if slot >= 0 and umask[slot]:
-                rows.append(("unite", fastplayer.features(view)[0], umask, slot))
+                rows.append(("unite", fastplayer.features(
+                    view, waiting, with_horizon)[0], umask, slot))
         after = view
         if unite is not None:
             after = view.clone()
             unites_mod.apply(after.toons[0], unite)
-        features, mask = fastplayer.features(after)
+        features, mask = fastplayer.features(after, waiting, with_horizon)
         label = fastplayer.index_of(plan[0] if plan else None)
         if label >= 0 and mask[label]:
             rows.append(("act", features, mask, label))
-        move = fastplayer.act(view) if player else plan
+        move = fastplayer.act(view, holdout=waiting) if player else plan
         try:
             done, _ = playout.step_round(env, move)
         except Exception:                # noqa: BLE001
@@ -142,6 +145,10 @@ def main() -> int:
                          "then play on with it")
     ap.add_argument("--unites", type=int, default=5,
                     help="most unites a toon carries (0 for none)")
+    ap.add_argument("--horizon", action="store_true",
+                    help="record `fastplayer.horizon` too: cogs waiting, later "
+                         "waves and SOS calls left -- what a policy playing "
+                         "like the playouts needs to see")
     ap.add_argument("--workers", type=int, default=10)
     args = ap.parse_args()
 
@@ -149,11 +156,17 @@ def main() -> int:
 
     kinds = ["vp"] * 6 + ["building"] * 2 + ["street"] * 2
     jobs = [(args.base + i, kinds[i % 10], args.player, args.teacher,
-             args.unites) for i in range(args.episodes)]
+             args.unites, args.horizon) for i in range(args.episodes)]
     rows = []
+    done = 0
     with ProcessPoolExecutor(max_workers=args.workers) as pool:
         for got in pool.map(episode, jobs, chunksize=4):
             rows.extend(got)
+            done += 1
+            if done % 100 == 0:
+                # Checkpoints, so a long run that dies still leaves data.
+                pickle.dump(rows, open(args.out, "wb"))
+                print(f"  {done}/{len(jobs)} fights, {len(rows)} rows", flush=True)
     pickle.dump(rows, open(args.out, "wb"))
     print(f"{len(rows)} labelled decisions written to {args.out}")
     return 0
