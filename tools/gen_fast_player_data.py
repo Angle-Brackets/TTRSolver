@@ -71,8 +71,9 @@ def _base_sampler(kind, sos_mod, env_mod, DECK, regime):
 
 
 def _teach(env, view, seed, rounds, teacher, rng):
-    """The teacher's move for this board, its unite carried on the plan.
-    `view` is not changed."""
+    """(the teacher's move, its scores) for this board. The move carries
+    its unite; the scores are the playouts' (candidate, mean) pairs, or
+    None from climb. `view` is not changed."""
     from solver.search import playout
 
     if teacher == "playout":
@@ -81,8 +82,27 @@ def _teach(env, view, seed, rounds, teacher, rng):
         res = playout.pick_wide(view, _horizon(env, env.state),
                                 seed=seed * 1000 + rounds)
         if res is not None:
-            return res.plan
-    return playout.climb_with_unite(view.clone(), rng, budget=24)
+            return res.plan, list(zip(res.candidates, res.means))
+    return playout.climb_with_unite(view.clone(), rng, budget=24), None
+
+
+def _soft(scores, unite):
+    """SOFT TARGETS, as AlphaZero trains on its search's visit counts: the
+    playouts' mean for every move they tried, not only the winner. Their
+    picks are full of near-ties (a Storm Cloud over a Safe by 0.0004), so
+    the winner alone is close to a coin flip to copy. Only candidates
+    opening with the chosen unite: the move head reads the board after it.
+    [(output index, best mean)]."""
+    from solver.search import fastplayer, playout
+
+    best = {}
+    for plan, mean in scores or ():
+        if playout.unite_of(plan) != unite or not plan:
+            continue
+        idx = fastplayer.index_of(plan[0])
+        if idx >= 0:
+            best[idx] = max(best.get(idx, float("-inf")), float(mean))
+    return sorted(best.items())
 
 
 def episode(job):
@@ -110,7 +130,7 @@ def episode(job):
         view = playout._view(env.state)
         waiting = len(env.state.holdout)       # the view strips it
         try:
-            plan = _teach(env, view, seed, rounds, teacher, rng)
+            plan, scores = _teach(env, view, seed, rounds, teacher, rng)
         except Exception:                # noqa: BLE001
             break
         unite = playout.unite_of(plan)
@@ -127,7 +147,9 @@ def episode(job):
         features, mask = fastplayer.features(after, waiting, with_horizon)
         label = fastplayer.index_of(plan[0] if plan else None)
         if label >= 0 and mask[label]:
-            rows.append(("act", features, mask, label))
+            soft = _soft(scores, unite) if scores else None
+            rows.append(("act", features, mask, label, soft) if soft
+                        else ("act", features, mask, label))
         move = fastplayer.act(view, holdout=waiting) if player else plan
         try:
             done, _ = playout.step_round(env, move)

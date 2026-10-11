@@ -34,6 +34,10 @@ def main() -> int:
     ap.add_argument("--batch", type=int, default=1024)
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--holdout", type=float, default=0.05)
+    ap.add_argument("--temp", type=float, default=0.02,
+                    help="soft-target temperature, in cogs: rows carrying the "
+                         "playouts' per-move means train on softmax(mean/temp) "
+                         "rather than the winner alone")
     args = ap.parse_args()
 
     import numpy as np
@@ -41,26 +45,6 @@ def main() -> int:
     import torch.nn as nn
     import torch.nn.functional as F
 
-    rows, unite_rows = [], []
-    # `path*k` repeats that file's rows k times: expert iteration trains on
-    # many cheap climb labels with the scarce playout labels weighted up.
-    sources = []
-    for spec in args.data:
-        path, _, times = spec.partition("*")
-        sources += [path] * max(1, int(times or 1))
-    for path in sources:
-        for row in pickle.load(open(path, "rb")):
-            if len(row) == 3:
-                # From before the unite inputs: those fights held no
-                # unites, so "0 held, no cooldown" is exactly right.
-                features, mask, label = row
-                rows.append((list(features) + [0.0, 0.0], mask, label))
-            elif row[0] == "act":
-                rows.append(row[1:])
-            elif row[0] == "unite":
-                unite_rows.append(row[1:])
-    random.Random(0).shuffle(rows)
-    random.Random(1).shuffle(unite_rows)
     dev = "cuda" if torch.cuda.is_available() else "cpu"
 
     def tensors(part):
@@ -69,14 +53,60 @@ def main() -> int:
         Y = torch.tensor([r[2] for r in part], device=dev)
         return X, M, Y
 
-    def split(part):
-        cut = int(len(part) * (1 - args.holdout))
-        return tensors(part[:cut]), tensors(part[cut:])
+    def targets(part, n_out):
+        """The distribution each row trains toward: one-hot on the label,
+        or, for a row with the playouts' means, softmax(mean / temp) over
+        the moves they tried (AlphaZero's visit-count targets)."""
+        P = np.zeros((len(part), n_out), dtype=np.float32)
+        for i, r in enumerate(part):
+            soft = r[3] if len(r) > 3 else None
+            if soft:
+                idx = [k for k, _ in soft]
+                z = np.array([m for _, m in soft], dtype=np.float64) / args.temp
+                z = np.exp(z - z.max())
+                P[i, idx] = z / z.sum()
+            else:
+                P[i, r[2]] = 1.0
+        return torch.tensor(P, device=dev)
 
-    (X, M, Y), (Xv, Mv, Yv) = split(rows)
-    have_unites = len(unite_rows) >= 20
+    # `path*k` repeats that file's rows k times: expert iteration trains on
+    # many cheap climb labels with the scarce playout labels weighted up.
+    # HELD OUT PER FILE, BEFORE REPEATING: repeating first put copies of
+    # one decision on both sides of the split, and blending files hid how
+    # well the student copies each teacher -- the number that matters.
+    rows, unite_rows, held, held_unites = [], [], {}, []
+    for spec in args.data:
+        path, _, times = spec.partition("*")
+        acts, unites = [], []
+        for row in pickle.load(open(path, "rb")):
+            if len(row) == 3:
+                # From before the unite inputs: those fights held no
+                # unites, so "0 held, no cooldown" is exactly right.
+                features, mask, label = row
+                acts.append((list(features) + [0.0, 0.0], mask, label))
+            elif row[0] == "act":
+                acts.append(row[1:])
+            elif row[0] == "unite":
+                unites.append(row[1:])
+        random.Random(0).shuffle(acts)
+        random.Random(1).shuffle(unites)
+        cut = int(len(acts) * (1 - args.holdout))
+        ucut = int(len(unites) * (1 - args.holdout))
+        repeat = max(1, int(times or 1))
+        rows += acts[:cut] * repeat
+        unite_rows += unites[:ucut] * repeat
+        held[Path(path).name] = acts[cut:]
+        held_unites += unites[ucut:]
+    random.Random(2).shuffle(rows)
+    random.Random(3).shuffle(unite_rows)
+    X, M, Y = tensors(rows)
+    P = targets(rows, M.shape[1])
+    every = [r for part in held.values() for r in part]
+    Xv, Mv, Yv = tensors(every)
+    held_t = {name: tensors(part) for name, part in held.items() if part}
+    have_unites = len(unite_rows) >= 20 and len(held_unites) > 0
     if have_unites:
-        (XU, MU, YU), (XUv, MUv, YUv) = split(unite_rows)
+        (XU, MU, YU), (XUv, MUv, YUv) = tensors(unite_rows), tensors(held_unites)
     n_in, n_out = X.shape[1], M.shape[1]
     print(f"  device {dev}  {len(X)} gag rows / {len(Xv)} held out, "
           f"{len(unite_rows)} unite rows  inputs {n_in}  outputs {n_out}")
@@ -102,7 +132,7 @@ def main() -> int:
         for s in range(0, len(X), args.batch):
             idx = perm[s:s + args.batch]
             out = act_head(trunk(X[idx])).masked_fill(~M[idx], -1e9)
-            loss = F.cross_entropy(out, Y[idx])
+            loss = -(P[idx] * F.log_softmax(out, -1)).sum(-1).mean()
             if unite_head is not None:
                 uidx = torch.randint(0, len(XU), (min(args.batch, len(XU)),), device=dev)
                 uout = unite_head(trunk(XU[uidx])).masked_fill(~MU[uidx], -1e9)
@@ -116,11 +146,15 @@ def main() -> int:
         if unite_head is not None:
             line += f"  unite match {100 * match(unite_head, XUv, MUv, YUv):.1f}%"
         print(line, flush=True)
+    per_file = {name: match(act_head, *t) for name, t in held_t.items()}
+    for name, value in per_file.items():
+        print(f"  held-out match on {name}: {100 * value:.1f}%")
 
     layers = [m for m in trunk if isinstance(m, nn.Linear)] + [act_head]
     payload = {"layers": [[m.weight.detach().cpu().T.tolist(),
                            m.bias.detach().cpu().tolist()] for m in layers],
-               "match": match(act_head, Xv, Mv, Yv), "rows": len(rows),
+               "match": match(act_head, Xv, Mv, Yv), "per_file": per_file,
+               "rows": len(rows),
                "unite_rows": len(unite_rows),
                "hidden": args.hidden, "epochs": args.epochs}
     if unite_head is not None:
