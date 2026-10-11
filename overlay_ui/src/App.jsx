@@ -788,6 +788,8 @@ function StepperRow({ label, subtitle, badge, icon, value, onChange, title }) {
 
 export default function App() {
   const [model, setModel] = useState(EMPTY)
+  // The floors button asks first: it restarts the player's Discord.
+  const [confirmFloors, setConfirmFloors] = useState(false)
   // Which width of "no, not that" the player is choosing. False = closed.
   const [rejecting, setRejecting] = useState(false)
   // Collapsed whenever the board moves: a picker left open across a
@@ -1209,16 +1211,35 @@ export default function App() {
             {locationText || 'Local API Disconnected'}
           </span>
         </div>
-        {model.discord_floors === 'blocked' && (
+        {model.discord_floors === 'blocked' && !confirmFloors && (
           <button
             type="button"
             onMouseDown={stopDrag}
-            onClick={() => call('restart_discord')}
-            title="Discord is holding the connection the game sends building floors over. Restarting it puts the panel in front: your Discord status keeps working, and floors show here."
+            onClick={() => setConfirmFloors(true)}
+            title="Show which floor of a Cog building you are on. Needs a quick Discord restart; your Discord status keeps working."
             className="shrink-0 rounded border border-sky-600/40 bg-sky-50/80 px-1.5 py-0.2 text-[9px] font-extrabold text-sky-800 hover:bg-sky-100 cursor-pointer"
           >
-            Restart Discord to show floors
+            Floors
           </button>
+        )}
+        {model.discord_floors === 'blocked' && confirmFloors && (
+          <div className="flex shrink-0 items-center gap-1" onMouseDown={stopDrag}>
+            <span className="text-sky-900">Restart Discord?</span>
+            <button
+              type="button"
+              onClick={() => { setConfirmFloors(false); call('restart_discord') }}
+              className="rounded border border-sky-700 bg-sky-500 px-1.5 py-0.2 text-[9px] font-extrabold text-white hover:bg-sky-600 cursor-pointer"
+            >
+              Yes
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirmFloors(false)}
+              className="rounded border border-amber-900/20 bg-white/80 px-1.5 py-0.2 text-[9px] font-extrabold text-amber-950 hover:bg-amber-100 cursor-pointer"
+            >
+              No
+            </button>
+          </div>
         )}
         {model.discord_floors === 'restarting' && (
           <span className="shrink-0 text-sky-800">Restarting Discord…</span>
