@@ -53,6 +53,8 @@ def _sampler(kind, unites=5):
 def _base_sampler(kind, sos_mod, env_mod, DECK, regime):
     if kind == "vp":
         return regime("solo-vp")[0]
+    if kind == "ceo":
+        return regime("solo-ceo")[0]
 
     def sample(rng):
         st = (env_mod.facility_position(rng) if kind == "building"
@@ -92,9 +94,12 @@ def episode(job):
 
     if player:
         fastplayer.use(player)
+    if kind == "ceo":
+        from solver import ceo as ceo_mod
+        ceo_mod.enable_big_cheese()
     env = env_mod.BattleEnv(rng=random.Random(seed),
                             sampler=_sampler(kind, unites), coordinated=True,
-                            max_rounds=400 if kind == "vp" else 20)
+                            max_rounds=400 if kind in ("vp", "ceo") else 20)
     try:
         env.reset()
     except Exception:                    # noqa: BLE001 -- an unbuildable draw
@@ -145,6 +150,8 @@ def main() -> int:
                          "then play on with it")
     ap.add_argument("--unites", type=int, default=5,
                     help="most unites a toon carries (0 for none)")
+    ap.add_argument("--kinds", default="vp:6,building:2,street:2",
+                    help="the fight mix, kind:weight -- vp, building, street, ceo")
     ap.add_argument("--horizon", action="store_true",
                     help="record `fastplayer.horizon` too: cogs waiting, later "
                          "waves and SOS calls left -- what a policy playing "
@@ -154,8 +161,11 @@ def main() -> int:
 
     from concurrent.futures import ProcessPoolExecutor
 
-    kinds = ["vp"] * 6 + ["building"] * 2 + ["street"] * 2
-    jobs = [(args.base + i, kinds[i % 10], args.player, args.teacher,
+    kinds = []
+    for part in args.kinds.split(","):
+        kind, _, weight = part.partition(":")
+        kinds += [kind.strip()] * max(1, int(weight or 1))
+    jobs = [(args.base + i, kinds[i % len(kinds)], args.player, args.teacher,
              args.unites, args.horizon) for i in range(args.episodes)]
     rows = []
     done = 0

@@ -69,7 +69,7 @@ REALMS_DECK = ("Melody Wavers", "Professor Pete", "Barnacle Bessie",
                "Flippy", "Daffy Don", "Madam Chuckle", "Soggy Bottom",
                "Julius Wheezer")
 REGIMES = ("solo-vp", "solo-building", "my-building", "party-building",
-           "duo-vp", "party-vp", "ceo", "realms-vp")
+           "duo-vp", "party-vp", "ceo", "solo-ceo", "realms-vp")
 # Toons in the whole boss fight where this side is not everyone.
 PLAYERS = {"duo-vp": 2}
 
@@ -139,6 +139,15 @@ def _sampler(regime):
             ceo_mod.LEFTOVERS = 2
             return ceo_mod.ceo_position(rng)
         return sample, True, 400
+    if regime == "solo-ceo":
+        # [OWNER] the CEO's round one is 20 cogs a side, so alone 40: one
+        # toon, and the env sizes the plan from the one player it sees.
+        def sample(rng):
+            ceo_mod.LEFTOVERS = 2
+            st = ceo_mod.ceo_position(rng)
+            st.toons = st.toons[:1]
+            return st
+        return sample, True, 400
     raise ValueError(regime)
 
 
@@ -176,7 +185,7 @@ def play(job):
     from solver.rl import env as env_mod
     from solver.search import fastplayer, hybrid, playout
 
-    if regime == "ceo":
+    if regime in ("ceo", "solo-ceo"):
         ceo_mod.enable_big_cheese()
     name, opts = _parse_arm(spec)
     # Settings are module globals and pool workers are REUSED: set every
