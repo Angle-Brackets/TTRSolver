@@ -259,7 +259,40 @@ def spend_charge(start: BattleState, end: BattleState, plan) -> float:
         waste = simulator.wasted_reach(start, action)
         if waste:
             charge += waste * (SOS_REACH_PRICE if action.sos else GAG_REACH_PRICE)
-    return charge
+    return charge + economy(start, end)
+
+
+# GAG ECONOMY [OWNER]: the playouts scored cogs, laff and rounds and, off
+# a building, nothing for what was spent -- a Storm Cloud on a level 5 was
+# free, where PPO and the Search row price every gag through the preset
+# and pick the smallest sure kill. Now every gag the playout spends (its
+# own move and the rollout after it) is charged the preset's own price,
+# at the preset's own exchange rate: the Search row trades one price unit
+# for 1/laff_weight laff points, and a laff point is worth
+# LAFF_WEIGHT/max_laff cogs here. Balanced: a Storm Cloud costs about two
+# laff points, a Safe about one. Nothing new is invented. No wins lost:
+# 42 vs 41 of 100 Realms VPs, 22 vs 21 of 200 solo buildings.
+ECONOMY = True
+
+
+def _pouch_price(state: BattleState) -> float:
+    """The preset's price of everything toon 0 still holds."""
+    toon = state.toons[0]
+    style = _style()
+    return sum(count * style.gag_price(track, level,
+                                       unlocked=toon.track_exp.get(track, 6) or 6)
+               for (track, level), count in toon.gag_counts.items() if count > 0)
+
+
+def economy(start: BattleState, end: BattleState) -> float:
+    """Cogs charged for the gags spent between `start` and `end`."""
+    from .objective import BALANCED
+
+    if not ECONOMY or not start.toons or not end.toons:
+        return 0.0
+    spent = _pouch_price(start) - _pouch_price(end)
+    max_laff = float(getattr(start.toons[0], "max_laff", 0) or 100)
+    return spent * LAFF_WEIGHT / (BALANCED.laff_weight * max_laff)
 
 # WHAT THE POUCH IS WORTH when a playout stops before the fight does: in
 # a building the next floor's cogs are unknown, so without this, gags

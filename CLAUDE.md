@@ -495,6 +495,13 @@ Things that hold it together, each measured:
   every card, and the Playout row called an SOS on 13 of 28 boards of a
   Realms VP. A per-call price on top only delayed calls and lost (43,
   38, 30 of 100 at 0, 0.5, 1 cog), so `SOS_CALL_PRICE` is 0.
+- **Gag economy** (`playout.economy`, [OWNER]): every gag a playout
+  spends, its move and the rollout after, costs the preset's own price at
+  the preset's own gag-for-laff rate (one price unit = 1/laff_weight laff
+  points; a laff point = LAFF_WEIGHT/max_laff cogs). Off a building the
+  playouts priced nothing they spent, so a Storm Cloud on a level 5 tied a
+  Safe and won by noise; with it the Safe wins, as in PPO and Search. No
+  wins lost: 42 vs 41 of 100 Realms VPs, 22 vs 21 of 200 solo buildings.
 - **Wasted reach is charged by all three engines**
   (`simulator.wasted_reach`, [OWNER] preference): any hit-all, gag or
   card, on cogs it cannot reach (Drop on lured, Lure on lured, Trap on

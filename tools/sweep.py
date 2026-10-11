@@ -187,6 +187,7 @@ def play(job):
     playout.SOS_REACH_PRICE = float(opts.get("sosreach", 0.5))
     playout.GAG_REACH_PRICE = float(opts.get("reach", 0.1))
     playout.PASS_ON_MENU = opts.get("pass", "needed")
+    playout.ECONOMY = opts.get("econ", "1") != "0"
     fastplayer.use(opts.get("net") or fastplayer.DEFAULT_WEIGHTS)
     # Shipped: shortened playouts (8 rounds, the repo's value net). trunc=0
     # plays in full; vnet=<weights> swaps the net.

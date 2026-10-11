@@ -836,3 +836,44 @@ class PassOnTheMenuTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GagEconomyTest(unittest.TestCase):
+    """[OWNER] The playouts priced nothing they spent off a building: a
+    Storm Cloud on a level 5 was free. Now every gag costs the preset's
+    price, at the preset's own gag-for-laff rate."""
+
+    def _charge(self, action, style=None):
+        from solver import data
+        from solver.data.types import Track
+        from solver.simulator import apply_toon_action
+        from solver.state import BattleState, CogState, ToonState
+
+        toon = ToonState(100, 100, {Track.SQUIRT: 7, Track.DROP: 7},
+                         {(Track.SQUIRT, 6): 3, (Track.DROP, 5): 3})
+        hp = data.cog_max_hp(5)
+        start = BattleState(toons=[toon], cogs=[CogState("flunky", "bossbot", 5, hp, hp)])
+        end = start.clone()
+        apply_toon_action(end, action, hit=True)
+        saved = playout.STYLE
+        playout.set_style(style)
+        try:
+            return playout.economy(start, end)
+        finally:
+            playout.set_style(saved)
+
+    def test_a_storm_cloud_costs_more_than_a_safe(self):
+        from solver.data.types import Track
+        from solver.state import Action
+        cloud = self._charge(Action(Track.SQUIRT, 6, 0))
+        safe = self._charge(Action(Track.DROP, 5, 0))
+        self.assertGreater(cloud, safe)
+        self.assertLess(cloud, 0.05, "a tiebreak among sure kills, not a cog")
+
+    def test_it_follows_the_preset(self):
+        from solver.data.types import Track
+        from solver.search import objective as O
+        from solver.state import Action
+        cloud = Action(Track.SQUIRT, 6, 0)
+        self.assertEqual(0.0, self._charge(cloud, O.PRESETS["glass cannon"]))
+        self.assertGreater(self._charge(cloud, O.PRESETS["conserve"]), self._charge(cloud))
