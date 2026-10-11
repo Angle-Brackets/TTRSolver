@@ -402,6 +402,18 @@ class ScreenCountingTest(unittest.TestCase):
         w.toon_count = 3
         self.assertEqual(2, w.allies_in_battle())
 
+    def test_the_client_log_names_the_vp(self):
+        """OBSERVED 2026-10-10: a VP logs ('CogHQBossBattle', 11000). The
+        Local API cannot tell it from Sellbot HQ's courtyard."""
+        from types import SimpleNamespace
+        w = self._worker()
+        w._places = SimpleNamespace(place=lambda: ("CogHQBossBattle", 11000))
+        w._track_boss(w.model, [], [], [])
+        self.assertEqual("vp", w.boss_tracker().kind)
+        w._places = SimpleNamespace(place=lambda: ("Playground", 2000))
+        w._track_boss(w.model, [], [], [])
+        self.assertIsNone(w.boss_tracker().kind, "leaving the room ends it")
+
     def test_no_boss_zone_is_known_yet(self):
         """Filled only from an observed string, never a plausible one."""
         self.assertEqual({}, boss.TTR_BOSS_ZONES)

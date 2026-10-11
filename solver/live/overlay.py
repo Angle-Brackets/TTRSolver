@@ -594,6 +594,7 @@ class Worker(AdviceWorker):
                     # Python repr on screen over a live battle.
                     model.invasion = getattr(
                         snap, "invasion_text", "") or ""
+                    self._observe_slips(getattr(snap, "pink_slips", None))
                 model.rows = [_row(r) for r in watcher.view.cogs]
                 self._track_boss(model, events, before,
                                  list(watcher.view.cogs))
@@ -635,7 +636,7 @@ class Worker(AdviceWorker):
                                    self.objective, self.depth, self.budget,
                                    self.ignore_checksum,
                                    allies=self.allies_in_battle(),
-                                   fires=self.remaining("fires"),
+                                   fires=self.slips_to_plan(),
                                    reject=self._rejected,
                                    boss=self.boss_tracker().frozen(),
                                    unites=self.remaining("unites"))
@@ -659,13 +660,53 @@ class Worker(AdviceWorker):
 
         tracker = self.boss_tracker()
         zone = getattr(model, "zone", "") or ""
-        if zone:
-            self._observe_boss(boss_mod.boss_from_location(zone))
+        detected = boss_mod.boss_from_location(zone) if zone else None
+        # THE CLIENT'S LOG names a boss room the API does not (`ttr_log`).
+        place = self._place()
+        if detected is None and place is not None:
+            detected = boss_mod.boss_from_place(*place)
+        if zone or place is not None:
+            self._observe_boss(detected)
         if any(e.kind in ("cog_defeated", "battle_ended") for e in events):
             tracker.note_defeated(boss_mod.died_plates(before, after))
         # The pill is the whole fight's toon count (`allies_in_battle`).
         tracker.party_size = self.toon_count
         self._boss_into(model, on_field=len(after))
+
+    _places = None
+    _slips_last = None
+    observed = ()
+
+    def _observe_slips(self, held) -> None:
+        """Tick the slip box down by what REALLY left the toon.
+
+        The Local API states the count (`/pinkslips.json`), so slips are
+        observed rather than charged from the advice. A count that rises
+        grants nothing.
+        """
+        if held is None:
+            return
+        self.observed = ("fires",)
+        last, self._slips_last = self._slips_last, int(held)
+        if last is not None and held < last:
+            self.spend("fires", last - held)
+
+    def slips_to_plan(self) -> int:
+        """The box, and never more than the toon actually holds."""
+        left = self.remaining("fires")
+        if self._slips_last is not None:
+            left = min(left, self._slips_last)
+        return left
+
+    def _place(self):
+        """(where, hoodId) from the client's log, or None. Never raises."""
+        try:
+            if self._places is None:
+                from .ttr_log import PlaceWatcher
+                self._places = PlaceWatcher()
+            return self._places.place()
+        except Exception:                      # noqa: BLE001
+            return None
 
     def _should_retry(self, model, now: float) -> bool:
         """Ask again after a read that produced no state.

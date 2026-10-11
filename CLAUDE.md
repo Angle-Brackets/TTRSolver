@@ -84,8 +84,13 @@ client rather than from documentation:
 
 - **Local API** (`solver/live/ttr_local.py`) — official, opt-in via
   `"want-local-api"` in TTR's `settings.json`, HTTP on `localhost:1547`.
-  Gives laff, unlocked gag tracks, organic, location, invasion. It does
-  **not** expose the battle: every documented endpoint returns 200 and
+  Gives laff, unlocked gag tracks, organic, location, invasion -- and,
+  each from its own endpoint (not `/all.json`), `/pinkslips.json` (a bare
+  count, read; the slip box ticks down by what really leaves the toon),
+  `/sos.json` and `/unites.json` (category -> name -> count). The last
+  two are NOT parsed yet: no toon with battle cards has been read, so
+  their card names are unseen. It has no floor count -- "Floor 3 of 3"
+  goes only to Discord's Rich Presence. It does **not** expose the battle: every documented endpoint returns 200 and
   every battle-shaped guess (`/battle.json`, `/combat.json`, `/cogs.json`)
   returns 404. Do not go looking again.
   The `Host` header must be exactly `localhost:<port>` — `127.0.0.1` gets
@@ -483,9 +488,11 @@ whole fight's count; in a two-sided fight (`boss.TWO_SIDED`) your battle
 holds your share (`toons_in_battle`). Realms reads the boss's
 `setToonIds` where present and takes the pill as a floor. That is information a player has, signed off by the owner;
 a building's next floor is not, and stays unknown. Realms names the boss
-from the battle object; TTR has no boss zone string yet
-(`boss.TTR_BOSS_ZONES` is empty until one is observed) and uses the
-panel's picker.
+from the battle object. TTR names it from the CLIENT'S LOG
+(`solver/live/ttr_log.py`), which writes `enter(requestStatus={...
+'where': 'CogHQBossBattle', 'hoodId': 11000})` on entering a VP --
+observed 2026-10-10, and the only room mapped (`boss.TTR_BOSS_PLACES`);
+the CFO, CJ and CEO stay on the picker until each is seen.
 
 A building is detected so the playouts value the pouch: TTR from the
 Local API zone (`session.BUILDING_ZONES` -- only "Cog Building",

@@ -204,12 +204,16 @@ class AdviceWorker(threading.Thread):
         several times while the player thinks. Correctable: the box is a
         control the player can put a number back into.
         """
-        if unite is not None:
+        # A holding the client READS is ticked down by what really left
+        # the toon (`observed`), never by the advice as well.
+        observed = getattr(self, "observed", ())
+        if unite is not None and "unites" not in observed:
             self.spend("unites")
         if action is None:
             return
         if getattr(action, "fire", False):
-            self.spend("fires")
+            if "fires" not in observed:
+                self.spend("fires")
         elif getattr(action, "sos", None):
             self.spend("sos")
 

@@ -174,3 +174,17 @@ class SnapshotContractTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PinkSlipsTest(unittest.TestCase):
+    """[CONFIRMED] live 2026-10-10: `/pinkslips.json` is a bare integer."""
+
+    def test_a_bare_count(self):
+        from solver.live.ttr_local import parse_pink_slips
+        self.assertEqual(0, parse_pink_slips(0))
+        self.assertEqual(7, parse_pink_slips(7))
+
+    def test_anything_else_is_unknown_not_zero(self):
+        from solver.live.ttr_local import parse_pink_slips
+        for body in ({}, "3", -1, None, True):
+            self.assertIsNone(parse_pink_slips(body))

@@ -33,6 +33,7 @@ apart.
 """
 from __future__ import annotations
 
+import dataclasses
 import json
 import secrets
 import socket
@@ -112,6 +113,10 @@ class Snapshot:
     # cogs being fought. Department key ("c"/"l"/"m"/"s") -> (merits
     # earned, merits needed) for each suit owned. See `merits_gained`.
     merits: Dict[str, Tuple[int, int]] = field(default_factory=dict)
+    # Pink slips HELD, from `/pinkslips.json` -- not part of `/all.json`.
+    # [CONFIRMED] live 2026-10-10: the body is a bare integer. None when
+    # it could not be read, which is "unknown", never "none".
+    pink_slips: Optional[int] = None
 
     @property
     def loading(self) -> bool:
@@ -261,7 +266,19 @@ class TTRLocal:
         3KB, which is not worth a class of bug that shows up as a field
         that is always blank.
         """
-        return parse_snapshot(self.fetch("all"))
+        snap = parse_snapshot(self.fetch("all"))
+        try:
+            slips = parse_pink_slips(self.fetch("pinkslips"))
+        except LocalAPIError:
+            slips = None
+        return dataclasses.replace(snap, pink_slips=slips)
+
+
+def parse_pink_slips(body) -> Optional[int]:
+    """`/pinkslips.json`'s body -- a bare count -- or None if it is not one."""
+    if isinstance(body, bool) or not isinstance(body, int) or body < 0:
+        return None
+    return body
 
 
 def parse_snapshot(payload: dict) -> Snapshot:

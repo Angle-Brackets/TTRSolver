@@ -1158,8 +1158,50 @@ class SpentBudgetRunsDownTest(unittest.TestCase):
 
         from solver.live.overlay import Worker
 
-        self.assertIn('fires=self.remaining("fires")',
-                      inspect.getsource(Worker.run))
+        self.assertIn('fires=self.slips_to_plan()', inspect.getsource(Worker.run))
+        w = self._worker(fires=5)
+        self.assertEqual(5, self._worker(fires=5).slips_to_plan())
+
+
+class ObservedSlipsTest(unittest.TestCase):
+    """[CONFIRMED] live: `/pinkslips.json` is a bare count, so TTR slips
+    are observed like Realms' holdings -- the box ticks down by what left
+    the toon, never by the advice, and never offers more than is held."""
+
+    def _worker(self, box):
+        import threading
+        from solver.live.overlay import Worker
+
+        w = Worker.__new__(Worker)
+        w._lock = threading.Lock()
+        w.model = Model()
+        w.max_fires, w.max_unites, w.max_sos = box, 0, 0
+        return w
+
+    def test_a_slip_that_leaves_ticks_the_box_down(self):
+        w = self._worker(5)
+        w._observe_slips(9)
+        w._observe_slips(8)
+        self.assertEqual((4, 4), (w.max_fires, w.model.max_fires))
+
+    def test_the_advice_is_not_charged_as_well(self):
+        from solver.state import Action
+        w = self._worker(5)
+        w._observe_slips(9)
+        w.note_spent(Action(track=None, target_index=0, fire=True))
+        self.assertEqual(5, w.max_fires)
+
+    def test_never_more_than_held(self):
+        w = self._worker(5)
+        w._observe_slips(2)
+        self.assertEqual(2, w.slips_to_plan())
+
+    def test_unreadable_changes_nothing(self):
+        from solver.state import Action
+        w = self._worker(5)
+        w._observe_slips(None)
+        w.note_spent(Action(track=None, target_index=0, fire=True))
+        self.assertEqual(4, w.max_fires, "unread, so the advice is charged as before")
 
 
 class InvasionReadsAsWordsTest(unittest.TestCase):

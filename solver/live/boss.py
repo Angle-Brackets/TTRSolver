@@ -88,6 +88,24 @@ def boss_from_location(zone: Optional[str]) -> Optional[str]:
     return TTR_BOSS_ZONES.get((zone or "").strip())
 
 
+# WHERE THE TTR CLIENT'S LOG PUTS YOU IN A BOSS ROOM, as (where, hoodId)
+# from its `enter(requestStatus=...)` line -- see `ttr_log`. OBSERVED: a
+# VP on 2026-10-10 logged ('CogHQBossBattle', 11000), hood 11000 being
+# Sellbot HQ. The CFO, CJ and CEO are [TODO] until a player stands in
+# one: the same 'where' with another hood is the obvious guess, and a
+# guessed key would quietly name the wrong fight if it were wrong.
+TTR_BOSS_PLACES: Dict[Tuple[str, int], str] = {
+    ("CogHQBossBattle", 11000): "vp",
+}
+
+
+def boss_from_place(where: Optional[str], hood: Optional[int]) -> Optional[str]:
+    """The boss fight a client-log place names, or None."""
+    if where is None or hood is None:
+        return None
+    return TTR_BOSS_PLACES.get((where, int(hood)))
+
+
 # WHO THE UNSEEN COGS ARE, as far as a player knows: the department and
 # each round's level band, both from the fight's own module so there is
 # one source for them. A round with no band is unknown and ends the
