@@ -24,7 +24,19 @@ import os
 import re
 from typing import Optional, Tuple
 
-DEFAULT_LOG_DIR = r"C:\Program Files (x86)\Toontown Rewritten\logs"
+# Where the logs are: `TTR_LOG_DIR` if set, else the default install's
+# folder where one has been SEEN -- Windows so far. A Mac's or Linux
+# install's folder is [TODO] until observed; set TTR_LOG_DIR there.
+WINDOWS_LOG_DIR = r"C:\Program Files (x86)\Toontown Rewritten\logs"
+
+
+def default_log_dir() -> Optional[str]:
+    if os.environ.get("TTR_LOG_DIR"):
+        return os.environ["TTR_LOG_DIR"]
+    if os.name == "nt":
+        return WINDOWS_LOG_DIR
+    return None
+
 
 _ENTER = "enter(requestStatus="
 _WHERE = re.compile(r"'where':\s*'([^']+)'")
@@ -48,12 +60,14 @@ class PlaceWatcher:
     """The toon's latest place, kept current from the newest log file."""
 
     def __init__(self, log_dir: Optional[str] = None):
-        self.log_dir = log_dir or DEFAULT_LOG_DIR
+        self.log_dir = log_dir or default_log_dir()
         self._file: Optional[str] = None
         self._offset = 0
         self._place: Optional[Place] = None
 
     def _newest(self) -> Optional[str]:
+        if not self.log_dir:
+            return None
         try:
             names = [n for n in os.listdir(self.log_dir)
                      if n.startswith("ttr-") and n.endswith(".log")]

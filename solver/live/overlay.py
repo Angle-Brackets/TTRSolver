@@ -537,6 +537,7 @@ class Worker(AdviceWorker):
 
         memory = PanelMemory()
         thinker.panel_memory = memory
+        self._start_relay()
         try:
             while not self._stop.is_set():
                 cycle = time.time()
@@ -595,6 +596,10 @@ class Worker(AdviceWorker):
                     model.invasion = getattr(
                         snap, "invasion_text", "") or ""
                     self._observe_slips(getattr(snap, "pink_slips", None))
+                    self.building = self._building(model.zone)
+                    if self.building:
+                        model.zone += (f", floor {self.building['floor']}"
+                                       f" of {self.building['floors']}")
                 model.rows = [_row(r) for r in watcher.view.cogs]
                 self._track_boss(model, events, before,
                                  list(watcher.view.cogs))
@@ -644,6 +649,8 @@ class Worker(AdviceWorker):
                 time.sleep(max(0.0, POLL_INTERVAL - (time.time() - cycle)))
         finally:
             watcher.close()
+            if self._relay is not None:
+                self._relay.stop()
 
     def _track_boss(self, model, events, before, after) -> None:
         """Name the fight and count what died, from the screen.
@@ -674,6 +681,33 @@ class Worker(AdviceWorker):
         self._boss_into(model, on_field=len(after))
 
     _places = None
+    _relay = None
+    building = None
+
+    def _start_relay(self) -> None:
+        """Sit on Discord's pipe when it is free, to read the building's
+        floors the game publishes there (`discord_relay`). A running
+        Discord already holding it is fine: a relay started before
+        Discord writes the same record to a file, read below."""
+        try:
+            from . import discord_relay
+            self._relay = discord_relay.Relay().start()
+        except Exception:                      # noqa: BLE001 -- PipeTaken, no pipes
+            self._relay = None
+
+    def _building(self, zone: str):
+        """{floor, floors, department} while the API says we are in a Cog
+        building, from what the game told Discord; else None."""
+        try:
+            from . import discord_relay
+            from .session import BUILDING_ZONES
+            if zone not in BUILDING_ZONES:
+                return None
+            entry = (self._relay.latest() if self._relay is not None
+                     else discord_relay.read_presence(max_age=3600))
+            return discord_relay.building(entry)
+        except Exception:                      # noqa: BLE001
+            return None
     _slips_last = None
     observed = ()
 

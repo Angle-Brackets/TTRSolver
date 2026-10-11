@@ -90,7 +90,8 @@ client rather than from documentation:
   `/sos.json` and `/unites.json` (category -> name -> count). The last
   two are NOT parsed yet: no toon with battle cards has been read, so
   their card names are unseen. It has no floor count -- "Floor 3 of 3"
-  goes only to Discord's Rich Presence. It does **not** expose the battle: every documented endpoint returns 200 and
+  goes only to Discord's Rich Presence (see the relay below). It does
+  **not** expose the battle: every documented endpoint returns 200 and
   every battle-shaped guess (`/battle.json`, `/combat.json`, `/cogs.json`)
   returns 404. Do not go looking again.
   The `Host` header must be exactly `localhost:<port>` — `127.0.0.1` gets
@@ -101,6 +102,20 @@ client rather than from documentation:
   plate above each cog. This is the only route to the cogs.
   `solver/live/watch.py` polls it live; `solver/live/read_battle.py`
   reads one screenshot and labels new cogs.
+
+- **Discord relay** (`solver/live/discord_relay.py`) -- the only source
+  of a building's floors. The game publishes "In a Four Story Sellbot
+  Building" / "Floor 2 of 4" to Discord over `discord-ipc-N` (a named
+  pipe on Windows, a Unix socket elsewhere, as Discord's own discord-rpc
+  does it), and a client takes the first that exists. The relay owns
+  `discord-ipc-0`: with Discord closed it answers the handshake itself;
+  started before Discord, Discord settles on `-1` and every byte is
+  passed through unchanged. A Discord already holding `-0` cannot be
+  displaced. The TTR panel starts it when the pipe is free and otherwise
+  reads a separately run relay's file; it shows the floor only while the
+  API zone is a Cog building. Reads what the game publishes, never its
+  memory. Seen working on Windows pipes; the Unix transport follows the
+  reference library and has not met a real Mac.
 
 **Read the game's window, not the screen.** This file used to say the
 opposite — that the teal portrait slot was distinctive enough that
