@@ -1219,7 +1219,7 @@ export default function App() {
             title="Show which floor of a Cog building you are on. Needs a quick Discord restart; your Discord status keeps working."
             className="shrink-0 rounded border border-sky-600/40 bg-sky-50/80 px-1.5 py-0.2 text-[9px] font-extrabold text-sky-800 hover:bg-sky-100 cursor-pointer"
           >
-            Floors
+            Show building floors
           </button>
         )}
         {model.discord_floors === 'blocked' && confirmFloors && (
