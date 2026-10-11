@@ -443,10 +443,20 @@ Things that hold it together, each measured:
   a one-decision label holds only while the old player plays on. The
   playouts themselves are the judge. Do not try a third fit without a new
   idea about why.
-- **`fastplayer` plays out the rest of each fight** -- a small network
-  trained to copy climb (two DAgger rounds, 79% agreement). Slightly worse
-  per rollout, four times as many in the same time. Solo only: groups are
-  played on by climb, which plans every seat.
+- **`fastplayer` plays out the rest of each fight**, and since
+  2026-10-11 it is trained by EXPERT ITERATION: the Playout engine labels
+  the moves (about 47,000 decisions over VPs, buildings, streets and solo
+  CEOs), with `climb` labels for the basics, and the network sees
+  `fastplayer.horizon` -- cogs waiting, later waves or floors, SOS calls
+  left. Playouts using it won 65 vs 44 and 68 vs 37 of 100 solo VPs
+  (p 0.001, < 0.001); buildings level (121 vs 128 of 1,000, p 0.32); solo
+  CEO 9.8 vs 8.9 cogs. It copies climb only 63% (the old one 83%), which
+  is the point. Its picks are near-ties, so round two trained on the
+  playouts' score for every move tried (soft targets, `--temp`), as
+  AlphaZero trains on visit counts. Solo only: groups are played on by
+  climb, which plans every seat. Alone, without playouts, it hoards in
+  buildings (108 vs 155 of 2,000) -- its teacher prices gags -- so it is a
+  rollout player, not a standalone engine.
 - **A unite rides on the plan** (`playout.Plan`, `climb_with_unite`).
   `climb` applies its unite to the board it is handed, and every playout
   hands it a copy -- so until this the unite was thrown away and the gag
