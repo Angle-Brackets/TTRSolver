@@ -328,31 +328,76 @@ class Relay:
                     return conn
         return None
 
+    # How often a session answering for an absent Discord looks for it.
+    RETRY_UPSTREAM = 5.0
+
+    def _await_frame(self, conn, timeout: float = 3.0) -> bool:
+        """Read until one whole frame arrives from `conn`, or give up."""
+        got = threading.Event()
+
+        def wait():
+            reader = FrameReader()
+            while not got.is_set():
+                data = self.t.read(conn)
+                if not data:
+                    return
+                if reader.feed(data):
+                    got.set()
+        threading.Thread(target=wait, daemon=True).start()
+        return got.wait(timeout)
+
+    def _hand_over(self, handshake: dict):
+        """Discord is back: replay the game's hello to it and swallow its
+        READY (the game already had ours). The connection, or None."""
+        upstream = self._upstream()
+        if upstream is None:
+            return None
+        if self.t.write(upstream, frame(OP_HANDSHAKE, handshake)) and \
+                self._await_frame(upstream):
+            return upstream
+        self.t.close(upstream)
+        return None
+
     def _session(self, game) -> None:
         t = self.t
         upstream = self._upstream()
         reader = FrameReader()
         client_id = None
+        handshake = None
+        tried = time.time()
         done = threading.Event()
 
+        def back(conn):
+            while not done.is_set():
+                data = t.read(conn)
+                if not data or not t.write(game, data):
+                    break
+            done.set()
+
         if upstream is not None:
-            def back():
-                while not done.is_set():
-                    data = t.read(upstream)
-                    if not data or not t.write(game, data):
-                        break
-                done.set()
-            threading.Thread(target=back, daemon=True).start()
+            threading.Thread(target=back, args=(upstream,), daemon=True).start()
 
         while not done.is_set():
             data = t.read(game)
             if not data:
                 break
+            if (upstream is None and handshake is not None
+                    and time.time() - tried > self.RETRY_UPSTREAM):
+                # ANSWERING FOR DISCORD, WHICH MAY BE BACK -- it settles on
+                # `-1` once this relay owns `-0`. Hand the game over so the
+                # player's status shows again, without the game knowing:
+                # this message and everything after go to Discord.
+                tried = time.time()
+                upstream = self._hand_over(handshake)
+                if upstream is not None:
+                    threading.Thread(target=back, args=(upstream,),
+                                     daemon=True).start()
             if upstream is not None and not t.write(upstream, data):
                 break
             for op, payload in reader.feed(data):
                 if op == OP_HANDSHAKE and isinstance(payload, dict):
                     client_id = payload.get("client_id")
+                    handshake = payload
                     if upstream is None:
                         # NO DISCORD: answer as it would, so the game keeps
                         # publishing what this relay is here to read.

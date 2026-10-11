@@ -596,6 +596,7 @@ class Worker(AdviceWorker):
                     model.invasion = getattr(
                         snap, "invasion_text", "") or ""
                     self._observe_slips(getattr(snap, "pink_slips", None))
+                    self._start_relay()
                     self.building = self._building(model.zone)
                     if self.building:
                         model.zone += (f", floor {self.building['floor']}"
@@ -682,13 +683,24 @@ class Worker(AdviceWorker):
 
     _places = None
     _relay = None
+    _relay_tried = 0.0
     building = None
+    # Seconds between attempts on a pipe a running Discord holds.
+    RELAY_RETRY = 3.0
 
     def _start_relay(self) -> None:
         """Sit on Discord's pipe when it is free, to read the building's
-        floors the game publishes there (`discord_relay`). A running
-        Discord already holding it is fine: a relay started before
-        Discord writes the same record to a file, read below."""
+        floors the game publishes there (`discord_relay`).
+
+        RETRIED, not tried once: a Discord already running holds the pipe,
+        and the player frees it by quitting Discord -- the panel takes it
+        in that gap, the game reconnects here within seconds (observed),
+        and a Discord restarted after that is handed the game. Meanwhile a
+        relay run separately writes the same record to a file, read below.
+        """
+        if self._relay is not None or time.time() - self._relay_tried < self.RELAY_RETRY:
+            return
+        self._relay_tried = time.time()
         try:
             from . import discord_relay
             self._relay = discord_relay.Relay().start()

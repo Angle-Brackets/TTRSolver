@@ -106,6 +106,47 @@ class _RelayCases:
         self.assertEqual("n1", ack[0][1]["nonce"])
         self._assert_kept(relay)
 
+    def test_a_discord_that_comes_back_takes_the_game_over(self):
+        """OBSERVED live: the game reconnects to the relay within seconds of
+        Discord quitting. When Discord returns (on `-1`), the game must be
+        handed to it, or the player's status never shows again."""
+        relay = self._relay()
+        relay.RETRY_UPSTREAM = 0.0
+        game = self.t.connect(self.base + "0")
+        self.t.write(game, R.frame(R.OP_HANDSHAKE, {"v": 1, "client_id": "ttr"}))
+        _recv_frames(self.t, game, 1)                      # the relay's READY
+        self.t.write(game, R.frame(R.OP_FRAME, ACTIVITY))
+        _recv_frames(self.t, game, 1)                      # the relay's ack
+
+        discord = self.t.serve(self.base + "1")            # Discord is back
+        self.addCleanup(self.t.close_listener, discord)
+        seen = {}
+
+        def fake_discord():
+            conn = self.t.accept(discord)
+            seen["hello"] = _recv_frames(self.t, conn, 1)
+            self.t.write(conn, R.frame(R.OP_FRAME, {"cmd": "DISPATCH", "evt": "READY"}))
+            seen["next"] = _recv_frames(self.t, conn, 1)
+            self.t.write(conn, R.frame(R.OP_FRAME, {"cmd": "SET_ACTIVITY", "nonce": "n2",
+                                                     "evt": None, "data": {}}))
+            time.sleep(0.2)
+            self.t.close(conn)
+        server = threading.Thread(target=fake_discord, daemon=True)
+        server.start()
+
+        later = dict(ACTIVITY, nonce="n2")
+        later["args"] = {"pid": 1, "activity": {"details": "In a Four Story Sellbot Building",
+                                                "state": "Floor 3 of 4"}}
+        self.t.write(game, R.frame(R.OP_FRAME, later))
+        reply = _recv_frames(self.t, game, 1)
+        server.join(5)
+        self.t.close(game)
+
+        self.assertEqual("ttr", seen["hello"][0][1]["client_id"], "the hello was replayed")
+        self.assertEqual("Floor 3 of 4", seen["next"][0][1]["args"]["activity"]["state"])
+        self.assertEqual("n2", reply[0][1]["nonce"], "Discord's own reply reached the game")
+        self.assertEqual("Floor 3 of 4", relay.latest()["state"])
+
     def test_a_taken_pipe_is_refused(self):
         self._relay()
         with self.assertRaises(R.PipeTaken):
@@ -176,6 +217,32 @@ class PanelFloorTest(unittest.TestCase):
         w = self._worker({"details": "In a Four Story Sellbot Building",
                           "state": "Floor 2 of 4"})
         self.assertEqual(2, w._building("Cog Building")["floor"])
+
+    def test_the_panel_keeps_trying_for_the_pipe(self):
+        """A running Discord holds it until the player quits Discord; the
+        panel must take it in that gap, not give up at startup."""
+        from solver.live.overlay import Worker
+        w = Worker.__new__(Worker)
+        w._relay, w._relay_tried = None, 0.0
+        calls = []
+        real = R.Relay
+
+        class Taken:
+            def __init__(self, *a, **k):
+                calls.append(1)
+
+            def start(self):
+                raise R.PipeTaken("discord-ipc-0")
+        R.Relay = Taken
+        try:
+            w._start_relay()
+            w._start_relay()                 # too soon: not retried
+            w._relay_tried -= w.RELAY_RETRY + 1
+            w._start_relay()                 # later: retried
+        finally:
+            R.Relay = real
+        self.assertEqual(2, len(calls))
+        self.assertIsNone(w._relay)
 
     def test_outside_one(self):
         w = self._worker({"details": "In a Four Story Sellbot Building",

@@ -111,10 +111,18 @@ client rather than from documentation:
   `discord-ipc-0`: with Discord closed it answers the handshake itself;
   started before Discord, Discord settles on `-1` and every byte is
   passed through unchanged. A Discord already holding `-0` cannot be
-  displaced. The TTR panel starts it when the pipe is free and otherwise
-  reads a separately run relay's file; it shows the floor only while the
-  API zone is a Cog building. Reads what the game publishes, never its
-  memory. Seen working on Windows pipes; the Unix transport follows the
+  displaced -- measured: with 1, 4 or 16 extra instances of `-0`
+  listening beside Discord's, Windows gave all 54 new connections to
+  Discord's. So the flow is: panel open (it retries the pipe every few
+  seconds), quit Discord, restart it. OBSERVED LIVE 2026-10-10: the game
+  reconnected to the relay 3 s after Discord quit and published "In a
+  One Story Lawbot Building" / "Floor 1 of 1"; Discord, restarted, took
+  `-1`, and at the game's next status the relay handed the game over
+  (`_hand_over`: replay its hello, swallow Discord's READY) and the
+  player's Discord status came back. The panel shows the floor only
+  while the API zone is a Cog building. Reads what the game publishes,
+  never its memory; hooking the game's process to read the pipe was
+  ruled out (tampering with the client). The Unix transport follows the
   reference library and has not met a real Mac.
 
 **Read the game's window, not the screen.** This file used to say the
