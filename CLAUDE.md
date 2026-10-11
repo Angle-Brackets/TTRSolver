@@ -114,7 +114,14 @@ client rather than from documentation:
   displaced -- measured: with 1, 4 or 16 extra instances of `-0`
   listening beside Discord's, Windows gave all 54 new connections to
   Discord's. So the flow is: panel open (it retries the pipe every few
-  seconds), quit Discord, restart it. OBSERVED LIVE 2026-10-10: the game
+  seconds), then Discord restarted -- the panel offers that as a button
+  ("Restart Discord to show floors", TTR only, shown while Discord holds
+  the pipe): it closes Discord, takes the pipe, starts Discord again.
+  TTR's own `settings.json` has `"discord-pipe-number"`, but the game
+  reads it ONLY AT LAUNCH -- tested three ways on 2026-10-10: edited
+  while running, edited then integration toggled, toggled off / edited /
+  on. Each time the game kept pipe 0, and toggling rewrote the file from
+  memory over the edit. Do not retry swapping it on a running game. OBSERVED LIVE 2026-10-10: the game
   reconnected to the relay 3 s after Discord quit and published "In a
   One Story Lawbot Building" / "Floor 1 of 1"; Discord, restarted, took
   `-1`, and at the game's next status the relay handed the game over

@@ -175,6 +175,7 @@ def model_json(model: Model) -> str:
         "neighborhood": model.neighborhood,
         "district": model.district,
         "invasion": model.invasion,
+        "discord_floors": getattr(model, "discord_floors", ""),
         "objective": model.objective,
         "budget": model.budget,
         # THE FEEDBACK RECEIPT. `feedback_showing` is a decision, and
@@ -253,6 +254,13 @@ class Api:
 
     def ask_now(self) -> None:
         self._worker.ask_now()
+
+    def restart_discord(self) -> None:
+        """The page's "Restart Discord" offer: puts the floor reader in
+        front of Discord. Only the TTR worker has one."""
+        restart = getattr(self._worker, "restart_discord", None)
+        if restart is not None:
+            restart()
 
     def set_level_7(self, allow) -> None:
         """Offer level 7 gags, or hold them back.

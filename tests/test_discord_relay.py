@@ -221,9 +221,10 @@ class PanelFloorTest(unittest.TestCase):
     def test_the_panel_keeps_trying_for_the_pipe(self):
         """A running Discord holds it until the player quits Discord; the
         panel must take it in that gap, not give up at startup."""
-        from solver.live.overlay import Worker
+        from solver.live.overlay import Model, Worker
         w = Worker.__new__(Worker)
         w._relay, w._relay_tried = None, 0.0
+        w.model = Model()
         calls = []
         real = R.Relay
 
@@ -243,6 +244,44 @@ class PanelFloorTest(unittest.TestCase):
             R.Relay = real
         self.assertEqual(2, len(calls))
         self.assertIsNone(w._relay)
+        self.assertEqual("blocked", w.model.discord_floors, "so the page offers the restart")
+
+    def test_the_restart_button_closes_claims_and_reopens(self):
+        """One click: close Discord, take the pipe once it is free, start
+        Discord again (it is handed the game). Nothing else is touched."""
+        import time as _time
+        from types import SimpleNamespace
+        from solver.live.overlay import Model, Worker
+        w = Worker.__new__(Worker)
+        w._relay, w._relay_tried = None, 0.0
+        w.model = Model()
+        w._post = lambda: None
+        steps = []
+        real = (R.Relay, R.quit_discord, R.start_discord)
+        tries = {"n": 0}
+
+        class FreedAfterAWhile:
+            def __init__(self, *a, **k):
+                pass
+
+            def start(self):
+                tries["n"] += 1
+                if tries["n"] < 3:              # Discord still letting go
+                    raise R.PipeTaken("discord-ipc-0")
+                steps.append("claimed")
+                return SimpleNamespace(latest=lambda: None)
+        R.Relay = FreedAfterAWhile
+        R.quit_discord = lambda: steps.append("quit") or ("windows", "Discord")
+        R.start_discord = lambda how: steps.append(("start", how)) or True
+        try:
+            w.restart_discord()
+            deadline = _time.time() + 5
+            while len(steps) < 3 and _time.time() < deadline:
+                _time.sleep(0.05)
+        finally:
+            R.Relay, R.quit_discord, R.start_discord = real
+        self.assertEqual(["quit", "claimed", ("start", ("windows", "Discord"))], steps)
+        self.assertEqual("on", w.model.discord_floors)
 
     def test_outside_one(self):
         w = self._worker({"details": "In a Four Story Sellbot Building",

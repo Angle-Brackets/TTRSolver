@@ -1304,6 +1304,11 @@ class RealmsApi:
         """Recompute now. The page's "Work it out" button."""
         self._worker.ask_now()
 
+    def restart_discord(self) -> None:
+        """Inert: the floor reader is the TTR panel's. The page is shared,
+        so the click has to land somewhere; it is never shown here."""
+        return None
+
     def toggle_fight(self, *_args) -> None:
         """The page's "I'm in a fight" button.
 

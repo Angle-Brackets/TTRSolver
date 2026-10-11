@@ -453,6 +453,76 @@ def building(entry: Optional[Dict]) -> Optional[Dict]:
             "department": _DEPARTMENT[kind.group(2)] if kind else None}
 
 
+# -- restarting Discord, for the player who asked to ---------------------------
+#
+# A Discord already holding `discord-ipc-0` keeps every new connection, so
+# the one clean way to put the relay in front of it is for Discord to start
+# AFTER the relay. These quit it and start it again through its own launcher
+# -- your own program stopped and started, nothing reached into. Windows is
+# the observed case; the macOS and Linux paths follow each platform's usual
+# app commands and have not met a real machine yet.
+
+_WINDOWS_VARIANTS = ("Discord", "DiscordPTB", "DiscordCanary")
+
+
+def _windows_running(image: str) -> bool:
+    import subprocess
+    out = subprocess.run(["tasklist", "/FI", f"IMAGENAME eq {image}", "/NH"],
+                         capture_output=True, text=True).stdout
+    return image.lower() in out.lower()
+
+
+def quit_discord():
+    """Close a running Discord. Returns how to start it again, or None if
+    none was running."""
+    import shutil
+    import subprocess
+    if sys.platform.startswith("win"):
+        for variant in _WINDOWS_VARIANTS:
+            image = variant + ".exe"
+            if _windows_running(image):
+                # /F: Discord treats an ordinary close as "hide to the tray".
+                subprocess.run(["taskkill", "/IM", image, "/T", "/F"],
+                               capture_output=True)
+                return ("windows", variant)
+        return None
+    if sys.platform == "darwin":
+        subprocess.run(["osascript", "-e", 'tell application "Discord" to quit'],
+                       capture_output=True)
+        return ("mac", "Discord")
+    if shutil.which("pkill"):
+        for name in ("Discord", "discord"):
+            if subprocess.run(["pkill", "-x", name], capture_output=True).returncode == 0:
+                return ("linux", name.lower())
+    return None
+
+
+def start_discord(how) -> bool:
+    """Start Discord again as `quit_discord` said to. Never raises."""
+    import shutil
+    import subprocess
+    if not how:
+        return False
+    kind, name = how
+    try:
+        if kind == "windows":
+            launcher = os.path.join(os.environ.get("LOCALAPPDATA", ""), name,
+                                    "Update.exe")
+            if not os.path.exists(launcher):
+                return False
+            subprocess.Popen([launcher, "--processStart", name + ".exe"])
+            return True
+        if kind == "mac":
+            subprocess.Popen(["open", "-a", name])
+            return True
+        if kind == "linux" and shutil.which(name):
+            subprocess.Popen([name])
+            return True
+    except OSError:
+        pass
+    return False
+
+
 def read_presence(path: str = PRESENCE_FILE,
                   max_age: float = 6 * 3600) -> Optional[Dict]:
     """The relay's last record, if one exists and is not stale."""

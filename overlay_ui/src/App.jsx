@@ -18,7 +18,7 @@ const EMPTY = {
   feedback_move: '', feedback_against: '', feedback_problem: '',
   feedback_fixable: false, feedback_needs_target: false, feedback_showing: false,
   feedback_stated: false, pouch: [],
-  boss_kind: '', boss_manual: '', cogs_defeated: 0, cogs_left: -1,
+  boss_kind: '', boss_manual: '', cogs_defeated: 0, discord_floors: '', cogs_left: -1,
 }
 
 const BOSSES = [
@@ -1209,6 +1209,20 @@ export default function App() {
             {locationText || 'Local API Disconnected'}
           </span>
         </div>
+        {model.discord_floors === 'blocked' && (
+          <button
+            type="button"
+            onMouseDown={stopDrag}
+            onClick={() => call('restart_discord')}
+            title="Discord is holding the connection the game sends building floors over. Restarting it puts the panel in front: your Discord status keeps working, and floors show here."
+            className="shrink-0 rounded border border-sky-600/40 bg-sky-50/80 px-1.5 py-0.2 text-[9px] font-extrabold text-sky-800 hover:bg-sky-100 cursor-pointer"
+          >
+            Restart Discord to show floors
+          </button>
+        )}
+        {model.discord_floors === 'restarting' && (
+          <span className="shrink-0 text-sky-800">Restarting Discord…</span>
+        )}
         {model.invasion && (
           <div className="shrink-0 text-amber-900 font-black bg-amber-200/80 px-1.5 py-0.2 rounded border border-amber-400/50 shadow-2xs">
             🤖 {model.invasion}

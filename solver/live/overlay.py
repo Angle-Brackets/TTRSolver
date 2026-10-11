@@ -373,6 +373,10 @@ class Model:
     neighborhood: str = ""
     district: str = ""
     invasion: str = ""
+    # Reading a building's floors off Discord's pipe: "on", "blocked"
+    # (Discord holds it -- the page offers a restart), "restarting", or ""
+    # where there is no pipe to read. See `Worker.restart_discord`.
+    discord_floors: str = ""
     turn: int = 0
 
     @property
@@ -703,9 +707,49 @@ class Worker(AdviceWorker):
         self._relay_tried = time.time()
         try:
             from . import discord_relay
+        except Exception:                      # noqa: BLE001
+            return
+        try:
             self._relay = discord_relay.Relay().start()
-        except Exception:                      # noqa: BLE001 -- PipeTaken, no pipes
+            self._floors_state("on")
+        except discord_relay.PipeTaken:
             self._relay = None
+            if self.model.discord_floors != "restarting":
+                self._floors_state("blocked")
+        except Exception:                      # noqa: BLE001 -- no pipes here
+            self._relay = None
+
+    def _floors_state(self, state: str) -> None:
+        """What the page says about reading floors: "on", "blocked" (Discord
+        holds the pipe -- offer the restart), "restarting", or ""."""
+        if getattr(self.model, "discord_floors", None) != state:
+            self.model.discord_floors = state
+
+    def restart_discord(self) -> None:
+        """The player's button: put the relay in front of Discord.
+
+        A Discord holding `discord-ipc-0` keeps every new connection, so it
+        has to start after the relay. Close it, take the pipe the moment it
+        is free (the game reconnects here within seconds -- observed), then
+        start Discord again: it settles on `-1` and is handed the game, so
+        the player's status comes back. Off the UI thread.
+        """
+        import threading
+
+        def run():
+            from . import discord_relay
+            self._floors_state("restarting")
+            self._post()
+            how = discord_relay.quit_discord()
+            deadline = time.time() + 15.0
+            while self._relay is None and time.time() < deadline:
+                self._relay_tried = 0.0
+                self._start_relay()
+                time.sleep(0.25)
+            discord_relay.start_discord(how)
+            self._floors_state("on" if self._relay is not None else "blocked")
+            self._post()
+        threading.Thread(target=run, daemon=True).start()
 
     def _building(self, zone: str):
         """{floor, floors, department} while the API says we are in a Cog
