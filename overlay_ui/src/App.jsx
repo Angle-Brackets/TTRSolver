@@ -868,27 +868,43 @@ export default function App() {
                   : 'WAITING FOR BATTLE'}
               </h1>
               {model.engine && (() => {
-                const currentEngine = model.preferred_engine || model.engine || 'rl'
-                const isRl = currentEngine === 'rl'
+                // ONE BUTTON PER ENGINE. The old badge knew two: it read
+                // "SEARCH" for anything not PPO, so with the Playout row
+                // leading it named the wrong engine, and a click could only
+                // flip between PPO and Search.
+                const current = model.preferred_engine || model.engine || 'rl'
+                const engines = ['rl', 'search', 'playout'].filter(
+                  (e) => (model.engines || ['rl', 'search', 'playout']).includes(e))
+                const pending = {
+                  rl: !model.rl_gag,
+                  search: !model.search_ready,
+                  playout: !model.playout_ready,
+                }
+                const TITLE = {
+                  rl: 'PPO: the trained policy, answers instantly',
+                  search: 'Search: exact search a few rounds deep',
+                  playout: 'Playout: plays each candidate to the end of the fight',
+                }
                 return (
-                  <button
-                    type="button"
-                    onMouseDown={stopDrag}
-                    onClick={() => call('prefer_engine', isRl ? 'search' : 'rl')}
-                    className={`badge h-[18px] px-2 text-[8.5px] font-black tracking-widest cursor-pointer toontown-btn-3d border ${
-                      isRl
-                        ? 'bg-emerald-500 text-white border-emerald-700 hover:bg-emerald-600 shadow-xs'
-                        : 'bg-sky-500 text-white border-sky-700 hover:bg-sky-600 shadow-xs'
-                    }`}
-                    title={
-                      isRl
-                        ? 'Currently displaying RL policy move. Click to swap to expectimax search.'
-                        : 'Currently displaying expectimax search move. Click to swap to RL policy.'
-                    }
-                  >
-                    {isRl ? 'RL' : 'SEARCH'}
-                    {model.preferred_engine === 'search' && !model.search_ready ? '…' : ''}
-                  </button>
+                  <div className="join" onMouseDown={stopDrag}>
+                    {engines.map((e) => (
+                      <button
+                        key={e}
+                        type="button"
+                        onClick={() => call('prefer_engine', e)}
+                        className={`join-item badge h-[18px] px-1.5 text-[8px] font-black tracking-wider cursor-pointer border ${
+                          current === e
+                            ? `${ENGINE_BADGE[e]} shadow-xs`
+                            : 'bg-amber-100/70 text-amber-900/55 border-amber-900/15 hover:text-amber-950'
+                        }`}
+                        title={`${TITLE[e]}${current === e ? ' (showing)' : '. Click to show its move.'}`}
+                        aria-pressed={current === e}
+                      >
+                        {ENGINE_LABEL[e]}
+                        {current === e && pending[e] ? '…' : ''}
+                      </button>
+                    ))}
+                  </div>
                 )
               })()}
             </div>
