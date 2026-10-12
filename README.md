@@ -1,231 +1,363 @@
 # TTRSolver
 
-TTRSolver advises a player during cog battles in
-[Toontown Rewritten](https://www.toontownrewritten.com/) (TTR), a fan-run
-online game. Each round it reads the battle and says which gag (an attack
-item, carried in limited numbers) to throw at which cog (an enemy). The
-advice appears in a small always-on-top panel beside the game. The player
-still makes every move.
+A battle advisor for [Toontown Rewritten](https://www.toontownrewritten.com/). It watches your cog fight and tells you which gag to throw at which cog, every round, from a small panel beside the game.
 
-It is written for two readers: a TTR player who wants a second opinion
-mid-fight, and a developer who wants to look at the methods, which are a
-battle simulator sourced from the TTR wiki, an exact expectimax search, a
-policy network trained with PPO, and Monte Carlo playouts driven by a small
-rollout network. Toontown Realms, a different Toontown server, is supported
-through its own panel.
+Under the hood it is a rules-exact simulator of TTR combat and three engines that argue over your next move: an expectimax tree search, a PPO policy network, and a Monte Carlo playout engine that plays the whole fight forward hundreds of times. You still make every move yourself.
 
-TTRSolver is not affiliated with or endorsed by Toontown Rewritten,
-Toontown Realms or The Walt Disney Company.
+It also supports Toontown Realms through its own panel.
 
-## What it reads, and what it never does
+> Not affiliated with or endorsed by Toontown Rewritten, Toontown Realms or The Walt Disney Company.
+
+---
+
+## Table of Contents
+
+- [What It Reads](#what-it-reads)
+- [System Architecture](#system-architecture)
+- [Quick Start](#quick-start)
+- [The Three Engines](#the-three-engines)
+  - [Playout: play the fight to the end](#playout-play-the-fight-to-the-end)
+  - [Search: exact expectimax](#search-exact-expectimax)
+  - [PPO: a policy network and a climb](#ppo-a-policy-network-and-a-climb)
+- [Combat Mechanics](#combat-mechanics)
+- [Results](#results)
+- [Reading a Live Game](#reading-a-live-game)
+- [Status and Limits](#status-and-limits)
+- [Repository Layout](#repository-layout)
+- [Documentation](#documentation)
+- [Licence](#licence)
+
+---
+
+## What It Reads
 
 | Source | What it gives |
 |---|---|
-| TTR's official Local API (opt-in; the game asks for consent in-game) | Laff (health), gag training, organic tracks, location, pink slips |
-| A capture of the game's own window | Cog level, department and health from the plate above each cog; gag counts from the gag menu |
-| The log file the TTR client writes | Which boss fight the toon has entered |
-| What the game publishes to Discord Rich Presence | The floor count of a cog building, through an optional local relay |
-| The installed game's asset archives | The interface font and department emblems, used to match what is on screen; cached locally and never shipped in this repository |
-| Toontown Realms' local server stream | The whole battle as typed values, read-only |
+| **TTR Local API** (official, opt-in, asks your consent in game) | Laff, gag training, organic tracks, location, pink slips |
+| **The game window** (a screenshot, nothing more) | Each cog's level, department and health; your gag counts |
+| **The client's log file** | Which boss fight you walked into |
+| **Discord Rich Presence** (optional) | Which floor of a cog building you are on |
+| **Toontown Realms' local server stream** | The whole battle, exactly |
 
-It never reads the game's memory, never hooks, injects into or modifies the
-client, never touches the game's encrypted code, and never sends input to
-the game. It advises; the player plays.
+**It never reads game memory, never hooks or injects into the client, and never sends a key press or a click to the game.** It advises. You play.
 
-## Quick start
+---
 
-The solver and its tests run on the Python standard library alone
-(developed on Python 3.13). The live panels need a few optional packages.
-
-```
-python run.py            # menu of front ends; marks any whose packages are missing
-python run.py --list     # print the menu and exit
-python run.py 1          # start entry 1 (the TTR overlay) directly
-```
-
-| Install | Needed for |
-|---|---|
-| `pip install -r requirements-vision.txt` (numpy, pillow, mss) | Screen reading, and the PPO and Playout engines |
-| `pip install pywebview` | The overlay window (TTR and Realms). Entry 2 is a plain Tk window that does not need it |
-| `pip install -r requirements-realms.txt` (panda3d) | The Realms panel only |
-| `pip install -r requirements-training.txt` (torch) | Retraining the networks with `tools/train_*.py`; nothing under `solver/` imports torch |
-
-Trained weights ship in the repository as JSON, so no training is needed to
-run anything.
-
-For the TTR overlay, two game settings must be on. Both are keys in TTR's
-`settings.json`:
-
-- `want-local-api` turns on the Local API. The game then asks for consent
-  the first time the panel connects.
-- `show-cog-levels` shows each cog's level on its plate, which is the only
-  place the level can be read from.
-
-To try it without a game, `python run.py 5` narrates a solo fight played by
-the search, and `python run.py 7` serves the browser visualizer.
-[docs/user-guide.md](docs/user-guide.md) covers setup and the panel's
-controls in full.
-
-## The three engines
-
-The panel shows three rows, one per engine, each with its own recommended
-move. The Playout row leads by default; a button per engine shows any
-other engine's move instead.
-
-| Row | What it is | Good at | Limits | Docs |
-|---|---|---|---|---|
-| **Playout** | Takes about ten candidate moves and plays each one out to the end of the fight many times, with a small network choosing the later moves and a value network scoring a playout cut off after 8 rounds | The strongest in simulation. The only engine that sees the boss waves after the one on the field | Takes seconds; it posts a best move after each batch of playouts and improves as it runs | [playout.md](docs/playout.md), [rollout-network.md](docs/rollout-network.md) |
-| **PPO** | A policy network trained with PPO (a reinforcement-learning algorithm) proposes moves, and a coordinate-ascent step, called `climb` in the code, refines them against a one-round scorer | Answers in milliseconds, so it is shown until the playouts post their first result | Judges one round at a time; ignores the panel's play-style preset | [ml-design.md](docs/ml-design.md), [ppo-math.md](docs/ppo-math.md), [scoring.md](docs/scoring.md) |
-| **Search** | Expectimax: a tree search over the exact outcome probabilities of each round | Exact for the depth it reaches; small solo fights can be solved to the end | Solo only. Cost grows quickly with depth: on a full endgame pouch against two cogs, depth 1 took 0.01 s and depth 2 took 9.3 s, so the live default is depth 2 | [search-depth.md](docs/search-depth.md), [heuristic-learning.md](docs/heuristic-learning.md) |
+## System Architecture
 
 ```mermaid
-flowchart LR
-    API["TTR Local API"] --> S["Battle state and fight context"]
-    SCR["Game window capture"] --> S
-    LOG["Client log"] --> S
-    DRP["Discord relay"] --> S
-    RLM["Realms server stream"] --> S
-    S --> PPO["PPO policy + climb"]
-    S --> SRCH["Search (expectimax)"]
-    S --> PLAY["Playout"]
-    PPO -- "candidate moves" --> PLAY
-    PPO --> P["Panel: three rows"]
-    SRCH --> P
-    PLAY --> P
+flowchart TD
+    classDef inputStyle fill:#1e3a8a,stroke:#60a5fa,stroke-width:2px,color:#ffffff
+    classDef stateStyle fill:#0369a1,stroke:#38bdf8,stroke-width:2px,color:#ffffff
+    classDef simStyle fill:#065f46,stroke:#34d399,stroke-width:2px,color:#ffffff
+    classDef engineStyle fill:#581c87,stroke:#c084fc,stroke-width:2px,color:#ffffff
+    classDef leadStyle fill:#b45309,stroke:#fbbf24,stroke-width:3px,color:#ffffff
+    classDef uiStyle fill:#7c2d12,stroke:#fb923c,stroke-width:2px,color:#ffffff
+
+    subgraph Ingestion["1. Reading the fight"]
+        L["TTR Local API"] --> BS["BattleState"]
+        V["Game window: plates and gag menu"] --> BS
+        G["Client log: boss fight"] --> BS
+        D["Discord relay: building floor"] --> BS
+        A["Realms server stream"] --> BS
+    end
+
+    subgraph Simulation["2. Rules"]
+        BS --> SIM["Simulator: legal actions and outcomes"]
+        SIM --> ACC["Mechanics: accuracy, damage, lure, trap, cog attacks"]
+    end
+
+    subgraph Engines["3. Three engines"]
+        ACC --> E1["PPO policy + climb<br/>(milliseconds)"]
+        ACC --> E2["Expectimax search<br/>(exact, a few rounds deep)"]
+        ACC --> E3["Playout<br/>(the whole fight, many times)"]
+        E1 -- "candidate moves" --> E3
+    end
+
+    subgraph Presentation["4. Front ends"]
+        E1 --> UI1["Live overlay panel"]
+        E2 --> UI1
+        E3 --> UI1
+        E1 --> UI2["Browser visualizer"]
+        E2 --> UI2
+        E1 --> UI3["Terminal advisor"]
+        E2 --> UI3
+    end
+
+    class L,V,G,D,A inputStyle
+    class BS stateStyle
+    class SIM,ACC simStyle
+    class E1,E2 engineStyle
+    class E3 leadStyle
+    class UI1,UI2,UI3 uiStyle
 ```
 
-## How well it does, in simulation
+---
 
-Every figure below comes from simulated fights (`tools/sweep.py`), not from
-live play. Each engine is shown only what the live panel would show it.
-The absolute win rates depend on the simulator's cog tables, which are
-known to be imperfect (see the note under the table), so the comparisons
-between engines on the same fights are more trustworthy than the
-percentages themselves.
+## Quick Start
 
-A VP is the Sellbot boss fight. Its cog rounds are 20 + 20 cogs for a toon
-alone and 10 + 10 per side when toons split across the two sides. A Unite
-is a consumable phrase that heals or restocks the party.
+The solver and its tests need nothing but Python 3.10+.
 
-| Simulated fight | Result |
+```bash
+python run.py                        # menu of every front end, and what each needs
+python run.py 1                      # the TTR overlay
+python run.py 5                      # no game needed: a narrated solo fight
+python -m unittest discover tests    # about 1,900 tests
+```
+
+Optional extras, only for the parts that use them:
+
+| Install | Unlocks |
 |---|---|
-| Solo VP, Unites not usable by the engines | PPO alone won about 7%. Playouts won 21–27% with three candidates, about 40% with the wider menu, and 55–70% with the rollout network and four times the rollouts |
-| Solo VP, the maintainer's own pouch and five Unites | Playout won 94 of 100 |
-| One toon on a VP side (10 + 10 cogs), same pouch and five Unites | Playout won 55 of 60 |
-| The same side with a few SOS cards and no Unites or pink slips | PPO 6 of 60, Search 6 of 60, Playout 33 of 60 |
-| Two toons on a VP side, planned together | 40 of 40 with PPO and with Playout |
-| Solo cog building, toon and street drawn at random | Playout won between 104 and 128 of 1,000 across sweeps |
-| Building with two to four toons, teammates played by `SensiblePrior` | Playout won 120 of 300 |
+| `pip install -r requirements-vision.txt` | Screen reading, and the PPO and Playout engines (numpy) |
+| `pip install pywebview` | The overlay window |
+| `pip install -r requirements-realms.txt` | The Realms panel |
+| `pip install -r requirements-training.txt` | Retraining the networks (torch). The trained weights ship with the repo |
 
-Where the model is known to be off:
+For the TTR overlay, turn on two settings in TTR's `settings.json`: **`want-local-api`** and **`show-cog-levels`**. The game asks for your consent the first time the panel connects.
 
-- The maintainer, an experienced player, describes the one-toon VP side as
-  trivial in the real game, yet without Unites the model wins only 33 of
-  60. Every traced loss died to the skelecogs (the VP's second round) with
-  most of the pouch unthrown, which points at the simulator's cog damage or
-  attack rate rather than at the search.
-- Cog attack frequency and accuracy are Toontown Online-era values. TTR has
-  rebalanced both and publishes neither. A sensitivity sweep found the
-  recommended move unchanged across ±20 accuracy points, but forecast win
-  rates should be read with that gap in mind
-  ([docs/data-confidence.md](docs/data-confidence.md)).
-- `SensiblePrior` is a guess at how strangers play, not a model fitted to
-  real players. Every result with modelled teammates rests on it.
+Full setup and a tour of the panel: **[docs/user-guide.md](docs/user-guide.md)**.
 
-Ideas that were measured and lost are kept in
-[docs/experiment-log.md](docs/experiment-log.md).
+---
 
-## How the game is read
+## The Three Engines
 
-On TTR, each source is used for one thing and never substituted for
-another: laff and gag training come from the Local API, gag counts from the
-gag menu on screen, and cogs from their plates. The capture is scoped to
-the game's window. Digits go through small classifiers trained on synthetic
-digits in the game's font, and the gag menu's "Total gags" label is read
-separately as a checksum on the counts. When the readings disagree or
-something cannot be read, the panel says why instead of advising from a
-guessed state. Department and level do not always name a cog, so the
-reader also matches the head on the plate against a library that each
-player builds by labelling cogs as they first appear. Building floors come
-from a relay on Discord's local pipe that passes Discord's own traffic
-through unchanged; taking that pipe can require restarting Discord, which
-the panel does only when the player presses the button for it. Each source
-and its limits are in [docs/live-reading.md](docs/live-reading.md), and
-Realms is covered in [docs/realms.md](docs/realms.md).
+The panel shows three rows, one move from each engine. **Playout leads**; one click shows either of the others.
 
-## Repository layout
+| | Playout | Search | PPO |
+|---|---|---|---|
+| **Method** | Monte Carlo playouts to the end of the fight | Expectimax over exact outcome probabilities | Policy network + coordinate ascent |
+| **Sees** | Every wave of the fight | The cogs on the field | One round |
+| **Speed** | Seconds, improving as it runs | Up to the think time | Milliseconds |
+| **Best at** | Boss fights and long buildings | Small fights, solved exactly | An instant answer |
+| **Needs** | numpy | Standard library | numpy |
+
+### Playout: play the fight to the end
+
+One round of lookahead cannot tell you that the Wedding Cake you are about to throw is the one you will need twelve cogs from now. So the Playout engine does not look one round ahead. It takes about ten candidate moves, plays each one out to the end of the fight, over and over, and keeps the move whose fights went best.
+
+```mermaid
+flowchart TD
+    classDef stateNode fill:#0369a1,stroke:#38bdf8,stroke-width:2px,color:#ffffff
+    classDef menuNode fill:#4338ca,stroke:#818cf8,stroke-width:2px,color:#ffffff
+    classDef rollNode fill:#581c87,stroke:#c084fc,stroke-width:2px,color:#ffffff
+    classDef cutNode fill:#0f766e,stroke:#2dd4bf,stroke-width:2px,color:#ffffff
+    classDef halveNode fill:#b45309,stroke:#fbbf24,stroke-width:2px,color:#ffffff
+    classDef outNode fill:#15803d,stroke:#4ade80,stroke-width:3px,color:#ffffff
+
+    S["Battle state + the waves still to come"] --> M["Menu: up to 12 candidate moves<br/>(PPO's pick, the network's favourites, the best of each kind)"]
+    M --> R["Play each candidate forward<br/>a small rollout network makes every later move"]
+    R --> C["After 8 rounds a value net scores the rest"]
+    C --> H["Successive halving at 16, 32 and 64 playouts<br/>the weaker half is dropped"]
+    H -->|survivors| R
+    H --> O["The move whose fights went best"]
+
+    class S stateNode
+    class M menuNode
+    class R rollNode
+    class C cutNode
+    class H halveNode
+    class O outNode
+```
+
+Each playout is scored in cogs:
+
+$$\text{value} = \text{cogs defeated} + 0.5 \cdot \frac{\text{laff left}}{\text{max laff}} - \text{charges for gags spent, rounds taken and reach wasted}$$
+
+What makes it work:
+
+- **Common random numbers.** Every candidate faces the same dice, so the comparison is about the move and not the luck.
+- **No peeking.** Cogs you have not seen are redrawn in every playout from what the fight is known to hold.
+- **A fast rollout network** trained by expert iteration: the Playout engine labels the moves, the network learns them, and the engine gets stronger rollouts back.
+- **Anytime.** The panel posts a move after the first playouts and keeps refining.
+
+Details and every measurement: **[docs/playout.md](docs/playout.md)** and **[docs/rollout-network.md](docs/rollout-network.md)**.
+
+### Search: exact expectimax
+
+A solo battle is a finite game. Every gag thrown leaves the pouch, so the fight cannot loop, and the search can weigh every outcome by its true probability:
+
+$$V(s) = \max_{a \in \mathcal{A}(s)} \sum_{o \in \Omega} P(o \mid s, a) \Big( r(s, a, o) + V(s') \Big)$$
+
+```mermaid
+flowchart TD
+    classDef maxNode fill:#1e3a8a,stroke:#60a5fa,stroke-width:2px,color:#ffffff
+    classDef chanceNode fill:#581c87,stroke:#c084fc,stroke-width:2px,color:#ffffff
+    classDef hitNode fill:#065f46,stroke:#34d399,stroke-width:2px,color:#ffffff
+    classDef missNode fill:#881337,stroke:#fb7185,stroke-width:2px,color:#ffffff
+
+    S["MAX: your turn, choose a gag"]
+    S -->|Throw| A["CHANCE: accuracy roll"]
+    S -->|Lure| B["CHANCE: accuracy roll"]
+    A -->|hit| A1["Cog takes damage"]
+    A -->|miss| A2["No effect"]
+    A1 --> D["CHANCE: the cogs attack"]
+    A2 --> E["CHANCE: the cogs attack"]
+    D -->|attack 1| D1["MAX: next round"]
+    D -->|attack 2| D2["MAX: next round"]
+
+    class S,D1,D2 maxNode
+    class A,B,D,E chanceNode
+    class A1 hitNode
+    class A2 missNode
+```
+
+- **Star pruning** cuts a chance node as soon as its bounds leave the search window.
+- **Cog-phase collapsing** merges outcomes that differ only in damage taken, from 20–70 per action down to a handful.
+- **Honest about cost.** On a full endgame pouch against two cogs, depth 1 takes 0.01 s and depth 2 takes 9.3 s, so the panel searches under a time budget.
+
+It is exact, and it only sees the cogs on the field. In a boss fight that is its ceiling.
+
+More: **[docs/search-depth.md](docs/search-depth.md)**, **[docs/scoring.md](docs/scoring.md)**.
+
+### PPO: a policy network and a climb
+
+The fast one. A policy network trained with PPO proposes moves, and a coordinate-ascent step called the climb improves the plan one seat at a time.
+
+```mermaid
+flowchart TD
+    classDef stateNode fill:#0369a1,stroke:#38bdf8,stroke-width:2px,color:#ffffff
+    classDef ppoNode fill:#581c87,stroke:#c084fc,stroke-width:2px,color:#ffffff
+    classDef menuNode fill:#4338ca,stroke:#818cf8,stroke-width:2px,color:#ffffff
+    classDef probeNode fill:#0f766e,stroke:#2dd4bf,stroke-width:2px,color:#ffffff
+    classDef climbNode fill:#b45309,stroke:#fbbf24,stroke-width:2px,color:#ffffff
+    classDef outNode fill:#15803d,stroke:#4ade80,stroke-width:3px,color:#ffffff
+
+    S["Battle state as 302 numbers"] --> PPO["Actor: 256 → 256 → 250 action logits<br/>illegal moves masked out"]
+    PPO --> P["Top 16 moves per seat"]
+    P --> PR["Add targeted probes<br/>(the cheapest kill, the Lure for an armed Trap)"]
+    PR --> CLIMB["Climb: change one seat at a time,<br/>then two together, keep what scores better"]
+    CLIMB --> OUT["The plan, within 24 evaluations"]
+
+    class S stateNode
+    class PPO ppoNode
+    class P menuNode
+    class PR probeNode
+    class CLIMB climbNode
+    class OUT outNode
+```
+
+It answers in milliseconds, so it is the move you see while the other two think. It judges one round at a time, which is exactly the weakness the playouts exist to fix.
+
+More: **[docs/ml-design.md](docs/ml-design.md)**, **[docs/ppo-math.md](docs/ppo-math.md)**.
+
+---
+
+## Combat Mechanics
+
+The simulator follows the [TTR wiki](https://toontownrewritten.wiki), rule by rule.
+
+$$\text{atkAcc} = \text{propAcc} + \text{trackExp} + \text{tgtDef} + \text{bonus} \qquad \text{clamped to } [5, 95]$$
+
+| Term | Meaning |
+|---|---|
+| **propAcc** | The gag's base accuracy |
+| **trackExp** | (highest level trained in the track − 1) × 10, halved for Toon-Up |
+| **tgtDef** | The cog's defence, from −2 at level 1 to −55 at level 12 |
+| **bonus** | Stun: +25 for each earlier attack that landed this round, up to +75. Sound and the level 7 Throw and Squirt also gain from cogs already lured |
+
+Rules that override the roll:
+
+- **Trap** always hits.
+- **Throw and Squirt on a lured cog** always hit, and deal **+50%** knockback.
+- **Drop on a lured cog** always misses.
+- **Same track, same cog, same round:** the damage is summed and **+20%** is added.
+- **One roll per track per target.** Four Throws at one cog all land or all miss together.
+
+Every value in the code carries a tag saying how it is known: `[CONFIRMED]` from the wiki, `[OWNER]` from the maintainer's play, `[ASSUMED]`, or `[TODO]` for unknown, where the code raises instead of guessing. **[docs/data-confidence.md](docs/data-confidence.md)** lists what is solid and what is not.
+
+More: **[docs/mechanics-notes.md](docs/mechanics-notes.md)**.
+
+---
+
+## Results
+
+All of these are **simulated fights**, each engine shown only what the live panel would show it. A VP is the Sellbot boss: 20 + 20 cogs alone, 10 + 10 a side with company.
+
+| Simulated fight | PPO | Search | Playout |
+|---|---|---|---|
+| Solo VP, no Unites | about 7% | — | 55–70% |
+| Solo VP, the maintainer's pouch and five Unites | — | — | **94 of 100** |
+| One toon on a VP side, five Unites | — | — | **55 of 60** |
+| One toon on a VP side, a few SOS cards only | 6 of 60 | 6 of 60 | **33 of 60** |
+| Two toons on a VP side, planned together | 40 of 40 | — | 40 of 40 |
+
+How the Playout engine got there on the solo VP, one measured step at a time:
+
+| Step | Wins |
+|---|---|
+| PPO alone | about 7% |
+| Top three moves, played out | 21–27% |
+| A wider menu of moves | about 40% |
+| A fast rollout network, four times the playouts | 55–70% |
+
+**Where the model is off.** The maintainer finds a one-toon VP side easy in the real game; the simulator wins it 33 times in 60 without Unites. That gap points at the simulator's cog damage, not at the engines. Cog attack frequencies also date from Toontown Online, because TTR does not publish its own.
+
+The ideas that lost are written down too: **[docs/experiment-log.md](docs/experiment-log.md)**.
+
+---
+
+## Reading a Live Game
+
+Each source answers for one thing and is never swapped for another: **laff and training from the API, gag counts from the gag menu, cogs from their plates.**
+
+- **Digits** go through small classifiers trained on synthetic digits in the game's own font.
+- **A free checksum.** The gag menu prints its own total, read separately, so a misread count is caught and often repaired.
+- **Cog identity.** Department and level name a cog outright in only 8 of 48 cases, so the reader matches the head on the plate against a library you build as you play.
+- **No guessing.** If the board cannot be read, the panel says why and gives no advice.
+
+More: **[docs/live-reading.md](docs/live-reading.md)**, **[docs/realms.md](docs/realms.md)**.
+
+---
+
+## Status and Limits
+
+- **Simulated results only.** No win rate has been measured in live play.
+- **Windows first.** Finding the game window is Windows-only; other platforms are untested.
+- **Boss fights.** The VP is detected automatically. The CFO, CJ and CEO are picked by hand, and their fight sizes are partly unknown.
+- **Teammates on TTR are a number.** The game shows the client one toon, so the engines do not see what your teammates carry.
+- **SOS cards and Unites on TTR** are entered by hand. Pink slips are read.
+- **A new install knows no cog heads.** Expect to name cogs often at first and rarely later.
+
+The full list of what is done, open and shelved: **[docs/roadmap.md](docs/roadmap.md)**.
+
+---
+
+## Repository Layout
 
 ```
-run.py            launcher: lists the front ends and what each needs
-solver/           battle rules: state.py, mechanics.py, simulator.py, outcomes.py, party.py
+run.py            launcher for every front end
+solver/           the rules: state, mechanics, simulator, exact outcomes, parties
   data/           cog and gag tables, sourced from the TTR wiki
-  search/         the engines: playout.py, fastplayer.py, hybrid.py, expectimax.py, party_search.py
-  rl/             the training environment and the shipped network weights
-  live/           live reading and the panels: ttr_local.py, vision.py, digits.py,
-                  ttr_log.py, discord_relay.py, session.py, panel.py, realms_panel.py
-overlay_ui/       the overlay's React front end (built files are committed; no Node needed to run)
-visualizer/       browser visualizer for exploring positions and search trees
-tools/            measurement and training scripts: sweep.py, round_parity.py, train_*.py
+  search/         the engines: playout, fastplayer, hybrid (PPO + climb), expectimax
+  rl/             the training environment and the shipped weights
+  live/           live reading and the panels
+overlay_ui/       the overlay's React front end (built files committed, no Node needed)
+visualizer/       browser visualizer for positions and search trees
+tools/            measurement and training scripts
 tests/            the unittest suite
 docs/             documentation
 ```
 
-## Status and limits
-
-- **Simulated results only.** No win rate has been measured in live play.
-- **Developed on Windows.** Finding the game's window is Windows-only
-  (elsewhere the whole screen is captured), the client log's location is
-  known only for a Windows install (set `TTR_LOG_DIR` otherwise), and the
-  Discord relay's Unix transport has not been run on a Mac.
-- **Boss fights.** The VP's structure is entered from the maintainer's play
-  (`[OWNER]`), as is the CEO's first round, with less certainty. The CFO,
-  the CJ and the CEO's second round are `[TODO]`. On TTR only the VP is
-  detected automatically; the others are picked by hand in the panel.
-- **Teammates on TTR.** The game shows the client one toon, so the engines
-  know teammates only as a count. Modelling them in the Playout row was
-  started and shelved after measuring no gain
-  ([docs/roadmap.md](docs/roadmap.md)). Party values from the evaluator are
-  defined but not validated.
-- **SOS cards and Unites on TTR.** The Local API's `/sos.json` and
-  `/unites.json` are not parsed, so the player enters what they hold in the
-  panel. Pink slips are read.
-- **Screen reading.** The library of cog heads is not shipped and starts
-  empty, so a new player labels cogs as they first appear. A cog that
-  cannot be read is reported as unreadable, not guessed.
-- **Realms.** The board is read exactly but priced with TTR's rules, so
-  damage numbers will not match what Realms rolls.
-- **Buildings.** The next floor is unknown to the player, so the engines do
-  not plan for it.
-
-Game values in the code carry a provenance tag: `[CONFIRMED]` (from the TTR
-wiki), `[OWNER]` (the maintainer's judgement as a player, not a sourced
-fact), `[OPEN TOONTOWN SOURCE]` (from the open-source Toontown Online
-reimplementation; a lead, not confirmation), `[ASSUMED]` (a labelled
-assumption) and `[TODO]` (unknown; the code raises instead of substituting
-a value). [docs/data-confidence.md](docs/data-confidence.md) lists what is
-confirmed and what is not.
-
-## Running the tests
-
-```
-python -m unittest discover tests
-```
-
-About 1,900 tests, standard-library `unittest` only. Tests that need numpy
-or panda3d skip themselves when the package is absent.
+---
 
 ## Documentation
 
-[docs/README.md](docs/README.md) is the index: guides for using the panels,
-how each engine works, the game mechanics and data, and the project's
-record of experiments.
+**[docs/README.md](docs/README.md)** is the index. The short version:
+
+| If you want to | Read |
+|---|---|
+| Run it and read the panel | [user-guide.md](docs/user-guide.md) |
+| Know what it reads from your game | [live-reading.md](docs/live-reading.md) |
+| See how the pieces fit | [architecture-review.md](docs/architecture-review.md) |
+| Understand the strong engine | [playout.md](docs/playout.md) |
+| Check the game rules it uses | [mechanics-notes.md](docs/mechanics-notes.md) |
+| See what was tried and what failed | [experiment-log.md](docs/experiment-log.md) |
+
+---
 
 ## Licence
 
-The code and documentation are released under the [MIT licence](LICENSE).
+Code and documentation are released under the [MIT licence](LICENSE).
 
-The licence does not cover the game's artwork. The cog and gag images
-under `overlay_ui/` and `visualizer/`, and the game screenshots under
-`docs/img/` and `tests/fixtures/`, come from Toontown Rewritten, Toontown
-Realms and the Toontown Rewritten wiki, and belong to their owners. They
-are included so the panels can show a player which cog or gag is meant.
+The licence does not cover the game's artwork. The cog and gag images under `overlay_ui/` and `visualizer/`, and the game screenshots under `docs/img/` and `tests/fixtures/`, come from Toontown Rewritten, Toontown Realms and the Toontown Rewritten wiki, and belong to their owners. They are included so the panels can show which cog or gag is meant.
