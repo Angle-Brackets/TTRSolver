@@ -868,6 +868,12 @@ class Worker(AdviceWorker):
     # PICKUP unless the player says their party plans together. See
     # `party.assumed_teammates`.
     party_mode = "pickup"
+    # OFF: stand-ins measured no better than the count. 300 party
+    # buildings, teammates playing SensiblePrior: count alone 120 won,
+    # stand-ins in pickup 111 (+13/-22, p 0.18), coordinated 106 (+9/-23,
+    # p 0.02). Kept, with its toggle hidden, until a measurement says
+    # otherwise (`tools/sweep.py ... see=standins`).
+    stand_in_teammates = False
 
     def _with_teammates(self, state):
         """The board the PLAYOUTS see: the pill's teammates as stand-in
@@ -876,6 +882,9 @@ class Worker(AdviceWorker):
         the count. A solo board is returned as it is."""
         from .. import party as party_mod
 
+        if not self.stand_in_teammates:
+            self.group_mode = None
+            return state
         board = party_mod.with_assumed_teammates(state)
         self.group_mode = self.party_mode if board is not state else None
         return board
@@ -1155,7 +1164,7 @@ class Worker(AdviceWorker):
         self.model.objective = self.objective_name
         self.model.budget = self.budget
         self.model.toon_count = self.toon_count
-        self.model.party_mode = self.party_mode
+        self.model.party_mode = self.party_mode if self.stand_in_teammates else ""
         try:
             self.outbox.put_nowait(copy(self.model))
         except queue.Full:                        # pragma: no cover

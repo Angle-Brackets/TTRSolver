@@ -61,7 +61,19 @@ class OverlayStandsThemInTest(unittest.TestCase):
         w._lock = threading.Lock()
         w.model = Model()
         w._settings_changed = lambda: None
+        w.stand_in_teammates = True
         return w
+
+    def test_off_by_default_the_count_is_kept(self):
+        """Measured no better than the count, so off until shown otherwise."""
+        from solver.live.overlay import Worker
+
+        self.assertFalse(Worker.stand_in_teammates)
+        w = self._worker()
+        w.stand_in_teammates = False
+        board = self._board(2)
+        self.assertIs(board, w._with_teammates(board))
+        self.assertIsNone(w.group_mode)
 
     def _board(self, allies):
         from solver.rl import env as env_mod
