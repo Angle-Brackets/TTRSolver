@@ -490,9 +490,10 @@ Things that hold it together, each measured:
   163 of 260 in 28% less time; duo VP 57 vs 52 of 100. Without the
   holdout count the same idea lost badly (19 vs 37 of 60): the panel's
   board drops it, so the net could not tell 16 cogs to come from none.
-- **The Playout row leads in boss fights** unless the player picked an
-  engine: on duo VP sides the Search row won 6/60 to its 33/60, because
-  only the playouts see the waves after the one on the field.
+- **The Playout row leads in every fight** unless the player picked an
+  engine (the panel's PPO / Search / Playout toggle). It began as a
+  boss-fight rule: on duo VP sides the Search row won 6/60 to its 33/60,
+  because only the playouts see the waves after the one on the field.
 - **More than 32 rollouts per move did not pay** with full playouts (146 vs 139/200, p 0.46).
 - **No peeking.** Unseen cogs are redrawn from the level band in each
   rollout, in the numbers `boss.Horizon` gives. Without a horizon the

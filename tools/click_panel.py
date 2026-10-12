@@ -12,11 +12,12 @@ reports both page errors and the calls that actually landed.
 
     python tools/click_panel.py
 """
-import functools, http.server, json, pathlib, socketserver, threading
+import functools, http.server, json, pathlib, socketserver, tempfile, threading
 from playwright.sync_api import sync_playwright
 
-ROOT = pathlib.Path(r"c:/Users/ankit/OneDrive/Desktop/Appu/Programs/TTRSolver")
-OUT = pathlib.Path(r"C:/Users/ankit/AppData/Local/Temp/claude/scratch")
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+OUT = pathlib.Path(tempfile.gettempdir()) / "ttrsolver-click-panel"
+OUT.mkdir(parents=True, exist_ok=True)
 DIST = ROOT / "overlay_ui/dist"
 handler = functools.partial(http.server.SimpleHTTPRequestHandler,
                             directory=str(DIST))

@@ -28,9 +28,10 @@ size is unconfirmed) the playout ends with the battle on screen, since
 the next floor is unknown to the player too. The owner signed off on
 boss-fight structure and nothing more; see `solver/live/boss.py`.
 
-SOLO ONLY for now: a party playout needs the teammate model to play the
-other seats, and has not been measured. `pick` returns None for a party
-and the caller keeps its own answer.
+Groups follow `GROUP_MODE`: "coordinated" plans every seat together and
+returns your part; "pickup" chooses your move and plays the other seats
+from the teammate model (`rollout_pickup`). Both are measured only in
+simulation -- see the notes beside `GROUP_MODE`.
 
 Needs numpy, like `hybrid`, because the continuation is `hybrid.climb`.
 """

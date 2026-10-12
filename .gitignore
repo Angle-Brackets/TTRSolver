@@ -30,3 +30,7 @@ disagreements.tsv
 # the game, so they are TTR artwork and must not be committed -- see
 # `ttr_assets` for the rule this follows.
 /frame*.png
+
+# Local tooling state, and boards recorded by `realms_panel --record`.
+.claude/
+/realms_decisions*.pkl

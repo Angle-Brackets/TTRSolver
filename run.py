@@ -46,7 +46,7 @@ GROUPS: Sequence[tuple] = (
         Entry("Random-policy demo", "solver.demo", (),
               "a baseline run, for comparison"),
         Entry("Browser visualizer", "visualizer.serve", (),
-              "serves the page and runs the solver in Pyodide"),
+              "serves the page; the solver runs in this process"),
     )),
     ("Diagnostics", (
         Entry("Read one screenshot", "solver.live.read_battle",
