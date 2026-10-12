@@ -69,7 +69,10 @@ def _play_out(env, objective, rng_seed) -> float:
     while not done and guard < 400:
         guard += 1
         view = playout._view(env.state)
-        plan = fastplayer.act(view)
+        # The view has its holdout stripped, so the count is handed over,
+        # as the playouts do: without it the network plays every label
+        # fight believing no more cogs are coming.
+        plan = fastplayer.act(view, holdout=len(env.state.holdout))
         action = plan[0] if plan else None
         before = env.state.toons[0].laff
         remaining = env.state.cogs_remaining
@@ -94,7 +97,8 @@ def _play_out_playout_units(env, rng_seed) -> float:
     guard, done = 0, False
     while not done and guard < 400:
         guard += 1
-        done, _info = playout.step_round(env, fastplayer.act(playout._view(env.state)))
+        done, _info = playout.step_round(env, fastplayer.act(
+            playout._view(env.state), holdout=len(env.state.holdout)))
     toon = env.state.toons[0]
     laff = max(0, toon.laff) / float(toon.max_laff or 1)
     return (left0 - playout._left(env.state)) + playout.LAFF_WEIGHT * laff
@@ -135,7 +139,8 @@ def episode(job):
                 rows.append({"x": x, "y": sum(ys) / len(ys),
                              "cogs": cogs, "regime": regime, "state": pickle.dumps(view)})
         try:
-            done, _ = playout.step_round(env, fastplayer.act(view))
+            done, _ = playout.step_round(env, fastplayer.act(
+                view, holdout=len(env.state.holdout)))
         except Exception:                   # noqa: BLE001
             break
     return rows

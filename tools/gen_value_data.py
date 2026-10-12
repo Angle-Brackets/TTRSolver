@@ -75,7 +75,8 @@ def episode(job):
         done = False
         while played < target and not done:
             try:
-                done, _ = playout.step_round(env, fastplayer.act(playout._view(env.state)))
+                done, _ = playout.step_round(env, fastplayer.act(
+                    playout._view(env.state), holdout=len(env.state.holdout)))
             except Exception:               # noqa: BLE001
                 return rows
             played += 1

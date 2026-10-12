@@ -122,7 +122,8 @@ def pick(state: BattleState, horizon=None, seed: int = 0, reject=None,
             plan = node.plans[i]
             if plan is None or (node is not root
                                 and not _legal(playout._view(env.state), plan)):
-                plan = fastplayer.act(playout._view(env.state))
+                plan = fastplayer.act(playout._view(env.state),
+                                      holdout=len(env.state.holdout))
             path.append((node, i))
             done, _info = playout.step_round(env, plan)
             rounds += 1
@@ -136,7 +137,8 @@ def pick(state: BattleState, horizon=None, seed: int = 0, reject=None,
         guard = 0
         while not done and guard < playout.ROUND_CAP:
             guard += 1
-            done, _info = playout.step_round(env, fastplayer.act(playout._view(env.state)))
+            done, _info = playout.step_round(env, fastplayer.act(
+                playout._view(env.state), holdout=len(env.state.holdout)))
             rounds += 1
         v = playout.value(env.state, total, pouch_start, pouch_weight, rounds=rounds)
         lo, hi = min(lo, v), max(hi, v)
