@@ -523,7 +523,8 @@ def _value_bounds(state: BattleState, depth: int,
     # can be charged up to twice over for reach thrown away
     # (`simulator.wasted_reach` is at most 1), so the floor doubles.
     worst_gag = 2.0 * max(gag_cost * 7.0 + scarcity,
-                          getattr(objective, "sos_cost", 0.0))
+                          getattr(objective, "sos_cost", 0.0),
+                          getattr(objective, "fire_cost", 0.0))
 
     # The battle can only be lost inside the horizon if the damage
     # available in it can actually reach zero laff.

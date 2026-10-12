@@ -210,6 +210,35 @@ class FireInTheExactSearchTest(unittest.TestCase):
             self.assertTrue(nxt.cogs[0].status.is_dead)
             self.assertEqual(nxt.toons[0].fires, 0)
 
+    def test_the_exact_search_charges_for_a_slip(self):
+        """A fire has no track, so `gag_price` charged nothing and the
+        Search row fired a slip at a lone level 1 Flunky."""
+        from solver import outcomes
+        from solver.search import objective
+
+        fire = Action(track=None, level=0, target_index=0, fire=True)
+        free = objective.Objective(name="free", description="", fire_cost=0.0)
+        priced = objective.Objective(name="priced", description="", fire_cost=4.8)
+        a = outcomes.action_outcomes(self._tiny(1), fire, objective=free)
+        b = outcomes.action_outcomes(self._tiny(1), fire, objective=priced)
+        self.assertAlmostEqual(4.8, a[0][2] - b[0][2])
+        self.assertGreater(objective.BALANCED.fire_cost, 0.0)
+
+    def test_the_search_keeps_its_slip_on_a_cog_any_gag_beats(self):
+        from solver import data
+        from solver.search import expectimax, objective
+
+        hp = data.cog_max_hp(1)
+        toon = ToonState(laff=100, max_laff=100, fires=1,
+                         gag_counts={(Track.THROW, 5): 5},
+                         track_exp={Track.THROW: 7})
+        board = BattleState(cogs=[CogState("flunky", "bossbot", 1, hp, hp)],
+                            toons=[toon])
+        for name in ("balanced", "conserve"):
+            _value, action = expectimax.solve(
+                board.clone(), objective=objective.PRESETS[name])
+            self.assertFalse(action.fire, name)
+
     def test_exact_solve_runs_with_slips_in_the_pouch(self):
         from solver.search import expectimax
         value, action = expectimax.solve(self._tiny(1))

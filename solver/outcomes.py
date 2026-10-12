@@ -385,6 +385,8 @@ def _accumulate(results, prob, state_after, laff_lost, action,
         lost=state_after.is_terminal() and not state_after.is_win())
     if getattr(action, "sos", None):
         reward -= getattr(objective, "sos_cost", 0.0) * (1.0 + waste)
+    elif getattr(action, "fire", False):
+        reward -= getattr(objective, "fire_cost", 0.0)
     elif waste:
         # The wasted share of a group gag -- `simulator.wasted_reach`.
         # Priced exactly as `step_reward` prices the gag itself.

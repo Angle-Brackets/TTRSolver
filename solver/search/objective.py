@@ -158,6 +158,20 @@ class Objective:
     # BALANCED's level 7 (4.7), because a card cannot be restocked in the
     # fight at all.
     sos_cost: float = 10.0
+    # What a pink slip costs. It was nothing at all -- a fire has no track
+    # either, and unlike a card it never got a price -- so with one slip
+    # held the Search row fired it at a lone level 1 Flunky (99.0 against
+    # 97.9 for a Whole Cream Pie), in Balanced and in Conserve alike. The
+    # owner's rule beside `weights.FIRE_FLOOR` is that standard play
+    # should not need one, and only the scorer enforced it.
+    #
+    # [ASSUMED] DERIVED, not measured: the scorer prices a slip's floor at
+    # 120 and an SOS call at 250, so a slip is 0.48 of a card, and a card
+    # here is `sos_cost`. That the ratio carries from the scorer's scale
+    # to this one is the assumption. It lands beside BALANCED's level 7
+    # (4.7). The scorer also charges per cog still to come; this search
+    # sees one battle, so that term has nothing to act on here.
+    fire_cost: float = 4.8
     # Multiplier on laff lost. Raise it to play defensively.
     laff_weight: float = 1.0
 
