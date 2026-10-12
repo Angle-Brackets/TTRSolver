@@ -285,24 +285,19 @@ class AdviceWorker(threading.Thread):
         kind = detected or self._boss_manual
         self.boss_tracker().set_kind(kind)
 
-    # THE PLAYOUT ROW LEADS IN A BOSS FIGHT unless the player has picked an
-    # engine themselves: on duo VP sides the Search row won 6/60 and the
-    # Playout row 33/60 (docs/experiment-log.md), because only the playouts
-    # see the waves after the one on the field. Back to the default when
-    # the fight ends.
+    # THE PLAYOUT ROW LEADS unless the player has picked an engine
+    # themselves. First only in boss fights -- on duo VP sides the Search row
+    # won 6/60 and the Playout row 33/60 (docs/experiment-log.md), since only
+    # the playouts see the waves to come -- and since 2026-10-11 in every
+    # fight: [OWNER] "I prefer playout's choice, I think it's the best in all
+    # instances". PPO's instant answer shows until the playouts post theirs.
     _engine_chosen = False      # the player pressed an engine
-    _engine_auto = False        # this worker switched to the playouts
 
     def _boss_into(self, model, on_field: int = 0) -> None:
         """Mirror the tracker onto the model the page draws."""
         tracker = self.boss_tracker()
-        if not self._engine_chosen:
-            if tracker.kind and model.preferred_engine != "playout":
-                model.preferred_engine = "playout"
-                self._engine_auto = True
-            elif not tracker.kind and self._engine_auto:
-                model.preferred_engine = "rl"
-                self._engine_auto = False
+        if not self._engine_chosen and model.preferred_engine != "playout":
+            model.preferred_engine = "playout"
         model.boss_kind = tracker.kind or ""
         model.boss_manual = self._boss_manual or ""
         model.boss_players = max(1, tracker.party_size)
@@ -363,7 +358,6 @@ class AdviceWorker(threading.Thread):
             model = self.model
             model.preferred_engine = choice
             self._engine_chosen = True
-            self._engine_auto = False
             swapped = False
             ready = (bool(model.rl_gag) if choice == "rl"
                      else getattr(model, choice + "_ready", False))

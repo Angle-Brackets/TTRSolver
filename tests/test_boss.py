@@ -476,14 +476,17 @@ class PlayoutLeadsInBossFightsTest(unittest.TestCase):
         w._boss_manual = None
         return w
 
-    def test_a_boss_fight_switches_to_the_playouts_and_back(self):
+    def test_the_playouts_lead_in_every_fight(self):
+        """[OWNER] prefers the Playout row's choice in all instances."""
         w = self._worker()
+        w._boss_into(w.model)
+        self.assertEqual("playout", w.model.preferred_engine)
         w.boss_tracker().set_kind("vp")
         w._boss_into(w.model)
         self.assertEqual("playout", w.model.preferred_engine)
         w.boss_tracker().set_kind(None)
         w._boss_into(w.model)
-        self.assertEqual("rl", w.model.preferred_engine)
+        self.assertEqual("playout", w.model.preferred_engine)
 
     def test_a_players_choice_is_never_overridden(self):
         import threading
