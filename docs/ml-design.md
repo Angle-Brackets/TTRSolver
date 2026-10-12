@@ -287,18 +287,19 @@ replications of the shipped policy's own flags on fresh seeds scored 33.0%
 and 31.5%. Any single new run compared against it will look like a
 regression.
 
-`solver/rl/` also holds weight files from earlier experiments that no code
-loads:
+`solver/rl/` used to hold seven weight files from earlier experiments that
+no code loaded. They were removed on 2026-10-12 to keep the repository
+small, and remain in the git history (last present at commit `432c4dd`):
 
 | file | what it was |
 |---|---|
-| `ppo_policy.json` | the first pickup policy and its early retrains (247 inputs, 246 actions). It is also the trainer's default `--export` path. |
+| `ppo_policy.json` | the first pickup policy and its early retrains (247 inputs, 246 actions). It is still the trainer's default `--export` path, so a training run with no `--export` writes a new file there. |
 | `ppo_pickup.json`, `ppo_coord.json` | a pickup and a coordinated policy from 2026-08-15, before buildings were modelled |
 | `ppo_expert.json`, `ppo_expert_w.json` | behaviour clones of the party search, without and with class weights |
 | `ppo_v4.json`, `ppo_v4_nokind.json` | the matched pair for the kind-of-fight feature: 2 million steps each, same seed, differing only in whether those inputs are live |
 
-All but the last pair use a 246-action table and would be refused by the
-loader.
+All but the last pair used a 246-action table and would have been refused
+by the loader.
 
 ## At play time: the climb
 

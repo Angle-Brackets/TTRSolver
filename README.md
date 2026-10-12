@@ -219,3 +219,13 @@ or panda3d skip themselves when the package is absent.
 [docs/README.md](docs/README.md) is the index: guides for using the panels,
 how each engine works, the game mechanics and data, and the project's
 record of experiments.
+
+## Licence
+
+The code and documentation are released under the [MIT licence](LICENSE).
+
+The licence does not cover the game's artwork. The cog and gag images
+under `overlay_ui/` and `visualizer/`, and the game screenshots under
+`docs/img/` and `tests/fixtures/`, come from Toontown Rewritten, Toontown
+Realms and the Toontown Rewritten wiki, and belong to their owners. They
+are included so the panels can show a player which cog or gag is meant.
