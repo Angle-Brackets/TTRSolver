@@ -44,6 +44,8 @@ ARMS  (`name` or `name:key=value,key=value`)
             truth=prior|net   (how pickup teammates play in the fight)
             assume=prior|net  (what the engine's rollouts expect of them)
             style=<preset>  (the panel's preset, e.g. survive, "glass cannon")
+            econ=0  econw=<w>  (the gag-economy charge off, or its weight;
+                        `playout.ECONOMY_WEIGHT`, shipped 2)
             see=true|count|standins  (what the playouts see of teammates:
                         the real toons; TTR's count alone; or the count
                         as `party.assumed_teammates`, as the TTR panel does)
