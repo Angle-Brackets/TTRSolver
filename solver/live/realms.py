@@ -23,6 +23,7 @@ Debugging history: `docs/live-notes.md#solverliverealmspy`.
 """
 from __future__ import annotations
 
+import os
 import random
 import socket
 import struct
@@ -126,6 +127,9 @@ class RealmsError(RuntimeError):
 
 
 def install_dir(override: Optional[str] = None) -> Path:
+    """The Realms installation: `override`, else `REALMS_DIR` from the
+    environment, else the default locations."""
+    override = override or os.environ.get("REALMS_DIR")
     candidates = [Path(override)] if override else list(DEFAULT_LOCATIONS)
     for path in candidates:
         if (path / "astron" / "dclass" / "ttoff.dc").is_file():

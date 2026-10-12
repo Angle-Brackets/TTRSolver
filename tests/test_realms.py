@@ -73,6 +73,47 @@ class _Bare(unittest.TestCase):
 
 
 @unittest.skipUnless(HAVE_MODULE, "solver.live.realms did not import")
+class InstallDirTest(unittest.TestCase):
+    """The error for a missing install says "Set REALMS_DIR"; for a long
+    time nothing read it."""
+
+    def _install(self, root):
+        import pathlib
+        folder = pathlib.Path(root) / "astron" / "dclass"
+        folder.mkdir(parents=True)
+        (folder / "ttoff.dc").write_text("")
+        return pathlib.Path(root)
+
+    def test_realms_dir_is_honoured(self):
+        import os
+        import tempfile
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as root:
+            here = self._install(root)
+            with mock.patch.dict(os.environ, {"REALMS_DIR": str(here)}):
+                self.assertEqual(here, realms.install_dir())
+
+    def test_an_explicit_override_wins(self):
+        import os
+        import tempfile
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as root,                 tempfile.TemporaryDirectory() as other:
+            here = self._install(root)
+            with mock.patch.dict(os.environ, {"REALMS_DIR": other}):
+                self.assertEqual(here, realms.install_dir(str(here)))
+
+    def test_a_wrong_realms_dir_says_where_it_looked(self):
+        import os
+        import tempfile
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as empty:
+            with mock.patch.dict(os.environ, {"REALMS_DIR": empty}):
+                with self.assertRaises(realms.RealmsError) as caught:
+                    realms.install_dir()
+        self.assertIn(empty, str(caught.exception))
+
+
+@unittest.skipUnless(HAVE_MODULE, "solver.live.realms did not import")
 class RoundCountTest(_Bare):
     """A round is one ENTRY into the movie state."""
 

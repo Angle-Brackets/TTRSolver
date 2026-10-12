@@ -114,13 +114,15 @@ def build_state(snapshot=None, panel=None, readings: Sequence = (),
     `readings` the `watch.CogReading`s for the cogs on screen.
 
     `allies` (0-3, other toons in the fight) and `fires` (pink slips
-    carried) are both SET BY THE PLAYER, not read: nothing on screen or
-    in the Local API counts either reliably, and this module's rule is a
-    state or the reasons there isn't one, never a guess. Both default to
-    0 -- solo and "no fire" are the safe assumptions, since they plan for
-    every attack landing on you and spend nothing you don't have. A pink
-    slip is the one consumable a plain count can fully describe: slips
-    are fungible, so a number is the whole story.
+    carried) are HANDED IN by the caller, not read here. `allies` is the
+    player's own count: nothing on screen or in the Local API reports it.
+    `fires` was the same until the Local API's `/pinkslips.json` was
+    found; the panel now passes what the game reports, capped by the
+    player's budget. Both default to 0 -- solo and "no fire" are the safe
+    assumptions, since they plan for every attack landing on you and
+    spend nothing you don't have. A pink slip is the one consumable a
+    plain count can fully describe: slips are fungible, so a number is
+    the whole story.
 
     Unites and SOS cards are absent for a stronger reason than "unread":
     a count would not be enough even if read, since a unite is one of
