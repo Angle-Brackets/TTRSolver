@@ -173,6 +173,30 @@ class BuildStateTest(unittest.TestCase):
         self.assertFalse(alive.status.is_dead)
         self.assertEqual([alive], result.state.active_cogs())
 
+    def test_your_toon_is_remembered_once_a_teammates_pouch_arrives(self):
+        """In a party the members are queried, so a teammate holds an
+        inventory too. Asked afresh, `player_toon_id` could not tell and
+        the first seat was advised -- whoever joined first."""
+        mine, theirs = toon(100000001), toon(100000002)
+        solo = FakeListener([battle(SOLO_MEMBERS)],
+                            [cog(11, "sdt" + NUL + "l", 2, 20, 20), mine])
+        self.assertEqual(100000001, realms_session.player_toon_id(solo))
+        # The teammate arrives, in the FIRST seat.
+        solo.store.objs[theirs.do_id] = theirs
+        solo._battles = [battle(([11], "", "", "0", "", "9",
+                                 [100000002, 100000001], "", "", "0", "", 1))]
+        self.assertEqual(100000001, realms_session.player_toon_id(solo))
+        result = realms_session.build_state(solo)
+        self.assertTrue(result, result.problems)
+        self.assertEqual(1, result.state.allies_standing)
+        self.assertEqual(1, len(result.allies))
+
+    def test_never_seen_alone_is_still_ambiguous(self):
+        """The open case: attached with the party already formed."""
+        listener = FakeListener([battle(SOLO_MEMBERS)],
+                                [toon(100000001), toon(100000002)])
+        self.assertIsNone(realms_session.player_toon_id(listener))
+
     def test_party_size_comes_from_the_roster(self):
         """The TTR panel has to ask the player for this. Here the game
         states it, and it drives `allies_standing`."""

@@ -365,10 +365,28 @@ def player_toon_id(listener) -> Optional[int]:
     one we're playing -- no configuration, no guessing at names.
     Returns None if that's ambiguous: declining beats advising the
     wrong toon's pouch.
+
+    REMEMBERED once seen alone. In a party the battle's members are
+    queried so the playouts can read their pouches, and then several
+    toons hold an inventory: asked afresh, this answered None and the
+    caller fell back to the first seat, which is whoever joined first.
+    Whose client this is does not change during a session, so one
+    unambiguous sighting settles it for as long as that toon is here.
+
+    STILL OPEN [TODO]: a listener attached when the party has already
+    formed has never seen the toon alone, and nothing read so far says
+    which one is the client's. It answers None then, as before.
     """
     holders = [t.do_id for t in listener.toons()
                if t.get("setInventory") is not None]
-    return holders[0] if len(holders) == 1 else None
+    if len(holders) == 1:
+        try:
+            listener._player_do_id = holders[0]
+        except AttributeError:               # pragma: no cover
+            pass
+        return holders[0]
+    remembered = getattr(listener, "_player_do_id", None)
+    return remembered if remembered in holders else None
 
 
 def pick_battle(listener, battles, player_do_id: Optional[int] = None):
