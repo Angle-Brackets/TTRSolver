@@ -157,6 +157,18 @@ Only the rules are party-aware end to end. Open items:
 - `SensiblePrior`, the model of what a stranger throws, is a guess about
   people and nothing in the game can confirm it. The interface takes a
   distribution so that a model fitted from real play can replace it.
+- **A unite reaches only its user in the model.** The wiki says a unite
+  "only affects Toons within a short radius of the user", and
+  `solver/unites.py` records that as a party effect, but `apply_toon_up`
+  and `apply_gag_up` heal and restock one toon. Party fights therefore
+  undercount every unite. Fixing it changes the party round and every
+  party measurement, so it needs its own sweep.
+- **Which Realms toon is the player's, in a party.** The panel queries
+  every toon in the battle so the playouts can read their pouches, and
+  then more than one toon holds an inventory. The player's toon is
+  remembered once it has been seen alone; a panel opened after the party
+  formed still cannot tell, and advises the first seat
+  (`realms_session.player_toon_id`).
 
 ### 5. Gaps in live reading
 

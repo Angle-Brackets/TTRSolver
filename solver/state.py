@@ -500,16 +500,14 @@ class BattleState:
     # the search could walk pass -> pass -> pass forever, and the state
     # graph would stop being a DAG.
     #
-    # CURRENTLY UNUSED -- `legal_actions` is back to the narrow rule.
-    # Widening it (pass as an ordinary choice) is the right behaviour,
-    # but shipping it broke exact `solve()`: adding `free_passes` to
-    # `outcomes.state_key` was necessary and not sufficient, so
-    # something else in the search caches across it -- caught when a
-    # budget of 2 valued a position at +88.85 and a budget of 1 valued
-    # the same position at +84.30, which passing cannot explain (it only
-    # costs laff and a turn). That has to be found before this returns:
-    # exact `solve()` is what the solo results and every fitted label
-    # rest on.
+    # IN USE: `simulator.legal_actions` offers an unlured pass while
+    # this lasts. For two days it was not -- the wider pass was reverted
+    # when exact `solve()` valued one position at +88.85 with a budget of
+    # 2 and +84.30 with 1. The pass was never the fault: `solve()` sized
+    # its depth as "gags + 1", assuming every action spends a gag, so a
+    # line with a pass in it was cut short and scored by the heuristic.
+    # The depth now counts `free_passes` too (d3fafd7). 3 is where exact
+    # solve's cost stopped rising with the budget.
     #
     # A pass while lured does NOT draw on this budget -- the lure timer
     # is already the decreasing quantity for the trap-and-wait line,

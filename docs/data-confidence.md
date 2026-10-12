@@ -123,6 +123,8 @@ approved filling it. Where the comment does not say so, the column says
 | Accuracy of The Big Cheese's Glower Power, only when opted in | `data.cogs.BORROW_BLANK_ACCURACY`, turned on by `ceo.enable_big_cheese` | Off by default, so the cell is a `[TODO]` that raises. Turned on to simulate the CEO's second battle, it borrows the mean accuracy of the cog's other attacks, the same mechanism as the twelve attacks above. | Not stated |
 | Pink slips resolve before any gag in a party round | `simulator.apply_party_round` | "No source states when in a round the cannon fires." Chosen because the alternative, slips last, would let a party damage a cog and then remove it for free. | Not stated |
 | SOS cards resolve before any gag in a party round | `simulator.apply_party_round` | "No source states when an SOS lands in a round." Chosen to match pink slips, and because it makes plays such as a Lure card before a teammate's Throw readable. | Not stated |
+| What a pink slip costs the exact search: 4.8 | `search.objective.Objective.fire_cost` | Derived, not measured: the scorer prices a slip's floor at 120 and an SOS call at 250, and a card costs the exact search 10. That the ratio carries from one scale to the other is the assumption. Before it, a slip was free and the Search row spent one on any cog. | Not stated |
+| A cog read as lured on the TTR screen stays lured for one round, with a Lure accuracy of 80 | `live.session.cog_from_reading` | The marker above the plate says lured and not for how long. One round is the conservative end: it credits this round's forced accuracy and knockback and promises nothing after. The 80 is used only for the wake-up check. | Not stated |
 | A waiting cog walks into a freed slot at once | `facility.reinforce` | The wiki confirms that cogs join a battle, not when. With four cogs on the field at most, they can only join as slots open, and a delay would only make the fight easier. Assumed "on timing only". | Not stated |
 | Share of Version 2.0 cogs in the CEO's first battle: 0.20 | `ceo.V2_FRACTION` | The wiki says only "some of which are Version 2.0". Set from the maintainer's observed play. Open Toontown makes every cog there Version 2.0, and that disagreement is recorded. | From the maintainer's play |
 
@@ -205,9 +207,9 @@ Cake 48–100, Grand Piano 85–170).
 | `propAcc` | `[CONFIRMED]` | Derived from the `Gag` objects. Trap is 0 in the table because Trap is handled by a special rule (always hits). |
 | `trackExp`, 0 to 60 in steps of 10, halved for Toon-Up | `[CONFIRMED]` | Set by the highest gag unlocked in the track, not by the gag thrown. |
 | `tgtDef`, cog levels 1–12 and 20 | `[CONFIRMED]` | Keyed on the cog's rank as well as its level: rank-1 cogs use −12 and −15 at levels 4 and 5, all others −15 and −20. |
-| `tgtDef`, cog levels 13–19 | `[ASSUMED]` | Interpolated, see above. The docstring of `tgt_def` still says these levels raise; they no longer do. |
+| `tgtDef`, cog levels 13–19 | `[ASSUMED]` | Interpolated, see above. These levels used to raise instead. |
 | 95 cap | `[CONFIRMED]` as a value | TTR 4.3.3 made it a soft cap that bonuses "can slightly push" past. The wiki gives no number for that, so the solver keeps a hard cap. Recorded by `ACCURACY_CAP_IS_SOFT_IN_GAME`, which nothing reads. |
-| 5 floor | `[CONFIRMED]` | Applied in `mechanics.calc_toon_accuracy`. (A comment in `accuracy.py` saying it is not modelled is out of date.) |
+| 5 floor | `[CONFIRMED]` | Applied in `mechanics.calc_toon_accuracy`. |
 | Stun bonus (`PrevHits`), 25 per prior hit, 75 maximum | `[CONFIRMED]` | The guide's 20 and 60 are the Toontown Online values and were replaced. |
 | Trap's Lure bonus, +10 for the first trap and +5 for each further one (group Lure only) | `[CONFIRMED]` | Persists across rounds while the trap is present. |
 | +50 stun when a Lure activates a Trap | `[CONFIRMED]`, not modelled | `TRAP_ACTIVATION_PREV_HITS` is recorded and unused. |

@@ -107,7 +107,7 @@ CARRY_LIMIT = 100
 UNITE_COSTS_THE_ROUND: Optional[bool] = False
 
 # What a unite costs the SEARCH, in the same units as
-# `weights.FIRE_PRICE` (20.0) and `FIRE_FLOOR` (20.0).
+# `weights.FIRE_PRICE` (20.0) and `FIRE_FLOOR` (120.0).
 #
 # [OWNER] "weigh them more than Fires" -- an absolute last resort,
 # because "unites are extremely OP compared to Fires... otherwise it

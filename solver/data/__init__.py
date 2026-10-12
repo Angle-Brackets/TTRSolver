@@ -3,10 +3,12 @@ Hand-entered game data, split by table.
 
 Every table below is annotated with a confidence tag:
 
-  [CONFIRMED] - taken directly from the QED1224/Toontown-Resources guide
-                (https://github.com/QED1224/Toontown-Resources), which is
-                derived from decompiled Toontown Online source and
-                cross-checked against the TTR wiki.
+  [CONFIRMED] - stated by the Toontown Rewritten wiki
+                (https://toontownrewritten.wiki), the authority for game
+                data. The tables began from the QED1224/Toontown-Resources
+                guide, which describes Toontown Online and has been caught
+                wrong several times; a value that still rests on the guide
+                alone is listed as such in docs/data-confidence.md.
   [PARTIAL]   - some cells confirmed, others missing.
   [TODO]      - not yet entered; using this in the simulator would silently
                 give wrong answers, so the callers raise instead.

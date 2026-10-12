@@ -83,8 +83,6 @@ TRACK_ICONS: dict = {}
 # The webview is told to poll this often. Python cannot push into the
 # page from another thread safely, so the page asks -- which also means
 # a page reloaded by hand recovers on its own.
-PULL_INTERVAL_MS = 400
-
 
 def model_json(model: Model) -> str:
     """`Model` in the shape the page renders.
@@ -288,8 +286,9 @@ class Api:
     def mark_lured(self, index, lured) -> None:
         """Mark a cog asleep on a Lure, or awake again.
 
-        Nothing reads the game's lure indicator yet, and the difference
-        is not cosmetic: Throw and Squirt are forced to 100% against a
+        The lure marker above the plate is read (`vision.lure_indicator`)
+        and this is the player's correction when the read is wrong. The
+        difference is not cosmetic: Throw and Squirt are forced to 100% against a
         lured cog and collect the knockback bonus, Drop always misses
         one, and a lured cog does not attack. Advice given for an awake
         cog that is actually asleep is wrong in all four ways.
@@ -306,10 +305,10 @@ class Api:
     def name_cog(self, slot, cog) -> None:
         """The player naming a plate the readers could not.
 
-        Applies to this battle only. It is deliberately not written to
-        the head catalogue -- a signature there is consulted forever, so
-        a wrong entry poisons every later match, while a wrong name here
-        costs one fight. `read_battle --label` is the way to teach it.
+        WRITTEN TO THE HEAD LIBRARY as well as applied to this battle
+        (`watch.name_plate`, on the owner's instruction): an entry is
+        overwritten rather than accumulated and keeps its source crop, so
+        a mis-click can be seen and corrected.
         """
         self._worker.name_cog(slot, cog)
         self._worker.ask_now()

@@ -130,9 +130,10 @@ def tgt_def(cog_level: int, cog_rank: int = 1) -> int:
     lowest level at which that cog type appears. Defaults to 1 to match
     TGT_DEF_BY_LEVEL.
 
-    Raises KeyError for cog levels 13-19, whose tgtDef the wiki records as
-    "Unknown" -- raising is the point, see the no-guessing rule in
-    docs/data-confidence.md.
+    Levels 13-19 are [ASSUMED]: the wiki records their tgtDef as
+    "Unknown", and the table fills them on the line between the
+    confirmed 12 and 20 (see the note on the table, and
+    docs/data-confidence.md). They used to raise KeyError here.
     """
     table = TGT_DEF_RANK_1 if cog_rank == 1 else TGT_DEF_RANK_2_PLUS
     return table[cog_level]
@@ -162,7 +163,7 @@ ACCURACY_CAP_IS_SOFT_IN_GAME = True
 # [CONFIRMED] -- Accuracy#Special rules: "Except when using a Drop gag on
 # lured Cogs, if atkAcc falls below 5%, it is automatically increased to
 # 5%." (Drop on a lured cog is a guaranteed miss, so the floor cannot
-# rescue it.) NOT MODELLED in mechanics.py today.
+# rescue it.) Applied in `mechanics.calc_toon_accuracy`.
 ACCURACY_FLOOR = 5
 ACCURACY_FLOOR_EXEMPT_TRACKS = frozenset({Track.DROP})   # only when lured
 

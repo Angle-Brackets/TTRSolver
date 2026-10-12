@@ -557,9 +557,10 @@ toon's Playout menu offers the pass only when nothing else is productive.
 In a party, passing is how one toon conserves gags while a teammate
 covers (`[OWNER]`).
 
-Two comments in the code are out of date on this: one in `state.py` says
-the pass budget is unused, and the `legal_actions` docstring says it
-starts at 12.
+The budget of 3 was briefly withdrawn in August 2026, when the exact
+search valued one position differently at two budgets. The cause was the
+search's depth limit, which assumed every action spends a gag, and not
+the pass; the budget returned two days later.
 
 ## Differences from the Open Toontown source and the guide
 

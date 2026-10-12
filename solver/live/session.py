@@ -86,8 +86,8 @@ def cog_from_reading(reading) -> Tuple[Optional[CogState], List[str]]:
                    or data.department_of(reading.cog),
                    level=reading.level, hp=hp, max_hp=max_hp)
     if getattr(reading, "lured", False):
-        # Duration is unknown (nothing reads the indicator or rounds
-        # left), so one round is assumed -- the conservative end, since
+        # [ASSUMED] The marker says lured, not for how many more rounds,
+        # so one round is assumed -- the conservative end, since
         # it credits this round's forced accuracy and knockback without
         # promising quiet the party may not get. The 80 is only the
         # lure's own accuracy for the wake-up check (mid-range of Lure

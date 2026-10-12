@@ -279,7 +279,7 @@ minus $20 n$.
 | Overkill | `waste_weight` × wasted fraction × scarcity, party path only | `waste` = 0.0 | 0.25 × wasted damage × scarcity | None |
 | Wasted reach | Yes | Yes | No | No |
 | Unsprung trap | None; the search plays the Lure | 0.6 × damage, if a Lure is held | None | 0.6 × damage minus the lure forgone |
-| Pink slip | 0 | $20n + 120$ | $20n$ × 10 | $20n$ |
+| Pink slip | 4.8 (`fire_cost`) | $20n + 120$ | $20n$ × 10 | $20n$ |
 | SOS card | 10 | 250 | 0 (a card has no track, so the objective's gag price is zero) | 0 |
 | Unite | 200, applied to the search's value | 200 | Not offered | Not offered |
 | A round passing | `turn_cost` 1.0 | None | None | None |
@@ -322,9 +322,14 @@ and changing one invalidates the measurements made around it.
    scorer scales gag prices by 0.15 per cog whatever preset is selected.
    The exact search never applies the horizon at all, and inside the party
    search `evaluate` passes it while `rollout_value` does not.
-7. **A pink slip is free to the objective.** The Search row's reward
-   charges nothing for one. The scorers charge $20n$, and only
-   `_quick_score` adds the floor of 120.
+7. **A pink slip costs the objective 4.8, a derived figure.** Until
+   2026-10-12 the Search row's reward charged nothing for one, and with a
+   slip held it fired at a lone level 1 Flunky. `Objective.fire_cost` is
+   `[ASSUMED]`: the scorer prices a slip's floor at 120 and an SOS call at
+   250, and a card costs the objective 10, so a slip is priced at the same
+   ratio. The scorers charge $20n$, and only `_quick_score` adds the floor
+   of 120; the objective has no per-cog term, because the exact search
+   sees one battle.
 8. **An SOS card is 10 to the objective, 250 to `_quick_score`, and free in
    `_greedy_score`.** The first two are on different scales, so the numbers
    are not directly comparable, but neither was derived from the other.

@@ -75,8 +75,8 @@ def legal_actions(state: BattleState) -> List[Action]:
     the pouch dry (tests/test_pass.py plays one out).
 
     AN UNLURED PASS DOES DRAW ON `state.free_passes`, a TERMINATION
-    GUARD rather than a strategic limit (it starts at 12, high enough
-    never to bind in a real battle). It can't be unbounded: `solve()`
+    GUARD rather than a strategic limit (it starts at 3, where exact
+    solve's cost stopped rising with it). It can't be unbounded: `solve()`
     terminates on the lexicographic measure (gags remaining, lure rounds
     remaining, free passes) strictly decreasing every round, and an
     unlured pass that missed everything would otherwise leave a state

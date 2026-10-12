@@ -187,6 +187,7 @@ statement about the model.
 | 2026-10-11 | [A new fight read fresh and advice recomputed on a corrected reading](#2026-10-11-a-new-fight-read-fresh-and-advice-recomputed-on-a-corrected-reading) | Fixed |
 | 2026-10-11 | [Stand-in teammates for the TTR Playout row](#2026-10-11-stand-in-teammates-for-the-ttr-playout-row) | Shelved |
 | 2026-10-12 | [The pass still reached the menu another way](#2026-10-12-the-pass-still-reached-the-menu-another-way) | Kept |
+| 2026-10-12 | [A pink slip was free to the Search row](#2026-10-12-a-pink-slip-was-free-to-the-search-row) | Kept, `[ASSUMED]` |
 
 ---
 
@@ -3107,3 +3108,32 @@ the advice no player should follow is gone. The earlier tests checked
 the helper that decides whether a pass is needed and never the menu,
 which is how the gap survived; the new test builds the menu. Parties
 are unchanged.
+
+### 2026-10-12 A pink slip was free to the Search row
+
+**Question.** The exact search charges for a gag, 10 for an SOS card and
+200 for a Unite. What does it charge for a pink slip?
+
+**Setup.** One slip held by a maxed toon, against boards of rising
+difficulty, in the Balanced and Conserve presets. The Search row's entry
+point at depth 2, with and without the slip.
+
+**Result.** Nothing was charged: a fire has no track, so the gag price
+was zero, and unlike a card it had never been given a price of its own.
+
+| Board | With a slip, before | With a slip, after | Without a slip |
+|---|---|---|---|
+| One level 1 cog, Balanced | Fire (99.0) | Whole Cream Pie (97.87) | Whole Cream Pie (97.87) |
+| One level 5 cog, Balanced | Fire (99.0) | Safe (97.75) | Safe (97.75) |
+| Four level 12 cogs, Balanced | 65.26 | 60.57 | 45.78 |
+
+Conserve behaved the same way. `Objective.fire_cost` is now 4.8.
+
+**Conclusion.** Kept, tagged `[ASSUMED]`. The figure is derived and not
+measured: the scorer prices a slip's floor at 120 and an SOS call at 250,
+and a card costs the exact search 10, so a slip takes the same ratio.
+The Search row now keeps its slip on a cog any gag beats, and a held
+slip is still worth about 15 points on the board where it matters. No
+sweep was run, because the Search row does not lead and this is a
+preference about spending, like the SOS and Unite prices.
+

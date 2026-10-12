@@ -44,8 +44,6 @@ The page runs in a pywebview window and reaches Python through
   payload renders as its default rather than as `undefined`.
 - **The page does not poll.** `pull()` returns the same JSON and exists
   for driving the page by hand; the page never calls it.
-  `panel.PULL_INTERVAL_MS` is a leftover from an earlier design and
-  nothing reads it.
 - **Calls are one way.** The page calls a method and ignores the return
   value. The effect arrives in a later push. All calls go through the
   `call(name, ...args)` helper in `App.jsx`, which does nothing when
