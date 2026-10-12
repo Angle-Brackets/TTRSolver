@@ -1001,7 +1001,12 @@ def _apply_track_group(state: BattleState, track: Track, resolved,
             # [CONFIRMED] TTR wiki (Toon-Up): "Toons cannot use Toon-Up
             # gags to restore their own laff"; they "restore each
             # other's laff" -- the heal credits everyone but the thrower.
-            amount = mechanics.calc_toon_heal(action.level, hit)
+            # ORGANIC counts here as it does for every damage track. It was
+            # left at the default, so a party's organic Toon-Up healed as
+            # a plain one (Feather 10, not 12).
+            amount = mechanics.calc_toon_heal(
+                action.level, hit,
+                organic=toon.is_organic(Track.TOON_UP, action.level))
             others = [i for i, other in enumerate(state.toons)
                       if i != toon_index and other.laff > 0]
             if not others:

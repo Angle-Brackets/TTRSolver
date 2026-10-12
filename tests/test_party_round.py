@@ -186,6 +186,22 @@ class ToonUpTest(unittest.TestCase):
         self.assertEqual(healed[0], 0, "the thrower healed themselves")
         self.assertGreater(healed[1], 0, "the teammate was not healed")
 
+    def test_an_organic_toon_up_heals_more(self):
+        """The party round never passed the organic flag, so an organic
+        Toon-Up healed as a plain one."""
+        def heal(organic):
+            state = BattleState(
+                toons=[toon({(Track.TOON_UP, 1): 1}, laff=40, organic=organic),
+                       toon({}, laff=40)],
+                cogs=[cog()])
+            return simulator.apply_party_round(
+                state, [Action(Track.TOON_UP, 1, 1), None], hits=[True, True])[1]
+
+        plain, organic = heal(()), heal((Track.TOON_UP,))
+        self.assertEqual(mechanics.calc_toon_heal(1), plain)
+        self.assertEqual(mechanics.calc_toon_heal(1, organic=True), organic)
+        self.assertGreater(organic, plain)
+
     def test_a_solo_toon_heals_nobody(self):
         """Nobody else in the battle, so the gag is spent for nothing.
         Solo Toon-Up is a wasted gag in TTR, not a self-heal."""
