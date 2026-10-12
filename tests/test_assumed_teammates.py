@@ -51,6 +51,36 @@ class AssumedTeammatesTest(unittest.TestCase):
     def test_none_for_none(self):
         self.assertEqual([], party.assumed_teammates(_you(), 0))
 
+    def test_the_board_says_which_toons_are_guesses(self):
+        board = BattleState(toons=[_you()], cogs=[], kind="street")
+        board.allies_standing = 2
+        seen = party.with_assumed_teammates(board)
+        self.assertEqual(2, seen.assumed_allies)
+        self.assertEqual(2, seen.clone().assumed_allies)
+        self.assertEqual(0, board.assumed_allies)
+
+    def test_a_different_seed_is_a_different_teammate(self):
+        """What the per-rollout redraw relies on: the seed varies their
+        TRAINING (a building pouch follows from training alone)."""
+        you = _you()
+        trained = {tuple(sorted(party.drawn_teammates(you, 1, s)[0]
+                                .track_exp.items())) for s in range(12)}
+        self.assertGreater(len(trained), 1)
+
+    def test_the_same_seed_is_the_same_teammate(self):
+        """Common random numbers: every candidate's k-th rollout meets the
+        same teammates."""
+        you = _you()
+        a = party.drawn_teammates(you, 2, 41)
+        b = party.drawn_teammates(you, 2, 41)
+        self.assertEqual([m.track_exp for m in a], [m.track_exp for m in b])
+        self.assertEqual([m.gag_counts for m in a], [m.gag_counts for m in b])
+
+    def test_drawn_at_full_laff_with_a_pouch(self):
+        for mate in party.drawn_teammates(_you(), 3, 5, street="Oak Street"):
+            self.assertEqual(mate.max_laff, mate.laff)
+            self.assertGreater(sum(mate.gag_counts.values()), 0)
+
 
 class OverlayStandsThemInTest(unittest.TestCase):
 

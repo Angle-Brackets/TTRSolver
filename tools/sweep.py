@@ -49,6 +49,13 @@ ARMS  (`name` or `name:key=value,key=value`)
             see=true|count|standins  (what the playouts see of teammates:
                         the real toons; TTR's count alone; or the count
                         as `party.assumed_teammates`, as the TTR panel does)
+            redraw=0  (with see=standins: one fixed set of stand-ins, not
+                        redrawn per rollout -- `playout.REDRAW_ASSUMED`)
+            street=0  (with see=standins: hide the street, so redrawn
+                        teammates come from the laff band, as on TTR)
+            keep=laff+pouch+exp  (with see=standins: copy those parts of
+                        the real teammates onto the stand-ins, to find
+                        which part of knowing them is worth having)
 
 Each board is shown to the engine as the live panel would see it: no
 holdout, and in a boss fight the horizon the boss tracker would give.
@@ -202,6 +209,7 @@ def play(job):
     playout.GAG_REACH_PRICE = float(opts.get("reach", 0.1))
     playout.PASS_ON_MENU = opts.get("pass", "needed")
     playout.ECONOMY = opts.get("econ", "1") != "0"
+    playout.REDRAW_ASSUMED = opts.get("redraw", "1") != "0"
     playout.ECONOMY_WEIGHT = float(opts.get("econw", playout.DEFAULT_ECONOMY_WEIGHT))
     fastplayer.use(opts.get("net") or fastplayer.DEFAULT_WEIGHTS)
     # Shipped: shortened playouts (8 rounds, the repo's value net). trunc=0
@@ -269,6 +277,20 @@ def play(job):
                     board = playout.solo_view(state)
                     if opts["see"] == "standins":
                         board = party_mod.with_assumed_teammates(board)
+                        real = [t for t in state.toons[1:] if t.laff > 0]
+                        keep = set(filter(None, opts.get("keep", "").split("+")))
+                        for mate, true in zip(board.toons[1:], real):
+                            if "laff" in keep:
+                                mate.laff, mate.max_laff = true.laff, true.max_laff
+                            if "pouch" in keep:
+                                mate.gag_counts = dict(true.gag_counts)
+                                mate.pouch_capacity = true.pouch_capacity
+                            if "exp" in keep:
+                                mate.track_exp = dict(true.track_exp)
+                        if keep:
+                            board.assumed_allies = 0    # told, not guessed
+                        if opts.get("street") == "0":
+                            board.street = ""
                 res = playout.pick_wide(board,
                                         _horizon(env, state), seed=seed * 1000 + rounds,
                                         stages=stages)

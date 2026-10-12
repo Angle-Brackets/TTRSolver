@@ -1091,6 +1091,10 @@ def solo_view(state: BattleState) -> BattleState:
     return view
 
 
+# Redraw guessed teammates in every pickup rollout (see `rollout_pickup`).
+REDRAW_ASSUMED = True
+
+
 def rollout_pickup(state: BattleState, plan, horizon, seed: int) -> float:
     """One pickup playout: your `plan` now, then the net (or climb) for
     you and the teammate model for everyone else, to the end."""
@@ -1100,6 +1104,14 @@ def rollout_pickup(state: BattleState, plan, horizon, seed: int) -> float:
 
     rng = random.Random(seed)
     start = state.clone()
+    if REDRAW_ASSUMED and start.assumed_allies:
+        # Guessed teammates are redrawn per rollout, like unseen cogs: the
+        # playouts average over who they might be. Seeded by the rollout,
+        # so every candidate's k-th rollout meets the same teammates.
+        from .. import party as party_mod
+        k = min(start.assumed_allies, len(start.toons) - 1)
+        start.toons[-k:] = party_mod.drawn_teammates(
+            start.toons[0], k, seed, getattr(start, "street", ""))
     kind = start.kind
     start.kind = "street"
     start.holdout, start.cogs_remaining = [], 0

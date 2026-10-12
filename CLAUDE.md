@@ -331,6 +331,18 @@ Still solo and **must not be quietly generalised**:
   ATTACK, not of the cog throwing it, which is why it is one set rather
   than a column per department. The categories are fetched with
   `action=query&list=categorymembers`, not a page parse.
+- **Guessing TTR's teammates gains nothing; knowing them would.** On
+  300 party buildings (teammates playing `SensiblePrior`), the Playout
+  row seeing the count alone won 120. Handed the real teammates, 131
+  (p 0.04) -- and copying parts of them onto stand-ins shows it is all
+  pouch and training (129); real laff adds about nothing (114 vs 110).
+  One fixed guess (`party.assumed_teammates`) LOST, 110: it is a specific
+  wrong teammate the playouts plan around. Redrawn every rollout
+  (`party.drawn_teammates`, `playout.REDRAW_ASSUMED`) it ties, 120 / 119:
+  averaging over unseen teammates is what the count already does. So the
+  overlay's `stand_in_teammates` is off, and the only lever left is
+  evidence of what these teammates hold -- worth at most ~11 of 300.
+  `tools/sweep.py ... see=count|true|standins keep= redraw= street=`.
 - TTR's live readers see one toon: the Local API reports the client's
   own laff and training, and nothing reads a teammate's laff meter off
   the screen. The Realms stream DOES carry teammates

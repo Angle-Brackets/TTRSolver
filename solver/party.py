@@ -312,6 +312,44 @@ def assumed_teammates(you, count: int, seed: int = 0) -> list:
     return mates
 
 
+def drawn_teammates(you, count: int, seed: int, street: str = "") -> list:
+    """Teammates DRAWN from who plays where, for one rollout: the pickup
+    playouts call this with each rollout's seed, so they average over who
+    the teammates might be instead of betting on one (`rollout_pickup`).
+
+    A GUESS ABOUT PEOPLE, labelled as one. Each is `env.toon_for_street`
+    -- the repo's model of a toon on that street, which built every
+    simulated party -- restocked for a building, at full laff. Without a
+    street (TTR's boards carry none) the street is drawn from those whose
+    playground's laff band holds your max laff, the bet that players
+    group near their level. Training varies, which is the point: given a
+    fixed teammate, the playouts planned around gags nobody held.
+    """
+    from . import facility
+    from .rl import env as env_mod
+
+    rng = random.Random(seed * 7919 + 17)
+    named = [s for s in facility.STREETS if s[0] == street]
+    if not named:
+        laff = you.max_laff
+        named = [s for s in facility.STREETS
+                 if facility.PROGRESSION[s[1]]["laff"][0] <= laff
+                 <= facility.PROGRESSION[s[1]]["laff"][1]]
+    if not named:
+        def gap(s):
+            low, high = facility.PROGRESSION[s[1]]["laff"]
+            return min(abs(you.max_laff - low), abs(you.max_laff - high))
+        best = min(gap(s) for s in facility.STREETS)
+        named = [s for s in facility.STREETS if gap(s) == best]
+    mates = []
+    for _ in range(max(0, int(count))):
+        mate = env_mod.toon_for_street(rng, rng.choice(named))
+        env_mod.restock(mate, rng)
+        mate.laff = mate.max_laff
+        mates.append(mate)
+    return mates
+
+
 def with_assumed_teammates(state: BattleState, seed: int = 0) -> BattleState:
     """`state` with its count of unseen teammates (`allies_standing`) made
     into `assumed_teammates`. A copy; a board with no count, or that
@@ -322,6 +360,7 @@ def with_assumed_teammates(state: BattleState, seed: int = 0) -> BattleState:
     board = state.clone()
     board.toons = [board.toons[0]] + assumed_teammates(board.toons[0], allies, seed)
     board.allies_standing = 0
+    board.assumed_allies = allies
     return board
 
 

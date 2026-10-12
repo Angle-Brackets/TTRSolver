@@ -868,11 +868,13 @@ class Worker(AdviceWorker):
     # PICKUP unless the player says their party plans together. See
     # `party.assumed_teammates`.
     party_mode = "pickup"
-    # OFF: stand-ins measured no better than the count. 300 party
-    # buildings, teammates playing SensiblePrior: count alone 120 won,
-    # stand-ins in pickup 111 (+13/-22, p 0.18), coordinated 106 (+9/-23,
-    # p 0.02). Kept, with its toggle hidden, until a measurement says
-    # otherwise (`tools/sweep.py ... see=standins`).
+    # OFF: guessed teammates measured no better than the count. 300 party
+    # buildings, teammates playing SensiblePrior: count alone 120 won; one
+    # fixed set of stand-ins 110-111 (+10/-20), coordinated 106 (p 0.02);
+    # redrawn per rollout 120 (true street) and 119 (laff band, as TTR
+    # would). The REAL teammates win 131 (p 0.04) -- all of it from their
+    # pouch and training, laff adds ~nothing -- so only reading what they
+    # actually hold could pay. Kept, toggle hidden (`see=standins`).
     stand_in_teammates = False
 
     def _with_teammates(self, state):

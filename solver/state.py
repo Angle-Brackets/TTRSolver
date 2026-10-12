@@ -482,6 +482,12 @@ class BattleState:
     # `solver/search/party_search.py` is what searches a joint plan.
     allies_standing: int = 0
 
+    # How many of the LAST toons are guesses (`party.assumed_teammates`),
+    # not teammates anyone read. The pickup playouts redraw those in every
+    # rollout, as they redraw unseen cogs: one fixed stand-in is a specific
+    # wrong teammate, and planning around it lost to the count alone.
+    assumed_allies: int = 0
+
     # Unlured passes still available. A pass is a real move -- conserving
     # a scarce gag, or in a party declining to hit a cog because
     # `mechanics.pick_cog_target` prefers whoever damaged it most, so
@@ -559,6 +565,7 @@ class BattleState:
         self.kind = kind
         self.street = street
         self.allies_standing = allies_standing
+        self.assumed_allies = 0
 
     @property
     def toon(self) -> ToonState:
@@ -628,7 +635,11 @@ class BattleState:
             toons_hit_rounds=self.toons_hit_rounds,
             cogs_miss_rounds=self.cogs_miss_rounds,
             sos_one_round=self.sos_one_round,
-        )
+        )._with_assumed(self.assumed_allies)
+
+    def _with_assumed(self, count: int) -> "BattleState":
+        self.assumed_allies = count
+        return self
 
     def active_cogs(self) -> List[CogState]:
         return [c for c in self.cogs if not c.status.is_dead]
