@@ -522,6 +522,12 @@ class BattleWatcher:
             self._traps().clear()
             self._levels.clear()
             self._low_frames = 0
+            # THE LAST FIGHT'S READINGS GO TOO. `read_frame` reuses them
+            # while the lineup holds and the menu is down, which is right
+            # mid-fight and wrong across fights: seen live, a level 6
+            # Mover & Shaker walked in before the menu came up and was
+            # handed the previous fight's level 5 (42/42) until it did.
+            self._cached_readings = None
             return
         # NO PLATES AT ALL IS "CANNOT SEE", NOT "COGS GONE" -- it must
         # never forget anything. The attack animation between rounds
@@ -763,6 +769,15 @@ class BattleWatcher:
                 events.append(Event("identified",
                                     f"cog {new.index + 1} is {new.cog}",
                                     [new]))
+            elif (len(before) == len(after) and not old.same_cog_as(new)
+                  and new.level is not None):
+                # A READING CORRECTED ITSELF -- a level or department read
+                # anew at the same plate count. It changes the cog's health
+                # and attacks, so it is news; without an event the advice
+                # stayed on the board it had been wrong about.
+                events.append(Event("corrected",
+                                    f"cog {new.index + 1}: level {old.level} "
+                                    f"-> {new.level}", [new]))
         return events
 
     def _collect(self, frame: np.ndarray, readings: List[CogReading]) -> None:

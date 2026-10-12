@@ -261,6 +261,30 @@ class DamageTest(unittest.TestCase):
         self.assertEqual(w._diff(before, after), [])
 
 
+class CorrectionTest(DamageTest):
+    """Seen live: a level 6 Mover & Shaker walked in before the gag menu
+    came up, was handed the previous fight's level 5 reading, and the
+    advice stayed on that board for ~20 s after the reading corrected."""
+
+    def test_a_level_read_anew_is_news(self):
+        w = self.watcher()
+        before = [CogReading(0, "sellbot", 5, 1.0)]
+        after = [CogReading(0, "sellbot", 6, 1.0)]
+        self.assertEqual([e.kind for e in w._diff(before, after)], ["corrected"])
+
+    def test_an_unreadable_level_is_not(self):
+        w = self.watcher()
+        before = [CogReading(0, "sellbot", 5, 1.0)]
+        after = [CogReading(0, "sellbot", None, 1.0)]
+        self.assertEqual(w._diff(before, after), [])
+
+    def test_a_new_fight_reads_fresh(self):
+        w = self.watcher()
+        w._cached_readings = [CogReading(0, "sellbot", 5, 1.0)]
+        w._forget_names(-1)
+        self.assertIsNone(w._cached_readings)
+
+
 if __name__ == "__main__":
     unittest.main()
 

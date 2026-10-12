@@ -38,7 +38,13 @@ from .watch import BattleWatcher, Event
 
 # Events that change the position. Anything else -- a cog identified, a
 # reading settling -- leaves the previous advice valid.
-RECOMPUTE_ON = {"battle_started", "cog_joined", "cog_defeated", "damage"}
+RECOMPUTE_ON = {"battle_started", "cog_joined", "cog_defeated", "damage",
+                # A LEVEL READ ANEW is not a reading merely settling: it
+                # changes the cog's health and attacks. Seen live, a level
+                # 6 first read as 5 kept the advice for the level 5 board
+                # for ~20 s. ("identified" stays off: an unidentified cog
+                # builds no board at all, and the retry re-asks once named.)
+                "corrected"}
 
 # Capped rather than fixed: the search is given a time budget and
 # returns the deepest pass that FINISHED within it, since cost depends

@@ -133,6 +133,8 @@ class BudgetTest(unittest.TestCase):
         self.assertIn("cog_defeated", A.RECOMPUTE_ON)
         self.assertNotIn("identified", A.RECOMPUTE_ON)
         self.assertNotIn("battle_ended", A.RECOMPUTE_ON)
+        # A level re-read changes the cog's health: it is news.
+        self.assertIn("corrected", A.RECOMPUTE_ON)
 
 
 if __name__ == "__main__":
