@@ -331,7 +331,10 @@ Still solo and **must not be quietly generalised**:
   ATTACK, not of the cog throwing it, which is why it is one set rather
   than a column per department. The categories are fetched with
   `action=query&list=categorymembers`, not a page parse.
-- **Guessing TTR's teammates gains nothing; knowing them would.** On
+- **TTR teammates in the Playout row are NOT FULLY IMPLEMENTED --
+  shelved 2026-10-11 [OWNER]; see `docs/roadmap.md`.** The panel plans
+  around the pill's count. Guessing the teammates gains nothing; knowing
+  them would, and nothing infers them from play yet. On
   300 party buildings (teammates playing `SensiblePrior`), the Playout
   row seeing the count alone won 120. Handed the real teammates, 131
   (p 0.04) -- and copying parts of them onto stand-ins shows it is all

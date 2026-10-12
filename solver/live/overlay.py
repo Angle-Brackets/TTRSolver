@@ -868,6 +868,9 @@ class Worker(AdviceWorker):
     # PICKUP unless the player says their party plans together. See
     # `party.assumed_teammates`.
     party_mode = "pickup"
+    # NOT FULLY IMPLEMENTED -- shelved 2026-10-11 [OWNER], see
+    # docs/roadmap.md. What exists guesses the teammates; the half that
+    # could pay, inferring what they hold from play, is not built.
     # OFF: guessed teammates measured no better than the count. 300 party
     # buildings, teammates playing SensiblePrior: count alone 120 won; one
     # fixed set of stand-ins 110-111 (+10/-20), coordinated 106 (p 0.02);

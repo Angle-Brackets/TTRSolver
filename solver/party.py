@@ -289,6 +289,9 @@ def assumed_teammates(you, count: int, seed: int = 0) -> list:
     """Stand-ins for teammates a client cannot read -- TTR's, whose gags and
     laff nothing reports.
 
+    NOT FULLY IMPLEMENTED: shelved, and unused by the live panel
+    (`overlay.Worker.stand_in_teammates` is off). See docs/roadmap.md.
+
     A GUESS ABOUT PEOPLE, like `SensiblePrior`, and to stay labelled as one:
     each is built like you (your training levels, a full building
     restock at your pouch size, full laff, no SOS cards, unites or slips),

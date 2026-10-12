@@ -161,6 +161,49 @@ branch at cog levels 4–5 isn't modeled. Multi-toon play would need
 `calc_prev_hits_bonus` and `pick_cog_target` filled in — both are
 deliberate solo-play simplifications today, not stubs.
 
+## Shelved: TTR teammates in the Playout row (not fully implemented)
+
+TTR shows the client one toon, so the Playout row plans around a COUNT of
+teammates (the "Toons in Fight" pill): it thins the cogs' attacks and
+knows nothing of anyone else's gags. Modelling the teammates was started
+and shelved on 2026-10-11, with the owner's agreement, because the half
+that could be built gains nothing.
+
+Built, and switched off (`Worker.stand_in_teammates` in
+`solver/live/overlay.py`; the Strangers / My party toggle is hidden while
+it is off):
+
+- `party.assumed_teammates` / `with_assumed_teammates` -- stand-in toons
+  for the pill's count.
+- `party.drawn_teammates` + `playout.REDRAW_ASSUMED` -- the stand-ins
+  redrawn in every pickup rollout.
+- The group mode passed per playout call (`Worker.group_mode`).
+
+Measured on 300 simulated party buildings, teammates playing
+`SensiblePrior` (`tools/sweep.py --regime party-building`, arm options
+`see= keep= redraw= street=`):
+
+| The Playout row sees | Won of 300 |
+|---|---|
+| the count alone (shipped) | 120 |
+| one fixed set of stand-ins | 110 |
+| stand-ins redrawn per rollout (true street / laff band) | 120 / 119 |
+| the real teammates | 131 (p 0.04) |
+| stand-ins with the real laff only | 114 |
+| stand-ins with the real pouch and training | 129 |
+
+So guessing is worth nothing and knowing is worth about 11 of 300, all of
+it in what the teammates HOLD.
+
+NOT BUILT -- the half that could pay: inferring a teammate's training and
+pouch from play. The readable signal is cog health that drops by more
+than your own throw explains; gag damage is distinct enough by track and
+level that a few rounds could weight `drawn_teammates` toward teammates
+consistent with what was seen. Open problems, none attempted: the health
+bar resolves only 2-3 HP on a high-level cog, several teammates' hits
+land in one round, and nothing has been checked against live frames. The
+ceiling is the 11 wins above, with perfect knowledge.
+
 ## Later: training throughput, and why numpy is not the answer
 
 Deferred by the owner, recorded so the profile does not have to be
