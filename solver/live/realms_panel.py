@@ -1304,6 +1304,11 @@ class RealmsApi:
         """Recompute now. The page's "Work it out" button."""
         self._worker.ask_now()
 
+    def set_party_mode(self, mode) -> None:
+        """Inert: Realms reads its teammates in full, so there are no
+        stand-ins to configure. The page is shared; it is never shown."""
+        return None
+
     def restart_discord(self) -> None:
         """Inert: the floor reader is the TTR panel's. The page is shared,
         so the click has to land somewhere; it is never shown here."""

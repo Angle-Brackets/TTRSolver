@@ -285,6 +285,46 @@ class SolverPolicy(TeammateModel):
         return [(self.focus, action)] + [(share, a) for a in others]
 
 
+def assumed_teammates(you, count: int, seed: int = 0) -> list:
+    """Stand-ins for teammates a client cannot read -- TTR's, whose gags and
+    laff nothing reports.
+
+    A GUESS ABOUT PEOPLE, like `SensiblePrior`, and to stay labelled as one:
+    each is built like you (your training levels, a full building
+    restock at your pouch size, full laff, no SOS cards, unites or slips),
+    on the bet that players group with others near their level. Without
+    them the playouts planned as if you must beat every cog alone, only
+    taking less damage, and "a teammate covers this, save the gag" could
+    not be found. Deterministic in `seed`, so every playout process sees
+    the same teammates and builds the same menu.
+    """
+    from .rl import env as env_mod
+    from .state import ToonState
+
+    mates = []
+    for i in range(max(0, int(count))):
+        mate = ToonState(laff=you.max_laff, max_laff=you.max_laff,
+                         track_exp=dict(you.track_exp), gag_counts={},
+                         pouch_capacity=you.pouch_capacity)
+        env_mod.restock(mate, random.Random(seed * 31 + i),
+                        capacity=you.pouch_capacity)
+        mates.append(mate)
+    return mates
+
+
+def with_assumed_teammates(state: BattleState, seed: int = 0) -> BattleState:
+    """`state` with its count of unseen teammates (`allies_standing`) made
+    into `assumed_teammates`. A copy; a board with no count, or that
+    already holds its teammates, comes back as it is."""
+    allies = int(getattr(state, "allies_standing", 0) or 0)
+    if allies <= 0 or len(state.toons) != 1:
+        return state
+    board = state.clone()
+    board.toons = [board.toons[0]] + assumed_teammates(board.toons[0], allies, seed)
+    board.allies_standing = 0
+    return board
+
+
 def _as_actor(state: BattleState, toon_index: int) -> BattleState:
     """The same battle seen from one toon's seat.
 

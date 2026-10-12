@@ -18,7 +18,7 @@ const EMPTY = {
   feedback_move: '', feedback_against: '', feedback_problem: '',
   feedback_fixable: false, feedback_needs_target: false, feedback_showing: false,
   feedback_stated: false, pouch: [],
-  boss_kind: '', boss_manual: '', cogs_defeated: 0, discord_floors: '', cogs_left: -1,
+  boss_kind: '', boss_manual: '', cogs_defeated: 0, discord_floors: '', party_mode: '', cogs_left: -1,
 }
 
 const BOSSES = [
@@ -1024,6 +1024,27 @@ export default function App() {
                   </button>
                 ))}
               </div>
+              {model.party_mode && model.toon_count > 1 && (
+                <div className="join" onMouseDown={stopDrag}>
+                  {[['pickup', 'Strangers', 'Teammates guessed at: a typical player built like you. Right for a pickup group.'],
+                    ['coordinated', 'My party', 'The Playout row plans the whole party together and shows your part. Right when your group follows a plan.']].map(([mode, label, tip]) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => call('set_party_mode', mode)}
+                      title={tip}
+                      aria-pressed={model.party_mode === mode}
+                      className={`btn btn-xs join-item h-[26px] min-h-0 px-1.5 text-[9.5px] font-black cursor-pointer toontown-btn-3d ${
+                        model.party_mode === mode
+                          ? 'bg-violet-600 border-2 border-violet-700 text-white shadow-xs'
+                          : 'bg-amber-100/60 border border-amber-900/15 text-amber-950 opacity-70 hover:opacity-100'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 

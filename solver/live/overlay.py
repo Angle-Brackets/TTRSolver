@@ -377,6 +377,10 @@ class Model:
     # (Discord holds it -- the page offers a restart), "restarting", or ""
     # where there is no pipe to read. See `Worker.restart_discord`.
     discord_floors: str = ""
+    # How the Playout row treats the pill's teammates: "pickup" (strangers,
+    # guessed at) or "coordinated" (a party that plans together). Empty on
+    # a panel that stands no teammates in, which hides the toggle.
+    party_mode: str = ""
     turn: int = 0
 
     @property
@@ -858,7 +862,34 @@ class Worker(AdviceWorker):
                      else (7 if track in ("fire", "sos") else None))
             return advise_mod._render(action, st), track or "", level or 0
 
-        self._start_playout(state, horizon, self.budget, is_current, describe)
+        self._start_playout(self._with_teammates(state), horizon, self.budget,
+                            is_current, describe)
+
+    # PICKUP unless the player says their party plans together. See
+    # `party.assumed_teammates`.
+    party_mode = "pickup"
+
+    def _with_teammates(self, state):
+        """The board the PLAYOUTS see: the pill's teammates as stand-in
+        toons rather than a count, so the playouts know someone else is
+        hitting the cogs too. Only the Playout row -- PPO and Search keep
+        the count. A solo board is returned as it is."""
+        from .. import party as party_mod
+
+        board = party_mod.with_assumed_teammates(state)
+        self.group_mode = self.party_mode if board is not state else None
+        return board
+
+    def set_party_mode(self, mode) -> None:
+        """Strangers ("pickup") or a party that plans together
+        ("coordinated")."""
+        mode = str(mode or "").lower()
+        if mode not in ("pickup", "coordinated"):
+            return
+        with self._lock:
+            self.party_mode = mode
+            self.model.party_mode = mode
+        self._settings_changed()
 
     def _feedback_round_over(self) -> None:
         """The round just played: hold its board and advice for the diff."""
@@ -1124,6 +1155,7 @@ class Worker(AdviceWorker):
         self.model.objective = self.objective_name
         self.model.budget = self.budget
         self.model.toon_count = self.toon_count
+        self.model.party_mode = self.party_mode
         try:
             self.outbox.put_nowait(copy(self.model))
         except queue.Full:                        # pragma: no cover

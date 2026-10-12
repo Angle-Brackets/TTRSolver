@@ -273,6 +273,9 @@ def spend_charge(start: BattleState, end: BattleState, plan) -> float:
 # laff points, a Safe about one. Nothing new is invented. No wins lost:
 # 42 vs 41 of 100 Realms VPs, 22 vs 21 of 200 solo buildings.
 ECONOMY = True
+# How hard the charge bites, as a multiple of the preset's exchange rate.
+# See the measurement next to its value.
+ECONOMY_WEIGHT = 1.0
 
 
 def _pouch_price(state: BattleState) -> float:
@@ -292,7 +295,7 @@ def economy(start: BattleState, end: BattleState) -> float:
         return 0.0
     spent = _pouch_price(start) - _pouch_price(end)
     max_laff = float(getattr(start.toons[0], "max_laff", 0) or 100)
-    return spent * LAFF_WEIGHT / (BALANCED.laff_weight * max_laff)
+    return ECONOMY_WEIGHT * spent * LAFF_WEIGHT / (BALANCED.laff_weight * max_laff)
 
 # WHAT THE POUCH IS WORTH when a playout stops before the fight does: in
 # a building the next floor's cogs are unknown, so without this, gags
@@ -682,7 +685,7 @@ def _seed(k: int) -> int:
 
 def chunk_in_child(state: BattleState, horizon, reject, allow_level_7: bool,
                    k_from: int, k_to: int, only=None, wide: bool = True,
-                   style: Optional[str] = None):
+                   style: Optional[str] = None, mode: Optional[str] = None):
     """Rollouts k_from..k_to-1 for each candidate: (pairs, note).
 
     `pairs` is [(plan, [cogs defeated, one per rollout])], the scorer's
@@ -702,6 +705,7 @@ def chunk_in_child(state: BattleState, horizon, reject, allow_level_7: bool,
     from . import hybrid
 
     state_mod.ALLOW_LEVEL_7 = bool(allow_level_7)
+    _set_group_mode(mode)
     from .objective import PRESETS
     set_style(PRESETS.get(style or "balanced"))
     if not hybrid.available() or state.is_terminal():
@@ -966,7 +970,7 @@ def pick_wide(state: BattleState, horizon=None, seed: int = 0,
 
 
 def menu_in_child(state: BattleState, reject, allow_level_7: bool,
-                  wide: bool = True):
+                  wide: bool = True, mode: Optional[str] = None):
     """The candidate keys a chunk would roll, in order: (keys, note).
 
     Cheap -- one climb -- and lets a caller split the first, slowest
@@ -976,6 +980,7 @@ def menu_in_child(state: BattleState, reject, allow_level_7: bool,
     from . import hybrid
 
     state_mod.ALLOW_LEVEL_7 = bool(allow_level_7)
+    _set_group_mode(mode)
     if not hybrid.available() or state.is_terminal():
         return None, "unavailable"
     if state.toons and state.toons[0].laff <= 0:
@@ -1011,6 +1016,14 @@ TEAMMATE_MODEL = None
 # together won 23 of 40 party VPs and planning each toon alone won 0,
 # with either teammate model.
 GROUP_MODE = "coordinated"
+DEFAULT_GROUP_MODE = GROUP_MODE
+
+
+def _set_group_mode(mode: Optional[str]) -> None:
+    """Set the group mode for this call. Every call, because pool workers
+    are reused: one board's pickup must not leak into the next board."""
+    global GROUP_MODE
+    GROUP_MODE = mode if mode in ("pickup", "coordinated") else DEFAULT_GROUP_MODE
 
 
 # TEAMMATES USE UNITES TOO, in both group modes. A unite costs no turn --

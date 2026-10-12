@@ -324,16 +324,23 @@ class ChunkTest(unittest.TestCase):
             self.assertEqual(1, len(values))
 
     def test_pickup_mode_offers_your_moves_alone(self):
-        old = playout.GROUP_MODE
-        try:
-            playout.GROUP_MODE = "pickup"
-            board = _party_board()
-            pairs, note = playout.chunk_in_child(board, None, None, True, 0, 1)
-            self.assertEqual("", note)
-            for plan, _values in pairs:
-                self.assertEqual(1, len(plan))
-        finally:
-            playout.GROUP_MODE = old
+        board = _party_board()
+        pairs, note = playout.chunk_in_child(board, None, None, True, 0, 1,
+                                             mode="pickup")
+        self.assertEqual("", note)
+        for plan, _values in pairs:
+            self.assertEqual(1, len(plan))
+
+    def test_the_mode_does_not_leak_into_the_next_call(self):
+        """Pool workers are reused: a pickup board must not leave the next
+        board, which named no mode, in pickup."""
+        board = _party_board()
+        playout.chunk_in_child(board, None, None, True, 0, 1, mode="pickup")
+        self.assertEqual("pickup", playout.GROUP_MODE)
+        pairs, _note = playout.chunk_in_child(board, None, None, True, 0, 1)
+        self.assertEqual(playout.DEFAULT_GROUP_MODE, playout.GROUP_MODE)
+        for plan, _values in pairs:
+            self.assertEqual(len(board.toons), len(plan))
 
     def test_no_advice_once_you_are_out(self):
         board = _party_board()

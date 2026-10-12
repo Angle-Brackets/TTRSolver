@@ -292,6 +292,9 @@ class AdviceWorker(threading.Thread):
     # fight: [OWNER] "I prefer playout's choice, I think it's the best in all
     # instances". PPO's instant answer shows until the playouts post theirs.
     _engine_chosen = False      # the player pressed an engine
+    # The playouts' group mode for this panel's boards: None for the
+    # playouts' own default, or "pickup" / "coordinated".
+    group_mode = None
 
     def _boss_into(self, model, on_field: int = 0) -> None:
         """Mirror the tracker onto the model the page draws."""
@@ -624,14 +627,16 @@ class AdviceWorker(threading.Thread):
         keys = alive
         if keys is None:
             keys, note = pool.submit(playout_mod.menu_in_child, state, reject,
-                                     allow7).result(timeout=timeout)
+                                     allow7, True, self.group_mode
+                                     ).result(timeout=timeout)
             if keys is None:
                 return None, note
         workers = max(1, min(PLAYOUT_WORKERS, len(keys)))
         parts = [keys[i::workers] for i in range(workers)]
         style = getattr(self, "objective_name", "balanced")
         futures = [pool.submit(playout_mod.chunk_in_child, state, horizon,
-                               reject, allow7, k_from, k_to, part, True, style)
+                               reject, allow7, k_from, k_to, part, True, style,
+                               self.group_mode)
                    for part in parts]
         merged, order = None, None
         for future in futures:

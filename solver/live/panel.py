@@ -176,6 +176,7 @@ def model_json(model: Model) -> str:
         "district": model.district,
         "invasion": model.invasion,
         "discord_floors": getattr(model, "discord_floors", ""),
+        "party_mode": getattr(model, "party_mode", ""),
         "objective": model.objective,
         "budget": model.budget,
         # THE FEEDBACK RECEIPT. `feedback_showing` is a decision, and
@@ -254,6 +255,13 @@ class Api:
 
     def ask_now(self) -> None:
         self._worker.ask_now()
+
+    def set_party_mode(self, mode) -> None:
+        """Strangers or a coordinated party, for the Playout row's
+        teammates. Only the TTR worker stands teammates in."""
+        setter = getattr(self._worker, "set_party_mode", None)
+        if setter is not None:
+            setter(mode)
 
     def restart_discord(self) -> None:
         """The page's "Restart Discord" offer: puts the floor reader in

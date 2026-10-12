@@ -44,6 +44,9 @@ ARMS  (`name` or `name:key=value,key=value`)
             truth=prior|net   (how pickup teammates play in the fight)
             assume=prior|net  (what the engine's rollouts expect of them)
             style=<preset>  (the panel's preset, e.g. survive, "glass cannon")
+            see=true|count|standins  (what the playouts see of teammates:
+                        the real toons; TTR's count alone; or the count
+                        as `party.assumed_teammates`, as the TTR panel does)
 
 Each board is shown to the engine as the live panel would see it: no
 holdout, and in a boss fight the horizon the boss tracker would give.
@@ -197,6 +200,7 @@ def play(job):
     playout.GAG_REACH_PRICE = float(opts.get("reach", 0.1))
     playout.PASS_ON_MENU = opts.get("pass", "needed")
     playout.ECONOMY = opts.get("econ", "1") != "0"
+    playout.ECONOMY_WEIGHT = float(opts.get("econw", 1.0))
     fastplayer.use(opts.get("net") or fastplayer.DEFAULT_WEIGHTS)
     # Shipped: shortened playouts (8 rounds, the repo's value net). trunc=0
     # plays in full; vnet=<weights> swaps the net.
@@ -258,7 +262,12 @@ def play(job):
             plan, t0 = None, time.perf_counter()
             playout.TEAMMATE_UNITES = model_mates
             if name == "playout":
-                res = playout.pick_wide(state if not coordinated else view,
+                board = state if not coordinated else view
+                if opts.get("see", "true") != "true" and len(state.toons) > 1:
+                    board = playout.solo_view(state)
+                    if opts["see"] == "standins":
+                        board = party_mod.with_assumed_teammates(board)
+                res = playout.pick_wide(board,
                                         _horizon(env, state), seed=seed * 1000 + rounds,
                                         stages=stages)
                 plan = res.plan if res else None
