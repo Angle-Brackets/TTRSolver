@@ -13,7 +13,7 @@ REGIMES
   solo-vp       a solo VP, 20 + 20 cogs, every track but Toon-Up, 140 laff,
                 three slips and a ten-card SOS deck
   solo-building a solo toon in a building, drawn street-first
-  my-building   the owner's toon (54 laff, 40-gag pouch, Toon-Up 5, Sound 6,
+  my-building   the maintainer's toon (54 laff, 40-gag pouch, Toon-Up 5, Sound 6,
                 Throw 5, Squirt 5, Drop 7 organic) in Daisy Gardens buildings
   party-building  a 2-4 toon building, you choosing, teammates modelled
   duo-vp        one side of a two-player VP: one toon, 10 + 10 cogs, two
@@ -21,6 +21,10 @@ REGIMES
   party-vp      one side of a four-player VP: two toons planned together,
                 10 + 10 cogs
   ceo           the two-toon CEO side, 20 cogs then two leftovers
+  solo-ceo      one toon against the CEO's round one, 40 cogs; nobody wins
+                it in the model, so read the cogs-defeated column
+  realms-vp     a solo VP as the Realms panel sees it: 100 laff, no slips,
+                sixteen SOS cards with five calls in all, five unites
 
 ARMS  (`name` or `name:key=value,key=value`)
   climb         the PPO row: `hybrid.climb`, budget 24
@@ -46,6 +50,13 @@ ARMS  (`name` or `name:key=value,key=value`)
             style=<preset>  (the panel's preset, e.g. survive, "glass cannon")
             econ=0  econw=<w>  (the gag-economy charge off, or its weight;
                         `playout.ECONOMY_WEIGHT`, shipped 2)
+            sosprice=<cogs>  (a price per SOS call; shipped 0)
+            sosreach=<cogs> reach=<cogs>  (the wasted-reach charge for a
+                        card and for a gag; shipped 0.5 and 0.1)
+            pass=needed|kinds|always  (a lone toon's pass on the menu:
+                        only when nothing else is productive; also through
+                        climb's pick and the best-of-kind slots, as it was
+                        before; or always)
             see=true|count|standins  (what the playouts see of teammates:
                         the real toons; TTR's count alone; or the count
                         as `party.assumed_teammates`, as the TTR panel does)

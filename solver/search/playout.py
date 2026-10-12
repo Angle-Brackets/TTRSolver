@@ -860,10 +860,17 @@ def wide_candidates(state: BattleState, reject=None,
     ranked = [p for p, _v in sorted(scored.values(), key=lambda pv: -pv[1])]
 
     out, seen = [], set()
+    # A LONE TOON'S PASS IS KEPT OFF EVERY SLOT, not only the explicit one
+    # at the end: climb's pick, the scorer's top, the network's top and
+    # the best-of-kind slots each carried it in (a pass is a kind), on
+    # 10-20% of sampled lured boards where nothing called for one.
+    solo = len(state.active_toons()) <= 1
+    pass_ok = (not solo or PASS_ON_MENU in ("always", "kinds")
+               or _pass_is_needed(state))
 
     def add(plan):
         if (plan is not None and _key(plan) not in seen and len(out) < cap
-                and playable(state, plan)):
+                and playable(state, plan) and (pass_ok or not _bare_pass(plan))):
             seen.add(_key(plan))
             out.append(plan if isinstance(plan, Plan) else list(plan))
 
@@ -907,7 +914,17 @@ def wide_candidates(state: BattleState, reject=None,
         add(plan)
     if PASS_ON_MENU == "always" or _pass_is_needed(state):
         add([Action(track=None)])
+    if not out:
+        # Nothing but a pass was playable: better that than no advice.
+        pass_ok = True
+        add(chosen)
     return out
+
+
+def _bare_pass(plan) -> bool:
+    """One seat, passing, with no unite riding on it."""
+    return (len(plan) == 1 and unite_of(plan) is None
+            and (plan[0] is None or plan[0].is_pass))
 
 
 # WHEN A LONE TOON'S MENU OFFERS A PASS: "needed" -- only when nothing
@@ -923,6 +940,15 @@ def wide_candidates(state: BattleState, reject=None,
 # Measured neutral: 41 against 43 of 100 Realms VPs, the two differing
 # on 2 fights (p=0.5) -- it rarely decides a fight, and it stops advice
 # no player should follow.
+#
+# THAT MEASUREMENT WAS OF A HALF FIX. "needed" then gated only the
+# explicit entry at the end of the menu, and the pass still came in
+# through climb's pick and the best-of-kind slots -- which is why the two
+# arms differed on 2 fights of 100. "kinds" keeps that old behaviour for
+# comparison; "needed" now keeps a lone toon's pass off every slot.
+# "needed" against "kinds": 96 vs 97 of 1,000 solo buildings (+2/-3) and
+# 68 vs 71 of 100 solo VPs (+8/-11, p 0.65), the VPs nine rounds shorter
+# (44.9 vs 54.2).
 PASS_ON_MENU = "needed"
 
 

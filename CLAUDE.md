@@ -43,8 +43,13 @@ curl "https://toontownrewritten.wiki/api.php?action=parse&page=Lure&prop=wikitex
 
 ## The no-guessing rule
 
-**One value is deliberately [ASSUMED] rather than [CONFIRMED]**, and it
-is the only one: `mechanics.MULTI_LURE_ACCURACY_BONUS`. The TTR v4.0.0
+**`[ASSUMED]` values exist, each tagged where it lives and listed in
+`docs/data-confidence.md`** -- about 25 tags across `mechanics`,
+`simulator`, `data/cogs`, `data/accuracy`, `ceo`, `vp`, `facility`,
+`rl/env` and `search/party_search`. This file used to say there was
+exactly one; that stopped being true as the boss fights, the cog attack
+tables and the simulated buildings were filled in. The worked example is
+still `mechanics.MULTI_LURE_ACCURACY_BONUS`. The TTR v4.0.0
 patch notes state that simultaneous Lures grant a "(20/15/10)%" bonus
 "depending on the gag level discrepancies" but never say which gap
 selects which value. The owner authorised mapping them onto gaps of 0,
@@ -70,9 +75,13 @@ stdlib `unittest` only — pytest is not installed. From the repo root:
 python -m unittest discover tests
 ```
 
-The solver, the Local API client and the whole suite run on the standard
-library alone. `solver/live/vision.py` is the one exception: it needs
-numpy, listed in `requirements-vision.txt`. Keep it that way — the extras
+The exact solver (simulator, outcomes, expectimax), the Local API client
+and the whole suite run on the standard library alone. numpy, listed in
+`requirements-vision.txt`, is needed by the screen readers
+(`solver/live/vision.py`, `digits.py`, `gagpanel.py`, `watch.py`,
+`catalogue.py`) and by the networks (`search/hybrid.py`, `fastplayer.py`,
+`valuenet.py`, `policy.py`), each of which imports it inside a function
+and reports itself unavailable without it. Keep it that way — the extras
 stay optional, `solver/live/__init__` must not import `vision`, and
 `tests/test_vision.py` skips itself rather than failing when numpy is
 absent. Verify both paths before shipping a change that touches it.
@@ -233,7 +242,9 @@ than no advice.
 
 Search cost, measured on a real endgame loadout (20 distinct gags, 30
 root actions, two cogs): depth 1 = 0.01s, depth 2 = 9.3s, depth 3 = many
-minutes. The default is 2 and the search runs off the polling thread.
+minutes. The panels ask for up to depth 4 (`DEFAULT_DEPTH`) under a time
+budget, iteratively, so depth 2 is what usually finishes; the search runs
+off the polling thread.
 
 ## Parties
 
@@ -369,8 +380,9 @@ Three things, and the third is easy to forget when adding rules:
 1. Laff hits zero.
 2. Every cog is dead.
 3. **The toon has no remaining way to damage a cog**
-   (`BattleState.can_still_damage`). Nothing restocks a pouch mid-fight
-   — SOS cards, Unites and Fires are not modelled — so this is as final
+   (`BattleState.can_still_damage`). A pink slip, a damage or restock
+   SOS card and a Gag-Up unite each count as a way back; with none of
+   those held nothing restocks a pouch mid-fight, so this is as final
    as (1). 80 Lures and no attacks is a loss; so is Toon-Up and/or Trap
    alone; so is a gag in a track the toon has no experience in. Trap
    *with* Lure is not, nor is Lure alone against an already-trapped cog.
@@ -390,7 +402,13 @@ toon conserves gags while a teammate covers [OWNER]. A lone toon's
 Playout menu offers it only when nothing else is productive
 (`playout.PASS_ON_MENU`): on a lured board a pass costs nothing this
 round, and offered everywhere it won by luck -- "pass and let the lure
-lapse", which is never the move.
+lapse", which is never the move. The rule covers EVERY slot of the menu:
+it first gated only the explicit entry, and the pass kept arriving
+through climb's pick and the best-of-kind slots on 10-20% of lured
+boards. Complete, it costs nothing measurable (96 vs 97 of 1,000 solo
+buildings, 68 vs 71 of 100 solo VPs, p 0.65) and VPs run nine rounds
+shorter. Test the MENU, not `_pass_is_needed`: the helper passed its
+tests throughout.
 
 ## Gag pouch
 
@@ -440,8 +458,8 @@ failure: it stays silent instead of raising a false alarm.
 third row beside PPO (`hybrid.climb`) and the expectimax Search. It takes
 about ten candidate moves (`wide_candidates`: climb's pick, the scorer's
 and the network's top two, the best move of every kind climb considered,
-the pass) and plays each to the END OF THE FIGHT, with successive halving
-at 8 and 16 rollouts and common random numbers. Measured on the solo VP
+the pass when one is needed; `WIDE_CAP` 12) and plays each on, with
+successive halving (`HALVING` 16, 32, 64) and common random numbers. Measured on the solo VP
 (20 + 20 cogs, live-panel information only): shipped climb ~7%, top-3
 playouts 21-27%, the wide menu ~40%, the fast network playing on with 4x
 the rollouts 55-70%. ALL OF THOSE HAD UNITES UNUSABLE (see the unite
@@ -477,8 +495,9 @@ Things that hold it together, each measured:
   hands it a copy -- so until this the unite was thrown away and the gag
   played without it. No simulated fight had ever spent one, and the
   Playout row could not advise one. `step_round` now applies it, and
-  the menu offers climb's move both with and without it. The fast
-  network still never uses one inside a rollout.
+  the menu offers climb's move both with and without it. The rollout
+  network has its own unite head since d3c18f4 and uses one inside a
+  rollout; weights without that head never do.
 - **The panel's preset reaches it** (`playout.STYLE`, set per chunk):
   laff weight, pouch weight and a per-round charge, each scaled by the
   preset's own numbers RELATIVE TO BALANCED, so Balanced is exactly the

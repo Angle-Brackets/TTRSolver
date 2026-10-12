@@ -840,6 +840,55 @@ class PassOnTheMenuTest(unittest.TestCase):
         board = self._board([(Track.TRAP, 5), (Track.LURE, 4)], [True, True])
         self.assertTrue(playout._pass_is_needed(board))
 
+    def _sampled(self, seed):
+        """A toon drawn for a street, its cogs all lured: the boards the
+        pass leaked onto."""
+        import random
+        from solver import data
+        from solver.rl import env as env_mod
+        from solver.state import BattleState, CogState
+
+        rng = random.Random(seed)
+        street = env_mod.facility.sample_street(rng)
+        toon = env_mod.toon_for_street(rng, street)
+        env_mod.restock(toon, rng)
+        level = rng.randint(street[2][0], street[2][1])
+        hp = data.cog_max_hp(level)
+        cogs = [CogState("mr_hollywood", "sellbot", level, hp, hp) for _ in range(3)]
+        for cog in cogs:
+            cog.status.apply_lure(90, 3, level=3)
+        return BattleState(toons=[toon], cogs=cogs, kind="facility", street=street[0])
+
+    @unittest.skipUnless(HAVE, "needs numpy and the policy weights")
+    def test_the_menu_itself_holds_no_pass_unless_one_is_needed(self):
+        """THE MENU, not the helper. `PASS_ON_MENU` once gated only the
+        explicit entry, and the pass came in through climb's pick and the
+        best-of-kind slots on 10-20% of boards like these."""
+        checked = 0
+        for seed in range(24):
+            board = self._sampled(seed)
+            if board.is_terminal() or playout._pass_is_needed(board):
+                continue
+            checked += 1
+            menu = playout.wide_candidates(board)
+            self.assertTrue(menu, seed)
+            self.assertFalse([p for p in menu if playout._bare_pass(p)], seed)
+        self.assertGreater(checked, 10)
+
+    @unittest.skipUnless(HAVE, "needs numpy and the policy weights")
+    def test_the_old_behaviour_is_still_selectable(self):
+        """"kinds" is what "needed" used to do, kept so a sweep can
+        compare the two."""
+        old = playout.PASS_ON_MENU
+        try:
+            playout.PASS_ON_MENU = "kinds"
+            leaked = sum(any(playout._bare_pass(p)
+                             for p in playout.wide_candidates(self._sampled(s)))
+                         for s in range(24))
+        finally:
+            playout.PASS_ON_MENU = old
+        self.assertGreater(leaked, 0)
+
 
 if __name__ == "__main__":
     unittest.main()
