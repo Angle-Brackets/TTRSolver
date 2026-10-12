@@ -274,8 +274,13 @@ def spend_charge(start: BattleState, end: BattleState, plan) -> float:
 # 42 vs 41 of 100 Realms VPs, 22 vs 21 of 200 solo buildings.
 ECONOMY = True
 # How hard the charge bites, as a multiple of the preset's exchange rate.
-# See the measurement next to its value.
-ECONOMY_WEIGHT = 1.0
+# At 1 it was too weak live: on the owner's board (lureless toon, a level 5
+# Glad Hander at 42/42, 2026-10-11) the Safe led the Storm Cloud by only
+# 0.0026 +/- 0.0021 cogs, a coin flip, and the panel showed the Storm
+# Cloud. At 2 the Safe leads by 0.0085 +/- 0.0025. No wins lost: 73 vs 75
+# of 100 solo VPs (+5/-7, p 0.77), 104 vs 104 of 1,000 solo buildings.
+ECONOMY_WEIGHT = 2.0
+DEFAULT_ECONOMY_WEIGHT = ECONOMY_WEIGHT
 
 
 def _pouch_price(state: BattleState) -> float:

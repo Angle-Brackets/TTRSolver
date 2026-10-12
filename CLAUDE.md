@@ -512,6 +512,9 @@ Things that hold it together, each measured:
   playouts priced nothing they spent, so a Storm Cloud on a level 5 tied a
   Safe and won by noise; with it the Safe wins, as in PPO and Search. No
   wins lost: 42 vs 41 of 100 Realms VPs, 22 vs 21 of 200 solo buildings.
+  At the plain exchange rate the Safe's lead on a real TTR board was still
+  a coin flip, so `ECONOMY_WEIGHT` is 2: lead 0.0085 +/- 0.0025 cogs, and
+  73 vs 75 of 100 solo VPs (p 0.77), 104 vs 104 of 1,000 buildings.
 - **Wasted reach is charged by all three engines**
   (`simulator.wasted_reach`, [OWNER] preference): any hit-all, gag or
   card, on cogs it cannot reach (Drop on lured, Lure on lured, Trap on
