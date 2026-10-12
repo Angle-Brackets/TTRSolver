@@ -1,597 +1,622 @@
-# TTRSolver: two agents for Toontown Rewritten battles
+# How TTRSolver fits together
 
-A 0.6 ms learned policy and a 124 ms classical search, measured against each
-other over 540 held-out cog buildings -- and what happened when the gap
-between them turned out not to exist. Still seeking an outside view, but on a
-different question than this document originally asked.
+TTRSolver advises a player during cog battles in Toontown Rewritten (TTR).
+Each round it says which gag to throw at which cog. This document describes
+the system as it stands on 2026-10-11: the layers, the path one decision takes
+from a screen frame to a line of advice, the three engines that produce
+advice, how groups of players are handled, and the constraints that shaped the
+design.
 
-## What changed since the last version of this document
+The filename is historical. An earlier version of this file was a review of
+two engines that predates the third; what is worth keeping from it is
+compressed in [the last section](#history-the-two-engine-review).
 
-Three suggestions were acted on. **One worked, and the two failures were
-more informative than the success.**
+Wherever this document quotes a win rate or a time, the figure comes from
+simulated fights or from timing the code, as recorded in the source comments
+and commit messages. Nothing here is a measurement of the real game.
 
-| | result |
+## Terms
+
+A non-player needs about a dozen words.
+
+| Term | Meaning |
 |---|---|
-| Entropy on the *track marginal* | **+1.1 mean**, positive on all three sets — shipped |
-| Capacity 256 -> 512 wide | -0.2, mixed signs — refuted |
-| DAgger with the climb as teacher | -2.0 plain / -0.9 with climb — refuted |
+| Toon, cog | The player's character and the enemy. Up to four toons fight up to four cogs at a time. |
+| Gag | One attack or support item. Gags come in seven tracks (Toon-Up, Trap, Lure, Sound, Throw, Squirt, Drop), each with levels 1 to 7. |
+| Laff | A toon's hit points. At zero the toon is "sad" and leaves the battle. |
+| Pouch | The gags a toon carries. It is not restocked during a fight. |
+| Lure, trap | A lured cog skips its attacks for some rounds. A trap goes off when its cog is lured. |
+| Organic | A bonus on a track's gags that comes from the toon's gag trees. It raises damage, or accuracy for Lure. |
+| Building, floor | A cog building is several battles ("floors") in a row on one pouch and one laff bar. |
+| VP, CFO, CJ, CEO | The four boss fights. The VP (Vice President) has a round of cogs and then a round of skelecogs. |
+| SOS card, unite, pink slip | Consumables: an SOS card calls a helper (a heal, a restock, a lure, damage); a unite heals or restocks alongside a gag without costing the round; a pink slip removes one cog. |
+| Holdout | Cogs that belong to the current round of a boss fight but have not walked onto the field yet. |
+| Plate | The name plate above a cog on screen. With the game's "show cog levels" option on, it shows the cog's level, department and health. |
 
-Two things were learned that change how everything else here should be read.
+The tags `[CONFIRMED]`, `[OWNER]`, `[ASSUMED]`, `[TODO]` and
+`[OPEN TOONTOWN SOURCE]` that appear in the code are explained in
+[data-confidence.md](data-confidence.md). `[OWNER]` marks the maintainer's
+judgement as an experienced player, not a sourced fact.
 
-**A noise floor was established, and it is about a point.** Three runs of the
-same configuration differing only in the training seed score 65.0 / 66.1 /
-65.9. Worse, they *reorder between sets*: the run that tops the three
-reported sets comes last on a fourth. Most single-number results in the
-earlier version of this document were within this.
+## The layers
 
-**The behavioural gap this document was written to explain has largely
-closed, and the outcome gap did not close with it.** Track-entropy moved the
-policy's profile onto the search's on every axis re-measured — holds 2.0% ->
-11.9% against 11.0%, throw 44.4% -> 33.8% against 35.1%, gag entropy 3.96 ->
-4.39 against 4.37 — and bought +1.1. Two earlier changes each moved one row
-into agreement and bought nothing. **Matching the search's behaviour is not
-sufficient for matching its result, and may not be necessary.** That is the
-central puzzle now, and it is a different puzzle from the one below.
+```mermaid
+flowchart TD
+    subgraph Rules["Rules (standard library only)"]
+        DATA["solver/data: gag, cog and accuracy tables"]
+        MECH["mechanics.py: the game's formulas"]
+        STATE["state.py: BattleState, ToonState, CogState, Action"]
+        SIM["simulator.py: one sampled round"]
+        OUT["outcomes.py: one round's exact outcome distribution"]
+        PARTY["party.py: a round with several toons, and teammate models"]
+        FIGHTS["facility.py, vp.py, ceo.py: buildings and boss fights"]
+    end
+    subgraph Engines["Engines (solver/search)"]
+        OBJ["objective.py: presets, what a gag or a point of laff costs"]
+        EXP["expectimax.py: Search"]
+        HYB["hybrid.py: PPO policy + climb"]
+        PLAY["playout.py: Playout"]
+        FAST["fastplayer.py, valuenet.py: rollout and value networks"]
+    end
+    ENV["solver/rl/env.py: the battle as an environment"]
+    subgraph Live["Live (solver/live)"]
+        READ["Readers: ttr_local, vision, watch, gagpanel, ttr_log, discord_relay, boss; realms for Realms"]
+        SESS["session.py, realms_session.py: build a BattleState or say why not"]
+        WORK["advise.py, worker.py: run the engines"]
+        UI["overlay.py, panel.py, realms_panel.py, overlay_ui: the windows"]
+    end
+    DATA --> MECH --> SIM --> OUT
+    STATE --> SIM
+    SIM --> PARTY
+    FIGHTS --> ENV
+    PARTY --> ENV
+    OUT --> EXP
+    ENV --> HYB
+    HYB --> PLAY
+    FAST --> PLAY
+    ENV --> PLAY
+    READ --> SESS --> WORK --> UI
+    EXP --> WORK
+    HYB --> WORK
+    PLAY --> WORK
+    OBJ --> EXP
+    OBJ --> PLAY
+```
 
-**And the gap is gone.** The 67.8% the whole programme aims at was measured
-on ONE set. Re-measured on three, paired, same buildings:
+### Data and mechanics
 
-| set | search | PPO + climb | |
+`solver/data/` holds the tables: gag damage, accuracy and carry limits, the
+cogs of the four departments with their attacks, and which attacks hit the
+whole party. The TTR wiki is the source of truth. A value that is not
+confirmed is left `None` and tagged `[TODO]`, and the code raises instead of
+substituting something plausible. [data-confidence.md](data-confidence.md)
+lists what is solid and what is not; the largest gap is that current cog
+attack frequencies and accuracies are not published.
+
+`solver/mechanics.py` holds the formulas that turn those tables into numbers:
+gag accuracy, damage and its bonuses, lure duration and wake-up, and which
+toon a cog attacks. `solver/state.py` defines the position:
+`BattleState` (a list of toons, the cogs on the field, the holdout, and how
+many cogs later rounds hold), `ToonState`, `CogState` and `Action`.
+
+### One round, three ways
+
+The rules of a round exist in three forms, because three consumers need
+different things from them.
+
+| Module | Gives | Used by |
+|---|---|---|
+| `simulator.step` | One sampled next state for a lone toon | Solo rollouts, tests |
+| `outcomes.action_outcomes` | Every next state with its exact probability | The Search engine |
+| `simulator.apply_party_round`, wrapped by `party.step` | One sampled round for any number of toons | `rl/env.py`, and through it the PPO policy's training, the Playout engine and the sweeps |
+
+The toon's half of a round is written once (`simulator.apply_toon_action`) and
+shared. The cogs' half is genuinely implemented more than once, so
+`tools/round_parity.py` plays random positions through all three and reports
+any expected outcome that differs beyond sampling error. A fixed-seed version
+runs in the test suite.
+
+One rule is easy to get wrong and matters for every engine: **accuracy is
+rolled once per track per target, not per gag.** Gags of the same track aimed
+at the same cog all land or all miss together. Rolling each gag separately
+would let a party hedge by stacking a track on one cog, which is not the game.
+
+`solver/facility.py`, `solver/vp.py` and `solver/ceo.py` describe fights longer
+than one battle: a building's floors, and the rounds of a VP or CEO.
+`solver/rl/env.py` wraps all of it as an environment with `reset` and `step`.
+It is not training-only. The live advisor calls its observation encoding to
+run the policy network, and the playouts step fights through it.
+
+### The engines
+
+Three engines answer the same question and are described
+[side by side below](#the-three-engines). They share
+`solver/search/objective.py`, which defines the five presets a player can pick
+(Balanced, Speedrun, Conserve, Survive, Glass Cannon). A preset is a choice
+about what "playing well" means, such as how a point of laff trades against a
+scarce gag. None of it is game data, and it is kept out of `solver/data/` for
+that reason.
+
+### The live readers
+
+TTR is read from four sources, each authoritative for one thing.
+
+| Source | Module | Gives |
+|---|---|---|
+| The official Local API (opt-in, HTTP on localhost) | `ttr_local.py` | Laff, which gag tracks are trained, organic, location, pink slips. It does not expose the battle. |
+| The game's own window | `window.py`, `watch.py`, `vision.py`, `gagpanel.py`, `digits.py`, `catalogue.py` | The cogs (level, department and health from each plate, identity from the head render) and the count of each gag from the gag menu |
+| The client's log file | `ttr_log.py` | Entering a boss room |
+| What the game publishes to Discord Rich Presence | `discord_relay.py` | A building's floor count, for display |
+
+Toontown Realms, a different server, is read by `realms.py` from the server
+stream that Realms runs on the player's own machine. The reader subscribes and
+queries; it never sends an update or a command. Realms' balance differs from
+TTR's, so nothing read there may reach `solver/data/` (see
+[realms.md](realms.md)).
+
+Nothing in the project reads game memory, hooks or injects into a client, or
+sends input to a game.
+
+`session.build_state` (TTR) and `realms_session.build_state` (Realms) join
+the sources into a `BattleState`. Each returns a state or the list of reasons
+there is not one, never a guess. `boss.py` holds the published structure of the
+boss fights and counts cogs defeated against it, which is what gives the
+engines a view of rounds that have not started.
+[live-notes.md](live-notes.md) covers the readers in detail.
+
+### The worker and the panels
+
+`solver/live/worker.py` defines `AdviceWorker`, the part of a panel that does
+not care where the state came from: which engine's answer is on screen, what a
+"no, not that" rejects, how a setting reaches the engines, and the playout
+scheduler. Two subclasses supply the state: `overlay.Worker` reads the TTR
+screen, and `realms_panel.RealmsWorker` reads Realms.
+
+The windows are views over a plain `Model` object. `solver/live/panel.py` shows
+it in a pywebview window drawn by the React app in `overlay_ui/`;
+`solver/live/overlay.py` also contains a Tk window over the same worker; and
+`solver/live/advise.py` can print advice to a terminal. `python run.py` lists
+every front end and says which optional dependencies each needs.
+[panel-contract.md](panel-contract.md) documents the fields the page receives.
+
+### What depends on what
+
+The layering is mostly one-directional, with three exceptions worth knowing
+before moving code:
+
+- `simulator.py` and `outcomes.py` import `search/objective.py`, because a
+  round's reward is defined by the objective.
+- `party.py` imports `search/expectimax.py` for one of its teammate models.
+- `rl/env.py` imports `search/party_search.py` for the reward, and
+  `search/hybrid.py` imports `rl/env.py` for the observation encoding.
+
+`worker.py` imports neither backend, by rule: it is shared by the TTR panel and
+the Realms panel, and Realms data must not leak into anything TTR-specific.
+
+## The path of one decision
+
+This is the TTR panel. Realms differs only in the first half, as noted after
+the steps.
+
+```mermaid
+sequenceDiagram
+    participant G as Game window
+    participant P as Polling thread
+    participant T as Request thread
+    participant S as Search process
+    participant O as Playout processes (4)
+    participant U as Panel page
+    loop every 0.5 s
+        P->>G: capture the window
+        P->>P: read plates, detect battle events
+        P->>U: post the model
+    end
+    Note over P: a cog joins, is hurt or dies
+    P->>T: submit frame and readings
+    T->>T: build BattleState, apply boss tracker
+    T->>O: start playouts on a clone (chunks)
+    T->>T: PPO on a clone (milliseconds)
+    T->>U: PPO row
+    T->>S: expectimax on a pickled copy
+    O-->>U: Playout row, refined after each chunk
+    S-->>U: Search row
+```
+
+1. **Capture.** Every 0.5 s the polling loop (`overlay.Worker.run`) asks the
+   window manager where the window titled "Toontown Rewritten" is and grabs
+   only that rectangle (`window.game_rect`, `watch.Capture`). The lookup is
+   Windows-only; elsewhere the whole screen is grabbed.
+2. **Read the cogs.** `BattleWatcher.poll` finds the plates, reads each
+   plate's level, department and health, and names the cog from its head
+   render against a collected library (`catalogue.py`). A battle is entered
+   only when plates and the gag menu are both visible, because plate-coloured
+   scenery alone once produced phantom battles. The watcher emits events: a
+   battle started, a cog joined or was defeated, damage landed, a reading was
+   corrected.
+3. **Decide whether to think.** Engines run only when an event changes the
+   position, when the player asks, or when a failed read is being retried.
+   Between those the previous answer stands.
+4. **Build the state.** On a new request thread (`advise.Thinker`), the Local
+   API snapshot supplies laff and training, the gag menu supplies counts, and
+   the plates supply the cogs. The menu's "Total gags" label is read
+   separately and used as a checksum on the counts; a mismatch refuses the
+   state. If anything is missing the panel shows the reasons and no advice.
+5. **Add what the player knows about the fight.** A frozen copy of the boss
+   tracker marks the state as a VP or CEO and sets how many cogs later rounds
+   hold. The player's own counts of unites and pink slips are added, since the
+   screen cannot show them.
+6. **Run three engines.** The playouts are started first on a clone of the
+   state, in their own process pool. PPO then runs on another clone in the
+   request thread and posts its move within milliseconds. Finally the state is
+   sent to the search process, and the request thread waits for it.
+7. **Word the answer.** Each engine's move is turned into a line such as
+   "Safe on cog 1 (Flunky, 42/42 hp)" by `advise._render`, with reasons
+   (accuracy, expected incoming damage) from `explain.py`, which reads them off
+   the same functions the scorer uses.
+8. **Show it.** The worker posts a copy of the model to a queue; the page
+   receives it as JSON. The Playout row's move is the one displayed unless the
+   player has picked an engine. PPO's move is shown until the playouts post
+   their first.
+
+A request for the same position as the one being searched does not restart
+anything. A request for a new position supersedes the old one: its playouts
+stop at the next chunk boundary and the old search process is terminated.
+
+In the Realms panel, steps 1 to 4 are replaced by `RealmsWorker.tick`, which
+builds the state from typed fields every 0.4 s and re-runs the engines when the
+position's key changes.
+
+## The three engines
+
+All three are computed every round and shown as three rows. A player can
+switch the displayed row at no cost, because the other answers already exist.
+
+| | PPO | Search | Playout |
 |---|---|---|---|
-| 31000 | 65.6% | 69.4% | policy +3.8 |
-| 33000 | 65.0% | 63.3% | search +1.7 |
-| 36000 | 64.4% | 65.0% | policy +0.6 |
-| **mean** | **65.0%** | **65.9%** | **+0.9** |
+| Module | `search/hybrid.py` (`climb`) | `search/expectimax.py` | `search/playout.py` |
+| What it computes | A trained policy network proposes a plan; coordinate ascent tries alternatives and keeps what a one-round scorer prefers | The expected value of each move over the exact outcome tree, to a depth limit | The mean result of playing each of about ten candidate moves to the end of the fight |
+| Looks ahead | One round | Several rounds of the battle on the field | The whole fight, including rounds not yet on the field in a VP or CEO |
+| Chance | Expectation over accuracy rolls for one round | Exact probabilities | Sampled, with the same random numbers for every candidate |
+| Cost per decision | Milliseconds | A time budget: 15 s by default on TTR, 4 s on Realms | Anytime: a first answer after two rollouts per candidate, refined until the think time runs out |
+| Where it runs | The request thread | One child process | Four child processes |
+| Follows the preset | No | Yes | Yes, relative to Balanced |
+| Groups | Plans every seat | Solo; teammates are a count | Joint plans or modelled teammates (see below) |
+| Needs numpy | Yes | No | Yes |
 
-Mixed signs and a mean inside the noise floor: **the agents are tied**, and
-the policy is 200x faster. Everything below this line was written to explain
-a 2.8-point deficit that does not survive being measured on more than one
-set.
+### PPO (`hybrid.climb`)
 
-**The 67.8% was never a regression, and this is measured rather than argued.**
-Running the search on the same 180 buildings with the same battle dice, and
-changing *only* the search's own sampling RNG:
+A policy network trained with PPO (proximal policy optimisation) and exported
+as plain numbers (`solver/rl/ppo_facility.json`) ranks the legal moves for each
+seat. `climb` starts from the network's first choice and sweeps the seats,
+offering each the network's top alternatives plus targeted probes (the pass,
+the cheapest kill, the cheapest lure, SOS cards, a unite), and keeps any change
+that `party_search._quick_score` prefers. That scorer takes the expectation of
+one round over its accuracy rolls with hand-set weights; see
+[scoring.md](scoring.md). [ppo-math.md](ppo-math.md) covers the training.
 
-| run | set 31000 |
+Its strength is cost. Timings recorded in the code range from about 2 ms to
+26 ms per decision depending on the board and settings, and one comparison
+over 80 single battles with a wounded toon found it agreeing with Search on 79
+while running about 2,000 times faster (98.8% of battles won against 100%).
+
+Its weakness is the one-round view. On 500 simulated solo VP sides it won 36
+(7.2%), spending its power gags on the easy cog round and meeting the skelecog
+round without them.
+
+Besides being the instant answer, `climb` proposes the Playout engine's menu
+and plays out group fights inside playouts.
+
+### Search (`expectimax`)
+
+A depth-limited expectimax: the toon's move is a MAX node, and the gag's hit
+roll with the cogs' counter-attack is a CHANCE node with exact probabilities
+from `outcomes.action_outcomes`. It uses *-minimax pruning (the analogue of
+alpha-beta for chance nodes), a memo across depths, and iterative deepening
+under a time budget, so it returns the deepest pass that finished. At the depth
+cutoff it scores the board with a linear evaluator fitted against exact
+solutions of small fights (`search/fitted.py`, checked in as plain floats).
+[search-depth.md](search-depth.md) has the branching analysis.
+
+Fully exact search is expensive. On a real endgame loadout (20 distinct gags,
+30 root actions, two cogs) depth 1 took 0.01 s, depth 2 took 9.3 s and depth 3
+many minutes. The panel therefore collapses the cogs' attacks into their mean
+where the preset allows it and drops 3% of probability mass per chance node,
+which reaches depth 4 against two cogs and depth 3 against three or four
+within the 15 s budget.
+
+Its strength is exactness inside its horizon. In single battles its move stops
+changing by depth 4, and it is the only engine whose values are not estimates.
+
+Its weakness is the horizon itself. It searches the battle on the field. The
+count of cogs still to come can make gags dearer in its objective, but those
+cogs are never simulated. On 60 simulated one-toon sides of a two-player VP it
+won 6 where the Playout engine won 33. In buildings the two were level (146
+against 149 of 200). Three attempts to give it a learned leaf evaluator
+(`search/valuenet.py`) had lower error than the fitted leaf and played no
+better; that network is off by default.
+
+It is also a solo search. `expectimax.solve` cannot reach a party position, and
+teammates enter only as a count that thins the cogs' single-target attacks.
+
+### Playout (`playout`)
+
+The Playout engine builds a menu of up to twelve candidate moves, plays each
+to the end of the fight with a small network choosing the later rounds, and
+keeps the move whose fights ended best, using successive halving and common
+random numbers to spend rollouts where candidates are close. In a boss fight
+it draws the unseen cogs afresh in each rollout from what a player knows is
+coming. [playout.md](playout.md) is its full reference, and
+[rollout-network.md](rollout-network.md) describes the network that plays the
+rollouts.
+
+It is the strongest engine wherever the fight extends past the cogs on the
+field. With a realistic VP pouch and five unites, simulated playouts won 94 of
+100 solo VPs and 55 of 60 one-toon sides of a two-player VP. Its results are
+estimates, and they are not comparable with Search's values.
+
+Its costs are time and dependencies. A sweep recorded about 1.9 s per decision
+on solo VPs, and it needs numpy and the shipped weights.
+
+### Which engine is shown
+
+The Playout row is displayed by default in every fight. It first led only in
+boss fights, on the 6-against-33 measurement above. Extending that to all
+fights on 2026-10-11 was the maintainer's preference after watching it play a
+building (`[OWNER]`), where the measured result is a tie with Search. Once the
+player clicks another engine's button, the panel stops applying the default
+and shows the engine they chose.
+
+## Parties
+
+`BattleState.toons` is a list, and `toons[0]` is the toon being advised.
+**Only part of the system is party-aware**, and the line is worth knowing
+before extending either side.
+
+### What is party-aware
+
+- **The rules.** A sad toon leaves the battle and does not end it; the fight is
+  over when every toon is sad or every cog is dead. `can_still_damage` pools
+  the party's gags, so Trap on one toon and Lure on another is a winning pair
+  although neither pouch is on its own. Group cog attacks damage every
+  standing toon; which attacks are group attacks is `[CONFIRMED]` from the
+  wiki's two attack categories.
+- **The memo keys.** `outcomes.state_key` and `merge_key` key on every toon in
+  order, because toons are not interchangeable.
+- **The evaluator's features** (`search/features.py`) pool laff, gags and
+  damage over the toons still standing. Solo feature vectors are bit-identical
+  to what they were before, which is what keeps the fitted weights valid. The
+  party values are defined but not validated: exact search cannot reach a
+  party position, so there are no labels to check them against.
+- **PPO and Playout.** `climb` plans one action per seat. The Playout engine
+  handles a board with teammates on it in one of two modes.
+
+### Two modes, and why there are two
+
+Whether a teammate is someone you choose for or someone you predict is a
+question about the players, not about the search.
+
+- **Coordinated**: every toon's action is chosen together. This is the only way
+  to find the plays that make coordinating worth anything, such as stacking a
+  track on one cog or holding a Trap for someone else's Lure.
+- **Pickup**: you control one toon, and the others are a chance node, sampled
+  from a `TeammateModel`.
+
+Using the wrong one gives bad advice in both directions. Searching strangers
+as choices you do not have produces "throw a level 1, my teammate will throw a
+level 7 into the same cog". Modelling a coordinated team as a distribution
+throws away the reason they coordinated.
+
+The default teammate model, `party.SensiblePrior`, is **a guess about how
+people play**. Nothing in the wiki or the source can confirm what a stranger
+throws, and any pickup-mode number rests on it. `party.NetTeammate` is a second
+guess of the same standing.
+
+`solver/search/party_search.py` is a sampled search over party positions with
+both modes. It is used offline, and its one-round scorer is the judge inside
+`climb`. Its values are estimates and are not comparable with exact search.
+One invariant catches most bugs in it: coordinated can never score below
+pickup, since it may choose everything pickup may and more.
+[party-strategy.md](party-strategy.md) records what its first strategic trials
+found, and two cautions from it carry over: the party evaluator is saturated on
+a maxed team, and no result about Lure is trustworthy from a one-ply search.
+
+### What is still solo
+
+- **The Search row.** Teammates are a count.
+- **`simulator.legal_actions`** enumerates one toon's moves; the party code
+  builds joint plans on top of it.
+- **The rollout network.** It knows one seat, so group playouts are played out
+  by `climb` and are not shortened.
+- **TTR's readers.** The Local API reports the player's own toon, and nothing
+  reads a teammate's laff or gags off the screen. On TTR every engine sees the
+  teammates as the count the player sets. The Realms stream does carry
+  teammates; there PPO and Playout plan the party jointly and show the
+  player's part, while Search still sees a count.
+
+An attempt to give the TTR playouts guessed teammates was measured and
+shelved: guessing gained nothing over the count, and knowing the real
+teammates was worth about 11 wins in 300 simulated buildings.
+[playout.md](playout.md#guessing-ttrs-teammates-gains-nothing) has the table.
+
+## Engines get a clone, never the live board
+
+`hybrid.climb` applies the unite it chooses to the board it is given. That is
+right inside a simulation, where the board is about to be played, and wrong for
+a board that anything else will read afterwards.
+
+Both panels once passed their live board to PPO. The Search row, the
+explanations and the decision log then read that same object. A Toon-Up unite
+that PPO had merely considered turned 12 laff into 92 for everything
+downstream, and a Gag-Up invented gags that two rows then planned with.
+
+The rule is now explicit at every call site:
+
+- `advise.first_answer` and `RealmsWorker._first_answer` call
+  `hybrid.climb(state.clone(), ...)`.
+- `Thinker` hands the playouts `state.clone()`; inside `playout.py` the menu is
+  built on a clone and every rollout starts from a clone.
+- The Search and Playout engines run in child processes, which receive pickled
+  copies.
+- The boss tracker is handed to the request thread as a frozen copy, so the
+  count cannot move while it is being read.
+
+A related rule: the model the page reads is a fresh copy on every post, so the
+page never sees a model the worker is halfway through updating.
+
+## Processes and threads
+
+The TTR panel is one main process with several threads and five child
+processes.
+
+| Where | What runs there |
 |---|---|
-| shipped seed | 65.6% |
-| `armed_credit` disabled, same seed | 65.6% |
-| sampling seed +500000 | 68.3% |
-| sampling seed +900000 | 66.1% |
+| Main thread | The window's event loop (pywebview, or Tk in `overlay.py`) |
+| Drain thread | Takes posted models off a queue and pushes them to the page as JSON. The page also pulls every 400 ms, so a dropped push is a late frame and not a stuck panel. |
+| Polling thread (`overlay.Worker`) | Captures the window and reads the plates every 0.5 s, votes on gag-menu counts while the menu is open, tracks the boss fight and the round count, and decides when to ask for advice. It never runs an engine. |
+| Local API refresher | One request every 5 s on a single kept session. Discovery is never run in a loop, because the game shows its consent prompt once per new client. |
+| Request thread (one per request, newest wins) | Builds the state, starts the playouts, runs PPO, and waits on the search |
+| Playout coordinator thread | Walks the chunk schedule, applies halving, and posts the best move after each chunk |
+| Search process (pool of 1) | `expectimax` under its time budget. A superseded search is terminated instead of being left to run out its budget. |
+| Playout processes (pool of `PLAYOUT_WORKERS` = 4) | Rollouts. Each chunk's candidates are split across them and merged by key. |
+| Discord relay threads | Hold the Discord pipe to read the building's floor |
 
-Spread 2.7, sd 1.44, against the 2.2-point difference three separate
-hypotheses were invented to explain. The search draws 8 outcome samples per
-plan, so it is deterministic given its seed -- the `armed_credit` row is the
-control, identical to the decimal -- and the entire difference lives in the
-seed. 67.8% and 65.6% are one measurement taken twice.
+The reasons for this shape are all measured. Polling has to keep its cadence
+because it is what notices a cog dying, and a search takes seconds, so the two
+cannot share a thread. Search and playouts are pure Python and would hold the
+interpreter lock the polling thread needs, so they run in processes. Rollouts
+of different candidates are independent, so four processes run a chunk about
+four times as fast: when the split was introduced, the first move on a VP
+opening arrived in 1.5 s instead of 3.0 s. Four are used, not every core,
+because the game and the screen reader run on the same machine.
 
-For the record, because the reasoning was wrong three times in a row: the
-drop was attributed first to repo-wide mechanics fixes (no rules file has
-been touched since the number was recorded -- `simulator`, `mechanics`,
-`party`, `state`, `outcomes` unchanged across 21 commits), then to the search
-relying on optimistic rollout bugs (that evidence comes from a *rejected*
-experiment that is not in the code), then to `armed_credit` (65.6% with it
-disabled). None of them survived. **No committed harness ever produced the
-67.8%**, which is the root cause of all three: an unreproducible number
-invites explanation instead of re-measurement.
+Two consequences are easy to trip over. Pool processes are reused, so any
+setting that lives in a module global (the preset, the group mode, whether
+level 7 gags are allowed) is set again on every call. And a value set in a
+child process never reaches the parent, which is why the Search process returns
+its chosen unite in its result.
 
-**This makes the search's 65.0% an underestimate.** Each set above was
-measured with one sampling thread, and on set 31000 that thread returned 65.6
-against a three-thread mean of 66.7. With sd 1.44 per measurement the
-three-set mean carries about 0.8 of standard error from the search's own dice
-before the building draw is counted. The honest summary is that the two
-agents cannot be separated at this sample size, and the ordering in the table
-below should not be read as one.
+The Realms panel has the same shape with a different first half: a listener
+thread keeps an object store from the server stream, and the worker thread
+polls that store every 0.4 s.
 
-**One asymmetry, now withdrawn.** The search scored 65.6 / 65.0 / 64.4 across
-the three sets against the policy's 69.4 / 63.3 / 65.0, and a spread of 1.2
-against 6.1 looked like a uniformly competent search against a spiky policy --
-which is what the timing hypothesis predicts. But each of those search
-numbers is a single draw from a distribution with sd 1.44, so a spread of 1.2
-across three of them is luck, not uniformity. We do not know the search's
-set-to-set spread, because every set was measured once.
+## Constraints that shape the design
 
-Everything below is measured. Figures are on **three disjoint sets of 180
-held-out buildings** (fixed seeds 31000 / 33000 / 36000, never used for
-tuning), reported as the mean with the per-set numbers where the spread
-matters. Earlier entries marked *(one set)* predate the move to three and
-are on the 31000 set alone.
+**The core runs on the standard library alone.** The rules, the tables, the
+exact search, the Local API client, the Discord relay and `run.py` import
+nothing third-party. The fitted evaluator is a block of float literals and its
+inference is a dot product in plain Python.
 
-**The noise floor is about a point.** Three runs of the *same* configuration
-differing only in the training seed score 65.0% / 66.1% / 65.9%. Nothing
-below a point is distinguishable from the seed lottery, which is why results
-here are only believed when every set agrees in sign.
+**numpy is optional and confined.** It is needed by the screen readers
+(`vision.py`, `watch.py`, `gagpanel.py`, `digits.py`, `catalogue.py`,
+`read_battle.py`) and by the modules that evaluate a network (`hybrid.py`,
+`fastplayer.py`, `valuenet.py`, `policy.py`). Each network module reports
+itself unavailable instead of raising, and callers fall back: without numpy
+the PPO and Playout rows are unavailable and Search still works. The screen
+extras are in `requirements-vision.txt`. `solver/live/__init__` must not
+import `vision`, and the vision tests skip themselves when numpy is absent.
 
-The seeds also **reorder between sets**: the run that is best on the three
-reported sets (66.1%) is the *worst* of the three on a fourth, disjoint set
-(58.9% against 59.4% and 61.1%). Choosing a training seed on the sets you
-report is therefore its own fitting, and the shipped policy is picked on
-that fourth set instead.
+**No torch in `solver/`.** Training uses torch (`requirements-training.txt`)
+and lives in `tools/`. Every trained network is exported to JSON as plain
+numbers and evaluated with numpy.
 
-## The problem
+**panda3d only in the Realms reader**, which needs the game's own parser for
+its message definitions (`requirements-realms.txt`).
 
-Toontown Rewritten party combat. Up to 4 toons vs up to 4 cogs (enemies).
-Each round every toon picks one "gag" — a track from {Toon-Up, Trap, Lure,
-Sound, Throw, Squirt, Drop} x a level 1-7 x a target. All gags resolve in a
-fixed track order, then the surviving cogs attack.
+**No guessed state.** A reader returns a value with a confidence, a builder
+returns a state or the reasons it cannot, and advice is not computed from an
+invented position. The one deliberately assumed game value is tagged
+`[ASSUMED]` and described in [data-confidence.md](data-confidence.md).
 
-The benchmark task is a **cog building**: 2-5 consecutive battles ("floors")
-sharing one gag pouch and one laff (HP) pool, with no restocking and no
-healing between floors. Dead cogs are replaced mid-floor from a holdout.
-Metric: **percentage of buildings fully cleared**.
+**Information realism.** An engine may use only what a player can see. The
+published structure of a boss fight counts; the next floor of a building does
+not.
 
-Action space as encoded: 246 (1 pass + 7 tracks x 7 levels x 5 targets).
+**Three things end a battle.** Laff reaches zero, every cog is dead, or the
+toons have no remaining way to damage a cog (`BattleState.can_still_damage`).
+The third is as final as the first, since nothing restocks a pouch mid-fight.
+Before it existed, a hopeless position fell through to the evaluator and
+scored +47.6, and because training labels came from exact solves, the
+evaluator was partly fitted to its own output.
 
-Relevant mechanics: accuracy is rolled once per (track, target) so gags of
-the same track at the same cog all land or all miss together; a lured cog
-skips its attacks for 2-8 rounds depending on lure level; springing a trap
-wakes the cog immediately; a toon cannot heal itself.
-
-## Agent A - classical search
+**Tests are standard-library `unittest`**, about 1,900 of them:
 
 ```
-state
- |- plans()                      choose which joint plans to consider
- |    |- candidates(seat)        legal moves -> 4 per track, ordered by a
- |    |                          hand-written prior
- |    |- combos across seats     product, or multiset when toons are
- |    |                          interchangeable
- |    |- _playable() filter      can these toons actually throw this?
- |    +- stratify by track-signature, rank within stratum by _quick_score,
- |       cut to 60 plans
- +- for each plan: sample 6 outcome draws (accuracy rolls + cog attacks)
-      +- at depth 0 -> rollout_value:
-           play 12 rounds forward using greedy_plan, accumulating the real
-           reward function
-             +- greedy_plan: per seat, _cheap_score -> top 2 (+3 track
-                probes) -> _greedy_score simulates one round -> pick best
+python -m unittest discover tests
 ```
 
-**~124 ms/decision (~1 position/second). 67.8% of buildings cleared.**
+Measurement tools live in `tools/`. `tools/sweep.py` plays the same simulated
+fights with different engines and is the harness behind the Playout figures.
 
-Three hand-written scorers, used at different stages:
+## Where to read next
 
-- `_cheap_score(state, seat, action)` — ranks a single action by arithmetic,
-  no simulation.
-- `_quick_score(state, plan)` — ranks a joint plan by simulating **one
-  all-hit round**:
-  `landed + 2*restored + armed_credit + 120*killed + 2*prevented - price`
-- `_greedy_score(state, trial, obj)` — picks one seat's action inside a
-  rollout.
+| Topic | Document |
+|---|---|
+| The Playout engine in full | [playout.md](playout.md) |
+| The rollout network | [rollout-network.md](rollout-network.md) |
+| What the game data is based on | [data-confidence.md](data-confidence.md), [mechanics-notes.md](mechanics-notes.md) |
+| The one-round scorer and its weights | [scoring.md](scoring.md) |
+| Exact search depth | [search-depth.md](search-depth.md) |
+| The policy network | [ppo-math.md](ppo-math.md), [ml-design.md](ml-design.md) |
+| The screen and API readers | [live-notes.md](live-notes.md) |
+| Realms | [realms.md](realms.md) |
+| Every experiment, including the failed ones | [experiment-log.md](experiment-log.md) |
 
-## Agent B - PPO + local search ("PPO with Advice")
+## History: the two-engine review
 
-```
-state
- |- encode() -> 290 floats
- |    per cog (x4):  alive, level, hp ratio, max hp, lured, trapped,
- |                   lure rounds left, dead, armed-trap damage
- |    per toon (x4): alive, laff ratio, max laff, 49 gag counts
- |    globals:       round, cogs alive, toons alive, cogs remaining in the
- |                   building, street-vs-facility, holdout size, whose turn,
- |                   what teammates already committed to this round
- |- MLP: 290 -> 256 -> 256 (tanh) -> 246 logits
- |       illegal actions masked to -inf inside the distribution
- |- propose(): each seat takes argmax in turn; a "pending" block lets later
- |             seats see earlier picks (this is the whole of coordination)
- +- climb(): start from that plan, then sweep seats — for each seat try the
-             policy's top 3 alternatives, keep any that _quick_score
-             prefers — until a full sweep changes nothing or a budget of 8
-             scorer calls is spent
-```
+This file used to be a request for outside review of two engines, written in
+August 2026 before the Playout engine existed. Its full text is in the file's
+git history. The engines it compared were PPO with `climb`, and the sampled
+party search in `party_search.py` (not today's Search row), on one task: the
+percentage of simulated cog buildings fully cleared by a party.
 
-**~0.6 ms/decision (~656 positions/second). 66.7% of buildings cleared.**
-Plain PPO with no climb: **61.7%**, 0.28 ms/decision.
+**The result was a tie.** Over three disjoint sets of 180 held-out buildings:
 
-PPO training: 6M steps, coordinated (one shared policy chooses for every
-toon), GAE gamma=0.99 lambda=0.95, entropy 0.04, separate actor and critic
-trunks, running reward normalisation, 50% of episodes multi-floor buildings.
-Training saturates: 800k -> 6M steps is +8.3 points, 6M -> 16M is +1.1.
-
-## Current standing
-
-| agent | buildings cleared | ms/decision |
+| Engine | Buildings cleared (per set) | Time per decision |
 |---|---|---|
-| PPO + climb | **65.9%** (69.4 / 63.3 / 65.0) | 0.6 |
-| classical search | 65.0% (65.6 / 65.0 / 64.4) * | 124 |
-| plain PPO | 57.6% (57.2 / 53.9 / 61.7) | 0.28 |
+| PPO + `climb` | 65.9% (69.4 / 63.3 / 65.0) | 0.6 ms |
+| Sampled party search | 65.0% (65.6 / 65.0 / 64.4) | 124 ms |
+| PPO alone | 57.6% (57.2 / 53.9 / 61.7) | 0.28 ms |
 
-\* One sampling thread per set, and the search's own dice are worth sd 1.44
-per measurement -- on set 31000 three threads gave 65.6 / 68.3 / 66.1, mean
-66.7. Read the search's row as "about 65-67".
+The lessons that outlived the comparison:
 
-The top two are tied and the ordering is noise. The 7-point gap between the
-climb and plain PPO is not: the local search is the one component whose value
-is comfortably larger than the measurement error.
+- **Measure the noise floor first.** Three training runs that differed only in
+  the seed scored 65.0%, 66.1% and 65.9%, and they reordered on a fourth set.
+  The party search's own sampling seed was worth a standard deviation of 1.44
+  points. A 2.8-point gap that the review had been written to explain came
+  from one measurement on one set and did not survive three. Results have
+  since been believed only when paired and repeated.
+- **A judge must be independent of the proposer.** Four times an evaluator
+  that shared the proposer's assumptions produced a result that vanished: the
+  policy's own critic ranking its samples, a greedy two-round lookahead (2.8
+  points worse), the policy playing a few rounds on as its own judge (3.3 to
+  3.8 points worse), and a fork experiment that favoured the search only while
+  the search's own rollout policy played the continuation.
+- **The better move depends on who plays after it.** In that fork experiment
+  (500 forks over 47 buildings, on identical dice) the search's moves led by
+  2.29 points under its own continuation and by nothing distinguishable from
+  zero under the policy's. This is the same reason formulas fitted to playout
+  labels later failed in play.
+- **Copying behaviour did not copy results.** Changes that moved the policy's
+  usage statistics onto the search's bought at most 1.1 points. Holding a gag
+  back, which five interventions had tried to teach, measured as worth
+  nothing.
+- **The scorer's terms matter and its weights do not.** Four random weight
+  vectors cleared 63.3% to 65.0% of buildings; zeroing every term but damage
+  cleared 57.5%.
+- **A building is decided by the first toon lost.** Over 50 buildings played by
+  both engines, every run that lost no toon cleared the building, and no run
+  was lost to an empty pouch.
+- **A self-referential teacher has no fixed point.** Distilling `climb` into
+  the policy failed, because `climb` is defined as a perturbation of the
+  policy's own output and the target moves with the student. Cloning the party
+  search collapsed to 7.5% of buildings.
 
-## What has been tried and failed
-
-All on held-out data. Nearly all are negative results, which is why an
-outside view might help.
-
-### On the policy
-
-1. **Expert iteration** — behaviour-clone the search's play, 12,445
-   decisions. Collapsed to **7.5%** of buildings. It also failed to copy the
-   behaviour that makes the teacher good: heals 1.3% against the teacher's
-   5.3%.
-2. **Entropy coefficient**, swept 0.01 / 0.04 / 0.10 — gag entropy came back
-   **3.79 at every setting**. The bonus is over 246 *actions*, and the policy
-   satisfies it by spreading across *targets* while still choosing the same
-   track. Action entropy is not track entropy.
-3. **Potential-based reward shaping** on incoming damage (Ng-style, so the
-   optimal policy is provably unchanged) — moved behaviour substantially
-   (Throw 44.7% -> 35.7%, toward the search's 32.0%) and moved buildings
-   finished **not at all** (52.2% either way).
-4. **Wider observation** — added per-cog expected damage (threat), per-toon
-   training level, and organic flags (290 -> 350 floats), on the theory that
-   the policy could not distinguish a Throw-7 toon from a Throw-2 toon
-   holding identical gags. It changed behaviour in the predicted direction
-   (holds 2.0% -> 5.6%) and did not help: three training seeds gave climb
-   64.4% / 66.1% / 63.3% against the 290-wide run's 66.7%. Reverted.
-
-5. **Entropy on the *track marginal*** — the one intervention on the policy
-   that worked. Sum the action probabilities into 7 track probabilities and
-   put the bonus on *that* distribution, which is what item 2 showed plain
-   action entropy was not doing. Positive on all three sets (+1.7 / +1.1 /
-   +0.6). Shipped.
-6. **Capacity: 256 -> 512 wide** — -0.2 mean with mixed signs (-2.2 / +0.0 /
-   +1.7), against 20.8 MB of weights for 7.5. Not the bottleneck.
-7. **DAgger with the climb as teacher** — the loop this document asked
-   about in question 2. Roll out with the *learner*, label every visited
-   state with `climb`, aggregate, fine-tune, repeat: 6 iterations, 15,393
-   states. **-2.0 plain and -0.9 with climb**, mixed signs on both.
-
-   The diagnostic beat the number. **Agreement with the teacher never
-   rises** — 44.3 / 37.6 / 43.1 / 44.1 / 42.7 / 45.8 across the six
-   iterations — while the loss falls monotonically 1.56 -> 1.26. The
-   student fits the labels and closes no distance on the teacher, because
-   the target moves with it: MCTS is a fixed operator a policy can converge
-   onto, whereas `climb` is *defined as a perturbation of the student's own
-   proposal*. There is no fixed point to walk toward.
-
-   Two harness bugs nearly buried that, and both are worth stating because
-   they are easy to repeat. The teacher was queried once per round and seat
-   *k* read off the resulting joint plan — so seat *k*'s label assumed
-   seats 0..*k*-1 played the **teacher's** moves while the trajectory had
-   played the **student's**. In a coordinated plan the seats are chosen
-   against each other, so those labels described positions that never
-   occurred: worth 10.4 of an apparent 12.4-point collapse. Separately, the
-   cross-entropy ran over all 246 actions including illegal ones, whose
-   logits inference never reads — the loss sat at 5.46 against ln(246) =
-   5.51, near-uniform, while the student already agreed with the teacher on
-   more than half its decisions.
-
-### On the evaluator
-
-5. **Fitting the scorer weights** — (1+lambda) evolution strategy, 120
-   generations, against buildings-finished with a disjoint validation set.
-   Fit set 70.0% -> 75.0%; validation 60.0% -> 60.8%; a **third** untouched
-   set identical to baseline.
-6. **New scorer features** — "threat of the cogs killed" and "toons one
-   round from going sad", both starting at zero weight so the optimiser
-   could adopt them freely. It drove them to 0.044 and 0.592 (i.e. off), and
-   a third seed set was again identical.
-7. **Weights do not matter; terms do.** Four random weight vectors drawn
-   from a hat scored 63.3%, 63.3%, 65.0%, 63.3%. Hand-tuned scored 62.5%.
-   **All terms zeroed (pure damage) scored 57.5%.** So the scorer's *form*
-   is worth ~5 points and its *coefficients* are worth nothing across a wide
-   range.
-
-### On giving the local search a horizon — three attempts, all negative
-
-8. **Track probes** — offer each seat the best action of every track, so
-   Trap becomes reachable (the policy proposes it with ~0 probability). It
-   did become reachable, and `_quick_score` then *declined* it: Trap use
-   1.0% -> 1.2%, finish rate **-2.8**.
-9. **Two-ply lookahead** with `greedy_plan` playing the second round:
-   **-2.8**.
-10. **PPO rollout judge** — play the candidate plan, then let PPO play on for
-    2-4 more rounds, score with the real reward function, common random
-    numbers across candidates so the comparison is paired: **-3.3 to -3.8**,
-    monotone in depth.
-
-## The pattern we think we see
-
-**A judge must be independent of the proposer.** Three separate
-confirmations: PPO's own critic ranking PPO's samples (no gain over plain
-argmax), a greedy two-ply (-2.8), a PPO rollout (-3.3 to -3.8). The only
-evaluator that has ever helped is `_quick_score`, which shares none of the
-policy's blind spots (58.9% -> 64.4%). It is also why the search works at
-all — its rollouts use `greedy_plan`, a different policy from the plans
-being graded.
-
-**Hypothesis for why depth helps the search and hurts the climb.** The
-search's candidate plans are *structurally different* from one another (a
-trap+lure line sitting next to a Sound line), so their true values differ by
-more than rollout noise. The climb's candidates are *one-seat perturbations*
-of a single proposal, so their true values differ very little and a sampled
-multi-round evaluation mostly measures dice. A deterministic one-round
-scorer at least ranks small differences consistently.
-
-If that is right, depth and diversity have to arrive **together** — which is
-the one combination not yet tried (probes + rollout).
-
-## The residual behavioural difference
-
-Over 80 held-out buildings, usage measured when the gag is in hand. The
-middle column is the SHIPPED policy (track-entropy); the first is what it
-replaced, kept because most of this document's failures were measured
-against it:
-
-| | pre-track-entropy | shipped | search |
-|---|---|---|---|
-| gag entropy | 3.96 | **4.39** | 4.37 |
-| **declines to act (hold)** | **2.1%** | **11.9%** | **11.0%** |
-| throw | 44.4% | 33.8% | 35.1% |
-| toon-up | 4.8% | 7.2% | 6.7% |
-| squirt | 20.3% | not re-measured | 23.4% |
-| sound | 11.4% | not re-measured | 14.1% |
-| drop | 10.0% | not re-measured | 8.2% |
-| lure | 7.8% | not re-measured | 9.5% |
-| trap | 1.3% | not re-measured | 2.9% |
-
-**On the four axes that were re-measured the profiles now agree**, holds
-included. So the behavioural gap this section was written to describe is
-largely closed, while the outcome gap it was written to explain moved only
-+1.1. Two earlier attempts moved a single row toward the search (shaping:
-throw 44.7 -> 35.7; wider observation: holds 2.0 -> 5.6) and changed
-outcomes not at all. Matching this table is evidently not sufficient for
-matching the result, and may not be necessary either.
-
-The description that follows is of the PRE-track-entropy policy. The climb
-threw ~13% more gags over the same buildings and preferred level 4 where the
-search prefers 5-6. Every difference pointed the same way: **it always
-swung.** `_quick_score` pays for damage landed, so any action that
-deals none scores about zero regardless of what it saves. A concrete case:
-on one building the search healed three times in seven rounds and held the
-party at 48-55 laff, while the climb healed twice — the second time at
-[2, 17, 2] laff — and lost, with two toons still carrying Toon-Up 7.
-
-## What actually decides a building
-
-Measured over 50 held-out buildings, each played by both agents
-(`tools/trace_building.py --stats 50`):
-
-| agent | cleared | toons lost | heal rounds | rounds |
-|---|---|---|---|---|
-| climb | 62.0% | 1.02 | 1.4 | 10.4 |
-| search | 64.0% | 0.88 | 0.9 | 10.1 |
-
-| | no toon lost | lost >=1 |
-|---|---|---|
-| climb | n=29, **100% cleared** | n=21, 9.5% |
-| search | n=31, **100% cleared** | n=19, 5.3% |
-
-**The outcome is the first toon loss and almost nothing else.** The clear
-rate is very nearly the fraction of buildings where nobody goes sad -- 29/50
-against 62% cleared, 31/50 against 64%.
-
-Part of that is definitional: a building is lost when *every* toon is sad, so
-losing implies losing toons. Two parts are not.
-
-**No run was ever lost to gag exhaustion.** All 60 intact-party runs cleared.
-The `can_still_damage` termination -- the pouch running dry, 80 Lures and no
-attacks -- never fires at these pouch sizes. So the `price`, `scarcity_cost`,
-`rare_gag_premium` and `horizon_cost` machinery in both scorers is defending
-against a failure mode that does not occur, and `price` is the single largest
-negative term in `_quick_score`. Every hour spent tuning conservation was
-spent on the wrong axis.
-
-**And healing more does not help.** The climb heals on 1.4 rounds a building
-against the search's 0.9, and loses MORE toons, 1.02 against 0.88. More
-healing, worse survival. The reading -- corroborated by the project owner's
-own observation of play, independently of these numbers -- is that the search
-is not out-healing the damage, it is **preventing** it: killing or luring the
-threat a round earlier so there is less to heal. The climb heals reactively
-once the damage has landed.
-
-That is the first mechanism in this project connecting a behaviour to the
-variable that decides buildings, and it suggests the objective everything has
-been measured against -- buildings cleared -- has been hiding its own
-structure. **Damage prevented before it lands** is the quantity to optimise,
-and neither scorer prices it: `prevented` exists in `_quick_score` at weight
-2.0 against a `landed` term with weight 1.0 per point of damage, which for a
-cog threatening 8-15 a round is not close to parity with killing it.
-
-## What the CRN experiment settled
-
-Hypotheses 1 and 2 below were written before this ran. Both are now
-answered, and the answers are more interesting than the hypotheses.
-
-The design: replay held-out buildings, find every round where the two agents
-choose a different joint plan, and fork. One branch plays the policy's
-action, the other the search's; both then play the rest of the building out
-under **one fixed continuation policy on identical dice**, so the only thing
-that differs is the action. 500 forks over 47 buildings, bootstrapped by
-BUILDING, because ten forks from one building are not ten independent
-observations.
-
-| bucket | greedy continuation | policy continuation |
-|---|---|---|
-| overall | **+2.29** [+0.32, +4.30] | +0.75 [-0.80, +2.43] |
-| target | **+5.94** [+2.02, +9.40] | +0.90 [-1.64, +3.29] |
-| track | **+2.65** [+0.05, +5.41] | +0.86 [-1.26, +3.27] |
-| hold | -0.18 [-2.52, +2.39] | -0.01 [-1.36, +1.37] |
-| sign test | 78-47 to search, p=0.007 | 59-51, p=0.50 |
-
-**The agents disagree almost always and it almost never matters.** They pick
-the same joint plan on 5.3% of rounds, and three quarters of their
-disagreements are worth under a point. Two agents playing what is very nearly
-a different game, finishing the same fraction of buildings.
-
-**Holding is worth nothing.** 233 samples, a tight interval around zero,
-under *both* continuations, so this one is not confounded. Reward shaping,
-hold-variants, the wider observation, four attempts to teach `_quick_score`
-patience and hypothesis 2 below were all aimed at reproducing the search's
-11% hold rate. It does not pay.
-
-**And the search's apparent edge was an artifact of who plays on.** Under
-`greedy_plan` the search leads by +2.29, with target selection at +5.94,
-surviving both a cluster bootstrap and a sign test at p=0.007. Swap the
-continuation for the climb and every interval covers zero. The reason:
-`greedy_plan` **is the search's own rollout policy**, so its moves were
-chosen assuming that follow-up and then graded under it, while the policy's
-moves were chosen assuming the policy continues. That is a fourth instance of
-the judge sharing the proposer's assumptions, and the one that came closest
-to being written up as a result -- it passed the statistics, because
-statistics test whether an effect is real, not whether the design measures
-what it claims.
-
-Neither continuation is neutral, so the reading is not "no difference" but
-something sharper: **the better move depends on who is playing after it.**
-Which is why every attempt to move the policy's behaviour toward the search
-moved the behaviour and not the result. The search's moves are good *for the
-search's continuation*, not good in themselves, and transplanting them
-transplants nothing.
-
-`tools/disagree.py` was the experiment (deleted; in git history); `tools/trace_building.py` prints two
-whole games side by side.
-
-## Our current read, offered so you can attack it
-
-Four hypotheses, in descending order of how much we believed them **when they
-were written**. The section above has since answered 1 and gutted 2; they are
-kept because the reasoning is what an outside reader is being asked to check.
-
-### 1. We have been matching marginals when the thing that matters is conditionals
-
-**Answered, and both halves were right for the wrong reason.** Conditional
-agreement really is near zero -- 5.3% -- while the marginals agree. But the
-disagreement is nearly free, so there was no blind spot hiding behind the
-marginals. The premise held and the conclusion did not.
-
-This is the one we would most like a second opinion on, because it
-reinterprets nearly every result above.
-
-Every behavioural measurement in this document is a **marginal frequency** --
-how often each track gets used across a corpus. Track-entropy made those
-marginals agree with the search's and bought +1.1. But a policy can hold
-11.9% of the time, exactly matching the search's 11.0%, while holding in
-*entirely different positions*. Marginal agreement constrains the repertoire
-and says nothing about the timing, and it is the timing that wins battles:
-the whole value of a hold is that it is the right round to do nothing.
-
-If that is what is happening, the behavioural programme is exhausted -- we
-have given the policy the search's vocabulary and it is still saying
-different things with it -- and no further work on usage tables will help.
-
-**It is cheaply testable and we have not done it.** Replay held-out
-buildings, and on each decision record what the search would do and what the
-policy does. Then measure *conditional* agreement: on the states where the
-search holds, how often does the policy hold? Compare against the policy's
-base rate of holding. If conditional agreement is at base rate, the marginals
-are agreeing by accident and the gap is timing. This also yields a corpus of
-maximum-disagreement states, which is the natural place to look next.
-
-### 2. The evaluator we keep trying to fix may not be the organ responsible
-
-**Gutted: the behaviour it is about is worth nothing.** The CRN result puts
-holding at -0.18 and -0.01 under the two continuations, on 233 samples with
-tight intervals. Everything below is an argument about *where in the
-architecture* patience lives, and it was worth having only while patience was
-assumed to be worth having. It is kept as a record of how long a plausible
-premise can go unmeasured -- five separate interventions were aimed at this.
-
-Four attempts above try to make `_quick_score` value not-acting, all failed.
-But **the search's holds do not come from `_quick_score`.** That function
-only shortlists which plans get sampled; the search's actual judgement is
-`rollout_value`, twelve rounds played forward with `greedy_plan`. The
-patience we are trying to reproduce is a *rollout* property.
-
-The climb has no rollout. So "teach `_quick_score` to value holding" may be
-trying to grow the behaviour on an organ that never carried it. The obvious
-correction -- give the climb a rollout -- was tried and lost 3.3 to 3.8
-points, which we attribute to variance across candidates too similar to
-distinguish. Those two facts together are the tightest corner in this
-project: the patience lives in a rollout, and the climb cannot afford a
-rollout quiet enough to be read.
-
-### 3. Being more correct about the game made the search play worse
-
-The strangest evidence here, and we would value a view on whether it
-generalises. Three corrections were made to the scorer, each *right* about
-TTR's mechanics: weight a lure's damage-prevention by whether the lure
-actually lands; apply per-cog lure durations rather than one mean; stop
-multiplying kills by lure duration (a plain accounting error). Measured:
-
-    67.8%   as written, defects and all
-    64.4%   + accuracy weighting
-    65.0%   + per-cog rounds
-    65.6%   + both, re-swept
-
-Every correction cost points. The cause is a **dual role**: `_greedy_score`
-is not only an evaluator, it is the policy that plays the rollouts grading
-every plan. Making it more careful about lures did not make the search
-patient -- it made the search's *model of the future* passive, and holds in
-the simulated continuation went 11.0% to 17.4%. The search then compared
-plans against a future in which it plays badly.
-
-We think the general form is: **when a rollout policy and a leaf evaluator
-share an implementation, fidelity improvements to the shared code are not
-sign-definite**, because a rollout policy wants to be *strong and fast* while
-an evaluator wants to be *accurate*. Is that the right reading, and is the
-standard answer simply to pay for two implementations?
-
-### 4. Self-referential improvement operators have no fixed point
-
-From the DAgger failure. AlphaZero distils MCTS, an operator defined
-*independently* of the policy -- the student chases a target that stands
-still. `climb` is defined as a perturbation *of the policy's own output*, so
-distilling it moves the target by exactly the amount the student moves.
-Agreement with the teacher stayed flat at 37-46% across six iterations while
-the loss fell monotonically: the student got better at the labels and no
-closer to the teacher.
-
-We suspect this rules out the whole family of cheap self-referential
-improvement operators as distillation targets, which is a shame, because the
-cheapness was the point. The only anchor we have that the student does not
-control is the classical search, at 200x the cost per label.
-
-## Questions we would value an outside view on
-
-0. **The search's lead is gone and the disagreement is free.** The agents tie
-   at ~65%, choose the same joint plan on 5.3% of rounds, and three quarters
-   of their disagreements are worth under a point. What is the right
-   objective now? The policy is 200x faster, so it is the better agent on
-   every axis that remains; the search's value would be as an independent
-   judge and a source of labels. Is there a principled use for a slower,
-   equal-strength second agent, or is the move to retire it as the benchmark
-   and find a harder task -- higher floors, tighter pouches -- where the two
-   separate again?
-1. **How should an experiment like the CRN fork be made neutral?** Ours
-   reversed sign depending on whether the continuation was the search's
-   rollout policy or the climb, because each agent's move was chosen assuming
-   its own follow-up. Averaging the two continuations feels like splitting a
-   difference rather than removing a bias. Is there a standard construction
-   for comparing two policies' actions without privileging either one's
-   continuation -- and is "the better move depends on who plays after it" a
-   known phenomenon with a name?
-2. **Four times now, an evaluator sharing the proposer's assumptions has
-   produced a result that then vanished.** PPO's critic on PPO's samples, a
-   greedy two-ply, a PPO rollout judge, and now a CRN fork continued by the
-   search's own rollout policy -- the last passing a cluster bootstrap and a
-   sign test at p=0.007. Is there a checkable property that would have caught
-   all four in advance, short of running every experiment twice with the
-   roles swapped?
-3. Is the "candidates too similar for a noisy evaluator" hypothesis right?
-   If so, is probes+rollout together the correct test, or is there a better
-   way to get candidate diversity that the evaluator will actually accept?
-3. ~~Would cloning from the **climb** work better than cloning from the
-   search?~~ **Answered: no** (item 7). The follow-up we would value a view
-   on: is a self-referential improvement operator — one defined as a
-   perturbation of the student's own output — *ever* a usable distillation
-   target, or does the missing fixed point rule the whole family out? If
-   the latter, the operator has to be anchored to something the student
-   does not control, and the cheapest such anchor we can see is the
-   classical search, which is 200x too slow to label with.
-4. ~~Is a 256x2 MLP too small?~~ **Answered: no** (item 6). Doubling the
-   trunk did nothing, so the 6M-step saturation is not capacity.
-6. ~~Is there a principled way to make an evaluator value *not acting*?~~
-   **Withdrawn.** This was the last live question of the original four, and
-   it rested on the search holding 5x more often *and winning*. It does not
-   win, and holding measures at -0.18 and -0.01 per disagreement under the
-   two continuations. Five interventions were aimed at teaching an evaluator
-   patience; none of them should have been. The question we should have asked
-   first, and are now asking about everything else here, is whether the
-   behaviour we were trying to copy was worth anything.
+Two of those threads lead directly to the current design. The review's
+unanswered request was for a horizon that the one-round scorer lacks and a
+judge the proposer does not control. The Playout engine supplies both: it
+plays to the end of the fight instead of a few rounds, scores cogs defeated,
+and averages many rollouts on common random numbers. And once that engine
+existed as a fixed, stronger teacher, expert iteration worked where it had
+failed before: the rollout network trained on the Playout engine's moves
+raised simulated solo-VP wins from 44 to 65 of 100, though only as a rollout
+player and not as an engine in its own right.

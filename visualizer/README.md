@@ -1,182 +1,194 @@
 # Visualizer
 
-An interactive view of the expectimax tree, running **the real solver** —
-the Python package is loaded into the browser with Pyodide, so there is no
-JavaScript copy of the battle rules and nothing to keep in sync.
+A browser page for exploring one battle position without the game running.
+You build a position by hand (toons, gag pouches, cogs and their status),
+and the page shows what two of the solver's engines would play, the tree of
+moves and outcomes underneath, and what each cog is likely to do next.
+
+Every number on the page comes from the real `solver` package. The page is
+a React app that sends JSON to a small local server, and the server calls
+the same Python code the tests import. There is no JavaScript copy of the
+battle rules to fall out of step.
+
+For the design, the HTTP API and the list of known gaps, see
+[docs/visualizer-spec.md](../docs/visualizer-spec.md).
 
 ## Running it
 
 ```
-python tools/fetch_icons.py     # once, optional -- gag/cog/emblem artwork
 python -m visualizer.serve
 ```
 
-That's the whole setup. No Node, no npm, no build step — a browser opens on
-`http://localhost:8000/visualizer/index.html`. The first load pulls the
-Pyodide runtime (~10 MB) from a CDN and is slow; after that it's cached.
+or `python run.py 7`. A browser tab opens on
+`http://localhost:8000/visualizer/index.html`. Stop the server with
+Ctrl-C.
 
-Flags: `--port N`, `--no-browser`.
+| Flag | Meaning |
+|---|---|
+| `--port N` | Serve on another port. Default 8000. |
+| `--no-browser` | Do not open a tab. |
 
-## How it works
+You do not need Node.js: the built page is committed in `visualizer/dist/`.
 
-```
-index.html ──postMessage──► worker.js ──fetch /api/manifest──► serve.py
-   (React, never blocks)   (Pyodide)  ──fetch each .py──────► writes to FS
-        ▲                              └── import bridge ──► solver.*
-        └────────── {id, result} ──────────────┘
-```
+The server and the search need only the Python standard library. The PPO
+engine also needs numpy (`pip install -r requirements-vision.txt`). Without
+it the page still works and the PPO side reports why it is unavailable.
 
-**The solver runs in a Web Worker.** Pyodide is single-threaded and its
-calls are synchronous, so running it in the page froze the UI for the
-length of every search -- about a second for a depth-2 root expansion, ten
-for depth 3. Dragging the gag-cost slider fires one of those per pixel,
-which made the settings unusable rather than merely slow.
-
-Three things keep it responsive, and the effect is measured rather than
-assumed -- dragging the slider across its full range at depth 3 now costs a
-**worst frame gap of 24ms, with no frame over 100ms**:
-
-- **Off the main thread.** Nothing the solver does can block rendering.
-- **Superseding.** Each request carries a generation; a new one abandons
-  everything in flight. A worker call can't be cancelled mid-search, but it
-  can be made not to matter. Abandoned promises are *rejected*, not
-  dropped -- a caller awaiting a reply that never comes is indistinguishable
-  from a hang.
-- **Progressive depth.** Depth 1 costs nothing measurable, so the tree
-  renders at depth 1 immediately and the full-depth answer replaces it when
-  the worker gets there. The header says "refining in the background…"
-  while that is pending.
-
-The gag-cost slider also debounces: the number under it follows the handle
-at once, and the search starts 250ms after the handle stops.
-
-`bridge.py` is the only translation layer: JSON in, JSON out. It holds
-serialization and display labels and **no game rules** — if the page needs
-a number it calls into `solver/`. There's a test suite for it at
-`tests/test_bridge.py`, including a check that the group-gag flags it sends
-the UI match `simulator.is_group_action` rather than restating them.
+The server listens on `127.0.0.1` only. It serves files from the
+repository directory, so do not expose the port beyond your own machine.
 
 ## What you see
 
-The tree grows **downward**: one row per node, with a small horizontal step
-for depth that stops growing after four levels, so a long plan reads as a
-vertical line rather than a staircase drifting off to the right. Expanding
-anything makes the page taller and never wider. That matters because branching is what makes these trees big --
-one decision node adds 8 gags, each of which adds ~9 outcomes. Fanned out
-sideways that reached 12,500px across; indented, the width is bounded by
-depth alone (~9 levels) no matter how much you open.
+### The banner
 
-Clicking a node computes and reveals its children, so nothing exists until
-you look at it.
+- **Engine selector.** "PPO (RL)", "Search", or "Both (Compare)". This
+  chooses whose path is highlighted in the tree.
+- **Preset.** The objective the search optimises (Balanced, Speedrun,
+  Conserve, Survive, Glass cannon). The PPO engine ignores it.
+- **Depth.** How many rounds deep the search looks when choosing its line,
+  1 to 4. Depth 3 and above can take a long time on a crowded board.
+- **Think.** Passed to the PPO engine as its evaluation budget. Despite the
+  "s" beside it, it is not a time limit, and it does not limit the search.
+- **Show Best Path.** Opens the tree along the selected engine's first
+  move and folds the alternatives into a "+N more" chip.
+- **Collapse.** Closes everything below the root.
+- **Setup.** Opens the scenario builder.
 
-## Moving around
+Below the controls, a card shows the leading engine's first move. When the
+two engines disagree, a second card shows the other engine's move with a
+"Use Move" button that swaps them. If the PPO engine wants a Resistance
+Unite used first, a "UNITE FIRST" notice appears beside the card.
 
-The canvas is an infinite board rather than a scroll pane, because the tree
-can outgrow any viewport in both directions:
+The two engines here are **PPO** (`solver/search/hybrid.py`, a trained
+policy with a local search) and **Search** (expectimax,
+`solver/search/expectimax.py`). The **Playout** engine, which leads in the
+live panel, is not available in the visualizer.
 
-- **scroll** to zoom, anchored on the pointer — whatever is under the
-  cursor stays under it
-- **drag anywhere** to pan, including across nodes; a drag longer than a
-  few pixels suppresses the click, so grabbing empty space between tiles
-  never selects one by accident
-- **Fit** frames the whole tree, recomputed on demand since the extent
-  changes every time a node opens
+### The tree
 
-Focus follows what you act on, but only nudges the board when the node is
-actually off-screen — it won't yank the view out from under you mid-read.
+The tree grows downward from the starting position.
 
-- **Your turn** (gold) — a position. Its children are the gags you could play.
-- **Gag** (blue) — one option, showing its expected value and **the gap to
-  the runner-up**. Near zero means the decision doesn't matter; a large gap
-  means the position has a real right answer.
-- Children of a gag are the **outcomes** of playing it, with exact
-  probabilities and the laff they cost.
+| Node | Meaning |
+|---|---|
+| Toon's turn | A position. Its children are the moves available. |
+| A gag | One move, with its expected value (EV) under the chosen preset. Values on tree nodes come from a one-round search, whatever the Depth setting. |
+| An outcome | One result of that move, with its probability. The eight likeliest are shown; the rest are merged into one "N rarer outcomes" node. |
+| Victory / Sad | The battle ended. |
 
-**Show best path** walks the solver's own recommendation down the tree,
-lighting the spine gold. It expands *only* the plan and collapses each
-node's other children into a "+N more" chip beside it, so the whole plan
-reads as one straight vertical line and fits on a screen. Click a chip to
-open the alternatives at that step.
+Click a node to select it and load its children. Nothing is computed until
+you open it, so a deep tree is many small requests.
 
-Breadth, not depth, is what makes these trees big: a depth-2 three-cog
-fight is 9 levels deep but 57 leaves wide, because four decision points at
-8 gags each fan out into 8-ish outcomes apiece. Expanded in full that is
-3768px tall on its side, or 12,540px wide top-down -- a card is 220 wide
-but only 50 tall, so putting breadth on the horizontal axis costs 3x.
-Capping breadth is what makes the downward layout work: the same plan is
-456 x 962.
+Moving around:
 
-The inspector on the right explains the selected position:
+- Scroll to zoom. The point under the cursor stays put.
+- Drag to pan. A drag of more than a few pixels does not count as a click.
 
-- **What the cogs do next** — every surviving cog, each of its attacks, how
-  often it picks that attack, how often the attack lands, and its damage.
-  `⁂` marks a group attack. These are *marginals per cog*: the joint over
-  all cogs is combinatorial (three cogs produce ~430 distinct rounds, so
-  even the twelve likeliest cover under a tenth of the probability), and
-  showing a truncated joint would badly misrepresent the round.
-- **The plan from here** — the principal variation, behind a button because
-  it runs a full search per step and blocks the page for a few seconds.
+In "Both" mode, the first move of each engine is outlined: green for PPO,
+blue for Search, amber where they agree.
 
-## Why it's built this way
+### The inspector
 
-The previous version was a standalone React component with its own
-hardcoded port of the rules and data. It drifted, exactly as you'd expect:
-by the time it was retired it still believed Small Magnet was
-single-target, that lures never expired, that Flunkies had a flat 75%
-accuracy, and it labelled the level-2 lure "Hypno Goggles" (that's level
-6). Every one of those was correct when written.
+The panel on the right describes the selected node:
 
-Two copies of a rule set is one copy too many, so the JS port is gone —
-`ToontownTreeExplorer.jsx`, recoverable from git history if you ever want
-the old layout. The UI here is deliberately plain (inline CSS, no Tailwind
-or icon library) so that it stays a thin shell over the solver and can be
-served from a single file.
+- **Toon Party.** Each toon's laff and pink slips.
+- **Cog Lineup.** Each cog's level, hit points, and whether it is lured
+  (with rounds left), trapped (with the trap's level) or a Version 2.0 cog.
+- **Cog Threat Forecast.** For each cog, its three likeliest attacks with
+  the chance of each and its damage.
+- **Expected Best Line.** The search's plan from the starting position:
+  its best move, then the single most likely outcome, then its best move
+  from there, and so on. It is the modal line, not a guaranteed one.
 
-## Choosing a loadout
+### The scenario builder
 
-**Setup** opens a gag grid laid out like the in-game menu: a row per track,
-a column per level, real gag icons. Click to add one, shift-click or
-right-click to remove. Cells grey out when adding would break a rule the
-game enforces, and the footer tracks both:
+**Setup** opens a dialog for the position.
 
-- **a per-gag carry limit** — 30 Cupcakes but only 3 Birthday Cakes and
-  exactly 1 of any level 7. This is the one that bites first: no gag's own
-  cap reaches 80, so you can never fill a pouch from a single tile.
-- **six gag tracks of the seven** — no toon has them all
-- **80 gags** — a full pouch after every ToonTask
+- **Scenario presets** fill it with a generated position: Cog Building,
+  Scrappy Fight, Weird Mid-Battle, Wall of Cogs, Combo Setup.
+- **Toons.** One to four. For each: laff, organic track, pink slips, and a
+  grid of gag counts by track and level. "Randomize Toon" fills one in.
+- **Cogs.** One to four. For each: department, name, level, hit points,
+  lured (and for how many rounds), trapped (and with which trap), and
+  Version 2.0.
 
-All three are [CONFIRMED] from the wiki and live in `solver/data/gags.py`
-(`Gag.max_carry`, `MAX_GAG_TRACKS`, `POUCH_CAPACITIES`, `validate_loadout`),
-not in the page. Note Sound is capped lower than every other track at every
-level (20/15/15/10/5/2/1), which matches its own rebalancing note.
-`bridge.build_state` rejects an illegal loadout too, so a config arriving
-from anywhere else can't make the solver plan for a toon who couldn't
-exist.
+**Update Battle Tree** sends the position to the server. The server
+rejects a loadout no toon could carry (more than six gag tracks, more than
+a full pouch, or more of one gag than its carry limit) and reports why.
+Those limits are `[CONFIRMED]` from the TTR wiki and live in
+`solver/data/gags.py`; [docs/data-confidence.md](../docs/data-confidence.md)
+explains the tags.
+
+## Known gaps
+
+The page was rebuilt recently and is less finished than the live panel.
+These are visible in the source; none of them affects the solver itself.
+
+- **Forecast card.** The cog's name, the "Target" line and the "Dmg" totals
+  read fields the server does not send, so they show placeholders ("Cog
+  1", "Random Toon", 0). The per-attack percentages and damage are real.
+  Attack names are not shown.
+- **Inspector counts for unites and SOS cards** are not filled in.
+- **Unites and SOS cards cannot be edited** in the builder. The default
+  position carries two of each. A toon loaded from a preset or randomised
+  arrives without unites.
+- **The Fit button does nothing.**
+- **Path highlighting covers the first move only**, not the whole line.
+- **The builder repeats two tables from the solver**: per-gag carry limits
+  and the cog hit-point formula. The server validates the loadout again,
+  so a stale copy cannot produce a wrong answer, but it can mislabel a
+  limit in the dialog.
+- **Parties are only partly supported.** The builder and the server accept
+  up to four toons. The tree and the best line come from the solo search,
+  which chooses for the first toon. The PPO engine plans every toon and
+  the page shows the first toon's move.
+- **Data gaps carry through.** A cog with a `[TODO]` cell in its attack
+  table makes the server report an error for that node rather than show a
+  made-up number.
 
 ## Icons
 
-`tools/fetch_icons.py` pulls 85 images from the wiki into `visualizer/assets/`
-— an icon per gag, a portrait per cog, and the four department emblems. The
-directory is **gitignored**: this is Toontown Rewritten's own artwork, fetched
-for a local tool the way a browser fetches it to render the wiki, and not
-this project's to redistribute. The repo carries the fetcher, not the files.
+The page shows an icon for each gag, a portrait for each cog and an emblem
+for each department. They are Toontown Rewritten's artwork, taken from the
+TTR wiki.
 
-Filenames are derived from the same identity the data uses
-(`gag-lure-2.png`, `cog-bossbot-the_big_cheese.png`, `dept-lawbot.png`) so
-they can't drift from it, and `tests/test_bridge.py` pins that. Every icon
-hides itself if the file is absent, so the page works untouched without ever
-running the fetcher — you just get text labels.
+```
+python tools/fetch_icons.py
+```
 
-One cog breaks the wiki's own naming: Mover & Shaker's file drops the "and"
-(`movershaker`), and is special-cased in the fetcher.
+downloads 85 images into `visualizer/assets/`, which is gitignored.
+File names are derived from the solver's own identifiers
+(`gag-lure-2.png`, `cog-bossbot-the_big_cheese.png`, `dept-lawbot.png`),
+and `tests/test_bridge.py` checks that.
 
-## Caveats
+You only need to run it before rebuilding the page: the build copies
+`visualizer/assets/` into `visualizer/dist/assets/`, and the committed
+build already contains a copy. An icon whose file is missing hides itself
+and the page falls back to text.
 
-Numbers on the page inherit the model's data gaps — cog attack frequency
-and accuracy in particular are pre-4.0.0 values the wiki doesn't publish.
-See [../docs/data-confidence.md](../docs/data-confidence.md). A cog with a
-`[TODO]` cell (Micromanager, The Big Cheese, Big Wig) shows the raise as an
-inline error on the node rather than a wrong number.
+## Changing the page
 
-Depth 3 on four cogs is slow — the search is single-threaded and blocks the
-page while it runs. Start at depth 2.
+```
+python tools/fetch_icons.py                 # once; the build copies these
+python -m visualizer.serve --no-browser     # the API, on port 8000
+cd visualizer
+npm install
+npm run dev                                 # Vite dev server; /api is proxied to port 8000
+npm run build                               # writes dist/, which is committed
+```
+
+| Path | What it is |
+|---|---|
+| `serve.py` | The local server: static files and `POST /api/call`. |
+| `bridge.py` | The only translation layer between JSON and the solver. Serialisation and labels, no game rules. |
+| `src/App.jsx` | Page state: the tree, the two engines' answers. |
+| `src/api.js` | One function per server call. |
+| `src/components/` | `DualEngineBanner`, `TreeCanvas`, `Inspector`, `ScenarioBuilder`, `Icons`. |
+| `dist/` | The built page that `serve.py` serves. |
+| `worker.js` | Left over from an earlier version that ran the solver in the browser. The current page does not load it. |
+
+If the page needs a number, add it to `bridge.py` so it comes from the
+solver. Do not compute game rules in JavaScript.
+
+Tests for the server side run with the rest of the suite
+(`python -m unittest discover tests`): `tests/test_bridge.py`,
+`tests/test_visualizer_bridge.py` and `tests/test_visualizer_e2e.py`.

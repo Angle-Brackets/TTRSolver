@@ -1,341 +1,303 @@
 # The panel contract
 
-Everything `solver/live/panel.py` sends the page, what the UI should
-build next with it, and the places where a reasonable-looking guess
-would be wrong.
+The interface between the Python worker and the overlay page: every field
+Python sends, every method the page may call, and the behaviour a UI
+change has to respect. Written for anyone working on `overlay_ui/`.
 
-Written for whoever is working on `overlay_ui/`. The field lists below
-are read off `panel.model_json`, `overlay.Model` and `overlay.Api`
-rather than from memory; if they disagree with the code, the code wins
-and this file is stale.
+One built page serves two programs: the Toontown Rewritten (TTR) panel
+(`solver/live/panel.py`) and the Toontown Realms panel
+(`solver/live/realms_panel.py`). Both send the same JSON and expose the
+same method names, so the page never needs to know which one it is
+talking to.
 
-- source: `panel.model_json`
-- 52 top-level fields, 12 per cog row, 17 callable methods
-- the page polls every 400 ms
+| | |
+|---|---|
+| Payload | `panel.model_json(model)`, where `model` is the `Model` dataclass in `solver/live/overlay.py` |
+| Size | 79 top-level fields, 12 fields per cog row |
+| Methods | 24, on `panel.Api` and `realms_panel.RealmsApi` |
+| Page | `overlay_ui/src/App.jsx` and `CogPicker.jsx` |
+
+If this file and the code disagree, the code is right.
 
 ## The one rule
 
-**If the UI needs something the model does not expose, the fix is a
-property on `Model`, not a calculation in JavaScript.**
+**The page renders; Python decides.** If the page needs something the
+model does not expose, add a property to `Model` rather than computing it
+in JavaScript.
 
-`model_json` is the whole interface. Every decision the panel makes --
-whether a fight can be confirmed, what the evidence line says, when
-advice goes stale -- already lives in Python, where it is tested without
-a display. Two implementations of "may the player confirm a battle" will
-drift, and the one in the UI is the one nobody tests.
+Every decision the panel makes (whether a fight may be confirmed, what the
+evidence line says, when the feedback strip expires) lives in `Model` or
+in `solver/live/worker.py`, where it is tested without a display. A second
+implementation in the page would drift, and the page's copy is the one no
+test covers.
 
-So *render* these fields, don't recompute them. Anything below marked
-**needs Python** is a small change on our side -- ask for it rather than
-deriving it in the page.
+## Transport
 
-## What to build, in order
+The page runs in a pywebview window and reaches Python through
+`window.pywebview.api`.
 
-Ranked by how much it changes a round for the player. The first four
-cost no Python at all: the data is already in the payload and the page
-currently drops it on the floor.
-
-### 1. The why-line — *in the payload*
-
-One quiet line under the advice: `reason` plus the hit chance. Reads as
-"Hypno-Goggles — *kills 2 · 95%*". Today the advice arrives as an
-instruction with no argument attached, which is the single biggest thing
-missing. `reason` is already ordered by what decides a round: kills,
-then damage prevented, then a trap armed, then damage dealt.
-
-*uses* `reason`, `accuracy`
-
-### 2. Board pressure — *in the payload*
-
-Expected damage this round, and how many rounds the party's laff covers.
-This is the number that tells a player to heal instead of attack, and it
-comes off the same function the scorer reads. Show `survive` as a small
-gauge -- it is the one field with a natural danger threshold.
-
-*uses* `incoming`, `survive` (capped at 4.0 — render 4.0 as "4+")
-
-### 3. Absolute HP on each cog row — *in the payload*
-
-"98 / 132" beats a bar with no numbers, because the player is choosing a
-gag by how much damage it does. Keep the bar; put the figures beside it.
-Both are `null` when the plate's level could not be read -- then show the
-bar alone, never a guessed maximum.
-
-*uses* `rows[].hp`, `rows[].max_hp`, `rows[].health`
-
-### 4. Second opinion, as a toggle — *in the payload*
-
-Both engines answer every round and both answers are already on the
-wire. Make the engine badge a switch instead of a label: tap to read the
-other one. `engine` is what produced the text on screen;
-`preferred_engine` is what the player asked for -- they legitimately
-differ on round one, before the search has finished. Gate the search
-side on `search_ready`.
-
-`rl_*` and `search_*` each carry their own accuracy, reason and organic
-flag, so this can be two rows showing both picks side by side rather
-than a toggle showing one at a time.
-
-*uses* `engine`, `preferred_engine`, `rl_gag`, `search_gag`,
-`search_ready`, `prefer_engine(name)`
-
-### 5. Damage and kills per move — **needs Python**
-
-`explain.describe` already computes `damage`, `kills`, `prevented` and
-`arms` on every recommendation -- and `overlay.py` throws all four away,
-keeping only the phrase built from them. Forwarding them is four lines.
-Worth it if the UI wants to show the arithmetic rather than the summary.
-
-It also computes `targets` (how many cogs the move actually damages)
-and `each` (the per-cog amount, when every target took the same). Those
-two are what stop a group gag reading as a single huge hit: Foghorn on
-two cogs is `damage: 100`, `targets: 2`, `each: 50` — and "100 damage"
-beside a 110 hp cog looks like a near-kill when both cogs in fact
-survive. `reason` already says "50 to each of 2 cogs"; the raw numbers
-would let the UI lay it out properly.
-
-`each` is deliberately absent when the spread is uneven — a lured cog
-takes the knockback bonus, so there is no single per-cog figure to
-quote, and the line falls back to "300 damage across 2 cogs".
-
-*would add* `damage`, `kills`, `prevented`, `arms`, `targets`, `each`
--- plus `rl_track`, `rl_gag_level`, `search_track`, `search_gag_level`
-if the runner-up needs a gag icon.
-
-### 6. The connection strip — *in the payload*
-
-District, neighborhood, zone and any active invasion, in a thin footer.
-The solver does not use any of it -- a street does not change a round.
-It is there so the player can tell at a glance whether the panel is
-talking to the game at all, which the cog readers cannot: they work off
-pixels and look identical with the API disconnected.
-
-*uses* `district`, `neighborhood`, `zone`, `invasion`
+- **Python pushes.** A Python thread calls
+  `window.pushModel(<model JSON>)` through `evaluate_js` after each worker
+  update, and at least every 0.25 seconds when there is none. The
+  page installs `window.pushModel` on mount and merges each payload over
+  its own defaults (`EMPTY` in `App.jsx`), so a field missing from a
+  payload renders as its default rather than as `undefined`.
+- **The page does not poll.** `pull()` returns the same JSON and exists
+  for driving the page by hand; the page never calls it.
+  `panel.PULL_INTERVAL_MS` is a leftover from an earlier design and
+  nothing reads it.
+- **Calls are one way.** The page calls a method and ignores the return
+  value. The effect arrives in a later push. All calls go through the
+  `call(name, ...args)` helper in `App.jsx`, which does nothing when
+  `window.pywebview` is absent, so the page runs in a plain browser.
 
 ## Top-level fields
 
-The complete payload from `pull()`. `| null` marks a field that will be
-absent and must render as absent -- not as zero.
+A type written `T | null` means the value can be absent and must render
+as absent, never as zero.
 
-### The answer
+### The move on screen
 
 | Field | Type | Notes |
 |---|---|---|
-| `advice` | string | The gag to throw. `""` when there is none. **Lingers 4 s after a battle ends** — a non-empty `advice` does not imply `in_battle`. |
-| `track` | string \| null | Lowercase track name, for the accent colour and the gag icon. Null exactly when the advice is a pass or a pink slip — those are not gags and have no picture. |
-| `gag_level` | int \| null | 1–7. With `track` it keys `gag-<track>-<level>.png`. Null in exactly the same cases as `track`. |
-| `unite` | string | A unite to use *alongside* the gag, e.g. `"80 Toon-Up unite"`; `""` for none. Deliberately not folded into `advice`: a unite costs no action, so the round is "use this, *then* throw that". Rendering them as one line reads as a choice between them. |
-| `reason` | string | `""` when there is nothing worth saying. Render nothing, not a blank row. |
-| `organic` | bool | Whether the recommended gag's track is organic. **From the Local API, not the screen** — it states organic outright, so nothing has to recognise the sprout on the gag button. Worth showing: organic raises damage, and Lure's accuracy with it. |
-| `organic_tracks` | string[] | Every organic track this toon has, lowercase. Same source. Lets the UI mark a whole gag menu, not just the advised gag. |
-| `accuracy` | int \| null | Percent, as the game computes it — forced values come through stated (Trap always hits; Drop always misses a lured cog), so 100 and 0 are real answers rather than clamps. |
-| `incoming` | float \| null | Expected damage to the party this round. |
-| `survive` | float \| null | Rounds the party's laff covers. **Capped at 4.0**, so 4.0 means "four or more". |
+| `advice` | string | The move in words. `""` when there is none. It lingers for 4 seconds after a battle ends, so non-empty `advice` does not imply `in_battle`. |
+| `track` | string \| null | The gag's track slug (`toon_up`, `trap`, `lure`, `sound`, `throw`, `squirt`, `drop`), or one of two sentinels: `"fire"` for a pink slip and `"sos"` for an SOS card. `null` for a pass or no advice. |
+| `gag_level` | int \| null | 1 to 7. With `track` it selects the picture `gag-<track>-<level>.png`. For `"fire"` and `"sos"` it carries a placeholder 7 that the page ignores. `null` when `track` is. |
+| `engine` | string | Which engine produced `advice`: `"rl"`, `"search"`, `"playout"`, or `""`. `"rl"` is the PPO row. |
+| `unite` | string | A Resistance Unite to use alongside the move, as a phrase, or `""`. It is separate from `advice` because a unite costs no turn: the round is "use this, then throw that". |
+| `reason` | string | A short why-line for the displayed move. `""` when there is nothing worth saying. |
+| `accuracy` | int \| null | Chance to hit, percent, for the displayed move. Forced values are real: 100 and 0 are answers, not clamps. |
+| `organic` | bool | Whether the displayed gag's track is organic. |
+| `organic_tracks` | string[] | Every organic track the toon has. Sent but not currently read by the page. |
+| `incoming` | float \| null | Expected damage to the toon's side this round. Describes the board, not the move. |
+| `survive` | float \| null | Rounds the laff covers at that rate. Capped at 4.0, which means "four or more". |
+
+`reason`, `accuracy` and `organic` always mirror the engine named by
+`engine`. `AdviceWorker._sync_explanation` enforces that wherever
+`engine` changes.
+
+### The three engines
+
+Each engine reports its own move and its own reasons, so a row never
+borrows another engine's numbers.
+
+| Field | Type | Notes |
+|---|---|---|
+| `engines` | string[] | Which engines this panel runs at all, in row order. A row is drawn only for an engine listed here. TTR sends all three. Realms sends a subset when started with `--engine`. |
+| `preferred_engine` | string | The engine whose move should lead. The dataclass default is `"rl"`, and both workers set it to `"playout"` on their first cycle. A click on an engine sets it for the rest of the session. It can differ from `engine` while the preferred engine is still thinking. |
+| `rl_gag`, `search_gag`, `playout_gag` | string | That engine's move in words. `""` until it answers. |
+| `rl_track`, `search_track`, `playout_track` | string | Its track slug or sentinel. `""` for none. |
+| `rl_gag_level`, `search_gag_level`, `playout_gag_level` | int | Its level. 0 for none. |
+| `rl_accuracy`, `search_accuracy`, `playout_accuracy` | int \| null | Its chance to hit. |
+| `rl_reason`, `search_reason`, `playout_reason` | string | Its why-line. |
+| `rl_organic`, `search_organic`, `playout_organic` | bool | Whether its gag is organic. |
+| `search_ready` | bool | The search has answered for this position. |
+| `playout_ready` | bool | The playouts have posted at least one answer. |
+| `playout_pending` | bool | A playout job is running. The Playout row shows "Thinking..." only while this is true. |
+| `playout_rollouts` | int | Playouts per candidate behind the move shown. |
+| `playout_done` | bool | Refining has stopped. While false and `playout_ready` is true, the move may still change. |
+| `playout_note` | string | Why a finished playout has no move, for the row to show instead of spinning. |
+| `playout_unite` | string | The unite the playouts' move is planned with. Python copies it into `unite` when the Playout move is displayed; the page does not read it directly. |
+| `thinking` | bool | PPO or the search is working. Drives "Thinking..." on those two rows and the large card. |
+
+There is no `rl_ready`: the PPO row is ready when `rl_gag` is non-empty.
 
 ### The board
 
 | Field | Type | Notes |
 |---|---|---|
-| `rows` | CogRow[] | One per plate on screen. See below. |
-| `turn` | int | 0 when unknown. **An estimate** — nothing reports the round, so it is inferred from the gag menu opening. It misses a round you let the timer pick for you. Label it as approximate wherever it appears. |
 | `in_battle` | bool | Detected, or asserted by the player. |
-| `status` | string | `"waiting"` / `"in battle"` / `"confirmed"`. The turn is deliberately not in here; show it separately. |
-| `problems` | string[] | **Why there is no advice.** The builder returns a state *or* the reasons there isn't one, never a guess. If this is non-empty and unrendered, the panel looks hung. Give it real space — and see the staleness caveat below, because a non-empty `problems` also means the advice next to it is out of date. |
-| `evidence` | string | What the readers can see right now — `"see: 2 cog plates, gag menu"`, or why not. |
-| `thinking` | bool | A search is running. |
+| `status` | string | `"waiting"`, `"in battle"` or `"confirmed"` (the player asserted it). |
+| `turn` | int | Estimated round number, 0 when unknown. On TTR it is inferred from the gag menu opening and misses a round the timer played. Label it as an estimate. |
+| `rows` | CogRow[] | One per cog. See [Cog rows](#cog-rows). The page draws at most four. |
+| `problems` | string[] | Why there is no position to advise on. Non-empty also means the move still on screen is stale. The page draws at most four. |
+| `evidence` | string | What the reader can see: `"see: 2 cog plates, gag menu"`, `"nothing on screen that looks like a battle"` or `"game window not found"`. |
+| `pouch` | PouchRow[] | The gags the toon is carrying, for the "I'd use…" picker. Filled by the Realms panel only; `[]` on TTR, which hides the picker. |
 
 ### Controls, mirrored back
 
-| Field | Type | Notes |
-|---|---|---|
-| `can_confirm` | bool | May the player assert or end a fight. True whenever the game window is found. |
-| `can_advise` | bool | May "work it out now" be pressed. False while thinking, and with no battle. |
-| `allow_level_7` | bool | Whether level 7 gags are being offered. |
-| `toon_count` | int | 1–4, including you. Set by the player; nothing on screen counts toons reliably. |
-| `objective` | string | Preset name, e.g. `"balanced"`, `"survive"`. |
-| `budget` | float | Search budget, in seconds. |
-| `max_fires` | int | 0–99. Pink slips the solver may plan with. **On TTR this is the count, not a cap on one** — nothing the client exposes says how many a toon holds, so the number typed here is the whole story. Label it "how many you have". |
-| `max_unites` | int | 0–99. **Inert on TTR.** Round-trips through the model and never reaches the solver. |
-| `max_sos` | int | 0–99. **Inert on TTR**, for the same reason. |
-| `fires_left` | int | What is LEFT of `max_fires` after the advice already given this fight. **This is what the solver plans with**, not `max_fires`. Show it as "2 of 5" so a spent resource visibly runs down — the panel used to keep offering slips a run had already used, with nothing on screen to say so. |
-| `unites_left` | int | Same, for unites. A unite costs no action, so it is charged alongside the gag it was advised beside. |
-| `sos_left` | int | Same, for SOS cards. |
-
-### Engines
+Each of these is owned by the worker. The page shows the value it is sent
+and never keeps its own copy.
 
 | Field | Type | Notes |
 |---|---|---|
-| `engine` | string | `"rl"` / `"search"` / `""`. What produced the text currently on screen. |
-| `preferred_engine` | string | `"rl"` / `"search"`. The player's standing choice; persists across rounds. |
-| `rl_gag` | string | The policy's answer, always present once computed. |
-| `rl_track` / `rl_gag_level` | string / int | Its track and level, for the gag icon. |
-| `rl_accuracy` / `rl_reason` / `rl_organic` | int \| null / string / bool | **The policy's own reasons.** |
-| `search_gag` | string | The search's answer. `""` until it finishes. |
-| `search_track` / `search_gag_level` | string / int | Same, for the search's pick. |
-| `search_accuracy` / `search_reason` / `search_organic` | int \| null / string / bool | **The search's own reasons.** |
-| `search_ready` | bool | Whether `search_gag` is worth offering yet. |
+| `can_confirm` | bool | Whether the fight button is enabled. True during a battle; outside one, true when the game window is found. |
+| `can_advise` | bool | In a battle and not thinking. Gates the Reconsider button. |
+| `allow_level_7` | bool | Whether level 7 gags may be advised. |
+| `objective` | string | Preset name: `balanced`, `conserve`, `glass cannon`, `speedrun` or `survive`. |
+| `budget` | float | Think time in seconds. |
+| `toon_count` | int | 1 to 4, counting the player. Set by hand on TTR; read from the server on Realms. |
+| `party_mode` | string | `"pickup"`, `"coordinated"`, or `""`. The Strangers / My party toggle is drawn only when this is non-empty and `toon_count > 1`. Both panels currently send `""`: the TTR feature behind it is switched off (`Worker.stand_in_teammates`). |
+| `max_fires` | int | The pink slip budget box, 0 to 99. A session budget that ticks down as slips are spent. |
+| `max_unites` | int | The unite budget box. |
+| `max_sos` | int | The SOS card budget box. On TTR it is not passed to the engines. |
+| `fires_left`, `unites_left`, `sos_left` | int | What the engines may still plan with. Equal to the boxes today. The page reads only `fires_left`, to decide whether the "I'd use…" picker offers a pink slip. |
 
-The displayed `accuracy` / `reason` / `organic` always mirror the engine
-named by `engine`. The per-engine copies exist so the *other* engine's
-answer can be shown as a second row with its own numbers rather than
-borrowing the winner's — which is what a single pair forced it to do,
-and which shipped as a real bug: a Grand Piano was captioned "95% ·
-kills 2" because those were the search's Wedding Cake numbers.
-
-### Where you are, and decoration
+### Boss fight
 
 | Field | Type | Notes |
 |---|---|---|
-| `zone` | string | From the Local API. `""` when not connected. |
-| `neighborhood` | string | Same. |
-| `district` | string | Same. |
-| `invasion` | string | Active invasion, or `""`. |
-| `lure_icon` | string | A `data:` URI for the game's own lure magnet, read from the player's install at runtime. `""` when the game is not installed — **fall back to a text badge, never a broken image**. |
-| `map_icon` | string | Same contract. |
-| `organic_icon` | string | The game's own green leaf badge, cut out of the battle-GUI palette. Same contract — `""` when the game is not installed, so fall back to a text marker. Pair it with `organic` / `organic_tracks`, which are the *data*; this is only the picture. |
-| `track_icons` | object | Track slug → data URI, for the Silly Team badge of each of the seven tracks (`toon_up`, `trap`, `lure`, `sound`, `throw`, `squirt`, `drop`). Read from the player's install like the others, so it is `{}` when the game is not there and **may be partial** — look each one up and fall back to the track's name. Note the key is the solver's `toon_up`, not the game's `toonup`. |
+| `boss_kind` | string | `"vp"`, `"cfo"`, `"cj"`, `"ceo"`, or `""` for none. The fight in effect. |
+| `boss_manual` | string | What the player picked, or `""` for "use detection". The page labels the picker "Detected" when `boss_kind` is set and this is empty. |
+| `cogs_defeated` | int | Cogs defeated this boss fight. 0 when there is no boss. |
+| `cogs_left` | int | Cogs still to beat, or -1 where the fight's size is not known. Render -1 as unknown, never as a number. |
 
-## Each cog row
-
-A plate carries only what a plate shows. Lure and trap state are marked
-by the player, not read off the screen.
+### Location and decoration
 
 | Field | Type | Notes |
 |---|---|---|
-| `index` | int \| null | **Plate order, and the key for every per-cog call** — `mark_lured`, `mark_trapped` and `name_cog` all take this. Not the detected bounding box, which moves a few pixels between frames and matched once and never again. |
-| `name` | string | Display name, or a placeholder when unidentified. |
-| `identified` | bool | False means the readers could not narrow the plate to one cog. Show the picker. |
-| `level` | int \| null | Null at low resolution — the level reader declines rather than guessing. |
-| `department` | string \| null | Bossbot / Sellbot / Cashbot / Lawbot. |
-| `health` | float | 0.0–1.0. **Snapped:** anything at or above 0.85 comes through as exactly 1.0, because the bar under-reads and the shortfall scales with plate size. Don't un-snap it — showing 91% while the solver correctly used full HP reads as a bug, and was reported as one. |
-| `hp` | int \| null | Absolute, derived from the level and the snapped fraction. Null whenever `level` is null. |
-| `max_hp` | int \| null | Same condition. |
-| `art` | string \| null | `<department>-<key>`, matching `cog-*.png`. Null when unidentified — fall back to the department emblem. Drawing a specific cog would assert more than was read. |
-| `lured` | bool | Player-marked. Changes four things at once: Throw and Squirt are forced to 100% and collect knockback, Drop always misses, and the cog does not attack. |
-| `trapped` | bool | **Currently inert — do not present it as working.** `mark_trapped` writes onto the model row, and the poll rebuilds every row from the watcher 400 ms later, so the toggle springs back and the solver never hears about it. Making it real needs a trap set on the watcher (like `lured`) *and* a way to say **which** trap gag is under the cog, because `CogStatus.trap_level` is what the damage comes from — a checkbox cannot express that. Ask before building UI for it. |
-| `choices` | object[] | **Every cog in the game, not the plate's shortlist** — likely ones sorted first and flagged `likely: true`. The department read can be wrong, and then the cog actually on screen is the one option never offered. Each entry: `key`, `display`, `department`, `likely`, `current`. *Needs a filter box or a grouped list, not a flat dropdown.* |
+| `zone`, `neighborhood`, `district` | string | From the TTR Local API. `""` when not connected. While inside a Cog building with the floor known, `zone` ends with `", floor 2 of 4"`. |
+| `invasion` | string | Active invasion in words, or `""`. |
+| `discord_floors` | string | State of the building-floor reader: `"on"`, `"blocked"` (Discord holds the pipe, so the page offers a restart), `"restarting"`, or `""` where there is none. |
+| `lure_icon` | string | A `data:` URI of the game's lure icon, read from the player's own TTR installation at start-up. `""` when the game is not installed. |
+| `organic_icon` | string | Same, for the organic leaf. |
+| `track_icons` | object | Track slug to `data:` URI for each track's badge. May be `{}` or partial. |
+| `map_icon` | string | Same contract. Sent but not currently read by the page. |
 
-## What the page may call
+Each icon can be missing. The page must fall back to text and never show a
+broken image.
 
-Small on purpose. Everything here is a request to Python, which
-recomputes and ships a fresh model on the next pull.
+### Feedback strip
 
-| Method | Argument | Notes |
+A receipt of the move the player was seen to make. Only the Realms panel
+fills these. On TTR they stay at their defaults and the strip never
+renders.
+
+| Field | Type | Notes |
 |---|---|---|
-| `pull()` | — | Returns the JSON above. The page polls it every 400 ms. Python cannot safely push into the page from its worker thread, so the page asks — which also means a hand-reloaded page recovers on its own. **Don't add a second poller.** |
-| `toggle_fight()` | — | Confirm a fight, or end one and reset. |
-| `ask_now()` | — | "Work it out now." Gate on `can_advise`. |
-| `reconsider(scope)` | `"gag"` \| `"track"` \| omitted | "No, not that." Turns down the move on screen and asks again. `"gag"` rejects this gag alone (no Grand Piano; Safe still offered), `"track"` rejects the track entirely (no Drop at any level), and omitting it keeps the original **kind** width — `(track, group)`, so single-target Drops go and the group one stays. The rejection lasts until the board changes. **It steers the RL engine only** — the search runs in a child process through `expectimax`, which has no root filter, so pressing it while the SEARCH answer is displayed records the rejection but cannot re-aim that engine. |
-| `prefer_engine(name)` | `"rl"` \| `"search"` | Swaps which answer is displayed. Both are already computed, so this is free. |
-| `mark_lured(index, lured)` | int, bool | Row `index`, not slot. |
-| `mark_trapped(index, trapped)` | int, bool | Same. |
-| `name_cog(index, key)` | int, string | Applies to this battle only, and is painted immediately. Deliberately not written to the head catalogue — an entry there is consulted forever, so a wrong one poisons every later match, while a wrong name here costs one fight. |
-| `set_level_7(allow)` | bool | Recomputes — the advice on screen was worked out under the old setting. |
-| `set_toon_count(count)` | int 1–4 | Recomputes. Party size changes how much of each cog's damage is aimed at *you*. |
-| `set_max_fires(count)` | int 0–99 | Real. Also **resets what we thought was spent** — the player can see the pouch and the panel cannot, so their number wins outright. |
-| `set_max_unites(count)` | int 0–99 | **Inert on TTR.** |
-| `set_max_sos(count)` | int 0–99 | **Inert on TTR.** |
-| `set_objective(name)` | string | Preset name. |
-| `set_budget(seconds)` | float | Search budget. |
-| `set_height(px)` | int | **Measure the page and report it** every time the content changes height. The window used to hardcode a height and clip its own last line — and an open cog picker (four rows plus a 208 px list) runs past it, clipping exactly the part being clicked. Clamped 160–900. |
-| `close()` | — | Quit. |
+| `feedback_showing` | bool | Whether the strip is on screen. A decision made in Python: it expires 3.5 seconds after the row was written. |
+| `feedback_move` | string | The move that was logged. |
+| `feedback_stated` | bool | True when the player said it through "I'd use…", false when it was inferred from the pouch. The strip words these differently ("you said:" and "logged:"). |
+| `feedback_against` | string | The engines whose advice it differed from. |
+| `feedback_problem` | string | Shown instead of a move when the round could not be logged. |
+| `feedback_fixable` | bool | Whether the "wrong?" control is offered. True only for the most recent row. |
+| `feedback_needs_target` | bool | Whether the row is missing its target cog, in which case "wrong?" offers the cogs to pick from. |
 
-## Caveats
+## Cog rows
 
-Each of these has already cost a debugging session or a wrong
-recommendation.
+| Field | Type | Notes |
+|---|---|---|
+| `index` | int \| null | Position in the row order. The key for every per-cog call. |
+| `name` | string | Display name, or the department name when the cog is unidentified. |
+| `identified` | bool | False when the reader could not settle on one cog. |
+| `level` | int \| null | `null` when the level could not be read; the page then shows a level picker. |
+| `department` | string \| null | `bossbot`, `sellbot`, `cashbot` or `lawbot`. |
+| `health` | float | 0.0 to 1.0. On TTR, anything read at 0.85 or above is sent as exactly 1.0, because the bar under-reads and the solver treats it as full. Do not undo this. |
+| `hp`, `max_hp` | int \| null | Hit points. Set on TTR when the level is known. The Realms panel leaves both `null`, so its rows show a percentage. |
+| `art` | string \| null | `<department>-<cog key>`, selecting `cog-<art>.png`. `null` when unidentified; fall back to the department emblem `dept-<department>.png` rather than draw a specific cog. |
+| `lured` | bool | On TTR, read from the plate and overridable by the player. On Realms, stated by the server. |
+| `trapped` | bool | Stated by the server on Realms. Always false on TTR, where nothing reads it. The page does not draw it. |
+| `choices` | object[] | Options for the name picker: `key`, `display`, `department`, `likely`, `current`. On TTR this is every cog in the game with the likely ones flagged, because a misread department would otherwise hide the right answer. `[]` on Realms. |
 
-### Do not build a "weakness" line
+A pouch row (Realms only) is `{track, level, count, name, group}`. `group`
+marks a gag that hits every cog, for which the picker asks for no target.
 
-The mockup's `WEAKNESS: TRAP, LURE` has no basis -- cogs in this game
-have no weaknesses, no type chart, no resistances. Every gag works on
-every cog. A UI that says otherwise is teaching the player something
-false, and there is no field behind it because there is no such thing to
-read.
+## Methods
 
-### Do not build a "best combo" panel
+Both API classes define every method, because the page is shared and a
+missing method fails silently at click time. A method that has no meaning
+for one panel exists there and does nothing.
 
-The solver plans **one round**, with a single-step lookahead for whether
-a trap gets sprung. It does not produce a multi-round sequence, so there
-is nothing truthful to put behind a combo display. If a combo view is
-wanted, that is a real search change rather than a rendering one -- ask
-first.
+| Method | Arguments | TTR panel | Realms panel | Called by the page |
+|---|---|---|---|---|
+| `pull()` | none | Returns the model JSON. | Same. | No |
+| `prefer_engine(name)` | `"rl"`, `"search"` or `"playout"` | Shows that engine's move and makes it the standing preference. Anything else is treated as `"rl"`. | Same. | Yes |
+| `reconsider(scope)` | `"gag"`, `"track"`, or omitted | Rejects the displayed move and recomputes. `"gag"` rejects that gag, `"track"` the whole track, and omitting it rejects the gag's kind (same track and same single-target or group type). Lasts until the position changes. Reaches the PPO and Playout engines; the search has no rejection filter. | Same. | Yes, with `"gag"` and `"track"` |
+| `toggle_fight()` | none | In a battle: ends it and clears everything derived from it. Otherwise: asserts a battle and recomputes. | Re-reads the stream and recomputes. | Yes |
+| `ask_now()` | none | Recompute on the next cycle. | Same. | No |
+| `set_objective(name)` | preset name | Switches preset and recomputes. Unknown names are ignored. | Same. | Yes |
+| `set_budget(seconds)` | number | Think time, clamped to 1 to 60. | Same. | Yes |
+| `set_level_7(allow)` | bool | Allows or withholds level 7 gags and recomputes. | Same. | Yes |
+| `set_toon_count(count)` | int | Toons in the fight, clamped to 1 to 4. Recomputes. | Sets a floor on the toons in a boss fight; the party in the player's own battle is read and not overridden. | Yes |
+| `set_party_mode(mode)` | `"pickup"` or `"coordinated"` | Stored, but has no effect while the feature is off. | Does nothing. | Yes, but the control is hidden |
+| `set_boss(kind)` | `"vp"`, `"cfo"`, `"cj"`, `"ceo"` or `""` | Names the boss fight by hand; `""` returns to detection. A detected fight takes precedence over a manual pick. Changing the fight restarts its count. | Same. | Yes |
+| `set_cogs_defeated(count)` | int | Corrects the boss count. | Same. | Yes |
+| `set_max_fires(count)` | int | Sets the pink slip box, clamped to 0 to 99. Recomputes. | Same. | Yes |
+| `set_max_unites(count)` | int | Sets the unite box. | Same. | Yes |
+| `set_max_sos(count)` | int | Sets the SOS box. Stored but unused on TTR. | Sets the SOS box. | Yes |
+| `mark_lured(index, lured)` | int, bool | Overrides the lure read for that row and recomputes. | Does nothing. | Yes |
+| `mark_trapped(index, trapped)` | int, bool | Writes the flag onto the current row only. The next read rebuilds the rows and the engines never see it. | Does nothing. | No |
+| `name_cog(index, key)` | int, cog key | Names that row's cog for this fight, shown at once. A cog not yet in the head library is also added to it. | Does nothing. | Yes |
+| `set_cog_level(index, level)` | int, int | States a level the reader could not settle, for this fight. | Does nothing. | Yes |
+| `suggest_move(track, level, target_index, fire, is_pass)` | see below | Does nothing. | Records the move the player says they would make. Needs `--feedback PATH`. | Yes |
+| `correct_feedback(target_index, discard)` | int \| null, bool | Does nothing. | Amends the last feedback row with a target, or discards it. | Yes |
+| `restart_discord()` | none | Closes Discord, takes its pipe, starts Discord again. Runs off the UI thread. | Does nothing. | Yes |
+| `set_height(px)` | int | Resizes the window to the page. Clamped to 160 to 900. | Resizes to `px + 16`, minimum 120. | Yes |
+| `close()` | none | Quits. | Same. | Yes |
 
-### Four fields are optional, and mean "unknown", not zero
+`suggest_move` takes five positional arguments: a track slug or `null`, a
+level or `null`, a target row index or `null`, whether it is a pink slip,
+and whether it is a pass.
 
-`incoming`, `survive` and `accuracy` arrive as `null`, and `reason` as
-`""`, whenever the explanation could not be computed. That is by design:
-an explanation that fails must never cost the advice it was explaining.
-Rendering a null as `0` would say "nothing is coming at you" -- the exact
-opposite of "we don't know". Hide the element instead.
+The page must report its height through `set_height` whenever its content
+changes size. It measures `#panel.scrollHeight`, on mount and from a
+`ResizeObserver`.
 
-### `survive` saturates at 4.0
+## What the tests enforce
 
-A gauge drawn on a 0-4 scale sits pinned at full for most of a healthy
-fight and looks broken. Render 4.0 as **"4+"** and treat the interesting
-range as 0-3.
+| Test | What it checks |
+|---|---|
+| `tests/test_panel_bridge.py` | Every `call('name', ...)` in `overlay_ui/src/*.jsx` names a method on `panel.Api` with the same number of arguments. Every `model.<field>` the page reads is in `model_json`. `call` is declared at module scope so every component can reach it. `panel.main` imports. |
+| `tests/test_realms_panel.py` | Every method the page calls exists on `RealmsApi`. The Realms panel pushes the model into the page. |
+| `tests/test_overlay.py` | The decisions in `Model` and the workers, without a display. |
 
-### Player marks must survive the poll
+The argument check reads call sites with a regular expression that stops
+at the first `)`. Keep every `call(...)` flat: pass plain variables, not
+nested function calls, or the check counts the wrong number of arguments.
 
-`lured`, `trapped` and a hand-named cog are the player's assertions, and
-the model is replaced wholesale every 400 ms. Python now holds these
-across the round transition, so a cog named in round two stays named in
-round three. If the UI keeps its own local mirror of them it will fight
-that: drive the toggles from the model, and let the call be the only
-writer.
+Run them with the rest of the suite:
 
-### The engine badge has two truths at once
+```
+python -m unittest discover tests
+```
 
-`engine` and `preferred_engine` disagreeing is not a bug. The search
-takes up to fifteen seconds on any board with two or more cogs, so on the
-first round of a fight the displayed answer is always the policy's,
-whatever the player prefers. Show the preference as selected and the
-actual source as the state -- a spinner on the unselected side reads
-correctly.
+## Behaviour a UI change must respect
 
-### Player marks are scoped to one fight, and keyed on plate order
+**Null means unknown.** `incoming`, `survive`, `accuracy`, `hp`, `max_hp`
+and `level` arrive as `null`, and `reason` as `""`, when they could not be
+worked out. Hide the element. Rendering `null` as 0 would say "nothing is
+coming at you", the opposite of "not known".
 
-`lured`, `trapped` and a hand-picked cog name are stored against the
-plate's **index**, not against the cog. They are cleared when a battle
-ends (and again when one starts, in case the end was missed), so nothing
-carries into the next fight — that was a real bug: a cog named in one
-battle was stamped onto whatever stood at the same index in the next,
-and the player's name outranks the readers, so the stale pick *beat* a
-correct read.
+**`survive` saturates.** Render 4.0 as "4+".
 
-Within one fight the indices still shift when a cog dies. That is
-visible and correctable in the dropdown, which is why it is preferred
-over silently discarding the pick — but it means the UI should never
-treat a name as permanent.
+**`cogs_left` of -1 is "unknown".** Several boss fights have sizes the
+project has not confirmed, and the panel does not invent a total.
 
-### Non-empty `problems` means the advice on screen is stale
+**Non-empty `problems` means stale advice.** Cog rows are rebuilt on every
+read; the advice is replaced only when an engine answers. While
+`problems` is non-empty the page shows live rows beside a move computed
+for an earlier position, so it greys the move and tags it "STALE". On TTR
+the worker retries every 2 seconds in this state.
 
-The cog rows are rebuilt from the readers every poll; the advice is only
-replaced when a search succeeds. So while `problems` is non-empty the
-page shows **live cog state beside frozen advice** — a cog you have just
-marked lured, sitting next to a recommendation computed when it was
-awake. That combination was reported as "it's a mess", and it reads as a
-mechanics bug rather than a stale frame.
+**`engine` and `preferred_engine` can differ.** The Playout and Search
+engines take seconds. Until the preferred one answers, the move on screen
+is another engine's. Show the preference as selected and the source as a
+badge on the move.
 
-Grey the advice card, or badge it, whenever `problems` is non-empty.
-Python retries every 2 s in that state, so it is usually brief.
+**The player's marks are scoped to one fight and keyed on row order.** A
+hand-picked name, level or lure mark is stored against the row index and
+cleared when the battle ends. Within a fight the indexes shift when a cog
+is defeated. Drive every toggle from the model and let the call be the
+only writer; a local mirror in the page will fight the next push.
 
-### Never bundle TTR artwork
+**Cogs have no weaknesses.** Every gag works on every cog. There is no
+field for a type chart because there is nothing of the kind to read.
 
-`lure_icon` and `map_icon` are read from the player's own installation at
-runtime and handed over inline for exactly this reason. Copying game art
-into `overlay_ui` would put TTR's assets in the repository, and would go
-stale the next time the game patches.
+**The game's own icons come from the player's installation.** `lure_icon`,
+`organic_icon`, `track_icons` and `map_icon` are extracted at run time and
+passed inline. The gag and cog pictures under `overlay_ui/src/assets/` are
+separate files bundled into the build.
 
-### The dark theme is the functional one
+**The window is small and sits over a running game.** Keep the move
+readable at a glance and keep motion away from it.
 
-It sits on top of a running game, always on top, in the player's
-peripheral vision. Whatever happens to the light theme, the dark one is
-what gets used mid-fight: high contrast on the advice line, everything
-else quiet, and no animation that pulls the eye away from the game.
+## Adding a field or a method
 
----
-
-Read the docstrings in `solver/live/overlay.py` and
-`solver/live/panel.py` before changing behaviour. Most of the
-constraints above are recorded there beside the code that enforces them,
-each with the failure that caused it.
+1. Add the field to `Model` (or a property, if it is a decision) and to
+   `model_json`.
+2. Add its default to `EMPTY` in `App.jsx`.
+3. For a method, add it to **both** `panel.Api` and
+   `realms_panel.RealmsApi`, as a stub where it has no meaning.
+4. Run the tests above, then `npm run build` in `overlay_ui/` and commit
+   `dist/`. See [overlay_ui/README.md](../overlay_ui/README.md).
+5. Update this file.

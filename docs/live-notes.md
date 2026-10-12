@@ -1,12 +1,86 @@
 # Live reader notes: how the debugging actually went
 
-This is the debugging history behind `solver/live/realms.py`,
-`solver/live/realms_panel.py` and `solver/live/watch.py` — wrong
-diagnoses, wire-format dead ends, and the incidents that forced a rule.
-The code keeps short docstrings with a pointer here; this is where the
-story and the evidence live. See also `docs/realms.md`, which covers the
-same Astron wire protocol from the "what to trust" angle rather than the
-debugging angle — the two overlap on some facts by design.
+**This file is a historical record, not the current reference.** It was
+written on 2026-08-30 and is the debugging history behind three
+modules: `solver/live/realms.py`, `solver/live/realms_panel.py` and
+`solver/live/watch.py`. It records wrong diagnoses, wire-format dead
+ends, and the incidents that forced a rule. The code keeps short
+docstrings that point here by section, and this is where the story and
+the evidence live.
+
+For how the tool reads a game today, see:
+
+- [live-reading.md](live-reading.md): the current reference for every
+  source the Toontown Rewritten (TTR) panel reads.
+- [realms.md](realms.md): the current reference for the Toontown Realms
+  reader, and the rule that nothing read from Realms may be used as TTR
+  game data. It covers the same wire protocol as the first part of this
+  file from the "what to trust" angle, and the two overlap on some
+  facts by design.
+
+## How to read this file
+
+Terms used below: *Astron* is the open-source server software that
+Toontown Realms runs on the player's own machine. A *dclass* is a class
+in its `.dc` schema file, a *doId* is an object's id, and a *datagram*
+is one message on its internal bus. A *plate* is the sign Toontown
+Rewritten draws above each cog in a battle. "The maintainer" is the
+project's maintainer, an experienced player whose reports from play are
+cited as evidence.
+
+The body is kept as it was written, so that the reasoning behind each
+rule stays intact. Where a statement has since become false, a dated
+note beside it says so:
+
+> **Note, 2026-10-11.** Notes in this form were added later and
+> describe the code as it stood on that date.
+
+Section headings are unchanged, because code comments link to them.
+
+## What has changed since this was written
+
+None of the following is covered by this file. Each is described in
+[live-reading.md](live-reading.md) or [realms.md](realms.md).
+
+- **A third engine.** The panels now show three engines (PPO, Search
+  and Playout) and the Playout row leads by default. Statements below
+  about "the policy" and "the search" being the only two, and about
+  which of them plays better being unmeasured, predate that.
+- **TTR digit reading.** Gag counts and plate levels are now read by
+  small classifiers trained on synthetic digits, and the gag menu is
+  remembered across polls while it stays open. The `watch.py` section
+  below describes the older template matching.
+- **New TTR sources.** The client's log file (which boss fight), a
+  relay for what the game publishes to Discord (building floors), and
+  the Local API's pink slip count were all added in October 2026.
+- **Realms holdings and teammates.** The Realms reader now also reads
+  pink slips, unites, SOS cards and teammates, and tracks boss fights.
+- **Shared worker.** Both panels now share `solver/live/worker.py`
+  (`AdviceWorker`). Some functions described below under
+  `realms_panel.py` have moved there.
+- **Party search.** A party position can now be searched
+  (`solver/search/party_search.py`). Remarks below that it cannot
+  predate that.
+
+## Sections that code comments point at
+
+| Code location | Section |
+|---|---|
+| `realms.py` module docstring | [solver/live/realms.py](#solverliverealmspy) |
+| `realms.py`, state server message constants | [State server message numbering](#state-server-message-numbering-six-of-the-constants-were-wrong) |
+| `realms.py`, `PROBE_ENTER` | [2040 and 2046 are not ENTER messages](#2040-and-2046-are-not-enter-messages) |
+| `realms.py`, `BATTLE_CLASSES` | [BATTLE_CLASSES](#battle_classes-distributedbattlebase-has-to-lead-the-list) |
+| `realms.py`, `DCIndex` | [DCIndex](#dcindex-use-the-games-own-parser-and-guard-dclass) |
+| `realms.py`, `ObjectStore.enter` | [ObjectStore.enter and the `fill_only` rule](#objectstoreenter-and-the-fill_only-rule) |
+| `realms.py`, `DNA_COGS` | [Suit DNA](#suit-dna) |
+| `realms.py`, `cog_level` | [cog_level](#cog_level-its-the-level-minus-one-not-a-range-offset) |
+| `realms.py`, `DC_TRACK_ORDER` | [Track order](#track-order-is-written-out-not-taken-from-the-enum) |
+| `realms.py`, `parse_organic` | [parse_inventory, parse_track_access, parse_organic](#parse_inventory-parse_track_access-parse_organic) |
+| `realms.py`, `Members` and `Members.traps` | [Members / setMembers](#members--setmembers) |
+| `realms.py`, `RealmsListener.refresh` | [RealmsListener.refresh and refresh_battle_members](#realmslistenerrefresh-and-refresh_battle_members) |
+| `realms.py`, `_note_chosen_attacks` | [_note_chosen_attacks](#_note_chosen_attacks-tracking-lure-and-trap-intent) |
+| `realms.py`, `apply_movie` | [apply_movie](#apply_movie-correcting-for-stale-hp-and-the-doubled-datagram) |
+| `realms.py`, `trap_on` | [trap_on / lure_age](#trap_on--lure_age) |
 
 ## solver/live/realms.py
 
@@ -170,13 +244,20 @@ Toon-Up, which is a real and awkward loadout rather than a misread.
 
 `parse_organic` reads `setTrackBonusLevel`: -1 means not organic,
 otherwise the level the bonus reaches. **The level is 0-based and 6
-means the whole track**, per the owner — a real toon read
+means the whole track**, per the maintainer — a real toon read
 `[-1, -1, -1, -1, 6, -1, -1]`: Throw organic, all seven levels. This
 project treats organic as a property of the whole track (see
 `ToonState.organic_tracks`), matching how TTR works — a track is earned
 organic by ToonTask and every gag in it is organic thereafter — so any
 non-negative entry makes the track organic and the level itself is
 dropped.
+
+> **Note, 2026-10-11.** The level is no longer dropped, and the
+> statement about how TTR works was wrong. A change on 2026-10-07 made
+> organic stop at the highest gag planted rather than cover the whole
+> track. `parse_organic_levels` now keeps how far up the bonus reaches,
+> and it reaches the board as `ToonState.organic_levels`.
+> `parse_organic` still answers only which tracks are organic.
 
 Whether "organic" means the same thing in both games is a separate
 question, and the answer is no: Realms gives organic a flat +10% to
@@ -226,7 +307,7 @@ was later corrected: see "the roster does refresh" below.
 the trap gag's 0-BASED LEVEL rather than a flag: `'9'` is the sentinel
 for no trap (there are only seven trap levels, so 0-6 are real values
 and 9 cannot collide). `[CONFIRMED]` live: a trapped Money Bags read
-`'4'`; the decode says level 5, Trapdoor; the owner confirmed a Trapdoor
+`'4'`; the decode says level 5, Trapdoor; the maintainer confirmed a Trapdoor
 is what they threw. Untrapped cogs read `'9'` in every capture across
 many fights.
 
@@ -306,7 +387,7 @@ claiming one plans damage that will never arrive.
 time, and the value it writes is the HP going INTO that round — the
 damage a round deals only reaches the state server at the NEXT commit.
 Confirmed against a live fight: HP 90 at one commit, 61 at the next,
-with the owner confirming every gag in between had hit. That leaves the
+with the maintainer confirming every gag in between had hit. That leaves the
 panel a round stale over exactly the window it's used in
 (`WaitForInput`, while the player chooses), and no amount of re-querying
 fixes it, because the state server does not have the number yet either.
@@ -323,6 +404,12 @@ server later confirms.
 matches both an object's own channel and its location channel — without
 de-duplication (`_last_movie`, keyed by a fingerprint of the value) the
 damage would apply twice and every cog would die at half health.
+
+> **Note, 2026-10-11.** The same doubling was later found in the round
+> counter, which had not been guarded. Counting every datagram that
+> named the movie state aged each Lure two rounds per round. Rounds are
+> now counted on entering the movie state (`_note_state`). See
+> [realms.md](realms.md#reading-a-vp-live-three-things-the-first-log-turned-up).
 
 ### trap_on / lure_age
 
@@ -342,6 +429,14 @@ no specific cog entry exists. Right for a group Lure, right for a solo
 fight; the only case it can be wrong is two different Lure levels aimed
 at different cogs in one round, which needs a party, and a party cannot
 be searched yet anyway.
+
+> **Note, 2026-10-11.** A party can now be searched, so that last
+> clause no longer excuses the gap; the limit itself still stands. Both
+> functions also now find a cog's battle by its roster
+> (`RealmsListener._battle_of`) instead of requiring exactly one battle
+> on the server. A Vice President fight has two battle objects, one per
+> side, and requiring exactly one made every Lure and Trap in a boss
+> fight read as unseen.
 
 ## solver/live/realms_panel.py
 
@@ -368,11 +463,18 @@ from `setDNAString`); health is exact (20/20 because the server said
 battle roster rather than marked by hand; party size is read from
 `setMembers` rather than asked for.
 
+> **Note, 2026-10-11.** `overlay.Worker` and the Realms worker now both
+> subclass `AdviceWorker` in `solver/live/worker.py`, which holds the
+> controls and the engine plumbing the two panels have in common. The
+> reading is still separate, and a test fails if the TTR modules or the
+> shared worker mention Realms. The Realms panel also reads more than
+> is listed here; see [realms.md](realms.md#the-panel).
+
 ### DEFAULT_BUDGET: depth 4 was tried at 12s and bought nothing
 
-Depth 4 never completes — CLAUDE.md measures depth 3 at "many minutes"
-— so iterative deepening always runs to the deadline, however long that
-is. Measured on the owner's real 70-gag loadout, the recommended move
+Depth 4 never completes — depth 3 was measured at "many minutes"
+([search-depth.md](search-depth.md)) — so iterative deepening always runs to the deadline, however long that
+is. Measured on the maintainer's real 70-gag loadout, the recommended move
 stops changing by 2s in every position tried: one cog, two cogs and
 four. It's not free time either: the search is CPU-bound Python in the
 same process as the UI, so a long one starves the poll loop and the
@@ -394,6 +496,11 @@ fresh interpreter. It returns `(text, track, level)` rather than an
 boundary, and the child renders the wording itself so it stays identical
 either way.
 
+> **Note, 2026-10-11.** It now returns `(text, track, level, target)`.
+> The target was added because the panel's explanation of a move
+> simulates the round, and a move rebuilt without its target read as
+> hitting every cog.
+
 ### RealmsWorker.reconsider and the rejection-key bug
 
 Rejections key on `hybrid.reject_key`, not the exact action: every fire
@@ -410,6 +517,11 @@ nothing at all. `ask_now` already forces the recompute through the
 `_asked` flag and leaves the key alone, so the board still counts as
 unchanged and the rejection survives.
 
+> **Note, 2026-10-11.** `reconsider` now lives on the shared
+> `AdviceWorker` and takes a scope: this gag only, the whole track, or
+> the middle width described above, which is the default. The rule that
+> it must not reset the position key is unchanged.
+
 ### _first_answer: the policy answers first, the search may override
 
 `hybrid.climb` is what every offline evaluation in this project actually
@@ -420,6 +532,14 @@ which of the two plays better is genuinely not established: they agreed
 on one of three test positions and differed on the other two, and
 nothing here has measured which was right. The fast answer goes up
 first and the search replaces it if it disagrees.
+
+> **Note, 2026-10-11.** This is no longer how the panel behaves. There
+> are three rows now. The policy's answer (the PPO row) still appears
+> first, and the Playout row, which plays candidate moves out to the
+> end of the fight, takes the lead when it posts unless the player has
+> picked a row. Comparisons have also been measured since: on one side
+> of a two-player Vice President fight the Search row won 6 of 60 and
+> the Playout row 33 of 60.
 
 ### Refresh throttling: the fight is refreshed every poll, the world isn't
 
@@ -437,18 +557,23 @@ second across 133 objects, put a few hundred queries a second through
 the message director — 6,000 `GET_ALL` replies in one fight, most of
 them re-describing a butterfly that had not changed.
 
+> **Note, 2026-10-11.** The comment in `_headless` has since been
+> shortened and no longer carries these figures; this section is where
+> they are kept. In the current code the battle's roster is refreshed
+> on every poll and the full sweep runs every ten seconds.
+
 ### _record_position: pickle the exact state, not a summary
 
 Reconstructing a board from a screenshot has failed twice on picks the
-owner reported — a Storm Cloud at a lured level 1, and a pass with four
+maintainer reported — a Storm Cloud at a lured level 1, and a pass with four
 lured cogs and a full pouch. Both rebuilt boards gave sensible moves,
 meaning the panel was searching something other than what was
 reconstructed, and no amount of rebuilding by hand will find that.
 Pickling the exact state avoids the failure mode of a summary: a summary
-records what I thought to write down, which is exactly the assumption
-that keeps being wrong. `record_error` is set and surfaced once rather
+records what its author thought to write down, which is exactly the
+assumption that keeps being wrong. `record_error` is set and surfaced once rather
 than swallowed — this used to be a silent `pass`, and the directory the
-owner chose did not exist, so every round failed silently and the
+maintainer chose did not exist, so every round failed silently and the
 recording they were relying on was never written.
 
 ### pump(): push the model, don't just store it
@@ -460,6 +585,10 @@ rendering its own defaults forever — "waiting for a battle" and a 15s
 budget while the reader could see the fight perfectly, because 15 is
 `App.jsx`'s own fallback and not this module's 12, and that mismatch is
 what gave the bug away.
+
+> **Note, 2026-10-11.** The module's default budget was 12 seconds when
+> this happened. It is now 4 seconds, for the reasons given under
+> `DEFAULT_BUDGET` above.
 
 `pump` also always skips to the newest queued model:
 `window.evaluate_js` is a round trip into WebView2 and slower than the
@@ -491,6 +620,9 @@ overworld frame that fools the plate detector. The claim in `vision`'s
 docstring that the slot colour "appears nowhere else in Toontown's
 high-key palette" was validated on battle screenshots only and is false
 in the wider game.
+
+> **Note, 2026-10-11.** That docstring has since been corrected and now
+> says what this paragraph says.
 
 **Teal plates are not necessary either**, which is the subtler one. When
 a round resolves, TTR cuts the camera to show the attack and takes the
@@ -571,6 +703,12 @@ score, and the margin is the dangerous one to skip: a live plate reading
 low score means the region holds nothing legible; a low margin means it
 holds something legible that could equally be another digit.
 
+> **Note, 2026-10-11.** The level is now read by a small classifier
+> when its weights are present, with the template match described here
+> as the fallback. Both gates still apply, on the same scales. The
+> player can also type a level the reader refused. See
+> [live-reading.md](live-reading.md#level-department-and-health).
+
 The player's own naming is consulted BEFORE the catalogue match, not
 after. Consulting the name only when nothing else identified the plate
 meant a confident wrong answer from the catalogue (six heads of
@@ -596,12 +734,20 @@ is indistinguishable from the dropdown not working. Indices can still
 shift onto the wrong cog when one dies, but that's visible in the
 dropdown and correctable, where a silently discarded pick is not.
 
+> **Note, 2026-10-11.** Two rules were added later. A frame with no
+> plates at all forgets nothing: it means the reader cannot see, not
+> that the cogs have gone, and the attack animation between rounds
+> lasts longer than the debounce. And every mark is cleared when a
+> fight ends or a new one starts, because marks are keyed on plate
+> order and one set in an earlier fight otherwise landed on whatever
+> stood in that position in the next.
+
 ### name_plate: writing the player's pick into the head library
 
 A signature is consulted forever, so a wrong entry poisons every later
 match, while a wrong name costs one battle — which was the reason not to
 write player picks into the library by default. Writing was later
-enabled on the owner's instruction, because `catalogue.add` overwrites
+enabled on the maintainer's instruction, because `catalogue.add` overwrites
 rather than accumulates and keeps the source crop in the catalogue
 directory, so a mis-click can be seen and corrected, and a player naming
 a cog they are looking at is better evidence than a signature match

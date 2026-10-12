@@ -1,392 +1,221 @@
 # TTRSolver
 
-TTRSolver is an automated battle assistant and decision engine for [Toontown Rewritten](https://www.toontownrewritten.com/). It combines a faithful simulation of Toontown's combat mechanics, an exact expectimax tree search for solo battles, a trained reinforcement learning policy (PPO) with coordinate ascent for party battles, and live screen-reading tools to deliver real-time tactical advice.
+TTRSolver advises a player during cog battles in
+[Toontown Rewritten](https://www.toontownrewritten.com/) (TTR), a fan-run
+online game. Each round it reads the battle and says which gag (an attack
+item, carried in limited numbers) to throw at which cog (an enemy). The
+advice appears in a small always-on-top panel beside the game. The player
+still makes every move.
 
----
+It is written for two readers: a TTR player who wants a second opinion
+mid-fight, and a developer who wants to look at the methods, which are a
+battle simulator sourced from the TTR wiki, an exact expectimax search, a
+policy network trained with PPO, and Monte Carlo playouts driven by a small
+rollout network. Toontown Realms, a different Toontown server, is supported
+through its own panel.
 
-## Table of Contents
-- [System Architecture](#system-architecture)
-- [How to Run & Interfaces](#how-to-run--interfaces)
-- [Combat Mechanics & Calculations](#combat-mechanics--calculations)
-- [Dual-Engine Solver Architecture](#dual-engine-solver-architecture)
-  - [Why Two Engines? Expectimax vs. PPO](#why-two-engines-expectimax-vs-ppo)
-  - [Engine 1: Exact Expectimax Search (Solo)](#engine-1-exact-expectimax-search-solo)
-  - [Engine 2: Neural Policy & Coordinate Ascent (Party)](#engine-2-neural-policy--coordinate-ascent-party)
-- [Scoring Objective & Optimization](#scoring-objective--optimization)
-- [Consumable Economics](#consumable-economics)
-- [Live Game State Ingestion](#live-game-state-ingestion)
-- [Benchmark Performance](#benchmark-performance)
-- [Repository Structure](#repository-structure)
-- [Documentation Index](#documentation-index)
+TTRSolver is not affiliated with or endorsed by Toontown Rewritten,
+Toontown Realms or The Walt Disney Company.
 
----
+## What it reads, and what it never does
 
-## System Architecture
+| Source | What it gives |
+|---|---|
+| TTR's official Local API (opt-in; the game asks for consent in-game) | Laff (health), gag training, organic tracks, location, pink slips |
+| A capture of the game's own window | Cog level, department and health from the plate above each cog; gag counts from the gag menu |
+| The log file the TTR client writes | Which boss fight the toon has entered |
+| What the game publishes to Discord Rich Presence | The floor count of a cog building, through an optional local relay |
+| The installed game's asset archives | The interface font and department emblems, used to match what is on screen; cached locally and never shipped in this repository |
+| Toontown Realms' local server stream | The whole battle as typed values, read-only |
 
-The following diagram illustrates how game state flows from live clients or simulated scenarios through the rules engine and solver to user interfaces:
+It never reads the game's memory, never hooks, injects into or modifies the
+client, never touches the game's encrypted code, and never sends input to
+the game. It advises; the player plays.
+
+## Quick start
+
+The solver and its tests run on the Python standard library alone
+(developed on Python 3.13). The live panels need a few optional packages.
+
+```
+python run.py            # menu of front ends; marks any whose packages are missing
+python run.py --list     # print the menu and exit
+python run.py 1          # start entry 1 (the TTR overlay) directly
+```
+
+| Install | Needed for |
+|---|---|
+| `pip install -r requirements-vision.txt` (numpy, pillow, mss) | Screen reading, and the PPO and Playout engines |
+| `pip install pywebview` | The overlay window (TTR and Realms). Entry 2 is a plain Tk window that does not need it |
+| `pip install -r requirements-realms.txt` (panda3d) | The Realms panel only |
+| `pip install -r requirements-training.txt` (torch) | Retraining the networks with `tools/train_*.py`; nothing under `solver/` imports torch |
+
+Trained weights ship in the repository as JSON, so no training is needed to
+run anything.
+
+For the TTR overlay, two game settings must be on. Both are keys in TTR's
+`settings.json`:
+
+- `want-local-api` turns on the Local API. The game then asks for consent
+  the first time the panel connects.
+- `show-cog-levels` shows each cog's level on its plate, which is the only
+  place the level can be read from.
+
+To try it without a game, `python run.py 5` narrates a solo fight played by
+the search, and `python run.py 7` serves the browser visualizer.
+[docs/user-guide.md](docs/user-guide.md) covers setup and the panel's
+controls in full.
+
+## The three engines
+
+The panel shows three rows, one per engine, each with its own recommended
+move. The Playout row leads by default; a button per engine shows any
+other engine's move instead.
+
+| Row | What it is | Good at | Limits | Docs |
+|---|---|---|---|---|
+| **Playout** | Takes about ten candidate moves and plays each one out to the end of the fight many times, with a small network choosing the later moves and a value network scoring a playout cut off after 8 rounds | The strongest in simulation. The only engine that sees the boss waves after the one on the field | Takes seconds; it posts a best move after each batch of playouts and improves as it runs | [playout.md](docs/playout.md), [rollout-network.md](docs/rollout-network.md) |
+| **PPO** | A policy network trained with PPO (a reinforcement-learning algorithm) proposes moves, and a coordinate-ascent step, called `climb` in the code, refines them against a one-round scorer | Answers in milliseconds, so it is shown until the playouts post their first result | Judges one round at a time; ignores the panel's play-style preset | [ml-design.md](docs/ml-design.md), [ppo-math.md](docs/ppo-math.md), [scoring.md](docs/scoring.md) |
+| **Search** | Expectimax: a tree search over the exact outcome probabilities of each round | Exact for the depth it reaches; small solo fights can be solved to the end | Solo only. Cost grows quickly with depth: on a full endgame pouch against two cogs, depth 1 took 0.01 s and depth 2 took 9.3 s, so the live default is depth 2 | [search-depth.md](docs/search-depth.md), [heuristic-learning.md](docs/heuristic-learning.md) |
 
 ```mermaid
-flowchart TD
-    classDef inputStyle fill:#1e3a8a,stroke:#60a5fa,stroke-width:2px,color:#ffffff
-    classDef stateStyle fill:#0369a1,stroke:#38bdf8,stroke-width:2px,color:#ffffff
-    classDef simStyle fill:#065f46,stroke:#34d399,stroke-width:2px,color:#ffffff
-    classDef engineStyle fill:#581c87,stroke:#c084fc,stroke-width:2px,color:#ffffff
-    classDef uiStyle fill:#7c2d12,stroke:#fb923c,stroke-width:2px,color:#ffffff
-
-    subgraph Ingestion["1. State Ingestion"]
-        V["Screen Capture / Vision"] --> BS["Normalized BattleState"]
-        A["Astron Wire / Realms"] --> BS
-        L["TTR Local API"] --> BS
-        S["Scenario Generator / CLI"] --> BS
-    end
-
-    subgraph Simulation["2. Rules & Simulation Engine"]
-        BS --> SIM["Simulator: Outcomes & Legal Actions"]
-        SIM --> ACC["Mechanics: Accuracy, Stuns, Damage, Combos"]
-    end
-
-    subgraph Engines["3. Dual Decision Engines"]
-        ACC --> E1["Exact Expectimax Search<br/>(Solo Battles, Star1/Star2 Pruning)"]
-        ACC --> E2["PPO Policy + Coordinate Ascent<br/>(Party Battles, Sub-10ms Latency)"]
-    end
-
-    subgraph Presentation["4. User Interfaces"]
-        E1 --> UI1["Live Advice Overlay / HUD"]
-        E2 --> UI1
-        E1 --> UI2["Interactive Browser Visualizer"]
-        E2 --> UI2
-        E1 --> UI3["Terminal CLI Advisor"]
-    end
-
-    class V,A,L,S inputStyle
-    class BS stateStyle
-    class SIM,ACC simStyle
-    class E1,E2 engineStyle
-    class UI1,UI2,UI3 uiStyle
+flowchart LR
+    API["TTR Local API"] --> S["Battle state and fight context"]
+    SCR["Game window capture"] --> S
+    LOG["Client log"] --> S
+    DRP["Discord relay"] --> S
+    RLM["Realms server stream"] --> S
+    S --> PPO["PPO policy + climb"]
+    S --> SRCH["Search (expectimax)"]
+    S --> PLAY["Playout"]
+    PPO -- "candidate moves" --> PLAY
+    PPO --> P["Panel: three rows"]
+    SRCH --> P
+    PLAY --> P
 ```
 
----
-
-## How to Run & Interfaces
-
-TTRSolver is designed to run out of the box using only the Python standard library. Optional dependencies are isolated to specific features (such as computer vision or model training).
-
-### Quick Start
-```bash
-python run.py                          # Open interactive launcher menu
-python -m unittest discover tests      # Run test suite (1600+ tests)
-```
-
-### Supported Interfaces
-
-1. **Live Game Overlay (`python run.py 1`)**:
-   - Transparent, always-on-top HUD rendered directly over Toontown Rewritten.
-   - Detects active battle state, displays cog health and status, and highlights recommended gags in real time.
-   - Inventory controls allow setting spending caps for pink slips, unites, and SOS cards.
-
-2. **Interactive Browser Visualizer (`python run.py 7` or `python -m visualizer.serve`)**:
-   - Web application for exploring solver decisions and inspecting game trees.
-   - Features:
-     - **Dual-Engine Inspection**: Compare moves selected by Classical Search vs. PPO Policy.
-     - **Tree Graph Visualization**: Explore full probability and outcome branches.
-     - **Custom Scenario Builder**: Generate or configure complex battle positions (e.g., multi-cog street battles, boss rounds, or damaged toons).
-
-3. **Terminal Real-Time Advisor (`python run.py 3`)**:
-   - Headless CLI tool that monitors live gameplay and prints turn-by-turn advice directly to the console.
-
-4. **Python Scripting API**:
-   ```python
-   from solver.state import BattleState, ToonState, CogState, Track
-   from solver.search import expectimax
-
-   toon = ToonState(laff=65, max_laff=100, track_exp={Track.THROW: 6},
-                    gag_counts={(Track.THROW, 5): 3, (Track.LURE, 4): 2})
-   cog = CogState.create(department="Bossbot", level=9)
-   state = BattleState(toons=[toon], cogs=[cog])
-
-   best_action, expected_value = expectimax.solve(state)
-   print(f"Recommended action: {best_action} (EV: {expected_value:.2f})")
-   ```
-
-### Optional Dependencies
-```bash
-pip install -r requirements-vision.txt     # OpenCV/NumPy for live screen reading
-pip install -r requirements-training.txt   # PyTorch for offline model training
-```
-
----
-
-## Combat Mechanics & Calculations
-
-The simulation engine implements exact Toontown Rewritten battle mechanics audited against the [TTR Wiki](https://toontownrewritten.wiki).
-
-### 1. Accuracy Calculation
-Toon gag accuracy is calculated as:
-
-$$\text{Accuracy} = \text{propAcc} + \text{trackExp} - \text{tgtDef} + \text{bonus}$$
-
-- **Base Accuracy ($\text{propAcc}$)**: The intrinsic accuracy of the gag tier (e.g., 70 for level 5 Throw, 95 for organic Lure).
-- **Track Experience ($\text{trackExp}$)**: $(\text{training level} - 1) \times 10$ points (halved for Toon-Up), reflecting mastery level.
-- **Target Defense ($\text{tgtDef}$)**: Defense rating determined by the highest-level cog targeted, scaled by cog tier rank.
-- **Accuracy Bonuses ($\text{bonus}$)**:
-  - **Stun Bonus**: $+20\%$ if a prior attack landed successfully earlier in the same round.
-  - **Trap Bonus**: $+20\%$ for Lure if the target cog is already trapped.
-  - **Multi-Lure Bonus**: $+20\%$ if multiple toons use Lure in the same round.
-
-Final accuracy is clamped to $[5\%, 95\%]$, except for rule-mandated forced outcomes:
-- **Trap**: Always hits ($100\%$).
-- **Throw & Squirt against Lured Cogs**: Always hit ($100\%$).
-- **Drop against Lured Cogs**: Always misses ($0\%$).
-
-*Roll Groups*: Gags of the same track targeting the same cog share a single random variable roll rather than rolling independently.
-
-### 2. Damage & Combo Multipliers
-- **Combo Bonus**: When two or more toons successfully hit the same cog with the same gag track in a single round, a $+20\%$ damage multiplier is applied.
-- **Lure Knockback Bonus**: Throw or Squirt attacks that wake a lured cog receive an additional $+50\%$ damage multiplier.
-- **Organic Bonus**: Trees planted in a toon's estate grant a $+10\%$ damage increase to that track.
-
-### 3. Cog Attack Selection
-Cogs do not play adversarially; they select attacks randomly from published frequency distributions based on their specific cog type and level. Counter-attacks occur after the toon phase concludes.
-
----
-
-## Dual-Engine Solver Architecture
-
-TTRSolver employs two complementary engines:
-
-| Feature | Engine 1: Exact Expectimax | Engine 2: Neural Policy + Climb |
-|---|---|---|
-| **Best For** | Solo battles (1 Toon) | Party battles (2–4 Toons), Bosses |
-| **Optimality** | **Exact mathematical expectation** | Approximate heuristic optimization |
-| **Search Method** | Depth-limited tree search with $\alpha$-$\beta$ pruning | Coordinate ascent hill-climbing over PPO logits |
-| **Branching Control** | Star1/Star2 bounds & cog node collapsing | Top-$k$ action menus & targeted heuristic probes |
-| **Latency** | 50 ms – 4.0 s (depending on depth) | **~5.8 ms** (deterministic budget) |
-| **Runtime Requirements** | Python Standard Library | NumPy |
-
-### Why Two Engines? Expectimax vs. PPO
-
-The split between the two engines is determined by state-space geometry and turn-time constraints:
-
-1. **Solo Combat $\to$ Exact Expectimax Search**:
-   Because every attack permanently consumes a gag, solo battles form a finite Directed Acyclic Graph (DAG) whose depth is bounded by initial pouch capacity. This enables `expectimax.solve()` to evaluate lines to battle completion without heuristic approximations, yielding an exact mathematical oracle. Reinforcement learning is unnecessary and sub-optimal here compared to direct exact computation.
-2. **Party Combat $\to$ Neural Policy (PPO) + Coordinate Ascent**:
-   In party encounters (2–4 toons against up to 4 cogs), joint action and outcome spaces explode ($>8,600$ branches per ply). Full search depth scales exponentially: Depth 1 takes ~0.38s, Depth 2 takes ~17.9s, and Depth 3 takes ~199s—far exceeding the 15-second turn timer. The trained PPO policy evaluates in $<1$ ms, generating high-probability candidate plans that coordinate ascent (`hybrid.climb`) refines in 5.8 ms.
-
-For detailed empirical analysis of this division, see [docs/ml-design.md](docs/ml-design.md).
-
----
-
-### Engine 1: Exact Expectimax Search (Solo)
-
-Solo combat forms a **Directed Acyclic Graph (DAG)**:
-1. Every attack consumes a gag from the pouch.
-2. Pouch inventory strictly decreases across turns, bounding the maximum game depth by the initial gag count.
-3. Unlured passes consume a finite allowance (`state.free_passes`), while lured passes reduce remaining lure duration.
-
-Because the game cannot loop infinitely, `expectimax.solve()` evaluates lines to battle completion without heuristic value approximations:
-
-$$V(s) = \max_{a \in \mathcal{A}(s)} \sum_{o \in \Omega} P(o \mid s, a) \Big( r(s, a, o) + V(s') \Big)$$
-
-```mermaid
-flowchart TD
-    classDef maxNode fill:#1e3a8a,stroke:#60a5fa,stroke-width:2px,color:#ffffff
-    classDef chanceNode fill:#581c87,stroke:#c084fc,stroke-width:2px,color:#ffffff
-    classDef hitNode fill:#065f46,stroke:#34d399,stroke-width:2px,color:#ffffff
-    classDef missNode fill:#881337,stroke:#fb7185,stroke-width:2px,color:#ffffff
-
-    S["MAX Node: Toon Turn (Choose Action)"]
-    S -->|Throw Lvl 5| A["CHANCE Node: Accuracy Roll"]
-    S -->|Lure Lvl 4| B["CHANCE Node: Accuracy Roll"]
-    A -->|Hit p=0.83| A1["Cog Takes Damage"]
-    A -->|Miss p=0.17| A2["No Effect"]
-    A1 --> D["CHANCE Node: Cog Attack Phase"]
-    A2 --> E["CHANCE Node: Cog Attack Phase"]
-    D -->|Attack 1 p=0.50| D1["MAX Node: Next Turn"]
-    D -->|Attack 2 p=0.50| D2["MAX Node: Next Turn"]
-
-    class S,D1,D2 maxNode
-    class A,B,D,E chanceNode
-    class A1 hitNode
-    class A2 missNode
-```
-
-#### Search Optimizations
-- **Star1 Pruning**: Bounds unexpanded chance node probability mass using child intervals $[L, U]$. If upper bound $< \alpha$ or lower bound $> \beta$, the branch is pruned.
-- **Star2 Probing**: Samples a single probe child per unseen branch to tighten bounds before evaluating complete subtrees.
-- **Cog Phase Collapsing**: Because cog counter-attacks involve random distributions rather than tactical choices, replacing the counter-attack distribution with its mean beyond root plies collapses chance outcomes from 20–70 down to 2 (toon hit vs. toon miss), unlocking $+1$ to $+2$ plies of search depth.
-
----
-
-### Engine 2: Neural Policy & Coordinate Ascent (Party)
-
-Party battles cannot be solved by full enumeration due to the combinatorial explosion of simultaneous toon actions, target assignments, and accuracy combinations ($>8,600$ branches per ply). TTRSolver solves party battles using a two-stage hybrid pipeline:
-
-```mermaid
-flowchart TD
-    classDef stateNode fill:#0369a1,stroke:#38bdf8,stroke-width:2px,color:#ffffff
-    classDef ppoNode fill:#581c87,stroke:#c084fc,stroke-width:2px,color:#ffffff
-    classDef menuNode fill:#4338ca,stroke:#818cf8,stroke-width:2px,color:#ffffff
-    classDef probeNode fill:#0f766e,stroke:#2dd4bf,stroke-width:2px,color:#ffffff
-    classDef climbNode fill:#b45309,stroke:#fbbf24,stroke-width:2px,color:#ffffff
-    classDef evalNode fill:#047857,stroke:#34d399,stroke-width:2px,color:#ffffff
-    classDef outNode fill:#15803d,stroke:#4ade80,stroke-width:3px,color:#ffffff
-
-    S["Battle State (302-dim Vector)"] --> PPO["PPO Actor-Critic Policy (0.6 ms)"]
-    PPO --> P["Propose Top-k Joint Actions per Seat"]
-    P --> PR["Inject Targeted Heuristic Probes"]
-    PR --> CLIMB["Coordinate Ascent Hill-Climb (5.8 ms)"]
-    CLIMB --> EVAL["Evaluate Candidates with _quick_score"]
-    EVAL --> OUT["Selected Optimal Joint Plan"]
-
-    class S stateNode
-    class PPO ppoNode
-    class P menuNode
-    class PR probeNode
-    class CLIMB climbNode
-    class EVAL evalNode
-    class OUT outNode
-```
-
-#### 1. Neural Policy (PPO)
-- **Observation Space (302 floats)**: Encodes cog levels, health fractions, Version 2.0 suits, lured/trapped statuses; toon health, inventory counts, pink slips; global battle counters; and pending teammate selections for the current round.
-- **Action Space (250 discrete actions)**: All legal (track, level, target) triples, passes, and fires. Invalid actions are masked with $-\infty$ logits.
-- **Architecture**: Separate 256-unit actor and critic towers with tanh activations to prevent high value gradients from destabilizing policy representations.
-
-#### 2. Coordinate Ascent ("The Climb")
-The neural policy serves as a candidate generator. `hybrid.climb` then refines the joint plan using coordinate ascent:
-- Iterates across toon seats, swapping individual moves with top policy candidates and targeted heuristic probes (such as the cheapest single-target kill or lure activations for armed traps).
-- Evaluates candidate plans using `_quick_score`.
-- Evaluates pairwise joint swaps to escape local minima (e.g. transitioning from dual Lure to dual Sound).
-- Operates under a fixed budget of 24 evaluations, executing in ~5.8 ms.
-
----
-
-## Scoring Objective & Optimization
-
-Candidate plans in the climb and party search are evaluated by `_quick_score`:
-
-$$\text{Score} = \Delta_{\text{damage}} + 2 \cdot \Delta_{\text{heal}} + \text{trap stored} + 120 \cdot \text{kills} + 9 \cdot \text{prevented} - \text{price}_{\text{gag}} - \text{price}_{\text{spend}} + \text{survival bonus}$$
-
-### Breakdown of Objective Terms
-- **$\Delta_{\text{damage}}$**: Expected damage inflicted across cogs (including Version 2.0 outer suits).
-- **$\Delta_{\text{heal}}$**: Laff restored to the party, weighted at $2\times$ up to maximum health headroom.
-- **$\text{trap stored}$**: Expected value of placing an armed trap that will trigger on subsequent lure (`trap_stored`).
-- **$\text{kills}$ ($+120$)**: High-priority bonus for eliminating a cog, removing its damage contribution permanently.
-- **$\text{prevented}$ ($+9\times$)**: Expected incoming cog damage averted this round through stun or lure.
-- **$\text{price}_{\text{gag}}$**: Gag conservation penalty scaling with remaining facility length ($\text{cogs remaining}$, via `cogs_remaining`).
-- **$\text{survival bonus}$**: Buffers toons against lethal thresholds based on pre-plan expected incoming damage (`survival_bonus`).
-
----
-
-## Consumable Economics
-
-Consumables sit outside regular gag pouches and are governed by individual resource constraints:
-
-| Consumable | Turn Cost | Pricing Structure | Solver Decision Rule |
-|---|---|---|---|
-| **Pink Slip** | 1 Turn | `FIRE_PRICE` $\times$ cogs remaining + `FIRE_FLOOR` (120) | Fired when threat exceeds floor; scales with remaining cogs. |
-| **Unite** | 0 Turns (SpeedChat) | Flat cost (`UNITE_PRICE = 200`) | Evaluated counterfactually; used only if plan gain exceeds cost. |
-| **SOS Card** | 1 Turn | Flat cost (`SOS_PRICE = 250`) | Evaluated against standard gags; reflects card rarity. |
-
-At low difficulty levels, the solver spends 0.00 unites or cards. In end-game encounters (such as the CEO), usage scales up automatically based on objective risk.
-
----
-
-## Live Game State Ingestion
-
-TTRSolver ingests live game state through three modular channels (`solver/live/`):
-
-1. **Screen Capture & Vision (`solver/live/vision.py`)**:
-   - Captures cog level, department, and current HP from floating overhead nameplates.
-   - Disambiguates identical (department, level) pairs by template-matching head icons against `solver/live/catalogue.py`.
-   - Uses deduction (`HeadCatalogue.eliminate`) to identify unindexed cogs when all other candidates are eliminated.
-
-2. **TTR Local API (`solver/live/ttr_local.py`)**:
-   - Official JSON endpoint exposing toon laff, gag tracks, organic status, and district location.
-
-3. **Astron Wire Protocol (`solver/live/realms.py`)**:
-   - For Toontown Realms environments; parses cluster network packets directly to extract exact inventory counts for pink slips, unites, and SOS cards.
-
-`solver/live/session.py` fuses available inputs into a verified `BattleState`. If data is incomplete or corrupted, the solver reports explicit error diagnostics rather than guessing state values.
-
----
-
-## Benchmark Performance
-
-Evaluated across held-out test seeds (200 sides per cell, PPO + Climb, budget 24):
-
-| Encounter Type | Single Side Win Rate | Full Battle Win Rate | Average Latency |
-|---|---|---|---|
-| Standard Cog Buildings | 73.5% | — | ~5.8 ms |
-| Sellbot VP Boss | 99.5% | 99.0% | ~5.8 ms |
-| Bossbot CEO (Banquet Cleared) | 88.5% | 78.3% | ~5.8 ms |
-| Bossbot CEO (2 Leftover Cogs) | 73.5% | 54.0% | ~5.8 ms |
-| Bossbot CEO (4 Leftover Cogs) | 45.0% | 20.2% | ~5.8 ms |
-| Bossbot CEO (5 Leftover Cogs) | 32.5% | 10.6% | ~5.8 ms |
-
-Classical search on equivalent party positions achieves comparable win rates but requires 794–1,245 ms per decision, compared to 5.8 ms for PPO + Climb.
-
----
-
-## Repository Structure
+## How well it does, in simulation
+
+Every figure below comes from simulated fights (`tools/sweep.py`), not from
+live play. Each engine is shown only what the live panel would show it.
+The absolute win rates depend on the simulator's cog tables, which are
+known to be imperfect (see the note under the table), so the comparisons
+between engines on the same fights are more trustworthy than the
+percentages themselves.
+
+A VP is the Sellbot boss fight. Its cog rounds are 20 + 20 cogs for a toon
+alone and 10 + 10 per side when toons split across the two sides. A Unite
+is a consumable phrase that heals or restocks the party.
+
+| Simulated fight | Result |
+|---|---|
+| Solo VP, Unites not usable by the engines | PPO alone won about 7%. Playouts won 21–27% with three candidates, about 40% with the wider menu, and 55–70% with the rollout network and four times the rollouts |
+| Solo VP, the maintainer's own pouch and five Unites | Playout won 94 of 100 |
+| One toon on a VP side (10 + 10 cogs), same pouch and five Unites | Playout won 55 of 60 |
+| The same side with a few SOS cards and no Unites or pink slips | PPO 6 of 60, Search 6 of 60, Playout 33 of 60 |
+| Two toons on a VP side, planned together | 40 of 40 with PPO and with Playout |
+| Solo cog building, toon and street drawn at random | Playout won between 104 and 128 of 1,000 across sweeps |
+| Building with two to four toons, teammates played by `SensiblePrior` | Playout won 120 of 300 |
+
+Where the model is known to be off:
+
+- The maintainer, an experienced player, describes the one-toon VP side as
+  trivial in the real game, yet without Unites the model wins only 33 of
+  60. Every traced loss died to the skelecogs (the VP's second round) with
+  most of the pouch unthrown, which points at the simulator's cog damage or
+  attack rate rather than at the search.
+- Cog attack frequency and accuracy are Toontown Online-era values. TTR has
+  rebalanced both and publishes neither. A sensitivity sweep found the
+  recommended move unchanged across ±20 accuracy points, but forecast win
+  rates should be read with that gap in mind
+  ([docs/data-confidence.md](docs/data-confidence.md)).
+- `SensiblePrior` is a guess at how strangers play, not a model fitted to
+  real players. Every result with modelled teammates rests on it.
+
+Ideas that were measured and lost are kept in
+[docs/experiment-log.md](docs/experiment-log.md).
+
+## How the game is read
+
+On TTR, each source is used for one thing and never substituted for
+another: laff and gag training come from the Local API, gag counts from the
+gag menu on screen, and cogs from their plates. The capture is scoped to
+the game's window. Digits go through small classifiers trained on synthetic
+digits in the game's font, and the gag menu's "Total gags" label is read
+separately as a checksum on the counts. When the readings disagree or
+something cannot be read, the panel says why instead of advising from a
+guessed state. Department and level do not always name a cog, so the
+reader also matches the head on the plate against a library that each
+player builds by labelling cogs as they first appear. Building floors come
+from a relay on Discord's local pipe that passes Discord's own traffic
+through unchanged; taking that pipe can require restarting Discord, which
+the panel does only when the player presses the button for it. Each source
+and its limits are in [docs/live-reading.md](docs/live-reading.md), and
+Realms is covered in [docs/realms.md](docs/realms.md).
+
+## Repository layout
 
 ```
-solver/
-  state.py              BattleState, ToonState, CogState, Action dataclasses
-  mechanics.py          Damage, accuracy, stun bonuses, and knockback formulas
-  simulator.py          Game simulation and step transition rules
-  outcomes.py           Exact probability distribution enumerator
-  party.py              Multi-toon party battle logic
-  data/                 Wiki-audited tables for cogs, gags, and tracks
-  unites.py             Unite evaluation and cooldown trackers
-  sos.py                SOS card definitions and effect logic
-  search/
-    expectimax.py       Exact solo solver with Star1/Star2 pruning
-    party_search.py     Sampled rollout search for party battles
-    hybrid.py           PPO + coordinate ascent climb engine
-    fitted.py           Fitted leaf evaluation model
-    objective.py        Reward functions and scoring weights
-  rl/
-    env.py              Gym-compatible BattleEnv observation and action mapping
-    harness.py          Safe execution harness for RL policies
-  live/
-    vision.py           Screen reader for cog nameplates and health bars
-    catalogue.py        Template library for cog head identification
-    session.py          State aggregation pipeline
-    panel.py            PyWebview overlay interface
-visualizer/             Browser-based interactive tree visualizer
-overlay_ui/             React HUD interface for the live overlay
-tools/                  Offline training, fitting, and data generation utilities
-docs/                   Detailed mathematical proofs and technical audit notes
+run.py            launcher: lists the front ends and what each needs
+solver/           battle rules: state.py, mechanics.py, simulator.py, outcomes.py, party.py
+  data/           cog and gag tables, sourced from the TTR wiki
+  search/         the engines: playout.py, fastplayer.py, hybrid.py, expectimax.py, party_search.py
+  rl/             the training environment and the shipped network weights
+  live/           live reading and the panels: ttr_local.py, vision.py, digits.py,
+                  ttr_log.py, discord_relay.py, session.py, panel.py, realms_panel.py
+overlay_ui/       the overlay's React front end (built files are committed; no Node needed to run)
+visualizer/       browser visualizer for exploring positions and search trees
+tools/            measurement and training scripts: sweep.py, round_parity.py, train_*.py
+tests/            the unittest suite
+docs/             documentation
 ```
 
----
+## Status and limits
 
-## Documentation Index
+- **Simulated results only.** No win rate has been measured in live play.
+- **Developed on Windows.** Finding the game's window is Windows-only
+  (elsewhere the whole screen is captured), the client log's location is
+  known only for a Windows install (set `TTR_LOG_DIR` otherwise), and the
+  Discord relay's Unix transport has not been run on a Mac.
+- **Boss fights.** The VP's structure is entered from the maintainer's play
+  (`[OWNER]`), as is the CEO's first round, with less certainty. The CFO,
+  the CJ and the CEO's second round are `[TODO]`. On TTR only the VP is
+  detected automatically; the others are picked by hand in the panel.
+- **Teammates on TTR.** The game shows the client one toon, so the engines
+  know teammates only as a count. Modelling them in the Playout row was
+  started and shelved after measuring no gain
+  ([docs/roadmap.md](docs/roadmap.md)). Party values from the evaluator are
+  defined but not validated.
+- **SOS cards and Unites on TTR.** The Local API's `/sos.json` and
+  `/unites.json` are not parsed, so the player enters what they hold in the
+  panel. Pink slips are read.
+- **Screen reading.** The library of cog heads is not shipped and starts
+  empty, so a new player labels cogs as they first appear. A cog that
+  cannot be read is reported as unreadable, not guessed.
+- **Realms.** The board is read exactly but priced with TTR's rules, so
+  damage numbers will not match what Realms rolls.
+- **Buildings.** The next floor is unknown to the player, so the engines do
+  not plan for it.
 
-### Core Mathematics & Algorithms
-- [docs/ppo-math.md](docs/ppo-math.md): Mathematical formulation of PPO loss, GAE, and track marginal entropy.
-- [docs/search-depth.md](docs/search-depth.md): Branching factor analysis, expectimax scaling, and chance node collapsing.
-- [docs/scoring.md](docs/scoring.md): Empirical tuning of scoring weights, survival terms, and consumable pricing.
-- [docs/scorer-audit.md](docs/scorer-audit.md): Party evaluation audit, conditional accuracy resolution, and bug postmortems.
-- [docs/heuristic-learning.md](docs/heuristic-learning.md): Ground-truth label generation and linear leaf evaluator training.
-- [docs/reward-experiments.md](docs/reward-experiments.md): Reward shaping ablations and conservation experiments.
+Game values in the code carry a provenance tag: `[CONFIRMED]` (from the TTR
+wiki), `[OWNER]` (the maintainer's judgement as a player, not a sourced
+fact), `[OPEN TOONTOWN SOURCE]` (from the open-source Toontown Online
+reimplementation; a lead, not confirmation), `[ASSUMED]` (a labelled
+assumption) and `[TODO]` (unknown; the code raises instead of substituting
+a value). [docs/data-confidence.md](docs/data-confidence.md) lists what is
+confirmed and what is not.
 
-### System Design & Strategy
-- [docs/ml-design.md](docs/ml-design.md): Machine learning architecture, policy design, and Expectimax vs. PPO analysis.
-- [docs/party-strategy.md](docs/party-strategy.md): Multi-toon tactics, sound combinations, and coordination dynamics.
-- [docs/mechanics-notes.md](docs/mechanics-notes.md): Combat formulas, stun bonuses, and wiki audit findings.
-- [docs/data-confidence.md](docs/data-confidence.md): Data validation against game tables and wiki specifications.
-- [docs/architecture-review.md](docs/architecture-review.md): System modularity, data contracts, and solver invariants.
+## Running the tests
 
-### Interfaces & Protocols
-- [docs/panel-contract.md](docs/panel-contract.md): Bridge protocol and JSON contracts for overlay interfaces.
-- [docs/visualizer-spec.md](docs/visualizer-spec.md): Web visualizer architecture and Pyodide/CPython bridge design.
-- [docs/realms.md](docs/realms.md): Astron cluster network protocols for Toontown Realms integration.
-- [docs/sos-notes.md](docs/sos-notes.md): Mechanics and inventory tracking for the 29 renewable SOS cards.
-- [docs/live-notes.md](docs/live-notes.md): Real-time screen capture, OCR, and memory reading observations.
-- [docs/roadmap.md](docs/roadmap.md): Planned solver improvements and future milestones.
+```
+python -m unittest discover tests
+```
 
----
+About 1,900 tests, standard-library `unittest` only. Tests that need numpy
+or panda3d skip themselves when the package is absent.
 
-*Disclaimer: TTRSolver is an independent open-source project and is not affiliated with Toontown Rewritten or the Walt Disney Company.*
+## Documentation
+
+[docs/README.md](docs/README.md) is the index: guides for using the panels,
+how each engine works, the game mechanics and data, and the project's
+record of experiments.
