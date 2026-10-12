@@ -189,3 +189,100 @@ class StartupApiTest(unittest.TestCase):
             w._stop.set()
             A._snapshot = saved
         self.assertTrue(calls, "asked straight away, not at the first battle")
+
+
+class SteadySearchTest(unittest.TestCase):
+    """Seen live: the gag menu dropped out of the reader's view every few
+    seconds, each dropout restarted the 12-15 s search, and the Search row
+    never finished. The same board must keep its search; an unreadable
+    frame is not news; only a new board supersedes."""
+
+    def setUp(self):
+        import concurrent.futures
+        import threading
+        from types import SimpleNamespace
+        from solver.state import BattleState, CogState, ToonState, Track
+
+        self.saved = {k: getattr(A, k) for k in
+                      ("_snapshot", "_panel", "_panel_with_training", "build_state",
+                       "_pool", "_kill_pool")}
+        self.searches, self.kills, self.posts = [], [], []
+        self.board = {"hp": 20, "readable": True}
+
+        def build_state(**_k):
+            if not self.board["readable"]:
+                return SimpleNamespace(state=None, problems=["gag menu not visible"])
+            toon = ToonState(50, 50, {Track.THROW: 7}, {(Track.THROW, 4): 3})
+            cog = CogState("flunky", "bossbot", 3, self.board["hp"], 20)
+            return SimpleNamespace(state=BattleState(toons=[toon], cogs=[cog]), problems=[])
+
+        test = self
+
+        class Pool:
+            def submit(self, fn, state, *args):
+                future = concurrent.futures.Future()
+                test.searches.append(future)
+                return future
+
+        A._snapshot = lambda *a, **k: object()
+        A._panel = lambda frame: object()
+        A._panel_with_training = lambda frame, snap: object()
+        A.build_state = build_state
+        A._pool = lambda: Pool()
+        A._kill_pool = lambda: self.kills.append(1)
+        self.thinker = A.Thinker(lambda lines, state, action, unite:
+                                 self.posts.append((lines, action)))
+        self.threading = threading
+
+    def tearDown(self):
+        for k, v in self.saved.items():
+            setattr(A, k, v)
+
+    def _submit(self, changed=False):
+        self.thinker.submit(None, [], None, None, 2, budget=1.0, changed=changed)
+        self._settle()
+
+    def _settle(self):
+        import time
+        time.sleep(0.15)
+
+    def _finish(self, i=-1, action="pie"):
+        self.searches[i].set_result((["Whole Fruit Pie"], None, action, None))
+        self._settle()
+
+    def test_the_same_board_keeps_its_search(self):
+        self._submit()
+        self._submit()
+        self._submit(changed=True)
+        self.assertEqual(1, len(self.searches), "no restart for the same board")
+        self._finish()
+        self.assertEqual([(["Whole Fruit Pie"], "pie")], self.posts)
+
+    def test_an_unreadable_frame_does_not_cancel_it(self):
+        self._submit()
+        self.board["readable"] = False
+        self._submit()
+        self._submit()
+        self.assertEqual([], self.posts, "the menu flickering out is not news")
+        self._finish()
+        self.assertEqual("pie", self.posts[-1][1])
+
+    def test_a_new_board_supersedes_and_stops_the_old_search(self):
+        self._submit()
+        self.board["hp"] = 9
+        self._submit(changed=True)
+        self.assertEqual(2, len(self.searches))
+        self.assertEqual([1], self.kills, "the abandoned search is stopped")
+        self._finish(0, "stale")
+        self._finish(1, "fresh")
+        self.assertEqual(["fresh"], [a for _l, a in self.posts])
+
+    def test_an_answer_stands_until_a_battle_event_questions_it(self):
+        self._submit()
+        self._finish()
+        self.board["readable"] = False
+        self._submit()
+        self.assertEqual(1, len(self.posts), "kept: nothing happened in the fight")
+        self._submit(changed=True)
+        self.assertEqual(["gag menu not visible"], self.posts[-1][0],
+                         "after an event, an unreadable board is said")

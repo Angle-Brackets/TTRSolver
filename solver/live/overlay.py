@@ -650,7 +650,8 @@ class Worker(AdviceWorker):
                                    fires=self.slips_to_plan(),
                                    reject=self._rejected,
                                    boss=self.boss_tracker().frozen(),
-                                   unites=self.remaining("unites"))
+                                   unites=self.remaining("unites"),
+                                   changed=bool(changed))
                 self._post()
                 time.sleep(max(0.0, POLL_INTERVAL - (time.time() - cycle)))
         finally:

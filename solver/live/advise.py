@@ -118,6 +118,24 @@ def first_answer(state, reject=None):
 _EXECUTOR = None
 
 
+def _kill_pool() -> None:
+    """Stop the search's child process outright. A superseded search
+    otherwise runs out its budget there while the next one waits."""
+    global _EXECUTOR
+    executor, _EXECUTOR = _EXECUTOR, None
+    if executor is None:
+        return
+    for process in list((getattr(executor, "_processes", None) or {}).values()):
+        try:
+            process.terminate()
+        except Exception:                  # noqa: BLE001
+            pass
+    try:
+        executor.shutdown(wait=False, cancel_futures=True)
+    except Exception:                      # noqa: BLE001
+        pass
+
+
 def _pool():
     global _EXECUTOR
     if _EXECUTOR is None:
@@ -188,17 +206,36 @@ class Thinker:
         self._generation = itertools.count()
         self._current = -1
         self._lock = threading.Lock()
+        # (token, position key) of the search running now, and of the one
+        # whose answer is on screen. A resubmission of the SAME position
+        # keeps them instead of starting over -- see `_run`.
+        self._inflight = None
+        self._answered = None
 
     def submit(self, frame, readings, snapshot, objective, depth,
                budget=DEFAULT_BUDGET, ignore_checksum=False,
-               allies=0, fires=0, reject=None, boss=None, unites=0) -> None:
+               allies=0, fires=0, reject=None, boss=None, unites=0,
+               changed: bool = False) -> None:
+        """`changed`: a battle event asked for this (a cog joined, took
+        damage, died). Then an unreadable frame is reported rather than
+        quietly kept, so a new round cannot hide behind the last answer."""
         with self._lock:
             token = next(self._generation)
             self._current = token
+            if changed:
+                self._answered = None
         threading.Thread(target=self._run, daemon=True,
                          args=(token, frame, readings, snapshot, objective,
                                depth, budget, ignore_checksum,
                                allies, fires, reject, boss, unites)).start()
+
+    def _keep(self, token, held) -> bool:
+        """Hand the floor back to `held` (token, key) if this request is
+        still the newest. True when it did."""
+        if held is not None and token == self._current:
+            self._current = held[0]
+            return True
+        return False
 
     def _run(self, token, frame, readings, snapshot, objective, depth,
              budget, ignore_checksum=False, allies=0, fires=0, reject=None,
@@ -215,7 +252,14 @@ class Thinker:
                               fires=fires)
             _with_unites(res, unites)
             if res is None or res.state is None:
+                # AN UNREADABLE FRAME IS NOT NEWS. Seen live: the gag menu
+                # dropped out of the reader's view every few seconds, each
+                # dropout restarted the 12-15 s search, and it never
+                # finished. With a search running, or an answer standing
+                # that no battle event has questioned, keep it.
                 with self._lock:
+                    if self._keep(token, self._inflight or self._answered):
+                        return
                     superseded = token != self._current
                 if not superseded:
                     # `res is not None`, NOT `res`. `BuildResult.__bool__`
@@ -237,6 +281,26 @@ class Thinker:
             # count cannot move while this thread reads it.
             if boss is not None:
                 boss.apply(state)
+            from .. import outcomes as outcomes_mod
+            key = (outcomes_mod.state_key(state),
+                   frozenset(map(repr, reject or ())),
+                   getattr(objective, "name", repr(objective)), depth, budget)
+            with self._lock:
+                # THE SAME BOARD, AGAIN: keep the search on it (or its
+                # answer) rather than start over.
+                for held in (self._inflight, self._answered):
+                    if held is not None and held[1] == key and \
+                            self._keep(token, held):
+                        return
+                if token != self._current:
+                    return
+                # A NEW BOARD. The child process is single and does not
+                # stop for a superseded search -- the next one queued
+                # behind it for its whole budget, and restarts compounded.
+                if self._inflight is not None:
+                    _kill_pool()
+                self._inflight = (token, key)
+                self._answered = None
             if self.on_playout:
                 try:
                     horizon = (boss.horizon(on_field=sum(
@@ -275,6 +339,11 @@ class Thinker:
             unite = None
         with self._lock:
             superseded = token != self._current
+            if self._inflight is not None and self._inflight[0] == token:
+                done = self._inflight
+                self._inflight = None
+                if not superseded and action is not None:
+                    self._answered = done
         if not superseded:
             self.on_result(lines, state, action, unite)
 
