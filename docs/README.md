@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="img/logo.jpg" alt="TTRSolver Logo" width="120" style="border-radius: 16px;" />
+</p>
+
 # TTRSolver Documentation Index
 
 Welcome to the complete technical and gameplay documentation for **TTRSolver**.

@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/img/logo.jpg" alt="TTRSolver Logo" width="160" style="border-radius: 20px;" />
+</p>
+
 # TTRSolver
 
 A real-time battle advisor for **[Toontown Rewritten](https://www.toontownrewritten.com/)** (and **Toontown Realms**). 
