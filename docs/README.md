@@ -10,11 +10,23 @@ If you're looking for a high-level overview of what TTRSolver is and how to inst
 
 ```mermaid
 flowchart TD
+    classDef mapNode fill:#1e3a8a,stroke:#60a5fa,stroke-width:2px,color:#ffffff
+    classDef userNode fill:#0369a1,stroke:#38bdf8,stroke-width:2px,color:#ffffff
+    classDef archNode fill:#b45309,stroke:#fbbf24,stroke-width:2px,color:#ffffff
+    classDef engNode fill:#581c87,stroke:#c084fc,stroke-width:2px,color:#ffffff
+    classDef combatNode fill:#065f46,stroke:#34d399,stroke-width:2px,color:#ffffff
+
     Start["Documentation Map"]
     Start --> User["Playing the Game<br/>user-guide.md, live-reading.md"]
     Start --> Arch["System Architecture<br/>architecture-review.md, panel-contract.md"]
     Start --> Engines["The AI Engines<br/>playout.md, scoring.md, search-depth.md"]
     Start --> Combat["Combat Rules<br/>mechanics-notes.md, data-confidence.md"]
+
+    class Start mapNode
+    class User userNode
+    class Arch archNode
+    class Engines engNode
+    class Combat combatNode
 ```
 
 ---

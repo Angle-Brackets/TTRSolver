@@ -6,6 +6,9 @@ Styled with **Tailwind CSS** and **daisyUI**, this interface runs seamlessly ins
 
 ```mermaid
 flowchart LR
+    classDef pyNode fill:#1e3a8a,stroke:#60a5fa,stroke-width:2px,color:#ffffff
+    classDef reactNode fill:#065f46,stroke:#34d399,stroke-width:2px,color:#ffffff
+
     subgraph PythonBackend["Python Backend"]
         Worker["AdviceWorker<br/>(Reads screen & runs AI)"]
         Bridge["pywebview JS Bridge"]
@@ -20,6 +23,9 @@ flowchart LR
 
     Worker -->|Pushes JSON Model| Bridge -->|window.pushModel()| ReactFrontEnd
     ReactFrontEnd -.->|User clicks button| Bridge -.->|call('method', args)| Worker
+
+    class Worker,Bridge pyNode
+    class Card,Engines,Cogs,Settings reactNode
 ```
 
 The overlay is shared across both supported game environments:

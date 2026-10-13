@@ -36,9 +36,19 @@ TTRSolver answers this in real-time through four cooperating stages:
 
 ```mermaid
 flowchart LR
+    classDef ingestNode fill:#1e3a8a,stroke:#60a5fa,stroke-width:2px,color:#ffffff
+    classDef stateNode fill:#0369a1,stroke:#38bdf8,stroke-width:2px,color:#ffffff
+    classDef simNode fill:#581c87,stroke:#c084fc,stroke-width:2px,color:#ffffff
+    classDef uiNode fill:#065f46,stroke:#34d399,stroke-width:2px,color:#ffffff
+
     A["1. Ingestion<br/>OCR + Local API<br/>(Reads without memory hacking)"] --> B["2. Battle State<br/>Unified Board Snapshot<br/>(Laff, Gags, Cogs, Waves)"]
     B --> C["3. Simulation & AI<br/>Rules + 3 AI Engines<br/>(PPO, Expectimax, Playout)"]
     C --> D["4. Live UI<br/>Overlay HUD & Visualizer<br/>(Recommends best play)"]
+
+    class A ingestNode
+    class B stateNode
+    class C simNode
+    class D uiNode
 ```
 
 1. **Ingest safely:** Grabs the screen and queries the official Local API to build an immutable snapshot of the battle.
@@ -278,12 +288,22 @@ Playout simulates candidates through multiple rounds to the fight's completion:
 
 ```mermaid
 flowchart TD
+    classDef menuNode fill:#4338ca,stroke:#818cf8,stroke-width:2px,color:#ffffff
+    classDef rollNode fill:#581c87,stroke:#c084fc,stroke-width:2px,color:#ffffff
+    classDef cutNode fill:#b45309,stroke:#fbbf24,stroke-width:2px,color:#ffffff
+    classDef outNode fill:#065f46,stroke:#34d399,stroke-width:3px,color:#ffffff
+
     A["Select 10–12 Diverse Candidates<br/>(PPO pick, sound combos, cheap kills, lures)"] --> B["Round 1: 16 Rollouts per candidate<br/>(Using Common Random Numbers)"]
     B --> C["Cut weaker 50% of candidates"]
     C --> D["Round 2: 32 Rollouts on survivors"]
     D --> E["Cut down to top finalists"]
     E --> F["Round 3: 64 Rollouts on finalists"]
     F --> G["Declare Move with Highest Mean Win Score"]
+
+    class A menuNode
+    class B,D,F rollNode
+    class C,E cutNode
+    class G outNode
 ```
 
 #### Key Techniques
@@ -299,6 +319,9 @@ When multiple toons are in a battle, how should an AI model teammates? TTRSolver
 
 ```mermaid
 flowchart TD
+    classDef coordNode fill:#1e3a8a,stroke:#60a5fa,stroke-width:2px,color:#ffffff
+    classDef pickupNode fill:#7c2d12,stroke:#fb923c,stroke-width:2px,color:#ffffff
+
     subgraph CoordinatedMode["Coordinated Mode"]
         direction TB
         C1["All 4 toons planned together as a unified team"]
@@ -310,6 +333,9 @@ flowchart TD
         P1["You control 1 toon; teammates treated as a probability distribution"]
         P2["Uses SensiblePrior to guess likely human moves"]
     end
+
+    class C1,C2 coordNode
+    class P1,P2 pickupNode
 ```
 
 - **Coordinated Mode:** Optimizes all 4 toon seats simultaneously. This is essential for high-level play—for example, coordinating one toon to place a Trap while another Lures, or combining three Pies for a $+20\%$ damage combo.
@@ -323,6 +349,11 @@ To keep the overlay responsive and prevent screen reading from stuttering your g
 
 ```mermaid
 flowchart TB
+    classDef mainNode fill:#1e3a8a,stroke:#60a5fa,stroke-width:2px,color:#ffffff
+    classDef thinkerNode fill:#581c87,stroke:#c084fc,stroke-width:2px,color:#ffffff
+    classDef searchNode fill:#0369a1,stroke:#38bdf8,stroke-width:2px,color:#ffffff
+    classDef playoutNode fill:#065f46,stroke:#34d399,stroke-width:2px,color:#ffffff
+
     subgraph MainProcess["Main Python Process"]
         MainThread["Main Thread<br/>(pywebview GUI Event Loop)"]
         DrainThread["Drain Thread<br/>(Pushes JSON to UI queue)"]
@@ -346,6 +377,11 @@ flowchart TB
     Playout1 & Playout2 & Playout3 & Playout4 -->|Rollout Results| RequestThread
     SearchProc -->|Tree Result| RequestThread
     RequestThread -->|Updates Model| DrainThread --> MainThread
+
+    class MainThread,DrainThread,PollThread,LocalAPIThread mainNode
+    class RequestThread thinkerNode
+    class SearchProc searchNode
+    class Playout1,Playout2,Playout3,Playout4 playoutNode
 ```
 
 ### Architecture Rationale

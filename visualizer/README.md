@@ -6,9 +6,19 @@ You can set up custom battle scenarios (toons, gag pouches, cog lineups, and lur
 
 ```mermaid
 flowchart LR
+    classDef builderNode fill:#1e3a8a,stroke:#60a5fa,stroke-width:2px,color:#ffffff
+    classDef pyNode fill:#581c87,stroke:#c084fc,stroke-width:2px,color:#ffffff
+    classDef treeNode fill:#065f46,stroke:#34d399,stroke-width:2px,color:#ffffff
+    classDef inspectNode fill:#b45309,stroke:#fbbf24,stroke-width:2px,color:#ffffff
+
     A["Scenario Builder<br/>Custom Toons & Cogs"] --> B["Python Backend<br/>(localhost:8000)<br/>Real Solver Physics"]
     B --> C["Interactive Tree Canvas<br/>Branching Probabilities"]
     B --> D["Deep Inspector<br/>Cog Threat Forecasts & EV"]
+
+    class A builderNode
+    class B pyNode
+    class C treeNode
+    class D inspectNode
 ```
 
 > [!TIP]

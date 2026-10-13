@@ -47,6 +47,11 @@ TTRSolver operates completely outside the game client. It never hooks into game 
 
 ```mermaid
 flowchart LR
+    classDef clientNode fill:#1e3a8a,stroke:#60a5fa,stroke-width:2px,color:#ffffff
+    classDef advisorNode fill:#065f46,stroke:#34d399,stroke-width:2px,color:#ffffff
+    classDef engineNode fill:#581c87,stroke:#c084fc,stroke-width:2px,color:#ffffff
+    classDef uiNode fill:#b45309,stroke:#fbbf24,stroke-width:2px,color:#ffffff
+
     subgraph GameClient["Toontown Rewritten Client"]
         LocalAPI["Local API Server<br/>(localhost:1547)"]
         Screen["Game Screen<br/>(Plates & Gag Menu)"]
@@ -68,6 +73,11 @@ flowchart LR
     Log -->|Boss detect| LogRead --> State
     State --> Engine --> Overlay
     Overlay -.->|Player sees advice & clicks in game| GameClient
+
+    class LocalAPI,Screen,Log clientNode
+    class Fetch,OCR,LogRead,State advisorNode
+    class Engine engineNode
+    class Overlay uiNode
 ```
 
 | Source | What it reads | How it works |
@@ -115,11 +125,23 @@ Before launching the overlay, turn on two settings inside Toontown Rewritten:
 
 ```mermaid
 flowchart TD
+    classDef stepNode fill:#1e293b,stroke:#64748b,stroke-width:2px,color:#ffffff
+    classDef optNode fill:#0369a1,stroke:#38bdf8,stroke-width:2px,color:#ffffff
+    classDef runNode fill:#581c87,stroke:#c084fc,stroke-width:2px,color:#ffffff
+    classDef modalNode fill:#b45309,stroke:#fbbf24,stroke-width:2px,color:#ffffff
+    classDef readyNode fill:#065f46,stroke:#34d399,stroke-width:3px,color:#ffffff
+
     A["Open TTR Options or edit settings.json"] --> B["Set 'want-local-api': true<br/>(Opens localhost:1547 for laff/gag reading)"]
     B --> C["Set 'show-cog-levels': true<br/>(Shows the nameplates above cogs)"]
     C --> D["Start TTRSolver (python run.py 1)"]
     D --> E["In-game dialog appears: 'TTRSolver wants to connect'<br/>Click ACCEPT!"]
     E --> F["Ready to battle! Overlay tracks your fights automatically."]
+
+    class A stepNode
+    class B,C optNode
+    class D runNode
+    class E modalNode
+    class F readyNode
 ```
 
 ### The Two Settings
@@ -230,6 +252,12 @@ When a round begins, three independent algorithms assess the board simultaneousl
 
 ```mermaid
 flowchart TD
+    classDef ppoNode fill:#581c87,stroke:#c084fc,stroke-width:2px,color:#ffffff
+    classDef searchNode fill:#0369a1,stroke:#38bdf8,stroke-width:2px,color:#ffffff
+    classDef playoutNode fill:#065f46,stroke:#34d399,stroke-width:3px,color:#ffffff
+    classDef cardNode fill:#b45309,stroke:#fbbf24,stroke-width:2px,color:#ffffff
+    classDef altNode fill:#1e293b,stroke:#64748b,stroke-width:2px,color:#ffffff
+
     subgraph ThreeEngines["Three AI Perspectives"]
         P["PPO Engine<br/><b>Instant (~2ms)</b><br/>Suggests an immediate move so the UI is never blank"]
         S["Search Engine<br/><b>Exact Math</b><br/>Calculates exact probabilities 1–3 turns out"]
@@ -239,6 +267,12 @@ flowchart TD
     PL --> Lead["Displayed in Large Top Card"]
     P --> Row1["Row: Instant / Alternative"]
     S --> Row2["Row: Exact Tree / Alternative"]
+
+    class P ppoNode
+    class S searchNode
+    class PL playoutNode
+    class Lead cardNode
+    class Row1,Row2 altNode
 ```
 
 1. **Playout (Leads by default):**  
@@ -292,9 +326,19 @@ You can tune the advisor's strategy mid-battle using the dropdowns:
 
 ```mermaid
 flowchart LR
+    classDef bossNode fill:#881337,stroke:#fb7185,stroke-width:2px,color:#ffffff
+    classDef logNode fill:#1e3a8a,stroke:#60a5fa,stroke-width:2px,color:#ffffff
+    classDef waveNode fill:#581c87,stroke:#c084fc,stroke-width:2px,color:#ffffff
+    classDef adviceNode fill:#065f46,stroke:#34d399,stroke-width:3px,color:#ffffff
+
     A["Enter Boss Fight (e.g., VP)"] --> B["Log Reader Detects 'Sellbot VP'"]
     B --> C["Playout Engine Knows Full Cog Waves<br/>(40 total cogs to defeat)"]
     C --> D["Smart Long-Range Advice<br/>(Saves big gags for Skelecog wave)"]
+
+    class A bossNode
+    class B logNode
+    class C waveNode
+    class D adviceNode
 ```
 
 - **Boss Fight Selector:**  
@@ -343,6 +387,10 @@ Here is a quick diagnosis guide if the panel doesn't advise as expected:
 
 ```mermaid
 flowchart TD
+    classDef issueNode fill:#881337,stroke:#fb7185,stroke-width:2px,color:#ffffff
+    classDef checkNode fill:#581c87,stroke:#c084fc,stroke-width:2px,color:#ffffff
+    classDef solNode fill:#0369a1,stroke:#38bdf8,stroke-width:2px,color:#ffffff
+
     Issue["Something looks wrong?"] --> Q1{"What does the panel say?"}
     
     Q1 -->|"Local API Disconnected"| A1["Check 'want-local-api': true in settings.json<br/>Accept in-game prompt! Run 'python run.py 10' to probe."]
@@ -350,6 +398,10 @@ flowchart TD
     Q1 -->|"no cog plates on screen"| A3["Turn on 'show-cog-levels': true in game options"]
     Q1 -->|"gag counts do not add up"| A4["Hovering a gag covers the total count.<br/>Move mouse away from gag menu to unblock OCR."]
     Q1 -->|"Card is greyed (STALE)"| A5["A plate or count was obscured.<br/>Wait 2 seconds for next automatic scan."]
+
+    class Issue issueNode
+    class Q1 checkNode
+    class A1,A2,A3,A4,A5 solNode
 ```
 
 ### Full Issue Reference Table

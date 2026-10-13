@@ -83,17 +83,25 @@ Playout doesn't waste time simulating all 50+ possible gags in your backpack. It
 
 ```mermaid
 flowchart LR
+    classDef sourceNode fill:#1e293b,stroke:#64748b,stroke-width:2px,color:#ffffff
+    classDef filterNode fill:#b45309,stroke:#fbbf24,stroke-width:2px,color:#ffffff
+    classDef menuNode fill:#065f46,stroke:#34d399,stroke-width:2px,color:#ffffff
+
     subgraph Sources["Menu Candidate Sources"]
         PPO["1. PPO Policy First Choice"]
         UniteVar["2. Unite Variants (With / Without Heal or Restock)"]
         ScorerTop["3. One-Round Scorer Top 2 Plans"]
         PolicyTop["4. Neural Policy Top 2 Ranked Moves"]
-        Diversity["5. Best Plan of Every Kind (Throw, Squirt, Sound, Drop, Lure, Trap, SOS, Slip)"]
+        Diversity["5. Best Plan of Every Kind<br/>(Throw, Squirt, Sound, Drop, Lure, Trap, SOS, Slip)"]
         PassM["6. Tactical Pass (If board is safe)"]
     end
 
     Sources --> Dedupe["Filter Duplicates & Illegal Moves"]
     Dedupe --> Menu["Final Menu: 10–12 Diverse Contenders"]
+
+    class PPO,UniteVar,ScorerTop,PolicyTop,Diversity,PassM sourceNode
+    class Dedupe filterNode
+    class Menu menuNode
 ```
 
 1. **`climb`'s pick:** The PPO neural net's favorite move.
@@ -137,9 +145,17 @@ To fix this, TTRSolver uses **`fastplayer`**: a compact feed-forward neural poli
 
 ```mermaid
 flowchart LR
+    classDef stepNode fill:#1e293b,stroke:#64748b,stroke-width:2px,color:#ffffff
+    classDef netNode fill:#581c87,stroke:#c084fc,stroke-width:2px,color:#ffffff
+    classDef endNode fill:#065f46,stroke:#34d399,stroke-width:2px,color:#ffffff
+
     A["Turn 1: Candidate Move Tested"] --> B["Turn 2: fastplayer net (~0.1ms)"]
     B --> C["Turn 3: fastplayer net"]
     C --> D["... Turn N: Final Victory or Defeat"]
+
+    class A stepNode
+    class B,C netNode
+    class D endNode
 ```
 
 #### Benchmark Comparison
@@ -165,9 +181,19 @@ $$\text{Rollout Return} = \text{Cogs Defeated in First 8 Rounds} + \text{Value N
 
 ```mermaid
 flowchart LR
+    classDef candNode fill:#1e293b,stroke:#64748b,stroke-width:2px,color:#ffffff
+    classDef simNode fill:#581c87,stroke:#c084fc,stroke-width:2px,color:#ffffff
+    classDef valNode fill:#0284c7,stroke:#38bdf8,stroke-width:2px,color:#ffffff
+    classDef scoreNode fill:#065f46,stroke:#34d399,stroke-width:2px,color:#ffffff
+
     A["Round 1: Candidate"] --> B["Rounds 2–8: Simulated by Fastplayer Net"]
-    B --> C["Round 8 Cutoff: Value Net Evaluates Remainder (68k-board trained net)"]
-    C --> D["Instant Score Returned!"]
+    B --> C["Round 8 Cutoff: Value Net Evaluates Remainder"]
+    C --> D["Instant Score Returned"]
+
+    class A candNode
+    class B simNode
+    class C valNode
+    class D scoreNode
 ```
 
 Cutting simulations at 8 rounds reduced computation time by **$28\%$ per decision**, allowing the engine to double its halving stages to $(16, 32, 64)$ for greater precision.
@@ -252,6 +278,9 @@ When multiple toons are in battle, Playout runs in one of two modes:
 
 ```mermaid
 flowchart TD
+    classDef coordNode fill:#1e3a8a,stroke:#60a5fa,stroke-width:2px,color:#ffffff
+    classDef pickupNode fill:#7c2d12,stroke:#fb923c,stroke-width:2px,color:#ffffff
+
     subgraph CoordinatedMode["Coordinated Mode (Default)"]
         direction TB
         C1["Generates joint multi-toon plans (e.g., Toon 1 Traps + Toon 2 Lures)"]
@@ -264,6 +293,9 @@ flowchart TD
         P1["Generates moves for you alone"]
         P2["Simulates teammates using SensiblePrior heuristic model"]
     end
+
+    class C1,C2,C3 coordNode
+    class P1,P2 pickupNode
 ```
 
 ### Multi-Toon Findings

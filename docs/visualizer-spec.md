@@ -25,10 +25,20 @@ answer the page shows now comes from the `solver` package.
 
 ```mermaid
 flowchart LR
+    classDef reactNode fill:#065f46,stroke:#34d399,stroke-width:2px,color:#ffffff
+    classDef serveNode fill:#1e3a8a,stroke:#60a5fa,stroke-width:2px,color:#ffffff
+    classDef bridgeNode fill:#0369a1,stroke:#38bdf8,stroke-width:2px,color:#ffffff
+    classDef solverNode fill:#581c87,stroke:#c084fc,stroke-width:2px,color:#ffffff
+
     PAGE["Browser page<br/>(React, built by Vite)"] -->|"POST /api/call<br/>{fn, payload}"| SERVE["visualizer/serve.py<br/>(threaded HTTP server)"]
     SERVE --> BRIDGE["visualizer/bridge.py<br/>(JSON in, JSON out)"]
     BRIDGE --> SOLVER["solver.*<br/>(expectimax, hybrid.climb)"]
     SOLVER -.->|JSON| PAGE
+
+    class PAGE reactNode
+    class SERVE serveNode
+    class BRIDGE bridgeNode
+    class SOLVER solverNode
 ```
 
 | Part | Role |

@@ -11,6 +11,11 @@ Because Toontown doesn't provide a score for individual moves, TTRSolver defines
 
 ```mermaid
 flowchart TD
+    classDef objNode fill:#1e3a8a,stroke:#60a5fa,stroke-width:2px,color:#ffffff
+    classDef quickNode fill:#581c87,stroke:#c084fc,stroke-width:2px,color:#ffffff
+    classDef greedyNode fill:#b45309,stroke:#fbbf24,stroke-width:2px,color:#ffffff
+    classDef leafNode fill:#065f46,stroke:#34d399,stroke-width:2px,color:#ffffff
+
     subgraph ScoringComponents["Scoring Components"]
         direction TB
         OBJ["Objective (solver/search/objective.py)<br/>• Scale: Win = +100, Laff = 1.0<br/>• Guides: Exact Expectimax Search & RL rewards"]
@@ -18,6 +23,11 @@ flowchart TD
         GREEDY["_greedy_score & _cheap_score<br/>• Fast arithmetic heuristics for candidate shortlisting"]
         LEAF["Fitted Leaf Evaluator (solver/search/fitted.py)<br/>• 18-feature linear model at Expectimax depth cutoffs"]
     end
+
+    class OBJ objNode
+    class QUICK quickNode
+    class GREEDY greedyNode
+    class LEAF leafNode
 ```
 
 > [!NOTE]
@@ -142,6 +152,10 @@ $$\begin{aligned}
 
 ```mermaid
 flowchart LR
+    classDef posNode fill:#065f46,stroke:#34d399,stroke-width:2px,color:#ffffff
+    classDef negNode fill:#881337,stroke:#fb7185,stroke-width:2px,color:#ffffff
+    classDef totNode fill:#1e3a8a,stroke:#60a5fa,stroke-width:3px,color:#ffffff
+
     subgraph Positives["Positive Rewards (+)"]
         D["Damage Landed (1.0 per HP)"]
         H["Laff Restored (2.0 per HP)"]
@@ -158,6 +172,10 @@ flowchart LR
 
     Positives --> Total["Quick Score Total"]
     Costs --> Total
+
+    class D,H,T,K,P,S posNode
+    class GP,SP negNode
+    class Total totNode
 ```
 
 ---

@@ -39,6 +39,12 @@ TTRSolver solves this with a **rules-exact game simulator** paired with **three 
 
 ```mermaid
 flowchart LR
+    classDef boardNode fill:#1e3a8a,stroke:#60a5fa,stroke-width:2px,color:#ffffff
+    classDef ppoNode fill:#581c87,stroke:#c084fc,stroke-width:2px,color:#ffffff
+    classDef expNode fill:#0369a1,stroke:#38bdf8,stroke-width:2px,color:#ffffff
+    classDef plyNode fill:#065f46,stroke:#34d399,stroke-width:2px,color:#ffffff
+    classDef panelNode fill:#b45309,stroke:#fbbf24,stroke-width:3px,color:#ffffff
+
     subgraph Engines["Three AI Engines"]
         direction TB
         PPO["PPO Engine<br/>Answers in ~2ms via neural net"]
@@ -48,6 +54,12 @@ flowchart LR
 
     Board["Current Battle Board"] --> Engines
     Engines --> Panel["Live Overlay Panel<br/>(Recommends best move + alternatives)"]
+
+    class Board boardNode
+    class PPO ppoNode
+    class EXP expNode
+    class PLY plyNode
+    class Panel panelNode
 ```
 
 - **Playout:** Plays out the whole rest of the fight hundreds of times in the simulator to ensure your gag pouch survives the entire wave.

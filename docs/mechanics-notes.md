@@ -80,6 +80,15 @@ Every round of combat in Toontown resolves in a strict, unchangeable sequence. T
 ```mermaid
 flowchart LR
     direction TB
+    classDef tuStyle fill:#7e22ce,stroke:#c084fc,stroke-width:2px,color:#ffffff
+    classDef trapStyle fill:#b45309,stroke:#fbbf24,stroke-width:2px,color:#ffffff
+    classDef lureStyle fill:#047857,stroke:#34d399,stroke-width:2px,color:#ffffff
+    classDef soundStyle fill:#1d4ed8,stroke:#60a5fa,stroke-width:2px,color:#ffffff
+    classDef throwStyle fill:#c2410c,stroke:#fb923c,stroke-width:2px,color:#ffffff
+    classDef squirtStyle fill:#0369a1,stroke:#38bdf8,stroke-width:2px,color:#ffffff
+    classDef dropStyle fill:#0f766e,stroke:#2dd4bf,stroke-width:2px,color:#ffffff
+    classDef cogStyle fill:#881337,stroke:#fb7185,stroke-width:2px,color:#ffffff
+
     G1["1. Toon-Up<br/>(Heals teammates)"] --> G2["2. Trap<br/>(Sets trap under cog)"]
     G2 --> G3["3. Lure<br/>(Puts cogs to sleep & springs Traps)"]
     G3 --> G4["4. Sound<br/>(Hits all cogs & wakes lured cogs)"]
@@ -87,6 +96,15 @@ flowchart LR
     G5 --> G6["6. Squirt<br/>(Fast water attack, +50% on lured)"]
     G6 --> G7["7. Drop<br/>(Heavy weight; 100% misses lured!)"]
     G7 --> C1["8. Cog Phase<br/>(Surviving awake cogs strike back)"]
+
+    class G1 tuStyle
+    class G2 trapStyle
+    class G3 lureStyle
+    class G4 soundStyle
+    class G5 throwStyle
+    class G6 squirtStyle
+    class G7 dropStyle
+    class C1 cogStyle
 ```
 
 ### Strategic Implications of the Resolution Order
@@ -136,12 +154,22 @@ Certain conditions bypass the accuracy roll entirely:
 
 ```mermaid
 flowchart TD
+    classDef stunNode fill:#0284c7,stroke:#38bdf8,stroke-width:2px,color:#ffffff
+    classDef lureRNode fill:#1d4ed8,stroke:#60a5fa,stroke-width:2px,color:#ffffff
+    classDef trapBNode fill:#b45309,stroke:#fbbf24,stroke-width:2px,color:#ffffff
+    classDef multiNode fill:#047857,stroke:#34d399,stroke-width:2px,color:#ffffff
+
     subgraph StunBonuses["Accuracy Boosters"]
         Prev["PrevHits Stun (+25% per hit)<br/>Each earlier attack that hit this round adds +25% (up to +75%)"]
         LuredR["LuredRatio Bonus<br/>(Lured Cogs / Total Cogs) × 100 added to Sound & Level 7s"]
         TrapBonus["Trap on Field<br/>+10% accuracy to all Lure gags (+5% per additional trap)"]
         MultiLure["Multi-Lure Bonus (+20/15/10%)<br/>Multiple toons luring together boost each other's hit chance"]
     end
+
+    class Prev stunNode
+    class LuredR lureRNode
+    class TrapBonus trapBNode
+    class MultiLure multiNode
 ```
 
 1. **PrevHits (The Stun Bonus):**  
@@ -253,6 +281,11 @@ When a cog uses a single-target attack, how does it choose which toon to hit? TT
 
 ```mermaid
 flowchart TD
+    classDef prepNode fill:#1e293b,stroke:#64748b,stroke-width:2px,color:#ffffff
+    classDef checkNode fill:#581c87,stroke:#c084fc,stroke-width:2px,color:#ffffff
+    classDef randNode fill:#0369a1,stroke:#38bdf8,stroke-width:2px,color:#ffffff
+    classDef revengeNode fill:#881337,stroke:#fb7185,stroke-width:2px,color:#ffffff
+
     A["Cog Prepares Single-Target Attack"] --> B{"Has any Toon damaged this Cog?"}
     
     B -- "No" --> C["Pick Uniformly at Random (25% chance per toon)"]
@@ -261,6 +294,11 @@ flowchart TD
     
     D -- "Roll &lt; 75" --> E["Revenge Targeting:<br/>Pick among attackers weighted by damage dealt!"]
     D -- "Roll &gt;= 75" --> C
+
+    class A prepNode
+    class B,D checkNode
+    class C randNode
+    class E revengeNode
 ```
 
 1. **The 75% Revenge Rule:** If toons have damaged the cog, there is a **$75\%$ chance** the cog retaliates against those attackers, with odds weighted directly by who dealt the most damage!
@@ -289,9 +327,17 @@ A battle state is marked terminal (`BattleState.is_terminal`) when any of the fo
 
 ```mermaid
 flowchart TD
+    classDef checkNode fill:#1e3a8a,stroke:#60a5fa,stroke-width:2px,color:#ffffff
+    classDef winNode fill:#065f46,stroke:#34d399,stroke-width:3px,color:#ffffff
+    classDef lossNode fill:#881337,stroke:#fb7185,stroke-width:2px,color:#ffffff
+
     EndCheck{"Terminal Check"} --> W["VICTORY: All cogs defeated (no holdout remains)"]
     EndCheck --> L1["DEFEAT: All toons have 0 laff (gone sad)"]
     EndCheck --> L2["DEFEAT: Toons have no remaining way to deal damage!"]
+
+    class EndCheck checkNode
+    class W winNode
+    class L1,L2 lossNode
 ```
 
 ### The "No Way to Damage" Rule
