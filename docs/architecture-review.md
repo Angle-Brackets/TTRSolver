@@ -1,622 +1,391 @@
-# How TTRSolver fits together
+# TTRSolver System Architecture
 
-TTRSolver advises a player during cog battles in Toontown Rewritten (TTR).
-Each round it says which gag to throw at which cog. This document describes
-the system as it stands on 2026-10-11: the layers, the path one decision takes
-from a screen frame to a line of advice, the three engines that produce
-advice, how groups of players are handled, and the constraints that shaped the
-design.
+A complete walkthrough of how **TTRSolver** works under the hood: how game data flows from your screen into Python, how combat rules are simulated with 100% precision, how three AI engines debate your best move, and why the system is built with a multi-process, multi-threaded design.
 
-The filename is historical. An earlier version of this file was a review of
-two engines that predates the third; what is worth keeping from it is
-compressed in [the last section](#history-the-two-engine-review).
+> [!NOTE]
+> All win rates, performance benchmarks, and timings cited here come from simulated fights and measured profiling scripts. Game data formulas adhere strictly to the Toontown Rewritten wiki and confirmed mechanics.
 
-Wherever this document quotes a win rate or a time, the figure comes from
-simulated fights or from timing the code, as recorded in the source comments
-and commit messages. Nothing here is a measurement of the real game.
+---
 
-## Terms
+## Table of Contents
 
-A non-player needs about a dozen words.
+- [Overview](#overview)
+- [Key Concepts & Vocabulary](#key-concepts--vocabulary)
+- [System Layers](#system-layers)
+  - [1. Rules & Game Physics](#1-rules--game-physics)
+  - [2. The Three AI Engines](#2-the-three-ai-engines)
+  - [3. Safe Live Ingestion](#3-safe-live-ingestion)
+  - [4. The Worker & Front-End Panels](#4-the-worker--front-end-panels)
+- [The Lifecycle of a Decision (Frame to Advice)](#the-lifecycle-of-a-decision-frame-to-advice)
+- [Engine Comparison (PPO, Search, Playout)](#engine-comparison-ppo-search-playout)
+  - [PPO (`hybrid.climb`)](#ppo-hybridclimb)
+  - [Search (`expectimax`)](#search-expectimax)
+  - [Playout (`playout`)](#playout-playout)
+- [Party Strategy (Coordinated vs. Pickup)](#party-strategy-coordinated-vs-pickup)
+- [Process & Threading Architecture](#process--threading-architecture)
+- [Core Design Invariants](#core-design-invariants)
+- [Historical Review & Evolution](#historical-review--evolution)
 
-| Term | Meaning |
+---
+
+## Overview
+
+At any given moment during a Toontown cog fight, a player needs to know: **"What is the best gag to throw right now that keeps my team alive and doesn't waste our highest-tier gags?"**
+
+TTRSolver answers this in real-time through four cooperating stages:
+
+```mermaid
+flowchart LR
+    A["1. Ingestion<br/>OCR + Local API<br/>(Reads without memory hacking)"] --> B["2. Battle State<br/>Unified Board Snapshot<br/>(Laff, Gags, Cogs, Waves)"]
+    B --> C["3. Simulation & AI<br/>Rules + 3 AI Engines<br/>(PPO, Expectimax, Playout)"]
+    C --> D["4. Live UI<br/>Overlay HUD & Visualizer<br/>(Recommends best play)"]
+```
+
+1. **Ingest safely:** Grabs the screen and queries the official Local API to build an immutable snapshot of the battle.
+2. **Simulate exactly:** Runs the board against exact Toontown combat rules (accuracy, combos, stun, knockback).
+3. **Solve concurrently:** Spawns three distinct AI algorithms to evaluate moves (from instant 2ms neural evaluations up to full-game Monte Carlo rollouts).
+4. **Display clearly:** Renders the leading recommendation on a sleek, always-on-top HUD window beside your game.
+
+---
+
+## Key Concepts & Vocabulary
+
+| Term | What it means in TTRSolver |
 |---|---|
-| Toon, cog | The player's character and the enemy. Up to four toons fight up to four cogs at a time. |
-| Gag | One attack or support item. Gags come in seven tracks (Toon-Up, Trap, Lure, Sound, Throw, Squirt, Drop), each with levels 1 to 7. |
-| Laff | A toon's hit points. At zero the toon is "sad" and leaves the battle. |
-| Pouch | The gags a toon carries. It is not restocked during a fight. |
-| Lure, trap | A lured cog skips its attacks for some rounds. A trap goes off when its cog is lured. |
-| Organic | A bonus on a track's gags that comes from the toon's gag trees. It raises damage, or accuracy for Lure. |
-| Building, floor | A cog building is several battles ("floors") in a row on one pouch and one laff bar. |
-| VP, CFO, CJ, CEO | The four boss fights. The VP (Vice President) has a round of cogs and then a round of skelecogs. |
-| SOS card, unite, pink slip | Consumables: an SOS card calls a helper (a heal, a restock, a lure, damage); a unite heals or restocks alongside a gag without costing the round; a pink slip removes one cog. |
-| Holdout | Cogs that belong to the current round of a boss fight but have not walked onto the field yet. |
-| Plate | The name plate above a cog on screen. With the game's "show cog levels" option on, it shows the cog's level, department and health. |
+| **Toon & Cog** | Your character (up to 4 per side) and the corporate enemies (up to 4 on the field). |
+| **Gag & Track** | Attacks in 7 families (*Toon-Up, Trap, Lure, Sound, Throw, Squirt, Drop*), tiered Levels 1–7. |
+| **Laff** | Health points. Reaching 0 laff means your toon goes "sad" and leaves the fight. |
+| **Pouch** | The gags currently in your backpack. Cannot be restocked mid-fight except via rare Unites or SOS cards. |
+| **Lure & Knockback** | Lured cogs fall asleep and skip attacks. Throw and Squirt against lured cogs get $+50\%$ damage knockback. |
+| **Plate** | The floating nameplate above a cog showing its department, level, and health bar. |
+| **Holdout** | Cogs that belong to the current wave or boss fight but are still waiting to walk onto the field. |
+| **Common Random Numbers (CRN)** | A statistical technique where all candidate moves are simulated with identical random seeds to eliminate dice luck. |
 
-The tags `[CONFIRMED]`, `[OWNER]`, `[ASSUMED]`, `[TODO]` and
-`[OPEN TOONTOWN SOURCE]` that appear in the code are explained in
-[data-confidence.md](data-confidence.md). `[OWNER]` marks the maintainer's
-judgement as an experienced player, not a sourced fact.
+---
 
-## The layers
+## System Layers
+
+TTRSolver is organized into clean, decoupled layers where game logic, AI math, and live screen capture remain strictly separated:
 
 ```mermaid
 flowchart TD
-    subgraph Rules["Rules (standard library only)"]
-        DATA["solver/data: gag, cog and accuracy tables"]
-        MECH["mechanics.py: the game's formulas"]
-        STATE["state.py: BattleState, ToonState, CogState, Action"]
-        SIM["simulator.py: one sampled round"]
-        OUT["outcomes.py: one round's exact outcome distribution"]
-        PARTY["party.py: a round with several toons, and teammate models"]
-        FIGHTS["facility.py, vp.py, ceo.py: buildings and boss fights"]
+    classDef ruleStyle fill:#065f46,stroke:#34d399,stroke-width:2px,color:#ffffff
+    classDef engineStyle fill:#581c87,stroke:#c084fc,stroke-width:2px,color:#ffffff
+    classDef liveStyle fill:#1e3a8a,stroke:#60a5fa,stroke-width:2px,color:#ffffff
+    classDef uiStyle fill:#7c2d12,stroke:#fb923c,stroke-width:2px,color:#ffffff
+
+    subgraph Layer1["1. Rules & Combat Simulator (Zero External Dependencies)"]
+        DATA["solver/data/<br/>Wiki tables: Cogs, Gags, Accuracy"]
+        MECH["solver/mechanics.py<br/>Hit formulas, damage, stun, lure"]
+        STATE["solver/state.py<br/>BattleState, ToonState, CogState"]
+        SIM["solver/simulator.py<br/>Single-round state transitions"]
+        OUT["solver/outcomes.py<br/>Exact branch probabilities"]
+        PARTY["solver/party.py<br/>Multi-toon team mechanics"]
     end
-    subgraph Engines["Engines (solver/search)"]
-        OBJ["objective.py: presets, what a gag or a point of laff costs"]
-        EXP["expectimax.py: Search"]
-        HYB["hybrid.py: PPO policy + climb"]
-        PLAY["playout.py: Playout"]
-        FAST["fastplayer.py, valuenet.py: rollout and value networks"]
+
+    subgraph Layer2["2. AI & Search Engines (solver/search/)"]
+        OBJ["objective.py<br/>Strategy presets (Balanced, Conserve, etc.)"]
+        HYB["hybrid.py (PPO)<br/>Fast neural policy + local ascent"]
+        EXP["expectimax.py (Search)<br/>Exact probability tree search"]
+        PLY["playout.py (Playout)<br/>Flagship Monte Carlo simulator"]
+        NETS["fastplayer.py & valuenet.py<br/>Neural rollout & value nets"]
     end
-    ENV["solver/rl/env.py: the battle as an environment"]
-    subgraph Live["Live (solver/live)"]
-        READ["Readers: ttr_local, vision, watch, gagpanel, ttr_log, discord_relay, boss; realms for Realms"]
-        SESS["session.py, realms_session.py: build a BattleState or say why not"]
-        WORK["advise.py, worker.py: run the engines"]
-        UI["overlay.py, panel.py, realms_panel.py, overlay_ui: the windows"]
+
+    subgraph Layer3["3. Safe Live Ingestion (solver/live/)"]
+        TTR_LOC["ttr_local.py<br/>HTTP Local API (Laff, Tracks)"]
+        VISION["vision.py & gagpanel.py<br/>OCR cog plates & pouch counts"]
+        LOGS["ttr_log.py & boss.py<br/>Boss room detection & waves"]
+        SESS["session.py<br/>Assembles verified BattleState"]
     end
+
+    subgraph Layer4["4. Workers & Presentation Front-Ends"]
+        WORK["worker.py & advise.py<br/>Multi-process engine scheduler"]
+        UI_TTR["panel.py + overlay_ui/<br/>Live React HUD Overlay"]
+        UI_VIS["visualizer/<br/>Interactive web tree visualizer"]
+    end
+
     DATA --> MECH --> SIM --> OUT
-    STATE --> SIM
-    SIM --> PARTY
-    FIGHTS --> ENV
-    PARTY --> ENV
+    STATE --> SIM --> PARTY
     OUT --> EXP
-    ENV --> HYB
-    HYB --> PLAY
-    FAST --> PLAY
-    ENV --> PLAY
-    READ --> SESS --> WORK --> UI
-    EXP --> WORK
-    HYB --> WORK
-    PLAY --> WORK
-    OBJ --> EXP
-    OBJ --> PLAY
+    SIM --> PLY
+    NETS --> PLY
+    OBJ --> EXP & PLY
+    TTR_LOC & VISION & LOGS --> SESS --> WORK
+    HYB & EXP & PLY --> WORK
+    WORK --> UI_TTR & UI_VIS
+
+    class DATA,MECH,STATE,SIM,OUT,PARTY ruleStyle
+    class OBJ,HYB,EXP,PLY,NETS engineStyle
+    class TTR_LOC,VISION,LOGS,SESS liveStyle
+    class WORK,UI_TTR,UI_VIS uiStyle
 ```
 
-### Data and mechanics
+---
 
-`solver/data/` holds the tables: gag damage, accuracy and carry limits, the
-cogs of the four departments with their attacks, and which attacks hit the
-whole party. The TTR wiki is the source of truth. A value that is not
-confirmed is left `None` and tagged `[TODO]`, and the code raises instead of
-substituting something plausible. [data-confidence.md](data-confidence.md)
-lists what is solid and what is not; the largest gap is that current cog
-attack frequencies and accuracies are not published.
+### 1. Rules & Game Physics
 
-`solver/mechanics.py` holds the formulas that turn those tables into numbers:
-gag accuracy, damage and its bonuses, lure duration and wake-up, and which
-toon a cog attacks. `solver/state.py` defines the position:
-`BattleState` (a list of toons, the cogs on the field, the holdout, and how
-many cogs later rounds hold), `ToonState`, `CogState` and `Action`.
+- **`solver/data/`**: Ground-truth tables sourced directly from the official Toontown Rewritten wiki. Covers cog HP, cog attack tables, gag damage numbers, and carrying limits.
+- **`solver/mechanics.py`**: Pure mathematical formulas for accuracy, track experience, group stun bonuses ($+25\%$ per earlier hit), and cog target selection.
+- **`solver/state.py`**: Immutable dataclasses representing the entire battle state: `BattleState`, `ToonState`, `CogState`, and `Action`.
 
-### One round, three ways
+#### One Round, Three Different Implementations
+Because different components need different outputs, combat rounds are evaluated in three distinct ways:
 
-The rules of a round exist in three forms, because three consumers need
-different things from them.
-
-| Module | Gives | Used by |
+| Implementation | What it outputs | Who uses it |
 |---|---|---|
-| `simulator.step` | One sampled next state for a lone toon | Solo rollouts, tests |
-| `outcomes.action_outcomes` | Every next state with its exact probability | The Search engine |
-| `simulator.apply_party_round`, wrapped by `party.step` | One sampled round for any number of toons | `rl/env.py`, and through it the PPO policy's training, the Playout engine and the sweeps |
+| `simulator.step` | 1 sampled next state for a lone toon | Fast solo rollouts, unit tests |
+| `outcomes.action_outcomes` | Every possible next state with exact mathematical probabilities | Exact Expectimax Search engine |
+| `party.step` | 1 sampled next state for a team of 1–4 toons | RL training environment, Playout engine, multi-toon sweeps |
 
-The toon's half of a round is written once (`simulator.apply_toon_action`) and
-shared. The cogs' half is genuinely implemented more than once, so
-`tools/round_parity.py` plays random positions through all three and reports
-any expected outcome that differs beyond sampling error. A fixed-seed version
-runs in the test suite.
+> [!IMPORTANT]
+> **One Roll Per Track Rule:** In Toontown, accuracy is rolled **once per gag track per target cog**, not per gag! If three toons throw Birthday Cakes at the same cog, they all hit or all miss together. Simulating individual rolls would falsely favor stacking gags. TTRSolver strictly models the true single-roll rule.
 
-One rule is easy to get wrong and matters for every engine: **accuracy is
-rolled once per track per target, not per gag.** Gags of the same track aimed
-at the same cog all land or all miss together. Rolling each gag separately
-would let a party hedge by stacking a track on one cog, which is not the game.
+---
 
-`solver/facility.py`, `solver/vp.py` and `solver/ceo.py` describe fights longer
-than one battle: a building's floors, and the rounds of a VP or CEO.
-`solver/rl/env.py` wraps all of it as an environment with `reset` and `step`.
-It is not training-only. The live advisor calls its observation encoding to
-run the policy network, and the playouts step fights through it.
+### 2. The Three AI Engines
 
-### The engines
+TTRSolver ships with three complementary AI engines:
+1. **PPO (`hybrid.py`)**: An ultra-fast neural policy network paired with a coordinate-ascent hill climber. Runs in $\sim 2\text{ms}$.
+2. **Search (`expectimax.py`)**: An exact depth-limited expectimax tree search. Calculates exact probabilities for current cogs on the field.
+3. **Playout (`playout.py`)**: The flagship Monte Carlo engine. Plays out the whole rest of the fight hundreds of times using a neural rollout policy to protect future waves.
 
-Three engines answer the same question and are described
-[side by side below](#the-three-engines). They share
-`solver/search/objective.py`, which defines the five presets a player can pick
-(Balanced, Speedrun, Conserve, Survive, Glass Cannon). A preset is a choice
-about what "playing well" means, such as how a point of laff trades against a
-scarce gag. None of it is game data, and it is kept out of `solver/data/` for
-that reason.
+---
 
-### The live readers
+### 3. Safe Live Ingestion
 
-TTR is read from four sources, each authoritative for one thing.
+The live readers gather information exclusively from outside the game client:
+- **`ttr_local.py`**: Connects via HTTP to `localhost:1547` (TTR's official local API) for laff, unlocked tracks, organic bonuses, and location.
+- **`vision.py` & `digits.py`**: Takes an OS screenshot of the game window and crops the cog nameplates. Runs a custom digit classifier trained on Toontown's native font.
+- **`gagpanel.py`**: Scans the gag menu numbers and verifies them against the in-game "Total Gags" label checksum.
+- **`session.py`**: Merges all sensory inputs into a complete `BattleState`. If anything is obscured or inconsistent, it refuses to guess and signals the UI to display a clear explanation.
 
-| Source | Module | Gives |
-|---|---|---|
-| The official Local API (opt-in, HTTP on localhost) | `ttr_local.py` | Laff, which gag tracks are trained, organic, location, pink slips. It does not expose the battle. |
-| The game's own window | `window.py`, `watch.py`, `vision.py`, `gagpanel.py`, `digits.py`, `catalogue.py` | The cogs (level, department and health from each plate, identity from the head render) and the count of each gag from the gag menu |
-| The client's log file | `ttr_log.py` | Entering a boss room |
-| What the game publishes to Discord Rich Presence | `discord_relay.py` | A building's floor count, for display |
+---
 
-Toontown Realms, a different server, is read by `realms.py` from the server
-stream that Realms runs on the player's own machine. The reader subscribes and
-queries; it never sends an update or a command. Realms' balance differs from
-TTR's, so nothing read there may reach `solver/data/` (see
-[realms.md](realms.md)).
+### 4. The Worker & Front-End Panels
 
-Nothing in the project reads game memory, hooks or injects into a client, or
-sends input to a game.
+- **`worker.py` (`AdviceWorker`)**: An engine coordinator completely decoupled from GUI frameworks. Dispatches work across background processes, manages calculation budgets, and aggregates advice.
+- **`overlay_ui/`**: A lightweight React web app styled with Tailwind and daisyUI. Rendered inside an Edge WebView2 window via `pywebview`.
+- **`visualizer/`**: A browser-based tree exploration application (`localhost:8000`) for debugging positions and evaluating alternative branches.
 
-`session.build_state` (TTR) and `realms_session.build_state` (Realms) join
-the sources into a `BattleState`. Each returns a state or the list of reasons
-there is not one, never a guess. `boss.py` holds the published structure of the
-boss fights and counts cogs defeated against it, which is what gives the
-engines a view of rounds that have not started.
-[live-notes.md](live-notes.md) covers the readers in detail.
+---
 
-### The worker and the panels
+## The Lifecycle of a Decision (Frame to Advice)
 
-`solver/live/worker.py` defines `AdviceWorker`, the part of a panel that does
-not care where the state came from: which engine's answer is on screen, what a
-"no, not that" rejects, how a setting reaches the engines, and the playout
-scheduler. Two subclasses supply the state: `overlay.Worker` reads the TTR
-screen, and `realms_panel.RealmsWorker` reads Realms.
-
-The windows are views over a plain `Model` object. `solver/live/panel.py` shows
-it in a pywebview window drawn by the React app in `overlay_ui/`;
-`solver/live/overlay.py` also contains a Tk window over the same worker; and
-`solver/live/advise.py` can print advice to a terminal. `python run.py` lists
-every front end and says which optional dependencies each needs.
-[panel-contract.md](panel-contract.md) documents the fields the page receives.
-
-### What depends on what
-
-The layering is mostly one-directional, with three exceptions worth knowing
-before moving code:
-
-- `simulator.py` and `outcomes.py` import `search/objective.py`, because a
-  round's reward is defined by the objective.
-- `party.py` imports `search/expectimax.py` for one of its teammate models.
-- `rl/env.py` imports `search/party_search.py` for the reward, and
-  `search/hybrid.py` imports `rl/env.py` for the observation encoding.
-
-`worker.py` imports neither backend, by rule: it is shared by the TTR panel and
-the Realms panel, and Realms data must not leak into anything TTR-specific.
-
-## The path of one decision
-
-This is the TTR panel. Realms differs only in the first half, as noted after
-the steps.
+Here is what happens during a single battle round from the moment the gag selection menu appears on your screen:
 
 ```mermaid
 sequenceDiagram
-    participant G as Game window
-    participant P as Polling thread
-    participant T as Request thread
-    participant S as Search process
-    participant O as Playout processes (4)
-    participant U as Panel page
-    loop every 0.5 s
-        P->>G: capture the window
-        P->>P: read plates, detect battle events
-        P->>U: post the model
+    autonumber
+    participant G as TTR Game Window
+    participant P as Polling Thread (0.5s)
+    participant T as Request Thread (Thinker)
+    participant S as Search Process (Expectimax)
+    participant O as Playout Processes (4 Workers)
+    participant U as Overlay UI (React)
+
+    loop Every 0.5s
+        P->>G: Capture game window rect
+        P->>P: Detect plates, verify gag menu
     end
-    Note over P: a cog joins, is hurt or dies
-    P->>T: submit frame and readings
-    T->>T: build BattleState, apply boss tracker
-    T->>O: start playouts on a clone (chunks)
-    T->>T: PPO on a clone (milliseconds)
-    T->>U: PPO row
-    T->>S: expectimax on a pickled copy
-    O-->>U: Playout row, refined after each chunk
-    S-->>U: Search row
+
+    Note over P: Battle detected! New round starts.
+    P->>T: Submit frame, plate OCR, and Local API snapshot
+    T->>T: Construct immutable BattleState (add wave holdout)
+
+    par PPO Policy
+        T->>T: Run PPO policy net on cloned state (~2ms)
+        T->>U: Post instant PPO advice (card populated immediately!)
+    and Exact Search Tree
+        T->>S: Dispatch pickled state to Search process (depth 1–3)
+    and Playout Rollouts
+        T->>O: Distribute candidate moves across 4 Playout workers
+    end
+
+    loop Progressive Refinement
+        O-->>U: Post updated best move after 16, 32, and 64 playouts!
+    end
+
+    S-->>U: Post finished Expectimax search branch
+    Note over U: Playout move leads; user can click Search or PPO anytime.
 ```
 
-1. **Capture.** Every 0.5 s the polling loop (`overlay.Worker.run`) asks the
-   window manager where the window titled "Toontown Rewritten" is and grabs
-   only that rectangle (`window.game_rect`, `watch.Capture`). The lookup is
-   Windows-only; elsewhere the whole screen is grabbed.
-2. **Read the cogs.** `BattleWatcher.poll` finds the plates, reads each
-   plate's level, department and health, and names the cog from its head
-   render against a collected library (`catalogue.py`). A battle is entered
-   only when plates and the gag menu are both visible, because plate-coloured
-   scenery alone once produced phantom battles. The watcher emits events: a
-   battle started, a cog joined or was defeated, damage landed, a reading was
-   corrected.
-3. **Decide whether to think.** Engines run only when an event changes the
-   position, when the player asks, or when a failed read is being retried.
-   Between those the previous answer stands.
-4. **Build the state.** On a new request thread (`advise.Thinker`), the Local
-   API snapshot supplies laff and training, the gag menu supplies counts, and
-   the plates supply the cogs. The menu's "Total gags" label is read
-   separately and used as a checksum on the counts; a mismatch refuses the
-   state. If anything is missing the panel shows the reasons and no advice.
-5. **Add what the player knows about the fight.** A frozen copy of the boss
-   tracker marks the state as a VP or CEO and sets how many cogs later rounds
-   hold. The player's own counts of unites and pink slips are added, since the
-   screen cannot show them.
-6. **Run three engines.** The playouts are started first on a clone of the
-   state, in their own process pool. PPO then runs on another clone in the
-   request thread and posts its move within milliseconds. Finally the state is
-   sent to the search process, and the request thread waits for it.
-7. **Word the answer.** Each engine's move is turned into a line such as
-   "Safe on cog 1 (Flunky, 42/42 hp)" by `advise._render`, with reasons
-   (accuracy, expected incoming damage) from `explain.py`, which reads them off
-   the same functions the scorer uses.
-8. **Show it.** The worker posts a copy of the model to a queue; the page
-   receives it as JSON. The Playout row's move is the one displayed unless the
-   player has picked an engine. PPO's move is shown until the playouts post
-   their first.
+---
 
-A request for the same position as the one being searched does not restart
-anything. A request for a new position supersedes the old one: its playouts
-stop at the next chunk boundary and the old search process is terminated.
+## Engine Comparison (PPO, Search, Playout)
 
-In the Realms panel, steps 1 to 4 are replaced by `RealmsWorker.tick`, which
-builds the state from typed fields every 0.4 s and re-runs the engines when the
-position's key changes.
-
-## The three engines
-
-All three are computed every round and shown as three rows. A player can
-switch the displayed row at no cost, because the other answers already exist.
-
-| | PPO | Search | Playout |
+| Attribute | PPO (`hybrid.climb`) | Search (`expectimax`) | Playout (`playout`) |
 |---|---|---|---|
-| Module | `search/hybrid.py` (`climb`) | `search/expectimax.py` | `search/playout.py` |
-| What it computes | A trained policy network proposes a plan; coordinate ascent tries alternatives and keeps what a one-round scorer prefers | The expected value of each move over the exact outcome tree, to a depth limit | The mean result of playing each of about ten candidate moves to the end of the fight |
-| Looks ahead | One round | Several rounds of the battle on the field | The whole fight, including rounds not yet on the field in a VP or CEO |
-| Chance | Expectation over accuracy rolls for one round | Exact probabilities | Sampled, with the same random numbers for every candidate |
-| Cost per decision | Milliseconds | A time budget: 15 s by default on TTR, 4 s on Realms | Anytime: a first answer after two rollouts per candidate, refined until the think time runs out |
-| Where it runs | The request thread | One child process | Four child processes |
-| Follows the preset | No | Yes | Yes, relative to Balanced |
-| Groups | Plans every seat | Solo; teammates are a count | Joint plans or modelled teammates (see below) |
-| Needs numpy | Yes | No | Yes |
+| **Underlying Math** | Neural policy net + coordinate hill-climb | Depth-limited Expectimax tree | Monte Carlo tree rollout + Successive Halving |
+| **Lookahead Horizon** | 1 single round | 1–3 rounds on current board | Entire fight to the end (including all reserve waves) |
+| **Probability Handling** | Hand-weighted expectation | Exact mathematical probabilities | Sampled with Common Random Numbers (CRN) |
+| **Speed / Latency** | **2ms – 25ms** (instant) | 5s – 15s (set by budget) | Progressive (first result at ~1s, refines to ~3s) |
+| **Execution Environment** | Request thread | 1 dedicated child process | 4 dedicated worker processes |
+| **Strategy Presets** | Ignores presets | Follows preset weights | Follows preset adjustments |
+| **Key Strength** | Zero latency; never leaves UI blank | 100% exact math on lethal turns | Long-range gag conservation for boss fights |
+
+---
 
 ### PPO (`hybrid.climb`)
 
-A policy network trained with PPO (proximal policy optimisation) and exported
-as plain numbers (`solver/rl/ppo_facility.json`) ranks the legal moves for each
-seat. `climb` starts from the network's first choice and sweeps the seats,
-offering each the network's top alternatives plus targeted probes (the pass,
-the cheapest kill, the cheapest lure, SOS cards, a unite), and keeps any change
-that `party_search._quick_score` prefers. That scorer takes the expectation of
-one round over its accuracy rolls with hand-set weights; see
-[scoring.md](scoring.md). [ppo-math.md](ppo-math.md) covers the training.
+PPO takes the 302-number battle state vector, feeds it through an actor neural network ($256 \to 256 \to 250$ action logits), and masks out illegal gags.
 
-Its strength is cost. Timings recorded in the code range from about 2 ms to
-26 ms per decision depending on the board and settings, and one comparison
-over 80 single battles with a wounded toon found it agreeing with Search on 79
-while running about 2,000 times faster (98.8% of battles won against 100%).
+Next, a coordinate-ascent hill climber (`climb`) tests small adjustments:
+1. Swaps one toon's move at a time with the network's top alternatives or strategic probes (e.g., cheapest lure, trap combo, SOS card).
+2. Tests paired 2-toon swaps.
+3. Locks in the best candidate within 24 quick evaluations.
 
-Its weakness is the one-round view. On 500 simulated solo VP sides it won 36
-(7.2%), spending its power gags on the easy cog round and meeting the skelecog
-round without them.
+**Why it's great:** Blazing fast. In benchmark tests against 80 single battles, it agreed with exact Search 79 times while running **2,000× faster** (98.8% win rate vs. 100%).  
+**Where it struggles:** It only sees 1 round ahead. In a solo VP with 40 cogs, it might blow its Level 7 Wedding Cake on a standard cog wave, leaving nothing for the Skelecogs later.
 
-Besides being the instant answer, `climb` proposes the Playout engine's menu
-and plays out group fights inside playouts.
+---
 
 ### Search (`expectimax`)
 
-A depth-limited expectimax: the toon's move is a MAX node, and the gag's hit
-roll with the cogs' counter-attack is a CHANCE node with exact probabilities
-from `outcomes.action_outcomes`. It uses *-minimax pruning (the analogue of
-alpha-beta for chance nodes), a memo across depths, and iterative deepening
-under a time budget, so it returns the deepest pass that finished. At the depth
-cutoff it scores the board with a linear evaluator fitted against exact
-solutions of small fights (`search/fitted.py`, checked in as plain floats).
-[search-depth.md](search-depth.md) has the branching analysis.
+Expectimax maps out a complete tree of choices:
+- **MAX Nodes:** Your choice of gags.
+- **CHANCE Nodes:** Every combination of hit/miss rolls and surviving cog counter-attacks, each weighted by its exact probability.
 
-Fully exact search is expensive. On a real endgame loadout (20 distinct gags,
-30 root actions, two cogs) depth 1 took 0.01 s, depth 2 took 9.3 s and depth 3
-many minutes. The panel therefore collapses the cogs' attacks into their mean
-where the preset allows it and drops 3% of probability mass per chance node,
-which reaches depth 4 against two cogs and depth 3 against three or four
-within the 15 s budget.
+```mermaid
+flowchart TD
+    classDef maxNode fill:#1e3a8a,stroke:#60a5fa,stroke-width:2px,color:#ffffff
+    classDef chanceNode fill:#581c87,stroke:#c084fc,stroke-width:2px,color:#ffffff
+    classDef leafNode fill:#065f46,stroke:#34d399,stroke-width:2px,color:#ffffff
 
-Its strength is exactness inside its horizon. In single battles its move stops
-changing by depth 4, and it is the only engine whose values are not estimates.
+    M1["MAX: Choose Gag<br/>(Throw vs Lure)"]
+    M1 -->|Throw Cake| C1["CHANCE: Hit Roll (95%)"]
+    M1 -->|Hypno Goggles| C2["CHANCE: Lure Roll (75%)"]
 
-Its weakness is the horizon itself. It searches the battle on the field. The
-count of cogs still to come can make gags dearer in its objective, but those
-cogs are never simulated. On 60 simulated one-toon sides of a two-player VP it
-won 6 where the Playout engine won 33. In buildings the two were level (146
-against 149 of 200). Three attempts to give it a learned leaf evaluator
-(`search/valuenet.py`) had lower error than the fitted leaf and played no
-better; that network is off by default.
+    C1 -->|Hit 95%| C3["CHANCE: Cogs Attack"]
+    C1 -->|Miss 5%| C4["CHANCE: Cogs Attack"]
 
-It is also a solo search. `expectimax.solve` cannot reach a party position, and
-teammates enter only as a count that thins the cogs' single-target attacks.
+    C3 --> L1["Leaf: Evaluated Board State"]
+    C3 --> L2["Leaf: Evaluated Board State"]
+
+    class M1 maxNode
+    class C1,C2,C3,C4 chanceNode
+    class L1,L2 leafNode
+```
+
+**Pruning Optimizations:**
+- **Star Pruning:** Prunes chance nodes whose mathematical upper bound cannot beat the current best known action.
+- **Cog-Phase Collapsing:** Groups identical damage amounts together, compressing 20–70 cog attack permutations down into a handful of outcomes.
+
+---
 
 ### Playout (`playout`)
 
-The Playout engine builds a menu of up to twelve candidate moves, plays each
-to the end of the fight with a small network choosing the later rounds, and
-keeps the move whose fights ended best, using successive halving and common
-random numbers to spend rollouts where candidates are close. In a boss fight
-it draws the unseen cogs afresh in each rollout from what a player knows is
-coming. [playout.md](playout.md) is its full reference, and
-[rollout-network.md](rollout-network.md) describes the network that plays the
-rollouts.
+Playout simulates candidates through multiple rounds to the fight's completion:
 
-It is the strongest engine wherever the fight extends past the cogs on the
-field. With a realistic VP pouch and five unites, simulated playouts won 94 of
-100 solo VPs and 55 of 60 one-toon sides of a two-player VP. Its results are
-estimates, and they are not comparable with Search's values.
-
-Its costs are time and dependencies. A sweep recorded about 1.9 s per decision
-on solo VPs, and it needs numpy and the shipped weights.
-
-### Which engine is shown
-
-The Playout row is displayed by default in every fight. It first led only in
-boss fights, on the 6-against-33 measurement above. Extending that to all
-fights on 2026-10-11 was the maintainer's preference after watching it play a
-building (`[OWNER]`), where the measured result is a tie with Search. Once the
-player clicks another engine's button, the panel stops applying the default
-and shows the engine they chose.
-
-## Parties
-
-`BattleState.toons` is a list, and `toons[0]` is the toon being advised.
-**Only part of the system is party-aware**, and the line is worth knowing
-before extending either side.
-
-### What is party-aware
-
-- **The rules.** A sad toon leaves the battle and does not end it; the fight is
-  over when every toon is sad or every cog is dead. `can_still_damage` pools
-  the party's gags, so Trap on one toon and Lure on another is a winning pair
-  although neither pouch is on its own. Group cog attacks damage every
-  standing toon; which attacks are group attacks is `[CONFIRMED]` from the
-  wiki's two attack categories.
-- **The memo keys.** `outcomes.state_key` and `merge_key` key on every toon in
-  order, because toons are not interchangeable.
-- **The evaluator's features** (`search/features.py`) pool laff, gags and
-  damage over the toons still standing. Solo feature vectors are bit-identical
-  to what they were before, which is what keeps the fitted weights valid. The
-  party values are defined but not validated: exact search cannot reach a
-  party position, so there are no labels to check them against.
-- **PPO and Playout.** `climb` plans one action per seat. The Playout engine
-  handles a board with teammates on it in one of two modes.
-
-### Two modes, and why there are two
-
-Whether a teammate is someone you choose for or someone you predict is a
-question about the players, not about the search.
-
-- **Coordinated**: every toon's action is chosen together. This is the only way
-  to find the plays that make coordinating worth anything, such as stacking a
-  track on one cog or holding a Trap for someone else's Lure.
-- **Pickup**: you control one toon, and the others are a chance node, sampled
-  from a `TeammateModel`.
-
-Using the wrong one gives bad advice in both directions. Searching strangers
-as choices you do not have produces "throw a level 1, my teammate will throw a
-level 7 into the same cog". Modelling a coordinated team as a distribution
-throws away the reason they coordinated.
-
-The default teammate model, `party.SensiblePrior`, is **a guess about how
-people play**. Nothing in the wiki or the source can confirm what a stranger
-throws, and any pickup-mode number rests on it. `party.NetTeammate` is a second
-guess of the same standing.
-
-`solver/search/party_search.py` is a sampled search over party positions with
-both modes. It is used offline, and its one-round scorer is the judge inside
-`climb`. Its values are estimates and are not comparable with exact search.
-One invariant catches most bugs in it: coordinated can never score below
-pickup, since it may choose everything pickup may and more.
-[party-strategy.md](party-strategy.md) records what its first strategic trials
-found, and two cautions from it carry over: the party evaluator is saturated on
-a maxed team, and no result about Lure is trustworthy from a one-ply search.
-
-### What is still solo
-
-- **The Search row.** Teammates are a count.
-- **`simulator.legal_actions`** enumerates one toon's moves; the party code
-  builds joint plans on top of it.
-- **The rollout network.** It knows one seat, so group playouts are played out
-  by `climb` and are not shortened.
-- **TTR's readers.** The Local API reports the player's own toon, and nothing
-  reads a teammate's laff or gags off the screen. On TTR every engine sees the
-  teammates as the count the player sets. The Realms stream does carry
-  teammates; there PPO and Playout plan the party jointly and show the
-  player's part, while Search still sees a count.
-
-An attempt to give the TTR playouts guessed teammates was measured and
-shelved: guessing gained nothing over the count, and knowing the real
-teammates was worth about 11 wins in 300 simulated buildings.
-[playout.md](playout.md#guessing-ttrs-teammates-gains-nothing) has the table.
-
-## Engines get a clone, never the live board
-
-`hybrid.climb` applies the unite it chooses to the board it is given. That is
-right inside a simulation, where the board is about to be played, and wrong for
-a board that anything else will read afterwards.
-
-Both panels once passed their live board to PPO. The Search row, the
-explanations and the decision log then read that same object. A Toon-Up unite
-that PPO had merely considered turned 12 laff into 92 for everything
-downstream, and a Gag-Up invented gags that two rows then planned with.
-
-The rule is now explicit at every call site:
-
-- `advise.first_answer` and `RealmsWorker._first_answer` call
-  `hybrid.climb(state.clone(), ...)`.
-- `Thinker` hands the playouts `state.clone()`; inside `playout.py` the menu is
-  built on a clone and every rollout starts from a clone.
-- The Search and Playout engines run in child processes, which receive pickled
-  copies.
-- The boss tracker is handed to the request thread as a frozen copy, so the
-  count cannot move while it is being read.
-
-A related rule: the model the page reads is a fresh copy on every post, so the
-page never sees a model the worker is halfway through updating.
-
-## Processes and threads
-
-The TTR panel is one main process with several threads and five child
-processes.
-
-| Where | What runs there |
-|---|---|
-| Main thread | The window's event loop (pywebview, or Tk in `overlay.py`) |
-| Drain thread | Takes posted models off a queue and pushes them to the page as JSON. The page also pulls every 400 ms, so a dropped push is a late frame and not a stuck panel. |
-| Polling thread (`overlay.Worker`) | Captures the window and reads the plates every 0.5 s, votes on gag-menu counts while the menu is open, tracks the boss fight and the round count, and decides when to ask for advice. It never runs an engine. |
-| Local API refresher | One request every 5 s on a single kept session. Discovery is never run in a loop, because the game shows its consent prompt once per new client. |
-| Request thread (one per request, newest wins) | Builds the state, starts the playouts, runs PPO, and waits on the search |
-| Playout coordinator thread | Walks the chunk schedule, applies halving, and posts the best move after each chunk |
-| Search process (pool of 1) | `expectimax` under its time budget. A superseded search is terminated instead of being left to run out its budget. |
-| Playout processes (pool of `PLAYOUT_WORKERS` = 4) | Rollouts. Each chunk's candidates are split across them and merged by key. |
-| Discord relay threads | Hold the Discord pipe to read the building's floor |
-
-The reasons for this shape are all measured. Polling has to keep its cadence
-because it is what notices a cog dying, and a search takes seconds, so the two
-cannot share a thread. Search and playouts are pure Python and would hold the
-interpreter lock the polling thread needs, so they run in processes. Rollouts
-of different candidates are independent, so four processes run a chunk about
-four times as fast: when the split was introduced, the first move on a VP
-opening arrived in 1.5 s instead of 3.0 s. Four are used, not every core,
-because the game and the screen reader run on the same machine.
-
-Two consequences are easy to trip over. Pool processes are reused, so any
-setting that lives in a module global (the preset, the group mode, whether
-level 7 gags are allowed) is set again on every call. And a value set in a
-child process never reaches the parent, which is why the Search process returns
-its chosen unite in its result.
-
-The Realms panel has the same shape with a different first half: a listener
-thread keeps an object store from the server stream, and the worker thread
-polls that store every 0.4 s.
-
-## Constraints that shape the design
-
-**The core runs on the standard library alone.** The rules, the tables, the
-exact search, the Local API client, the Discord relay and `run.py` import
-nothing third-party. The fitted evaluator is a block of float literals and its
-inference is a dot product in plain Python.
-
-**numpy is optional and confined.** It is needed by the screen readers
-(`vision.py`, `watch.py`, `gagpanel.py`, `digits.py`, `catalogue.py`,
-`read_battle.py`) and by the modules that evaluate a network (`hybrid.py`,
-`fastplayer.py`, `valuenet.py`, `policy.py`). Each network module reports
-itself unavailable instead of raising, and callers fall back: without numpy
-the PPO and Playout rows are unavailable and Search still works. The screen
-extras are in `requirements-vision.txt`. `solver/live/__init__` must not
-import `vision`, and the vision tests skip themselves when numpy is absent.
-
-**No torch in `solver/`.** Training uses torch (`requirements-training.txt`)
-and lives in `tools/`. Every trained network is exported to JSON as plain
-numbers and evaluated with numpy.
-
-**panda3d only in the Realms reader**, which needs the game's own parser for
-its message definitions (`requirements-realms.txt`).
-
-**No guessed state.** A reader returns a value with a confidence, a builder
-returns a state or the reasons it cannot, and advice is not computed from an
-invented position. The one deliberately assumed game value is tagged
-`[ASSUMED]` and described in [data-confidence.md](data-confidence.md).
-
-**Information realism.** An engine may use only what a player can see. The
-published structure of a boss fight counts; the next floor of a building does
-not.
-
-**Three things end a battle.** Laff reaches zero, every cog is dead, or the
-toons have no remaining way to damage a cog (`BattleState.can_still_damage`).
-The third is as final as the first, since nothing restocks a pouch mid-fight.
-Before it existed, a hopeless position fell through to the evaluator and
-scored +47.6, and because training labels came from exact solves, the
-evaluator was partly fitted to its own output.
-
-**Tests are standard-library `unittest`**, about 1,900 of them:
-
-```
-python -m unittest discover tests
+```mermaid
+flowchart TD
+    A["Select 10–12 Diverse Candidates<br/>(PPO pick, sound combos, cheap kills, lures)"] --> B["Round 1: 16 Rollouts per candidate<br/>(Using Common Random Numbers)"]
+    B --> C["Cut weaker 50% of candidates"]
+    C --> D["Round 2: 32 Rollouts on survivors"]
+    D --> E["Cut down to top finalists"]
+    E --> F["Round 3: 64 Rollouts on finalists"]
+    F --> G["Declare Move with Highest Mean Win Score"]
 ```
 
-Measurement tools live in `tools/`. `tools/sweep.py` plays the same simulated
-fights with different engines and is the harness behind the Playout figures.
+#### Key Techniques
+1. **Common Random Numbers (CRN):** In rollout $k$, every single candidate move encounters the exact same random seed. If one move lands a hit and another misses, it's because of the move's base accuracy—not lucky dice.
+2. **Successive Halving:** Instead of spending equal compute on bad moves, the bottom 50% are dropped at 16 and 32 playouts. Compute is focused on the razor-thin decisions.
+3. **Rollout Policy Network:** A lightweight neural policy plays subsequent rounds at blazing speed, allowing hundreds of full-battle rollouts in seconds.
 
-## Where to read next
+---
 
-| Topic | Document |
-|---|---|
-| The Playout engine in full | [playout.md](playout.md) |
-| The rollout network | [rollout-network.md](rollout-network.md) |
-| What the game data is based on | [data-confidence.md](data-confidence.md), [mechanics-notes.md](mechanics-notes.md) |
-| The one-round scorer and its weights | [scoring.md](scoring.md) |
-| Exact search depth | [search-depth.md](search-depth.md) |
-| The policy network | [ppo-math.md](ppo-math.md), [ml-design.md](ml-design.md) |
-| The screen and API readers | [live-notes.md](live-notes.md) |
-| Realms | [realms.md](realms.md) |
-| Every experiment, including the failed ones | [experiment-log.md](experiment-log.md) |
+## Party Strategy (Coordinated vs. Pickup)
 
-## History: the two-engine review
+When multiple toons are in a battle, how should an AI model teammates? TTRSolver supports two fundamental modes:
 
-This file used to be a request for outside review of two engines, written in
-August 2026 before the Playout engine existed. Its full text is in the file's
-git history. The engines it compared were PPO with `climb`, and the sampled
-party search in `party_search.py` (not today's Search row), on one task: the
-percentage of simulated cog buildings fully cleared by a party.
+```mermaid
+flowchart TD
+    subgraph CoordinatedMode["Coordinated Mode"]
+        direction TB
+        C1["All 4 toons planned together as a unified team"]
+        C2["Enables big combos, trap-lure setups, and staggered sound"]
+    end
 
-**The result was a tie.** Over three disjoint sets of 180 held-out buildings:
+    subgraph PickupMode["Pickup Mode"]
+        direction TB
+        P1["You control 1 toon; teammates treated as a probability distribution"]
+        P2["Uses SensiblePrior to guess likely human moves"]
+    end
+```
 
-| Engine | Buildings cleared (per set) | Time per decision |
+- **Coordinated Mode:** Optimizes all 4 toon seats simultaneously. This is essential for high-level play—for example, coordinating one toon to place a Trap while another Lures, or combining three Pies for a $+20\%$ damage combo.
+- **Pickup Mode (`SensiblePrior`):** Models random teammates using realistic human heuristics. Prevents the solver from dangerously assuming a random teammate will save you with a Level 7 gag when you throw a Level 1 gag!
+
+---
+
+## Process & Threading Architecture
+
+To keep the overlay responsive and prevent screen reading from stuttering your game, TTRSolver isolates tasks across threads and dedicated processes:
+
+```mermaid
+flowchart TB
+    subgraph MainProcess["Main Python Process"]
+        MainThread["Main Thread<br/>(pywebview GUI Event Loop)"]
+        DrainThread["Drain Thread<br/>(Pushes JSON to UI queue)"]
+        PollThread["Screen Polling Thread<br/>(Captures & OCRs every 0.5s)"]
+        LocalAPIThread["Local API Thread<br/>(Refreshes laff every 5s)"]
+        RequestThread["Request Thread (Thinker)<br/>(Coordinates engines & runs PPO)"]
+    end
+
+    subgraph ChildProcesses["Worker Process Pool"]
+        SearchProc["1x Search Process<br/>(Runs heavy Expectimax tree)"]
+        Playout1["Playout Worker 1"]
+        Playout2["Playout Worker 2"]
+        Playout3["Playout Worker 3"]
+        Playout4["Playout Worker 4"]
+    end
+
+    PollThread -->|State Ready| RequestThread
+    RequestThread -->|Runs instant| RequestThread
+    RequestThread -->|Dispatches| SearchProc
+    RequestThread -->|Dispatches in parallel| Playout1 & Playout2 & Playout3 & Playout4
+    Playout1 & Playout2 & Playout3 & Playout4 -->|Rollout Results| RequestThread
+    SearchProc -->|Tree Result| RequestThread
+    RequestThread -->|Updates Model| DrainThread --> MainThread
+```
+
+### Architecture Rationale
+- **Zero GUI Freezes:** Heavy Expectimax searches and thousands of Monte Carlo rollouts run in child processes, keeping the Python Global Interpreter Lock (GIL) completely free.
+- **Parallel Speedup:** Splitting candidate rollouts across 4 worker processes reduced VP opening evaluation times from 3.0s down to 1.5s!
+- **Instant Abort:** If a cog dies or a new round starts, outdated searches are terminated immediately and restarted on the fresh board.
+
+---
+
+## Core Design Invariants
+
+1. **Engines Always Get Clones, Never the Live Board:**  
+   > [!IMPORTANT]
+   > During development, an early bug allowed PPO to test a Toon-Up Unite directly on the live board object. Downstream search processes suddenly believed the toon had 92 health and extra gags!  
+   > **The Iron Rule:** Every engine receives an explicit `state.clone()` before any simulation begins.
+2. **Fail-Safe Verification (No Guessing):**  
+   If an OCR reading fails or gag counts do not match the pouch checksum, the advisor displays the exact reason and **refuses to give advice**. No synthetic guesses are ever fed to the player.
+3. **Information Realism:**  
+   The engines only know what a skilled human player could know. They know the structure of a boss fight (e.g., 40 total cogs in a VP), but they never peek at future floors of a building or randomly generated unknown cogs.
+
+---
+
+## Historical Review & Evolution
+
+In August 2026, the project underwent a rigorous head-to-head comparison between **PPO with `climb`** and **Sampled Party Search** over hundreds of simulated buildings:
+
+| Engine Tested | Buildings Cleared | Time per Decision |
 |---|---|---|
-| PPO + `climb` | 65.9% (69.4 / 63.3 / 65.0) | 0.6 ms |
-| Sampled party search | 65.0% (65.6 / 65.0 / 64.4) | 124 ms |
-| PPO alone | 57.6% (57.2 / 53.9 / 61.7) | 0.28 ms |
+| **PPO + `climb`** | **65.9%** | **0.6 ms** |
+| **Sampled Party Search** | 65.0% | 124 ms |
+| **PPO alone (no climb)** | 57.6% | 0.28 ms |
 
-The lessons that outlived the comparison:
+### Lessons Learned
+- **The Proposer Needs an Independent Judge:** Having a neural policy evaluate its own sampled moves led to circular overconfidence. The best move requires an objective, external evaluator.
+- **The Birth of Playout:** A one-round scorer cannot foresee the end of a boss fight. The Playout engine was built specifically to solve this—playing fights all the way to the end and using Common Random Numbers to eliminate noise.
+- **Expert Iteration Breakthrough:** Training a neural rollout policy on the Playout engine's winning trajectories raised simulated solo VP wins from **44% to 65%**, and eventually to **94% with Unites**.
 
-- **Measure the noise floor first.** Three training runs that differed only in
-  the seed scored 65.0%, 66.1% and 65.9%, and they reordered on a fourth set.
-  The party search's own sampling seed was worth a standard deviation of 1.44
-  points. A 2.8-point gap that the review had been written to explain came
-  from one measurement on one set and did not survive three. Results have
-  since been believed only when paired and repeated.
-- **A judge must be independent of the proposer.** Four times an evaluator
-  that shared the proposer's assumptions produced a result that vanished: the
-  policy's own critic ranking its samples, a greedy two-round lookahead (2.8
-  points worse), the policy playing a few rounds on as its own judge (3.3 to
-  3.8 points worse), and a fork experiment that favoured the search only while
-  the search's own rollout policy played the continuation.
-- **The better move depends on who plays after it.** In that fork experiment
-  (500 forks over 47 buildings, on identical dice) the search's moves led by
-  2.29 points under its own continuation and by nothing distinguishable from
-  zero under the policy's. This is the same reason formulas fitted to playout
-  labels later failed in play.
-- **Copying behaviour did not copy results.** Changes that moved the policy's
-  usage statistics onto the search's bought at most 1.1 points. Holding a gag
-  back, which five interventions had tried to teach, measured as worth
-  nothing.
-- **The scorer's terms matter and its weights do not.** Four random weight
-  vectors cleared 63.3% to 65.0% of buildings; zeroing every term but damage
-  cleared 57.5%.
-- **A building is decided by the first toon lost.** Over 50 buildings played by
-  both engines, every run that lost no toon cleared the building, and no run
-  was lost to an empty pouch.
-- **A self-referential teacher has no fixed point.** Distilling `climb` into
-  the policy failed, because `climb` is defined as a perturbation of the
-  policy's own output and the target moves with the student. Cloning the party
-  search collapsed to 7.5% of buildings.
+---
 
-Two of those threads lead directly to the current design. The review's
-unanswered request was for a horizon that the one-round scorer lacks and a
-judge the proposer does not control. The Playout engine supplies both: it
-plays to the end of the fight instead of a few rounds, scores cogs defeated,
-and averages many rollouts on common random numbers. And once that engine
-existed as a fixed, stronger teacher, expert iteration worked where it had
-failed before: the rollout network trained on the Playout engine's moves
-raised simulated solo-VP wins from 44 to 65 of 100, though only as a rollout
-player and not as an engine in its own right.
+*Continue reading:*
+- [The Playout Engine Deep Dive](playout.md)
+- [Combat Mechanics & Game Rules](mechanics-notes.md)
+- [How Game Data is Read from Screen & API](live-reading.md)

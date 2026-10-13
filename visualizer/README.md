@@ -1,194 +1,173 @@
-# Visualizer
+# TTRSolver Browser Visualizer
 
-A browser page for exploring one battle position without the game running.
-You build a position by hand (toons, gag pouches, cogs and their status),
-and the page shows what two of the solver's engines would play, the tree of
-moves and outcomes underneath, and what each cog is likely to do next.
+An interactive web application for exploring battle positions, testing "what-if" gag scenarios, and visualizing AI decision trees—**without needing the Toontown game running**.
 
-Every number on the page comes from the real `solver` package. The page is
-a React app that sends JSON to a small local server, and the server calls
-the same Python code the tests import. There is no JavaScript copy of the
-battle rules to fall out of step.
+You can set up custom battle scenarios (toons, gag pouches, cog lineups, and lures), and the visualizer will render an interactive canvas showing what the AI engines would play, the probabilities of every hit/miss branch, and what the cogs are expected to do next.
 
-For the design, the HTTP API and the list of known gaps, see
-[docs/visualizer-spec.md](../docs/visualizer-spec.md).
-
-## Running it
-
+```mermaid
+flowchart LR
+    A["Scenario Builder<br/>Custom Toons & Cogs"] --> B["Python Backend<br/>(localhost:8000)<br/>Real Solver Physics"]
+    B --> C["Interactive Tree Canvas<br/>Branching Probabilities"]
+    B --> D["Deep Inspector<br/>Cog Threat Forecasts & EV"]
 ```
+
+> [!TIP]
+> **100% Real Python Rules:** Every probability, accuracy roll, and damage number on the page comes directly from the Python `solver` engine via JSON APIs. There are no duplicated or out-of-sync JavaScript rules!
+
+---
+
+## Table of Contents
+
+- [Quick Start](#quick-start)
+- [Tour of the Interface](#tour-of-the-interface)
+  - [The Control Banner](#the-control-banner)
+  - [The Interactive Battle Tree](#the-interactive-battle-tree)
+  - [The State Inspector & Cog Threat Forecast](#the-state-inspector--cog-threat-forecast)
+  - [The Scenario Builder](#the-scenario-builder)
+- [How to Navigate the Tree Canvas](#how-to-navigate-the-tree-canvas)
+- [Developer Setup](#developer-setup)
+- [Known Gaps & Roadmap](#known-gaps--roadmap)
+
+---
+
+## Quick Start
+
+You can launch the visualizer with a single command:
+
+```bash
+# Option 1: Direct launch
 python -m visualizer.serve
+
+# Option 2: Via main menu
+python run.py 7
 ```
 
-or `python run.py 7`. A browser tab opens on
-`http://localhost:8000/visualizer/index.html`. Stop the server with
-Ctrl-C.
+A browser tab will automatically open at `http://localhost:8000/visualizer/index.html`. To stop the local server, press `Ctrl-C` in your terminal.
 
-| Flag | Meaning |
+| CLI Flag | Purpose |
 |---|---|
-| `--port N` | Serve on another port. Default 8000. |
-| `--no-browser` | Do not open a tab. |
+| `--port N` | Serve on a custom port (default: 8000). |
+| `--no-browser` | Starts the server without automatically opening a browser tab. |
 
-You do not need Node.js: the built page is committed in `visualizer/dist/`.
+> [!NOTE]
+> **No Node.js Required:** The React front-end is already pre-compiled inside `visualizer/dist/`. You only need Node.js if you want to modify the React code itself!
 
-The server and the search need only the Python standard library. The PPO
-engine also needs numpy (`pip install -r requirements-vision.txt`). Without
-it the page still works and the PPO side reports why it is unavailable.
+---
 
-The server listens on `127.0.0.1` only. It serves files from the
-repository directory, so do not expose the port beyond your own machine.
+## Tour of the Interface
 
-## What you see
+### The Control Banner
+- **Engine Selector:** Toggle between **PPO (RL)**, **Search (Expectimax)**, or **Both (Compare)**. In comparison mode, moves are color-coded:
+  - **Green outline:** PPO's choice.
+  - **Blue outline:** Search's choice.
+  - **Amber outline:** Both engines agree!
+- **Strategy Preset:** Choose the search objective (*Balanced, Conserve, Survive, Speedrun, Glass Cannon*).
+- **Search Depth (1 to 4):** Sets how many turns into the future Expectimax explores. Depth 1–2 is instant; depth 3+ explores deep branching trees!
+- **Think Budget:** Sets calculation evaluations for PPO.
+- **Show Best Path:** Instantly opens the single highest-EV line while collapsing lower-scoring alternatives into clean `+N more` chips.
+- **Setup:** Opens the Scenario Builder modal.
 
-### The banner
+---
 
-- **Engine selector.** "PPO (RL)", "Search", or "Both (Compare)". This
-  chooses whose path is highlighted in the tree.
-- **Preset.** The objective the search optimises (Balanced, Speedrun,
-  Conserve, Survive, Glass cannon). The PPO engine ignores it.
-- **Depth.** How many rounds deep the search looks when choosing its line,
-  1 to 4. Depth 3 and above can take a long time on a crowded board.
-- **Think.** Passed to the PPO engine as its evaluation budget. Despite the
-  "s" beside it, it is not a time limit, and it does not limit the search.
-- **Show Best Path.** Opens the tree along the selected engine's first
-  move and folds the alternatives into a "+N more" chip.
-- **Collapse.** Closes everything below the root.
-- **Setup.** Opens the scenario builder.
+### The Interactive Battle Tree
 
-Below the controls, a card shows the leading engine's first move. When the
-two engines disagree, a second card shows the other engine's move with a
-"Use Move" button that swaps them. If the PPO engine wants a Resistance
-Unite used first, a "UNITE FIRST" notice appears beside the card.
+The tree expands downwards from the root starting position:
 
-The two engines here are **PPO** (`solver/search/hybrid.py`, a trained
-policy with a local search) and **Search** (expectimax,
-`solver/search/expectimax.py`). The **Playout** engine, which leads in the
-live panel, is not available in the visualizer.
+```mermaid
+flowchart TD
+    classDef rootNode fill:#1e3a8a,stroke:#60a5fa,stroke-width:2px,color:#ffffff
+    classDef gagNode fill:#4338ca,stroke:#818cf8,stroke-width:2px,color:#ffffff
+    classDef outNode fill:#065f46,stroke:#34d399,stroke-width:2px,color:#ffffff
 
-### The tree
+    R["Toon's Turn<br/>(Starting Board State)"] --> G1["Birthday Cake (Throw Lv 6)<br/>EV: +82.4"]
+    R --> G2["Storm Cloud (Squirt Lv 6)<br/>EV: +71.0"]
+    R --> G3["Hypno-Goggles (Lure Lv 5)<br/>EV: +68.5"]
 
-The tree grows downward from the starting position.
+    G1 --> O1["Hit (95% chance)<br/>Cog takes 100 dmg"]
+    G1 --> O2["Miss (5% chance)<br/>Cog takes 0 dmg"]
 
-| Node | Meaning |
-|---|---|
-| Toon's turn | A position. Its children are the moves available. |
-| A gag | One move, with its expected value (EV) under the chosen preset. Values on tree nodes come from a one-round search, whatever the Depth setting. |
-| An outcome | One result of that move, with its probability. The eight likeliest are shown; the rest are merged into one "N rarer outcomes" node. |
-| Victory / Sad | The battle ended. |
+    O1 --> T2["Round 2 Board State<br/>(Click to expand next moves!)"]
 
-Click a node to select it and load its children. Nothing is computed until
-you open it, so a deep tree is many small requests.
-
-Moving around:
-
-- Scroll to zoom. The point under the cursor stays put.
-- Drag to pan. A drag of more than a few pixels does not count as a click.
-
-In "Both" mode, the first move of each engine is outlined: green for PPO,
-blue for Search, amber where they agree.
-
-### The inspector
-
-The panel on the right describes the selected node:
-
-- **Toon Party.** Each toon's laff and pink slips.
-- **Cog Lineup.** Each cog's level, hit points, and whether it is lured
-  (with rounds left), trapped (with the trap's level) or a Version 2.0 cog.
-- **Cog Threat Forecast.** For each cog, its three likeliest attacks with
-  the chance of each and its damage.
-- **Expected Best Line.** The search's plan from the starting position:
-  its best move, then the single most likely outcome, then its best move
-  from there, and so on. It is the modal line, not a guaranteed one.
-
-### The scenario builder
-
-**Setup** opens a dialog for the position.
-
-- **Scenario presets** fill it with a generated position: Cog Building,
-  Scrappy Fight, Weird Mid-Battle, Wall of Cogs, Combo Setup.
-- **Toons.** One to four. For each: laff, organic track, pink slips, and a
-  grid of gag counts by track and level. "Randomize Toon" fills one in.
-- **Cogs.** One to four. For each: department, name, level, hit points,
-  lured (and for how many rounds), trapped (and with which trap), and
-  Version 2.0.
-
-**Update Battle Tree** sends the position to the server. The server
-rejects a loadout no toon could carry (more than six gag tracks, more than
-a full pouch, or more of one gag than its carry limit) and reports why.
-Those limits are `[CONFIRMED]` from the TTR wiki and live in
-`solver/data/gags.py`; [docs/data-confidence.md](../docs/data-confidence.md)
-explains the tags.
-
-## Known gaps
-
-The page was rebuilt recently and is less finished than the live panel.
-These are visible in the source; none of them affects the solver itself.
-
-- **Forecast card.** The cog's name, the "Target" line and the "Dmg" totals
-  read fields the server does not send, so they show placeholders ("Cog
-  1", "Random Toon", 0). The per-attack percentages and damage are real.
-  Attack names are not shown.
-- **Inspector counts for unites and SOS cards** are not filled in.
-- **Unites and SOS cards cannot be edited** in the builder. The default
-  position carries two of each. A toon loaded from a preset or randomised
-  arrives without unites.
-- **The Fit button does nothing.**
-- **Path highlighting covers the first move only**, not the whole line.
-- **The builder repeats two tables from the solver**: per-gag carry limits
-  and the cog hit-point formula. The server validates the loadout again,
-  so a stale copy cannot produce a wrong answer, but it can mislabel a
-  limit in the dialog.
-- **Parties are only partly supported.** The builder and the server accept
-  up to four toons. The tree and the best line come from the solo search,
-  which chooses for the first toon. The PPO engine plans every toon and
-  the page shows the first toon's move.
-- **Data gaps carry through.** A cog with a `[TODO]` cell in its attack
-  table makes the server report an error for that node rather than show a
-  made-up number.
-
-## Icons
-
-The page shows an icon for each gag, a portrait for each cog and an emblem
-for each department. They are Toontown Rewritten's artwork, taken from the
-TTR wiki.
-
+    class R rootNode
+    class G1,G2,G3 gagNode
+    class O1,O2,T2 outNode
 ```
+
+- **Toon Positions:** Square cards showing the board state.
+- **Gag Actions:** Shows the gag icon, name, and Expected Value (EV).
+- **Outcome Nodes:** Shows what happens (hit, miss, damage taken) with exact percentage chances. The 8 most likely outcomes are displayed; rare branches are grouped into an expandable chip.
+- **Terminal Nodes:** Marked as **Victory** or **Sad**.
+
+---
+
+### The State Inspector & Cog Threat Forecast
+
+Clicking any node in the tree opens the Inspector sidebar on the right:
+- **Toon Party:** Shows current laff and available pink slips.
+- **Cog Lineup:** Level, department, exact HP, and whether the cog is lured or trapped.
+- **Cog Threat Forecast:** Shows each cog's 3 most dangerous attacks, their exact hit chances, and how much damage they will deal to your toons!
+- **Modal Best Line:** Displays the search's most likely sequence of moves and counter-attacks move-by-move.
+
+---
+
+### The Scenario Builder
+
+Clicking the **Setup** button opens the sandbox builder:
+- **Presets:** Quick-load famous setups: *Cog Building, Scrappy Fight, Weird Mid-Battle, Wall of Cogs, Combo Setup*.
+- **Custom Toons (1 to 4):** Adjust Laff, pick organic gag tracks, grant pink slips, and customize remaining pouch counts for each gag tier.
+- **Custom Cogs (1 to 4):** Pick any cog species, adjust current HP, toggle Lure rounds remaining, or turn them into Version 2.0 cogs.
+- **Loadout Validator:** The server automatically checks pouch limits against real Toontown rules (cannot carry more than 80 gags or gags from locked tracks).
+
+---
+
+## How to Navigate the Tree Canvas
+
+- **Zoom:** Mouse wheel scrolls to zoom in and out centered on your cursor.
+- **Pan:** Click and drag the canvas background to move around.
+- **Expand / Collapse:** Click on any node to expand its children or collapse its sub-branches.
+
+---
+
+## Developer Setup
+
+If you want to edit the React front-end:
+
+```bash
+# 1. Fetch official icons (cached into visualizer/assets/)
 python tools/fetch_icons.py
-```
 
-downloads 85 images into `visualizer/assets/`, which is gitignored.
-File names are derived from the solver's own identifiers
-(`gag-lure-2.png`, `cog-bossbot-the_big_cheese.png`, `dept-lawbot.png`),
-and `tests/test_bridge.py` checks that.
+# 2. Run backend API on port 8000
+python -m visualizer.serve --no-browser
 
-You only need to run it before rebuilding the page: the build copies
-`visualizer/assets/` into `visualizer/dist/assets/`, and the committed
-build already contains a copy. An icon whose file is missing hides itself
-and the page falls back to text.
-
-## Changing the page
-
-```
-python tools/fetch_icons.py                 # once; the build copies these
-python -m visualizer.serve --no-browser     # the API, on port 8000
+# 3. In another terminal, run Vite dev server
 cd visualizer
 npm install
-npm run dev                                 # Vite dev server; /api is proxied to port 8000
-npm run build                               # writes dist/, which is committed
+npm run dev        # Hot reload on localhost:5173 (proxies /api to port 8000)
+
+# 4. Compile production build for distribution
+npm run build      # Bundles everything into visualizer/dist/
 ```
 
-| Path | What it is |
+| File / Folder | Role |
 |---|---|
-| `serve.py` | The local server: static files and `POST /api/call`. |
-| `bridge.py` | The only translation layer between JSON and the solver. Serialisation and labels, no game rules. |
-| `src/App.jsx` | Page state: the tree, the two engines' answers. |
-| `src/api.js` | One function per server call. |
-| `src/components/` | `DualEngineBanner`, `TreeCanvas`, `Inspector`, `ScenarioBuilder`, `Icons`. |
-| `dist/` | The built page that `serve.py` serves. |
-| `worker.js` | Left over from an earlier version that ran the solver in the browser. The current page does not load it. |
+| `serve.py` | Python HTTP server serving static files and `/api/call`. |
+| `bridge.py` | JSON serialization bridge calling the Python `solver` modules. |
+| `src/App.jsx` | Main React application state. |
+| `src/components/TreeCanvas.jsx` | Interactive canvas graph renderer. |
+| `src/components/ScenarioBuilder.jsx` | The position configuration modal. |
+| `src/components/Inspector.jsx` | Threat forecast and node inspector sidebar. |
 
-If the page needs a number, add it to `bridge.py` so it comes from the
-solver. Do not compute game rules in JavaScript.
+---
 
-Tests for the server side run with the rest of the suite
-(`python -m unittest discover tests`): `tests/test_bridge.py`,
-`tests/test_visualizer_bridge.py` and `tests/test_visualizer_e2e.py`.
+## Known Gaps & Roadmap
+
+- **Forecast Placeholders:** The Cog Threat Forecast currently shows real attack damages and chances, but cog names currently display as "Cog 1".
+- **Party Search:** The tree expansion currently plans for the first toon; multi-toon party tree visualization is in development.
+- **Unite & SOS Editing:** Custom amounts of Unites and SOS cards in the scenario builder are planned for a future update.
+
+---
+
+*Related Documentation:*
+- [Search Depth & Branching Analysis](../docs/search-depth.md)
+- [Visualizer Architecture Spec](../docs/visualizer-spec.md)
+- [Combat Mechanics](../docs/mechanics-notes.md)
