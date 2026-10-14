@@ -1,6 +1,6 @@
 # TTRSolver
 
-<img align="right" src="docs/img/logo-transparent.png" width="180" alt="TTRSolver logo"/>
+<img align="right" src="docs/img/logo.png" width="180" alt="TTRSolver logo"/>
 
 ![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)
 ![Tests](https://img.shields.io/badge/Tests-1900%2B%20Passing-brightgreen)

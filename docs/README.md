@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="img/logo.jpg" alt="TTRSolver Logo" width="120" style="border-radius: 16px;" />
+  <img src="img/logo.png" alt="TTRSolver Logo" width="120" />
 </p>
 
 # TTRSolver Documentation Index
