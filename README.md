@@ -1,17 +1,24 @@
-<p align="center">
-  <img src="docs/img/logo.jpg" alt="TTRSolver Logo" width="160" style="border-radius: 20px;" />
-</p>
-
 # TTRSolver
 
-A real-time battle advisor for **[Toontown Rewritten](https://www.toontownrewritten.com/)** (and **Toontown Realms**). 
+<img align="right" src="docs/img/logo-transparent.png" width="180" alt="TTRSolver logo"/>
 
-TTRSolver sits quietly beside your game window on a lightweight overlay panel. Every round, it reads the battle state, evaluates hundreds of possible outcomes, and suggests the smartest gag to throw at which cog—so you never accidentally waste a Level 7 gag or drop an unsafe move in a critical boss fight.
+![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)
+![Tests](https://img.shields.io/badge/Tests-1900%2B%20Passing-brightgreen)
+![Game](https://img.shields.io/badge/Toontown-Rewritten%20%7C%20Realms-orange)
+![License](https://img.shields.io/badge/License-MIT-green)
+
+A real-time battle advisor for **[Toontown Rewritten](https://www.toontownrewritten.com/)** and **Toontown Realms**. 
+
+TTRSolver sits quietly beside your game window on a lightweight overlay panel. Every round, it reads the battle state, evaluates hundreds of possible outcomes across three cooperating AI engines, and suggests the smartest gag to throw at which cog—so you never accidentally waste a Level 7 gag or drop an unsafe move in a critical boss fight.
+
+**Supported Modes:** Toontown Rewritten (OCR + Local API) · Toontown Realms (Network Stream) · Browser Tree Visualizer · Terminal Advisor
 
 > [!NOTE]
 > **You are always in control:** TTRSolver never plays the game for you, never injects into game memory, never clicks, and never sends keystrokes. It reads the game safely from the outside and advises. You make every move yourself.
 > 
 > *Not affiliated with or endorsed by Toontown Rewritten, Toontown Realms, or The Walt Disney Company.*
+
+<br clear="both"/>
 
 ---
 
