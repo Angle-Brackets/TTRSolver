@@ -386,8 +386,6 @@ def candidates(toon):
     Returns (kind, argument) pairs. `kind` is "toon_up" or "gag_up";
     the argument is the laff value, or the Track (None = all tracks).
     """
-    from .data import gags as gags_mod
-
     if not available(toon):
         return []
     out = []
@@ -420,6 +418,13 @@ def candidates(toon):
     out.sort(key=_heal_rank)
 
     owned = [t for t, xp in toon.track_exp.items() if xp > 0]
+    # ONLY A RESTOCK THAT RESTOCKS. Both checks used to count room gag by
+    # gag and never asked the pouch: seen live on Realms, an 80/80 pouch
+    # was advised a Gag-Up (all tracks), which adds nothing -- the empty
+    # low levels look like room, but the pouch cap binds first. The
+    # playouts charge nothing for a unite, so a no-op one could win on
+    # noise and spend a unite and a 3-round cooldown for nothing. Now each
+    # is dry-run on a copy and offered only if it really adds gags.
     # ALL-TRACKS FIRST, and the order is load-bearing. A single-track
     # restock and an all-tracks one usually TIE on a one-round score (both
     # put the same best gag in hand this round), and `climb` breaks ties
@@ -427,25 +432,30 @@ def candidates(toon):
     # board and the panel took the single track, 7 gags instead of 30 for
     # the same cooldown. The one-round scorer can't see the extra 23 gags
     # paying off later, so the tie is broken here in favour of more.
-    if len(owned) > 1:
+    if len(owned) > 1 and _gag_up_adds(toon, None) > 0:
         out.append(("gag_up", None))
     for track in owned:
-        room = 0
-        for level in range(1, gags_mod.POUCH_EXEMPT_LEVEL):
-            if toon.track_exp.get(track, 0) < level:
-                continue
-            try:
-                cap = gags_mod.gag(track, level).max_carry
-            except (KeyError, ValueError, NotImplementedError):
-                continue
-            room += max(0, cap - toon.gag_counts.get((track, level), 0))
-        if room >= GAG_UP_SINGLE_TRACK_MAX:
+        if _gag_up_adds(toon, track) >= GAG_UP_SINGLE_TRACK_MAX:
             out.append(("gag_up", track))
     # WHAT IS ACTUALLY HELD, when the reading says. A toon carrying only
     # a Lure restock was still offered a Squirt one, because a single
     # `unites_held` count cannot tell them apart; `unite_stock` can, and
     # an empty stock still permits everything.
     return [c for c in out if in_stock(toon, c)]
+
+
+def _gag_up_adds(toon, track) -> int:
+    """How many gags a Gag-Up would really put in this pouch: the same
+    `apply_gag_up`, on a copy. Every cap applies -- per track, in total,
+    each gag's carry limit and the pouch's."""
+    import copy
+
+    probe = copy.copy(toon)
+    probe.gag_counts = dict(toon.gag_counts)
+    try:
+        return apply_gag_up(probe, track)
+    except (KeyError, ValueError, NotImplementedError):
+        return 0
 
 
 def apply(toon, choice) -> int:

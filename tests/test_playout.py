@@ -797,8 +797,22 @@ class UniteVariantTest(unittest.TestCase):
         from solver.state import Action, Track
 
         plan = [Action(Track.THROW, 5, 0)]
-        kinds = {playout.unite_of(p)[0] for p in playout._unite_variants(self._board(), plan)}
+        board = self._board()
+        # Room in the pouch: this board starts at 80/80, where a Gag-Up
+        # restocks nothing and must not be offered (next test).
+        counts = board.toons[0].gag_counts
+        for key in [k for k in counts if k[1] < 7 and counts[k] > 0][:6]:
+            counts[key] = 0
+        kinds = {playout.unite_of(p)[0] for p in playout._unite_variants(board, plan)}
         self.assertEqual({"toon_up", "gag_up"}, kinds)
+
+    def test_a_full_pouch_is_offered_the_heal_only(self):
+        """Seen live on Realms: Gag-Up advised at 80/80."""
+        from solver.state import Action, Track
+
+        plan = [Action(Track.THROW, 5, 0)]
+        kinds = {playout.unite_of(p)[0] for p in playout._unite_variants(self._board(), plan)}
+        self.assertEqual({"toon_up"}, kinds)
 
     def test_none_held_or_cooling_down_offers_none(self):
         from solver.state import Action, Track

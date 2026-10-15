@@ -618,3 +618,44 @@ class CooldownTicksInPlayTest(unittest.TestCase):
             hits=[True])
         self.assertEqual(state.toons[0].unite_cooldown,
                          probe.toons[0].unite_cooldown)
+
+
+class NoOpGagUpTest(unittest.TestCase):
+    """Seen live on Realms: an 80/80 pouch was advised a Gag-Up (all
+    tracks), which restocks nothing. The empty low levels looked like
+    room; the pouch cap binds first."""
+
+    def _full_pouch(self):
+        from solver.state import ToonState, Track
+        T, L, S = Track.TRAP, Track.LURE, Track.SOUND
+        TH, SQ, D = Track.THROW, Track.SQUIRT, Track.DROP
+        counts = {(T, 5): 5, (T, 6): 2, (T, 7): 1, (L, 4): 10, (L, 5): 7,
+                  (L, 6): 3, (L, 7): 1, (S, 4): 5, (S, 5): 7, (S, 6): 3,
+                  (S, 7): 1, (TH, 4): 4, (TH, 5): 7, (TH, 6): 3, (TH, 7): 1,
+                  (SQ, 4): 4, (SQ, 5): 7, (SQ, 6): 3, (SQ, 7): 1, (D, 5): 7,
+                  (D, 6): 3, (D, 7): 1}
+        toon = ToonState(100, 100, {t: 7 for t in (T, L, S, TH, SQ, D)},
+                         counts, pouch_capacity=80)
+        toon.unites_held = 5
+        return toon
+
+    def test_a_full_pouch_is_offered_no_gag_up(self):
+        from solver import unites
+        toon = self._full_pouch()
+        self.assertEqual([], [c for c in unites.candidates(toon) if c[0] == "gag_up"])
+
+    def test_the_dry_run_leaves_the_toon_alone(self):
+        from solver import unites
+        toon = self._full_pouch()
+        before = (dict(toon.gag_counts), toon.unites_held, toon.unite_cooldown)
+        unites.candidates(toon)
+        self.assertEqual(before, (dict(toon.gag_counts), toon.unites_held,
+                                  toon.unite_cooldown))
+
+    def test_a_pouch_with_room_is_still_offered_one(self):
+        from solver import unites
+        toon = self._full_pouch()
+        for key in [k for k in toon.gag_counts if k[1] < 7][:6]:
+            toon.gag_counts[key] = 0
+        self.assertIn(("gag_up", None), unites.candidates(toon))
+
