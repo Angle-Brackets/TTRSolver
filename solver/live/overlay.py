@@ -1524,6 +1524,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                         help="advise even when the gag counts disagree "
                              "with the menu's own total (UNSAFE)")
     args = parser.parse_args(argv)
+    # After parsing, so `--help` changes nothing. See
+    # `cogs.live_play_assumptions`.
+    from ..data.cogs import live_play_assumptions
+    live_play_assumptions()
 
     try:
         objective = objectives.get(args.objective)

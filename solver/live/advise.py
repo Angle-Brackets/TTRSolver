@@ -146,7 +146,9 @@ def _pool():
     global _EXECUTOR
     if _EXECUTOR is None:
         from concurrent.futures import ProcessPoolExecutor
-        _EXECUTOR = ProcessPoolExecutor(max_workers=1)
+        from ..data.cogs import live_play_assumptions
+        _EXECUTOR = ProcessPoolExecutor(max_workers=1,
+                                        initializer=live_play_assumptions)
     return _EXECUTOR
 
 
@@ -639,6 +641,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                              "pouch is known wrong, so the advice is for "
                              "a slightly different fight")
     args = parser.parse_args(argv)
+    # After parsing, so `--help` changes nothing. See
+    # `cogs.live_play_assumptions`.
+    from ..data.cogs import live_play_assumptions
+    live_play_assumptions()
 
     # A module global read at move-generation time, so setting it here
     # covers the search, the climb and the scorers without threading a

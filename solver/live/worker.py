@@ -497,8 +497,9 @@ class AdviceWorker(threading.Thread):
         if self._playout_executor is None:
             from concurrent.futures import ProcessPoolExecutor
 
+            from ..data.cogs import live_play_assumptions
             self._playout_executor = ProcessPoolExecutor(
-                max_workers=PLAYOUT_WORKERS)
+                max_workers=PLAYOUT_WORKERS, initializer=live_play_assumptions)
         return self._playout_executor
 
     def _start_playout(self, state, horizon, budget, is_current,

@@ -405,6 +405,10 @@ def main(argv: Optional[list] = None) -> int:
                         help="start with level 7 gags held back; the "
                              "panel can toggle it live")
     args = parser.parse_args(argv)
+    # After parsing, so `--help` changes nothing. See
+    # `cogs.live_play_assumptions`.
+    from ..data.cogs import live_play_assumptions
+    live_play_assumptions()
 
     index = DIST / "index.html"
     if not index.exists():

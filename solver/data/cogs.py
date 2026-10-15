@@ -306,6 +306,25 @@ COG_DEPARTMENTS = {
 }
 
 
+def live_play_assumptions() -> None:
+    """What the LIVE panels need that the data tables leave [TODO].
+
+    A cog in front of the player has to be advised on, and a Big Cheese
+    -- in a building, at levels 8 to 15 -- made every engine raise
+    `MissingData` on Glower Power's accuracy, so the panel showed nothing
+    useful for the whole fight. [OWNER] live play uses the assumed value
+    rather than failing: the same borrow the simulated CEO fight already
+    takes, stated in `_fill_unmodeled`. The tables keep the [TODO], and
+    a process that never calls this still raises, which is what the data
+    tests check.
+
+    Called by each panel's `main` and as the INITIALIZER of each worker
+    pool: those processes are spawned fresh and would otherwise start
+    with the borrow off.
+    """
+    enable_blank_accuracy_borrow()
+
+
 def enable_blank_accuracy_borrow() -> None:
     """Turn the borrow on and rebuild the tables.
 

@@ -1005,7 +1005,9 @@ class RealmsWorker(AdviceWorker):
         if self._executor is None:
             from concurrent.futures import ProcessPoolExecutor
 
-            self._executor = ProcessPoolExecutor(max_workers=1)
+            from ..data.cogs import live_play_assumptions
+            self._executor = ProcessPoolExecutor(
+                max_workers=1, initializer=live_play_assumptions)
         return self._executor
 
     def _run_search(self, token, state, objective, depth, budget,
@@ -1618,6 +1620,10 @@ def main(argv: Optional[list] = None) -> int:   # pragma: no cover
                              "can't read the fight apart from one whose "
                              "reader thread died -- both look frozen.")
     args = parser.parse_args(argv)
+    # After parsing, so `--help` changes nothing. See
+    # `cogs.live_play_assumptions`.
+    from ..data.cogs import live_play_assumptions
+    live_play_assumptions()
 
     index = DIST / "index.html"
     if not index.exists():
