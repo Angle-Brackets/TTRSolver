@@ -224,7 +224,10 @@ class SteadySearchTest(unittest.TestCase):
             def submit(self, fn, state, *args):
                 future = concurrent.futures.Future()
                 test.searches.append(future)
+                test.submitted.append(args)
                 return future
+
+        self.submitted = []
 
         A._snapshot = lambda *a, **k: object()
         A._panel = lambda frame: object()
@@ -251,6 +254,19 @@ class SteadySearchTest(unittest.TestCase):
     def _finish(self, i=-1, action="pie"):
         self.searches[i].set_result((["Whole Fruit Pie"], None, action, None))
         self._settle()
+
+    def test_the_level_7_switch_reaches_the_search_process(self):
+        """Seen live: "7s OFF" on the panel, Opera Singer from the Search
+        row. The switch was read off the board, which never carries it."""
+        from solver import state as state_mod
+        saved = state_mod.ALLOW_LEVEL_7
+        try:
+            state_mod.ALLOW_LEVEL_7 = False
+            self._submit()
+            # search_in_child(state, objective_name, depth, budget, allow_level_7)
+            self.assertIs(False, self.submitted[-1][-1])
+        finally:
+            state_mod.ALLOW_LEVEL_7 = saved
 
     def test_the_same_board_keeps_its_search(self):
         self._submit()

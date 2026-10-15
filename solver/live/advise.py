@@ -331,7 +331,15 @@ class Thinker:
                     pass
 
             objective_name = getattr(objective, "name", "balanced")
-            allow_level_7 = getattr(state, "allow_level_7", True)
+            # THE PANEL'S SWITCH, read in this process. It was read off
+            # the board -- `getattr(state, "allow_level_7", True)` -- and
+            # nothing ever puts it there, so the Search row searched with
+            # level 7s whatever the toggle said: seen live, "7s OFF" with
+            # Opera Singer advised. The worker sets this global when the
+            # toggle moves; the search process has its own copy, hence
+            # the argument.
+            from .. import state as state_mod
+            allow_level_7 = bool(state_mod.ALLOW_LEVEL_7)
 
             future = _pool().submit(search_in_child, state, objective_name, depth, budget, allow_level_7)
             lines, state, action, unite = future.result(timeout=budget + 15.0)
