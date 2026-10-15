@@ -163,3 +163,36 @@ class WastedReachTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HealCardWasteTest(unittest.TestCase):
+    """Seen live on Realms: Flippy (180 laff) called at 92/100 with every
+    cog lured. The overflow is waste, like a hit-all's unreachable cogs."""
+
+    def _state(self, laff):
+        from solver import data
+        from solver.state import BattleState, CogState, ToonState, Track
+        toon = ToonState(laff, 100, {Track.THROW: 7}, {(Track.THROW, 5): 3})
+        hp = data.cog_max_hp(6)
+        return BattleState(toons=[toon], cogs=[CogState("name_dropper", "sellbot", 6, hp, hp)])
+
+    def test_flippy_at_92_of_100_is_almost_all_waste(self):
+        from solver import simulator
+        from solver.state import Action
+        waste = simulator.wasted_reach(self._state(92), Action(track=None, sos="Flippy"))
+        self.assertAlmostEqual(172 / 180, waste, places=6)
+
+    def test_a_heal_that_fits_wastes_nothing(self):
+        from solver import simulator
+        from solver.state import Action
+        self.assertEqual(0.0, simulator.wasted_reach(self._state(30),
+                                                    Action(track=None, sos="Madam Chuckle")))
+
+    def test_a_smaller_card_wastes_less_for_the_same_heal(self):
+        """At 10/100 Flippy and Daffy Don both restore 90; the premium
+        card throws away more, so it is charged more."""
+        from solver import simulator
+        from solver.state import Action
+        state = self._state(10)
+        self.assertGreater(simulator.wasted_reach(state, Action(track=None, sos="Flippy")),
+                           simulator.wasted_reach(state, Action(track=None, sos="Daffy Don")))

@@ -199,6 +199,12 @@ def wasted_reach(state: BattleState, action: Action) -> float:
 
     Every hit-all, gag or card alike. Not Sound or Moe Zart waking a
     lured cog: they still land on it, which a Drop does not.
+
+    A HEAL CARD wastes the laff it cannot restore: the share of its total
+    that overflows the toons' max laff. Seen live on Realms: Flippy (180)
+    called at 92/100 with every cog lured -- 172 of 180 wasted. The
+    playouts charge nothing for a call, so a heal there was a free way to
+    wait a round, the pass a lone toon's menu no longer offers.
     """
     live = [c for c in state.cogs if not c.status.is_dead]
     if not live or action is None:
@@ -206,6 +212,12 @@ def wasted_reach(state: BattleState, action: Action) -> float:
     if getattr(action, "sos", None):
         card = sos_mod.BY_NAME.get(action.sos)
         kind = getattr(card, "kind", None)
+        if kind == sos_mod.HEAL:
+            toons = [t for t in state.toons if t.laff > 0]
+            share = sos_mod.heal_share(card, len(toons))
+            overflow = sum(max(0, share - (int(t.max_laff) - int(t.laff)))
+                           for t in toons)
+            return min(1.0, overflow / float(card.amount)) if card.amount else 0.0
         shape = {sos_mod.DAMAGE_UNLURED: Track.DROP, sos_mod.LURE: Track.LURE,
                  sos_mod.TRAP: Track.TRAP}.get(kind)
     elif (action.track is not None and action.target_index is None
