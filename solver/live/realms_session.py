@@ -213,6 +213,7 @@ def cog_from_object(obj, lured: bool = False,
                           f"level is unknown"]
 
         from ..data import gags as gags_mod
+        from .. import mechanics as mechanics_mod
         from ..state import Track
 
         gag = gags_mod.gag(Track.LURE, lure_level)
@@ -231,7 +232,8 @@ def cog_from_object(obj, lured: bool = False,
         remaining = 1
         if rounds_elapsed is not None:
             try:
-                remaining = max(1, gag.rounds() - int(rounds_elapsed))
+                remaining = max(1, mechanics_mod.lure_duration_rounds(lure_level)
+                                - int(rounds_elapsed))
             except (TypeError, ValueError):
                 remaining = 1
 
@@ -356,6 +358,27 @@ def toon_from_object(obj, max_fires: int = 0, max_unites: int = 0,
             toon.sos_cards = {name: min(int(count), budget)
                               for name, count in cards.items() if count > 0}
     return toon, []
+
+
+# REALMS' LURE DURATION, where it differs from TTR's. [OWNER] Presentation
+# reads "15 rounds" in Realms and 9 in TTR, and the TTR wiki's history
+# says it "decreased from 15 to 8" in the rebalancing update, so Realms
+# kept the old value. The tooltip counts the round the Lure is thrown in
+# (`simulator` docstring on the off-by-one, measured on TTR: tooltip 9,
+# 8 cog phases skipped), so Realms skips 14. Verify with
+# `solver/live/realms_lurewatch.py`; never copy this into `solver/data`.
+REALMS_LURE_ROUNDS = {7: 14}
+
+
+def use_realms_rules() -> None:
+    """Set this process up for Realms: the live assumptions every panel
+    takes, and Realms' Lure durations. Used by the Realms panel's main and
+    as the initializer of its worker pools."""
+    from .. import mechanics
+    from ..data.cogs import live_play_assumptions
+
+    live_play_assumptions()
+    mechanics.LURE_ROUNDS_OVERRIDE.update(REALMS_LURE_ROUNDS)
 
 
 def player_toon_id(listener) -> Optional[int]:

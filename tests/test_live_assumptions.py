@@ -42,16 +42,36 @@ class LivePlayAssumptionsTest(unittest.TestCase):
         self.assertIn("glower_power", out.stdout, out.stderr)
         self.assertIn("TODO", out.stdout, out.stderr)
 
-    def test_every_live_pool_is_built_with_it(self):
-        """A pool built without the initializer would raise on a Big
-        Cheese however the panel's own process was set up."""
+    def test_every_live_pool_is_built_with_an_initializer(self):
+        """A pool built without one would raise on a Big Cheese, and on
+        Realms would use TTR's Lure durations, however the panel's own
+        process was set up."""
         for path in ("solver/live/advise.py", "solver/live/realms_panel.py",
                      "solver/live/worker.py"):
             source = (ROOT / path).read_text(encoding="utf-8")
             pools = source.count("ProcessPoolExecutor(")
-            self.assertEqual(pools, source.count("initializer=live_play_assumptions"),
-                             path)
+            self.assertEqual(pools, source.count("initializer="), path)
 
+    def test_realms_rules_give_presentation_its_realms_duration(self):
+        """[OWNER] Realms' tooltip reads 15 (TTR's 9); the tooltip counts
+        the throw round, so 14 cog phases. TTR's table is untouched."""
+        code = chr(10).join([
+            "from solver import mechanics",
+            "before = mechanics.lure_duration_rounds(7)",
+            "from solver.live.realms_session import use_realms_rules",
+            "use_realms_rules()",
+            "print(before, mechanics.lure_duration_rounds(7),"
+            " mechanics.lure_duration_rounds(6))",
+        ])
+        out = subprocess.run([sys.executable, "-c", code], cwd=ROOT,
+                             capture_output=True, text=True, timeout=120)
+        self.assertEqual("8 14 4", out.stdout.strip(), out.stderr)
+
+    def test_the_realms_worker_sets_up_its_pools_with_realms_rules(self):
+        import inspect
+        from solver.live.realms_panel import RealmsWorker
+        source = inspect.getsource(RealmsWorker.__init__)
+        self.assertIn("self._pool_setup = use_realms_rules", source)
 
 if __name__ == "__main__":
     unittest.main()

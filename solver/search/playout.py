@@ -738,6 +738,69 @@ def chunk_in_child(state: BattleState, horizon, reject, allow_level_7: bool,
     return list(zip(cands, values)), ""
 
 
+# TIES GO TO THE CHEAPER MOVE. When two moves both win the fight, their
+# playout means differ by less than the playouts' own noise, and the
+# larger mean is a coin toss: seen live, a Storm Cloud on a level 5 where
+# a Safe kills, and a Grand Piano (one of three) on a 30 hp level 4. The
+# gag-economy charge leans the right way but is too small to beat noise,
+# and raising it further prices gags against wins. So among the moves the
+# best one does NOT lead by a paired standard error, the cheapest is
+# taken -- preset prices for gags, and any pink slip, SOS card or unite
+# dearer than every gag. Off restores the plain best mean.
+TIE_TO_CHEAPEST = True
+CONSUMABLE_PRICE = 1.0e6
+# HOW MUCH A TIE MAY GIVE UP, in cogs. A standard error alone is no test
+# of "tied": in a VP opening one paired standard error is about 1.1 cogs,
+# so the first version of this rule called moves a whole cog worse tied
+# and took the cheapest -- seen live, a $10 Bill on a level 2 instead of
+# Hypno-goggles on four cogs. A tie must also be close in the mean. The
+# cases the rule exists for differ by far less (Safe against Storm Cloud:
+# 0.003 to 0.009 cogs). [ASSUMED] a preference, not a measurement.
+TIE_MARGIN = 0.05
+
+
+def plan_price(state: BattleState, plan) -> float:
+    """What a plan spends, for breaking ties: the preset's gag prices,
+    and every consumable dearer than any gag."""
+    toon = state.toons[0] if state.toons else None
+    style = _style()
+    price = CONSUMABLE_PRICE if unite_of(plan) is not None else 0.0
+    for action in plan or ():
+        if action is None or action.track is None:
+            if action is not None and (action.fire or action.sos):
+                price += CONSUMABLE_PRICE
+            continue
+        if getattr(action, "sos", None):
+            price += CONSUMABLE_PRICE
+            continue
+        unlocked = (toon.track_exp.get(action.track, 6) or 6) if toon else 6
+        price += style.gag_price(action.track, action.level, unlocked=unlocked)
+    return price
+
+
+def choose(keys, values, plans, state: BattleState, first=None):
+    """The move to play among `keys`: the best mean, unless a cheaper move
+    is tied with it within a paired standard error (`TIE_TO_CHEAPEST`).
+    `first` breaks exact ties in the mean, as the plain rule did."""
+    def mean(k):
+        return sum(values[k]) / len(values[k])
+
+    best = max(keys, key=lambda k: (mean(k), k == first))
+    if not TIE_TO_CHEAPEST:
+        return best
+
+    def tied(k):
+        if k == best:
+            return True
+        if mean(best) - mean(k) > TIE_MARGIN:
+            return False
+        n = min(len(values[k]), len(values[best]))
+        return not leads(values[best][:n], values[k][:n])
+
+    return min((k for k in keys if tied(k)),
+               key=lambda k: (plan_price(state, plans[k]), -mean(k), k != first))
+
+
 def leads(challenger: Sequence[float], incumbent: Sequence[float]) -> bool:
     """Does `challenger` beat `incumbent` by more than one standard error,
     paired rollout by rollout? Used only to stop the move on screen
@@ -870,7 +933,8 @@ def wide_candidates(state: BattleState, reject=None,
 
     def add(plan):
         if (plan is not None and _key(plan) not in seen and len(out) < cap
-                and playable(state, plan) and (pass_ok or not _bare_pass(plan))):
+                and playable(state, plan) and (pass_ok or not _bare_pass(plan))
+                and not _mostly_wasted(state, plan)):
             seen.add(_key(plan))
             out.append(plan if isinstance(plan, Plan) else list(plan))
 
@@ -915,10 +979,35 @@ def wide_candidates(state: BattleState, reject=None,
     if PASS_ON_MENU == "always" or _pass_is_needed(state):
         add([Action(track=None)])
     if not out:
-        # Nothing but a pass was playable: better that than no advice.
+        # Nothing but a pass, or only wasteful moves, were playable:
+        # better that than no advice.
         pass_ok = True
-        add(chosen)
+        out.append(chosen if isinstance(chosen, Plan) else list(chosen))
     return out
+
+
+# A MOVE THAT THROWS MOST OF ITSELF AWAY never reaches the menu while
+# anything else does. Seen live on Realms, one fight: Toontanic on four
+# cogs with three lured (a Drop cannot hit a lured cog), Lil Oldman's
+# lure-all on cogs all already lured, Flippy's 180 laff at 92/100. The
+# wasted-reach CHARGE (`SOS_REACH_PRICE`, `GAG_REACH_PRICE`) is a nudge
+# of 0.1 to 0.5 cogs and playout noise outweighs it, so the menu now
+# refuses any hit-all, gag or card, wasting more than this share
+# (`simulator.wasted_reach`), and the charge stays for what is left.
+# [OWNER] "a waste". If every candidate is wasteful the best of them is
+# kept rather than giving no advice.
+WASTE_CAP = 0.5
+
+
+def _mostly_wasted(state: BattleState, plan) -> bool:
+    from .. import simulator
+    if not WASTE_CAP < 1.0:
+        return False
+    try:
+        return any(simulator.wasted_reach(state, a) > WASTE_CAP
+                   for a in plan or () if a is not None)
+    except Exception:                      # noqa: BLE001
+        return False
 
 
 def _bare_pass(plan) -> bool:
@@ -996,7 +1085,7 @@ def pick_wide(state: BattleState, horizon=None, seed: int = 0,
         if stage + 1 < len(stages):
             alive.sort(key=lambda i: (-sum(values[i]) / len(values[i]), i))
             alive = alive[:max(HALVING_KEEP_AT_LEAST, (len(alive) + 1) // 2)]
-    best = max(alive, key=lambda i: (sum(values[i]) / len(values[i]), i == 0))
+    best = choose(alive, values, cands, state, first=0)
     means = [sum(values[i]) / len(values[i]) for i in range(len(cands))]
     return Result(cands[best], cands, means, done_k)
 

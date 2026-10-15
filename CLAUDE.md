@@ -550,6 +550,23 @@ Things that hold it together, each measured:
   At the plain exchange rate the Safe's lead on a real TTR board was still
   a coin flip, so `ECONOMY_WEIGHT` is 2: lead 0.0085 +/- 0.0025 cogs, and
   73 vs 75 of 100 solo VPs (p 0.77), 104 vs 104 of 1,000 buildings.
+- **Ties go to the cheaper move** (`playout.choose`, `TIE_TO_CHEAPEST`):
+  among moves the best does not lead by a paired standard error AND
+  within `TIE_MARGIN` (0.05 cogs) of it, the cheapest by the preset's
+  prices wins, every consumable dearer than any gag. Seen live: a Grand
+  Piano on a 30 hp level 4, a Storm Cloud on a level 5. The first version
+  had no margin, and in a VP opening a paired standard error is ~1.1
+  cogs, so it called a $10 Bill a cog worse "tied" with Hypno-goggles.
+  With the margin: 119 vs 118 of 1,000 solo buildings, 72 vs 69 of 100
+  solo VPs (p 0.68).
+- **A move wasting most of its reach is refused on the menu**
+  (`playout.WASTE_CAP` 0.5, [OWNER] "horrible play"): Toontanic on mostly
+  lured cogs, a lure-all on lured cogs, Flippy at 92/100 (overflowing heal
+  cards count as waste too). The charge alone was a nudge playout noise
+  outweighed. NOT a free preference: 40 vs 46 of 100 Realms VPs (p 0.29),
+  70 vs 74 of 100 solo VPs (p 0.56), level on buildings -- each within
+  noise, both VP regimes leaning against it. Kept on the owner's call;
+  `WASTE_CAP = 1` turns it off.
 - **Wasted reach is charged by all three engines**
   (`simulator.wasted_reach`, [OWNER] preference): any hit-all, gag or
   card, on cogs it cannot reach (Drop on lured, Lure on lured, Trap on
@@ -578,6 +595,13 @@ from the battle object. TTR names it from the CLIENT'S LOG
 'where': 'CogHQBossBattle', 'hoodId': 11000})` on entering a VP --
 observed 2026-10-10, and the only room mapped (`boss.TTR_BOSS_PLACES`);
 the CFO, CJ and CEO stay on the picker until each is seen.
+
+**Realms' Presentation holds 14 rounds** (`realms_session.REALMS_LURE_ROUNDS`,
+set process-wide by `use_realms_rules` in the Realms panel and its pools,
+through `mechanics.LURE_ROUNDS_OVERRIDE`). [OWNER] the tooltip reads 15 on
+Realms and 9 on TTR; the wiki's history says TTR cut it "from 15 to 8", and
+the tooltip counts the throw round, so 14 cog phases. TTR's table stays 8.
+`realms_lurewatch.py` can measure it.
 
 A building is detected so the playouts value the pouch: TTR from the
 Local API zone (`session.BUILDING_ZONES` -- only "Cog Building",

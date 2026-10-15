@@ -291,6 +291,9 @@ class RealmsWorker(AdviceWorker):
 
     def __init__(self, outbox: "queue.Queue", objective, depth: int,
                  budget: float, listener=None, engine: str = "both"):
+        # Realms' rules in every playout process, not only this one.
+        from .realms_session import use_realms_rules
+        self._pool_setup = use_realms_rules
         # `model` FIRST: the base writes `allow_level_7` and the
         # holdings onto it, so it has to exist before that runs.
         self.model = Model()
@@ -1005,9 +1008,9 @@ class RealmsWorker(AdviceWorker):
         if self._executor is None:
             from concurrent.futures import ProcessPoolExecutor
 
-            from ..data.cogs import live_play_assumptions
+            from .realms_session import use_realms_rules
             self._executor = ProcessPoolExecutor(
-                max_workers=1, initializer=live_play_assumptions)
+                max_workers=1, initializer=use_realms_rules)
         return self._executor
 
     def _run_search(self, token, state, objective, depth, budget,
@@ -1620,10 +1623,10 @@ def main(argv: Optional[list] = None) -> int:   # pragma: no cover
                              "can't read the fight apart from one whose "
                              "reader thread died -- both look frozen.")
     args = parser.parse_args(argv)
-    # After parsing, so `--help` changes nothing. See
-    # `cogs.live_play_assumptions`.
-    from ..data.cogs import live_play_assumptions
-    live_play_assumptions()
+    # After parsing, so `--help` changes nothing. Realms' rules: the live
+    # assumptions and Realms' Lure durations (`use_realms_rules`).
+    from .realms_session import use_realms_rules
+    use_realms_rules()
 
     index = DIST / "index.html"
     if not index.exists():

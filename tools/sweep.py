@@ -50,6 +50,9 @@ ARMS  (`name` or `name:key=value,key=value`)
             style=<preset>  (the panel's preset, e.g. survive, "glass cannon")
             econ=0  econw=<w>  (the gag-economy charge off, or its weight;
                         `playout.ECONOMY_WEIGHT`, shipped 2)
+            tie=0  (no tie-break to the cheaper move: the plain best mean)
+            wastecap=<share>  (refuse menu moves wasting more reach than
+                        this; shipped 0.5, 1 turns the filter off)
             sosprice=<cogs>  (a price per SOS call; shipped 0)
             sosreach=<cogs> reach=<cogs>  (the wasted-reach charge for a
                         card and for a gag; shipped 0.5 and 0.1)
@@ -221,6 +224,8 @@ def play(job):
     playout.PASS_ON_MENU = opts.get("pass", "needed")
     playout.ECONOMY = opts.get("econ", "1") != "0"
     playout.REDRAW_ASSUMED = opts.get("redraw", "1") != "0"
+    playout.TIE_TO_CHEAPEST = opts.get("tie", "1") != "0"
+    playout.WASTE_CAP = float(opts.get("wastecap", 0.5))
     playout.ECONOMY_WEIGHT = float(opts.get("econw", playout.DEFAULT_ECONOMY_WEIGHT))
     fastplayer.use(opts.get("net") or fastplayer.DEFAULT_WEIGHTS)
     # Shipped: shortened playouts (8 rounds, the repo's value net). trunc=0

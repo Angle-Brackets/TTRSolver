@@ -295,6 +295,10 @@ class AdviceWorker(threading.Thread):
     # The playouts' group mode for this panel's boards: None for the
     # playouts' own default, or "pickup" / "coordinated".
     group_mode = None
+    # What each playout process runs first. None means the live
+    # assumptions every panel takes (`cogs.live_play_assumptions`); a
+    # panel whose game has other rules sets its own in `__init__`.
+    _pool_setup = None
 
     def _boss_into(self, model, on_field: int = 0) -> None:
         """Mirror the tracker onto the model the page draws."""
@@ -498,8 +502,9 @@ class AdviceWorker(threading.Thread):
             from concurrent.futures import ProcessPoolExecutor
 
             from ..data.cogs import live_play_assumptions
+            setup = self._pool_setup or live_play_assumptions
             self._playout_executor = ProcessPoolExecutor(
-                max_workers=PLAYOUT_WORKERS, initializer=live_play_assumptions)
+                max_workers=PLAYOUT_WORKERS, initializer=setup)
         return self._playout_executor
 
     def _start_playout(self, state, horizon, budget, is_current,
@@ -583,16 +588,19 @@ class AdviceWorker(threading.Thread):
                                      (len(live) + 1) // 2)]
                 alive = live
                 # While refining, the move on screen changes only for a
-                # lead beyond noise; the scorer's pick holds it at first.
+                # lead beyond noise, or for a cheaper move tied with the
+                # best (`playout.choose`); the scorer's pick holds it at
+                # first.
+                pick = playout_mod.choose(alive, values, plans, state,
+                                          first=order[0])
                 if shown is None or shown not in alive:
-                    shown = max(alive, key=lambda k: (
-                        sum(values[k]) / len(values[k]), k == order[0]))
-                best = max(alive, key=lambda k: (sum(values[k]) / len(values[k]),
-                                                 k == order[0]))
-                n = min(len(values[best]), len(values[shown]))
-                if best != shown and playout_mod.leads(values[best][:n],
-                                                       values[shown][:n]):
-                    shown = best
+                    shown = pick
+                n = min(len(values[pick]), len(values[shown]))
+                if pick != shown and (
+                        playout_mod.leads(values[pick][:n], values[shown][:n])
+                        or playout_mod.plan_price(state, plans[pick])
+                        < playout_mod.plan_price(state, plans[shown])):
+                    shown = pick
                 plan = plans[shown]
                 self._deliver_playout(worded_on, plan[0] if plan else None, "",
                                       describe, rollouts=done_k,
@@ -600,10 +608,10 @@ class AdviceWorker(threading.Thread):
                                       unite=playout_mod.unite_of(plan))
             if not order or not is_current():
                 return
-            # FINISHED: the measured rule, plain best mean (ties to the
-            # scorer's pick), whatever was on screen while refining.
-            final = max(alive or order, key=lambda k: (
-                sum(values[k]) / len(values[k]), k == order[0]))
+            # FINISHED: the best mean, or a cheaper move tied with it
+            # (`playout.choose`), whatever was on screen while refining.
+            final = playout_mod.choose(alive or order, values, plans, state,
+                                       first=order[0])
             plan = plans[final]
             self._deliver_playout(worded_on, plan[0] if plan else None, "",
                                   describe, rollouts=done_k, finished=True,

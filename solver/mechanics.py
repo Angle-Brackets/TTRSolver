@@ -485,12 +485,20 @@ def lure_wakes_up(atk_acc_before_bonus: int, rng=random) -> bool:
 LURE_ROUNDS_BY_LEVEL = {g.level: g.lure_rounds for g in data.gags_in(Track.LURE)}
 
 
+# A PROCESS-WIDE OVERRIDE for a game whose durations differ: only the
+# Realms panel sets it (`realms_session.use_realms_rules`), in its own
+# processes. TTR's table is never edited for another game.
+LURE_ROUNDS_OVERRIDE: dict = {}
+
+
 def lure_duration_rounds(level: int) -> int:
     """Rounds a Lure of this level holds for -- cog phases the cog skips.
     [CONFIRMED] TTR wiki: 2/2/3/3/4/4/8 by level. Set once, when the lure
     lands on an un-lured cog, and never extended -- re-luring neither
     stacks (3.0.0 removed that) nor refreshes. See CogStatus.apply_lure.
     """
+    if level in LURE_ROUNDS_OVERRIDE:
+        return LURE_ROUNDS_OVERRIDE[level]
     return data.gag(Track.LURE, level).rounds()
 
 

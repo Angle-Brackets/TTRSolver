@@ -947,3 +947,101 @@ class GagEconomyTest(unittest.TestCase):
         cloud = Action(Track.SQUIRT, 6, 0)
         self.assertEqual(0.0, self._charge(cloud, O.PRESETS["glass cannon"]))
         self.assertGreater(self._charge(cloud, O.PRESETS["conserve"]), self._charge(cloud))
+
+
+class TieToCheapestTest(unittest.TestCase):
+    """Seen live: a Grand Piano on a 30 hp level 4 where a Safe kills,
+    and a Storm Cloud on a level 5. Tied means are a coin toss; a tie goes
+    to the cheaper move."""
+
+    def _setup(self):
+        from solver import data
+        from solver.state import Action, BattleState, CogState, ToonState, Track
+
+        toon = ToonState(100, 100, {Track.DROP: 7},
+                         {(Track.DROP, 5): 5, (Track.DROP, 6): 3})
+        hp = data.cog_max_hp(4)
+        state = BattleState(toons=[toon], cogs=[CogState("flunky", "bossbot", 4, hp, hp)])
+        plans = {"piano": [Action(Track.DROP, 6, 0)], "safe": [Action(Track.DROP, 5, 0)]}
+        return state, plans
+
+    def test_a_tie_goes_to_the_cheaper_gag(self):
+        state, plans = self._setup()
+        # Paired differences that go both ways: a tie, whatever the means.
+        values = {"piano": [1.0, 0.9, 1.1, 1.0, 1.02],
+                  "safe": [1.05, 0.85, 1.12, 0.97, 1.03]}
+        self.assertEqual("safe", playout.choose(["piano", "safe"], values, plans, state))
+
+    def test_a_steady_small_edge_is_a_lead_not_a_tie(self):
+        """Common random numbers make paired differences steady, so a
+        consistent edge counts even when it is small."""
+        state, plans = self._setup()
+        values = {"piano": [1.0, 0.9, 1.1, 1.0, 1.02],
+                  "safe": [1.0, 0.88, 1.1, 0.99, 1.0]}
+        self.assertEqual("piano", playout.choose(["piano", "safe"], values, plans, state))
+
+    def test_a_noisy_fight_does_not_make_a_worse_move_tied(self):
+        """Seen live: in a VP opening a paired standard error is about a
+        cog, so a $10 Bill a whole cog worse than Hypno-goggles counted as
+        tied and won on price. A tie must also be close in the mean."""
+        state, plans = self._setup()
+        values = {"piano": [30.0, 22.0, 35.0, 25.0, 28.0],
+                  "safe": [27.0, 24.0, 31.0, 26.0, 27.0]}    # 1 cog worse, noisy
+        self.assertEqual("piano", playout.choose(["piano", "safe"], values, plans, state))
+
+    def test_a_real_lead_is_kept(self):
+        state, plans = self._setup()
+        values = {"piano": [2.0, 2.1, 1.9, 2.05, 2.0],
+                  "safe": [1.0, 1.1, 0.9, 1.0, 1.05]}
+        self.assertEqual("piano", playout.choose(["piano", "safe"], values, plans, state))
+
+    def test_off_is_the_plain_best_mean(self):
+        state, plans = self._setup()
+        values = {"piano": [1.0, 0.9, 1.1, 1.0, 1.02],
+                  "safe": [1.0, 0.88, 1.1, 0.99, 1.0]}
+        saved = playout.TIE_TO_CHEAPEST
+        try:
+            playout.TIE_TO_CHEAPEST = False
+            self.assertEqual("piano", playout.choose(["piano", "safe"], values, plans, state))
+        finally:
+            playout.TIE_TO_CHEAPEST = saved
+
+    def test_a_pink_slip_is_dearer_than_any_gag(self):
+        from solver.state import Action
+        state, plans = self._setup()
+        fire = [Action(track=None, target_index=0, fire=True)]
+        self.assertGreater(playout.plan_price(state, fire),
+                           playout.plan_price(state, plans["piano"]))
+
+
+class MostlyWastedTest(unittest.TestCase):
+    """Seen live on Realms: Toontanic on four cogs with three lured. A Drop
+    cannot hit a lured cog, so three quarters of it was thrown away."""
+
+    def _board(self, lured):
+        from solver import data
+        from solver.state import BattleState, CogState, ToonState, Track
+        toon = ToonState(80, 100, {Track.DROP: 7, Track.LURE: 7},
+                         {(Track.DROP, 7): 1, (Track.DROP, 6): 2, (Track.LURE, 5): 3})
+        cogs = []
+        for i in range(4):
+            hp = data.cog_max_hp(10)
+            cog = CogState("mr_hollywood", "sellbot", 10, hp, hp)
+            if i < lured:
+                cog.status.apply_lure(90, 3, level=5)
+            cogs.append(cog)
+        return BattleState(toons=[toon], cogs=cogs)
+
+    def test_a_drop_hit_all_on_mostly_lured_cogs_is_refused(self):
+        from solver.state import Action, Track
+        toontanic = [Action(Track.DROP, 7, None)]
+        self.assertTrue(playout._mostly_wasted(self._board(lured=3), toontanic))
+        self.assertFalse(playout._mostly_wasted(self._board(lured=0), toontanic))
+
+    @unittest.skipUnless(HAVE, "needs numpy and the policy weights")
+    def test_the_menu_holds_no_such_move(self):
+        from solver.data.types import Track
+        menu = playout.wide_candidates(self._board(lured=3))
+        self.assertTrue(menu)
+        self.assertFalse([p for p in menu if p[0] is not None
+                          and p[0].track == Track.DROP and p[0].level == 7])
