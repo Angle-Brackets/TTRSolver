@@ -333,11 +333,23 @@ class TestLureIndicator(unittest.TestCase):
         self.assertFalse(lure_indicator(self._frame(), self._plate()))
 
     def test_found_when_the_tile_is_there(self):
+        """A red tile carrying the green magnet."""
         from solver.live.vision import lure_indicator
         plate, frame = self._plate(), self._frame()
         x0, y0, _x1, _y1 = plate.region("lure")
         frame[y0 + 5:y0 + 25, x0 + 5:x0 + 45] = (220, 40, 40)
+        frame[y0 + 9:y0 + 21, x0 + 15:x0 + 27] = (81, 211, 82)
         self.assertTrue(lure_indicator(frame, plate))
+
+    def test_red_headgear_without_the_magnet_is_not_a_lure(self):
+        """Seen live: a Corporate Raider's red bandana sits in the box
+        above the plate, and every Raider read as lured."""
+        from solver.live.vision import lure_indicator
+        plate, frame = self._plate(), self._frame()
+        x0, y0, x1, y1 = plate.region("lure")
+        frame[y0:y1, x0:x1] = (200, 30, 35)
+        frame[y0 + 4:y1:6, x0 + 4:x1:6] = (240, 240, 240)   # the polka dots
+        self.assertFalse(lure_indicator(frame, plate))
 
     def test_the_region_sits_above_the_plate(self):
         """Negative offsets: the tile floats over the sign, not on it."""

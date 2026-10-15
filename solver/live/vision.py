@@ -884,12 +884,26 @@ def locate_plates(frame: np.ndarray,
     return find_plates(frame)
 
 
-# The tile is a saturated red that nothing else near a plate wears. Set
-# from the live frame the owner supplied rather than from the art files,
-# which are not extractable for this element.
+# The tile's red was set from one live frame the owner supplied. "Nothing
+# else near a plate wears it" turned out false: the box above the plate is
+# where the cog's HEAD sits, and a Corporate Raider's red bandana put 1,154
+# qualifying pixels in it (threshold 40), so every Raider read as lured.
 LURE_RED_MIN = 140          # red channel floor
 LURE_RED_DOMINANCE = 55     # how far red must lead both other channels
 LURE_MIN_PIXELS = 40        # below this it is a stray highlight
+# THE MAGNET. The marker the game floats over a sleeping cog carries the
+# lure status icon, a green horseshoe with white tips
+# (`ttr_assets.lure_icon`, from the player's own install): 43% of its
+# opaque pixels pass this test, median RGB (81, 211, 82). The bandana frame
+# has 0 such pixels in the box. Requiring the green as well as the red can
+# only remove positives the red test gave, never add any.
+#
+# [TODO] calibrate on a frame of a real lured cog: none is at hand, so the
+# floor is set well under what a magnet even 15 px across would show
+# (~95 green pixels at the icon's own proportion).
+LURE_GREEN_MIN = 20
+LURE_GREEN_FLOOR = 120      # green channel floor
+LURE_GREEN_DOMINANCE = 60   # how far green must lead both other channels
 
 
 def lure_indicator(frame: np.ndarray, plate: Plate) -> bool:
@@ -914,7 +928,22 @@ def lure_indicator(frame: np.ndarray, plate: Plate) -> bool:
     x1, y1 = min(width, x1), min(height, y1)
     if x1 <= x0 or y1 <= y0:
         return False
-    return lure_pixels(frame, plate) >= LURE_MIN_PIXELS
+    return (lure_pixels(frame, plate) >= LURE_MIN_PIXELS
+            and lure_magnet_pixels(frame, plate) >= LURE_GREEN_MIN)
+
+
+def lure_magnet_pixels(frame: np.ndarray, plate: Plate) -> int:
+    """How many pixels above the plate look like the lure magnet's green."""
+    x0, y0, x1, y1 = plate.region("lure")
+    height, width = frame.shape[:2]
+    x0, y0 = max(0, x0), max(0, y0)
+    x1, y1 = min(width, x1), min(height, y1)
+    if x1 <= x0 or y1 <= y0:
+        return 0
+    patch = frame[y0:y1, x0:x1, :3].astype(np.int16)
+    green = patch[:, :, 1]
+    lead = green - np.maximum(patch[:, :, 0], patch[:, :, 2])
+    return int(((green > LURE_GREEN_FLOOR) & (lead > LURE_GREEN_DOMINANCE)).sum())
 
 
 def lure_pixels(frame: np.ndarray, plate: Plate) -> int:
