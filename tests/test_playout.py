@@ -1032,6 +1032,18 @@ class MostlyWastedTest(unittest.TestCase):
             cogs.append(cog)
         return BattleState(toons=[toon], cogs=cogs)
 
+    def setUp(self):
+        # The filter is OFF as shipped -- it cost wins (see WASTE_CAP) --
+        # but kept working so it can be measured again.
+        self._saved = playout.WASTE_CAP
+        playout.WASTE_CAP = 0.5
+
+    def tearDown(self):
+        playout.WASTE_CAP = self._saved
+
+    def test_it_is_off_as_shipped(self):
+        self.assertEqual(1.0, self._saved)
+
     def test_a_drop_hit_all_on_mostly_lured_cogs_is_refused(self):
         from solver.state import Action, Track
         toontanic = [Action(Track.DROP, 7, None)]

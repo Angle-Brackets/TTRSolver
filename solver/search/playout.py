@@ -1012,7 +1012,14 @@ def wide_candidates(state: BattleState, reject=None,
 # (`simulator.wasted_reach`), and the charge stays for what is left.
 # [OWNER] "a waste". If every candidate is wasteful the best of them is
 # kept rather than giving no advice.
-WASTE_CAP = 0.5
+#
+# OFF (1.0): it cost wins, and the owner's condition was that it must not.
+# 200 solo VPs: 112 with it, 146 without (+24/-58, p < 0.001); 200 Realms
+# VPs 64 vs 70; the first 100 of each leaned the same way. SOS calls fell
+# from 9.0 to 8.1 a fight: refusing any card over half wasted also refused
+# heals and restocks the playouts used well. The wasted-reach CHARGE (heal
+# and restock cards included) still applies; this switch is the refusal.
+WASTE_CAP = 1.0
 
 
 def _mostly_wasted(state: BattleState, plan) -> bool:

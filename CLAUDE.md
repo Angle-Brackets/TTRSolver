@@ -559,14 +559,16 @@ Things that hold it together, each measured:
   cogs, so it called a $10 Bill a cog worse "tied" with Hypno-goggles.
   With the margin: 119 vs 118 of 1,000 solo buildings, 72 vs 69 of 100
   solo VPs (p 0.68).
-- **A move wasting most of its reach is refused on the menu**
-  (`playout.WASTE_CAP` 0.5, [OWNER] "horrible play"): Toontanic on mostly
-  lured cogs, a lure-all on lured cogs, Flippy at 92/100 (overflowing heal
-  cards count as waste too). The charge alone was a nudge playout noise
-  outweighed. NOT a free preference: 40 vs 46 of 100 Realms VPs (p 0.29),
-  70 vs 74 of 100 solo VPs (p 0.56), level on buildings -- each within
-  noise, both VP regimes leaning against it. Kept on the owner's call;
-  `WASTE_CAP = 1` turns it off.
+- **A move wasting most of its reach is NOT refused** (`playout.WASTE_CAP`
+  1.0, i.e. off). Refusing any hit-all or card over half wasted was tried
+  after the owner called Toontanic on lured cogs, a lure-all on lured cogs
+  and Flippy at 92/100 horrible play, on the condition that it cost no
+  wins. It did: 112 vs 146 of 200 solo VPs (+24/-58, p < 0.001), 64 vs 70
+  of 200 Realms VPs; SOS calls fell from 9.0 to 8.1 a fight, so it also
+  refused heals and restocks the playouts used well. The wasted-reach
+  CHARGE stays, now covering overflowing heal cards and restock cards that
+  cannot fit (`simulator.wasted_reach`); those card charges are not yet
+  measured on their own.
 - **Wasted reach is charged by all three engines**
   (`simulator.wasted_reach`, [OWNER] preference): any hit-all, gag or
   card, on cogs it cannot reach (Drop on lured, Lure on lured, Trap on
