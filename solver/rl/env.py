@@ -285,10 +285,12 @@ def _trap_damage(cog) -> float:
 # early, and the lowest is the Small Magnet at 55%
 # (`mechanics.lure_can_expire_early` is False for every Lure gag). A lure
 # holds its full rounds unless the cog is hit, so rounds left already
-# says everything. [TODO] Realms may keep Toontown Online's per-round
-# wake-up roll, which would make the level matter there; unverified --
-# `solver/live/realms_lurewatch.py` can measure it before a Realms
-# retrain adds the input.
+# says everything. [OWNER] Realms has no early wake-up either. Nor the
+# lure's TOTAL rounds as an input (also proposed): two cogs with 3 rounds
+# left skip the same attacks, take the same knockback and spring a Trap
+# the same way whichever Lure put them to sleep, so the total is the
+# gag's identity and no rule reads it once the lure lands. Add one only
+# if such a rule appears.
 LURE_SAFETY_BASE = 0.75
 
 
