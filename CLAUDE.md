@@ -565,10 +565,13 @@ Things that hold it together, each measured:
   and Flippy at 92/100 horrible play, on the condition that it cost no
   wins. It did: 112 vs 146 of 200 solo VPs (+24/-58, p < 0.001), 64 vs 70
   of 200 Realms VPs; SOS calls fell from 9.0 to 8.1 a fight, so it also
-  refused heals and restocks the playouts used well. The wasted-reach
-  CHARGE stays, now covering overflowing heal cards and restock cards that
-  cannot fit (`simulator.wasted_reach`); those card charges are not yet
-  measured on their own.
+  refused heals and restocks the playouts used well. Part of that was a
+  bug -- heal waste counted the part of a card too big for any laff, so
+  Flippy was refused above 50/140 -- fixed in 8234ab8, and re-measured:
+  still 113 vs 139 of 200 solo VPs (+26/-52, p 0.004) and 75 vs 86 of 200
+  Realms VPs (+8/-19, p 0.052). It stays off. The wasted-reach CHARGE
+  stays, covering overflowing heal cards and restock cards that cannot fit
+  (`simulator.wasted_reach`); those card charges are not measured alone.
 - **Wasted reach is charged by all three engines**
   (`simulator.wasted_reach`, [OWNER] preference): any hit-all, gag or
   card, on cogs it cannot reach (Drop on lured, Lure on lured, Trap on
@@ -610,6 +613,16 @@ through `mechanics.LURE_ROUNDS_OVERRIDE`). [OWNER] the tooltip reads 15 on
 Realms and 9 on TTR; the wiki's history says TTR cut it "from 15 to 8", and
 the tooltip counts the throw round, so 14 cog phases. TTR's table stays 8.
 `realms_lurewatch.py` can measure it.
+
+**Realms networks at encoding 5 were trained and LOST** (2026-10-16, not
+shipped; `realms_session` loads `fast_player_realms.json` /
+`playout_value_realms.json` only if present, and neither is). Rollout
+network fine-tuned from the shipped one on the TTR data converted to
+encoding 5 (`tools/reencode_lure.py`, exact) plus 24,368 Playout-labelled
+decisions from 600 fights under Realms' Lure durations (x2); value net
+trained afresh on the converted 68,030 TTR boards plus 5,173 Realms ones.
+Together, against the TTR networks: 66 vs 87 of 200 Realms VPs (+30/-51,
+p 0.026). Both changed at once, so which one hurt is not known.
 
 A building is detected so the playouts value the pouch: TTR from the
 Local API zone (`session.BUILDING_ZONES` -- only "Cog Building",
