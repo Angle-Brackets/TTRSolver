@@ -151,3 +151,37 @@ class AMismatchedPolicySaysWhy(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LureSafetyTest(unittest.TestCase):
+    """The lure input designed for the next retrain (OBS_VERSION 5): the
+    reasoning is beside `env_mod.LURE_SAFETY_BASE`."""
+
+    def test_the_curve(self):
+        got = [round(env_mod.lure_safety(r), 2) for r in (0, 1, 2, 4, 8, 14)]
+        self.assertEqual([0.0, 0.25, 0.44, 0.68, 0.9, 0.98], got)
+
+    def test_a_long_lure_reads_safer_than_a_short_one(self):
+        """The reason a per-gag fraction was rejected: a fresh $1 Bill and
+        a fresh Presentation must not read the same."""
+        self.assertLess(env_mod.lure_safety(2), env_mod.lure_safety(14))
+
+    def _lured(self, rounds):
+        board = state(level=6)
+        board.cogs[0].status.apply_lure(90, rounds, level=6)
+        return board
+
+    def test_the_shipped_networks_still_get_their_encoding(self):
+        """Version 4 is what every shipped network was trained on; the new
+        curve must not leak into it."""
+        self.assertEqual(env_mod.encode(self._lured(4)),
+                         env_mod.encode(self._lured(4), obs_version=4))
+        self.assertEqual(4, env_mod.OBS_VERSION)
+
+    def test_version_5_tells_14_rounds_from_8(self):
+        v4 = (env_mod.encode(self._lured(8), obs_version=4),
+              env_mod.encode(self._lured(14), obs_version=4))
+        v5 = (env_mod.encode(self._lured(8), obs_version=5),
+              env_mod.encode(self._lured(14), obs_version=5))
+        self.assertEqual(v4[0], v4[1])
+        self.assertNotEqual(v5[0], v5[1])

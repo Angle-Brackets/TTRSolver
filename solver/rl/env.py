@@ -250,6 +250,55 @@ def _trap_damage(cog) -> float:
         return 0.0
 
 
+# HOW SAFE A LURED COG IS, as one number: 0 awake and dangerous, 1 asleep
+# for as long as it matters. Designed with the maintainer, 2026-10-15,
+# for the next retrain (OBS_VERSION 5). Versions 1-4 feed
+# `min(rounds left, 8) / 8`, which saturates at TTR's longest lure, so a
+# Realms Presentation (14 rounds) reads the same as 8.
+#
+# WHY NOT `rounds left / that lure's duration`. It looks dynamic, but it
+# measures how far through ITS OWN lure a cog is, not when it swings
+# again: a fresh $1 Bill (2 of 2) and a fresh Presentation (14 of 14)
+# would both read 1.0, though one buys 2 quiet rounds and the other 14;
+# a $1 Bill with 1 left and a Presentation with 7 left would both read
+# 0.5. Danger is when the cog attacks next, which only ABSOLUTE rounds
+# left says -- and absolute rounds let one scale serve TTR and Realms.
+#
+# WHY A CURVE AND NOT `rounds / ceiling`. Danger is not linear in rounds:
+# 2 rounds left to 1 matters far more than 14 to 13. `1 - BASE**rounds`
+# rises steeply first and flattens, so a fresh Presentation reads as the
+# cog neutralised for the fight (14 rounds: 0.98), a fresh $1 Bill as
+# poor protection (2 rounds: 0.44), and each round lost costs more as the
+# cog nears waking (0.25 between 1 and 0, about 0.01 between 14 and 13).
+#
+#     rounds left   0     1     2     4     8     14
+#     safety       0.00  0.25  0.44  0.68  0.90  0.98
+#
+# BASE is the knob: lower saturates long lures sooner, higher spreads
+# them out. It is fixed once a network is trained on it -- a network
+# learns what each value MEANT in its training fights, so changing BASE
+# (or the formula) at play time would make it misread every lured cog.
+#
+# NO LURE-LEVEL INPUT FOR TTR. It was proposed (2026-10-15) on the idea
+# that low-level lures wear off early, and that is wrong for TTR today:
+# 3.3.0 stopped Lure gags with base accuracy of 50% or more expiring
+# early, and the lowest is the Small Magnet at 55%
+# (`mechanics.lure_can_expire_early` is False for every Lure gag). A lure
+# holds its full rounds unless the cog is hit, so rounds left already
+# says everything. [TODO] Realms may keep Toontown Online's per-round
+# wake-up roll, which would make the level matter there; unverified --
+# `solver/live/realms_lurewatch.py` can measure it before a Realms
+# retrain adds the input.
+LURE_SAFETY_BASE = 0.75
+
+
+def lure_safety(rounds_left) -> float:
+    """0 for an awake cog, rising toward 1 the longer it stays asleep.
+    See the note above `LURE_SAFETY_BASE`."""
+    rounds = max(0, int(rounds_left or 0))
+    return 1.0 - LURE_SAFETY_BASE ** rounds
+
+
 OBS_VERSION = 4
 """Bumped whenever `encode` changes what a slot MEANS.
 
@@ -352,7 +401,12 @@ def encode(state: BattleState, actor: int = 0,
                     remaining / max(1, 2 * cog.max_hp),
                     1.0 if cog.status.lured else 0.0,
                     1.0 if cog.status.trapped else 0.0,
-                    min(cog.status.lure_rounds_remaining, 8) / 8.0,
+                    # Version 5: `lure_safety`, designed for the next
+                    # retrain. 1-4: capped linear, what every shipped
+                    # network was trained on.
+                    (lure_safety(cog.status.lure_rounds_remaining)
+                     if obs_version >= 5 and cog.status.lured
+                     else min(cog.status.lure_rounds_remaining, 8) / 8.0),
                     1.0 if cog.status.is_dead else 0.0,
                     # HOW BIG the armed trap is, as a fraction of what
                     # the cog has left. A bare `trapped` flag makes a
