@@ -59,7 +59,8 @@ def load(path):
 
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
     return ([(np.array(w, dtype=float), np.array(b, dtype=float))
-             for w, b in payload["layers"]], float(payload.get("scale", 100.0)))
+             for w, b in payload["layers"]], float(payload.get("scale", 100.0)),
+            int(payload.get("obs_version", 4)))
 
 
 def extras(holdout: int, cogs_remaining: int) -> list:
@@ -74,8 +75,12 @@ def predict(model, state: BattleState, holdout: int = 0) -> float:
     import numpy as np
     from . import fastplayer
 
-    layers, scale = model
-    x = fastplayer.features(state)[0]
+    layers, scale = model[0], model[1]
+    # ITS OWN encoding, never the rollout network's: the two are trained
+    # and loaded separately, and the panel may run a v5 rollout network
+    # beside a v4 value net.
+    version = model[2] if len(model) > 2 else 4
+    x = fastplayer.features(state, obs_version=version)[0]
     if layers[0][0].shape[0] == len(x) + 2:
         x = x + extras(holdout, state.cogs_remaining)
     h = np.array(x, dtype=float)

@@ -34,6 +34,10 @@ def main() -> int:
     ap.add_argument("--batch", type=int, default=1024)
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--holdout", type=float, default=0.05)
+    ap.add_argument("--obs-version", type=int, default=4,
+                    help="board encoding the DATA was written in "
+                         "(gen_*'s --obs-version); recorded in the export so "
+                         "the loader encodes boards the same way")
     ap.add_argument("--init", default="",
                     help="weights to fine-tune from (an export of this script)")
     ap.add_argument("--temp", type=float, default=0.02,
@@ -175,7 +179,8 @@ def main() -> int:
                "match": match(act_head, Xv, Mv, Yv), "per_file": per_file,
                "rows": len(rows),
                "unite_rows": len(unite_rows),
-               "hidden": args.hidden, "epochs": args.epochs}
+               "hidden": args.hidden, "epochs": args.epochs,
+               "obs_version": args.obs_version}
     if unite_head is not None:
         payload["unite"] = [unite_head.weight.detach().cpu().T.tolist(),
                             unite_head.bias.detach().cpu().tolist()]

@@ -32,6 +32,10 @@ def main() -> int:
     ap.add_argument("--batch", type=int, default=256)
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--holdout", type=float, default=0.1)
+    ap.add_argument("--obs-version", type=int, default=4,
+                    help="board encoding the DATA was written in "
+                         "(gen_*'s --obs-version); recorded in the export so "
+                         "the loader encodes boards the same way")
     args = ap.parse_args()
 
     import numpy as np
@@ -101,7 +105,8 @@ def main() -> int:
         print(f"  {cogs} cogs ({len(pairs)}): net MAE {statistics.mean(a for a, _ in pairs):6.2f}"
               f"   fitted MAE {statistics.mean(b for _, b in pairs):6.2f}")
     payload = {"layers": best[1], "scale": SCALE, "hold_mae": best[0],
-               "fitted_mae": fitted_mae, "rows": len(rows), "hidden": args.hidden}
+               "fitted_mae": fitted_mae, "rows": len(rows), "hidden": args.hidden,
+               "obs_version": args.obs_version}
     Path(args.export).write_text(json.dumps(payload), encoding="utf-8")
     print(f"  best held-out MAE {best[0]:.2f} (fitted {fitted_mae:.2f}); exported to {args.export}")
     return 0

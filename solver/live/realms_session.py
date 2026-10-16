@@ -370,15 +370,37 @@ def toon_from_object(obj, max_fires: int = 0, max_unites: int = 0,
 REALMS_LURE_ROUNDS = {7: 14}
 
 
+# REALMS WEIGHTS, used when present: the rollout network and playout value
+# net trained on fights under Realms' Lure durations, at board encoding 5
+# (`env.lure_safety`), so a 14-round Presentation reads differently from
+# an 8-round one. Absent, the TTR weights are used, as before.
+REALMS_ROLLOUT_WEIGHTS = "fast_player_realms.json"
+REALMS_VALUE_WEIGHTS = "playout_value_realms.json"
+
+
 def use_realms_rules() -> None:
     """Set this process up for Realms: the live assumptions every panel
-    takes, and Realms' Lure durations. Used by the Realms panel's main and
-    as the initializer of its worker pools."""
+    takes, Realms' Lure durations, and the Realms networks if trained. Used
+    by the Realms panel's main and as the initializer of its worker pools."""
+    from pathlib import Path
+
     from .. import mechanics
     from ..data.cogs import live_play_assumptions
 
     live_play_assumptions()
     mechanics.LURE_ROUNDS_OVERRIDE.update(REALMS_LURE_ROUNDS)
+    weights = Path(__file__).resolve().parents[1] / "rl"
+    try:
+        rollout = weights / REALMS_ROLLOUT_WEIGHTS
+        if rollout.is_file():
+            from ..search import fastplayer
+            fastplayer.use(rollout)
+        value = weights / REALMS_VALUE_WEIGHTS
+        if value.is_file():
+            from ..search import playout, valuenet
+            playout.ROLLOUT_VALUE = valuenet.load(value)
+    except Exception:                      # noqa: BLE001 -- TTR weights stand
+        pass
 
 
 def player_toon_id(listener) -> Optional[int]:

@@ -104,6 +104,25 @@ def _play_out_playout_units(env, rng_seed) -> float:
     return (left0 - playout._left(env.state)) + playout.LAFF_WEIGHT * laff
 
 
+# THE RULES AND ENCODING THIS RUN WRITES, set in every worker. `ROW_VERSION`
+# is the board encoding of the recorded rows (None: the loaded network's
+# own). The networks used to PLAY -- the teacher's rollout network, the
+# PPO proposals -- keep reading the encoding their weights were trained
+# on; only the rows change. `realms_lure` plays the fights under Realms'
+# Lure durations (`realms_session.REALMS_LURE_ROUNDS`) for Realms weights.
+ROW_VERSION = None
+
+
+def _setup(obs_version, realms_lure):
+    global ROW_VERSION
+    ROW_VERSION = obs_version
+    from solver import mechanics
+    mechanics.LURE_ROUNDS_OVERRIDE.clear()
+    if realms_lure:
+        from solver.live.realms_session import REALMS_LURE_ROUNDS
+        mechanics.LURE_ROUNDS_OVERRIDE.update(REALMS_LURE_ROUNDS)
+
+
 def episode(job):
     seed, rollouts, loss_penalty, units, extras = job
     import dataclasses
@@ -132,7 +151,7 @@ def episode(job):
             except Exception:               # noqa: BLE001
                 ys = []
             if ys:
-                x = fastplayer.features(view)[0]
+                x = fastplayer.features(view, obs_version=ROW_VERSION)[0]
                 if extras:
                     from solver.search import valuenet
                     x = x + valuenet.extras(len(env.state.holdout), env.state.cogs_remaining)
@@ -159,6 +178,11 @@ def main() -> int:
     ap.add_argument("--extras", action="store_true",
                     help="add the holdout and later-wave counts to the inputs")
     ap.add_argument("--workers", type=int, default=10)
+    ap.add_argument("--obs-version", type=int, default=None,
+                    help="board encoding of the written rows (env.OBS_VERSION); "
+                         "default: the loaded network's own")
+    ap.add_argument("--realms-lure", action="store_true",
+                    help="play the fights under Realms' Lure durations")
     args = ap.parse_args()
 
     from concurrent.futures import ProcessPoolExecutor
@@ -166,7 +190,8 @@ def main() -> int:
     jobs = [(args.base + i, args.rollouts, args.loss_penalty, args.units, args.extras)
             for i in range(args.episodes)]
     rows, t0 = [], time.time()
-    with ProcessPoolExecutor(max_workers=args.workers) as pool:
+    with ProcessPoolExecutor(max_workers=args.workers, initializer=_setup,
+                             initargs=(args.obs_version, args.realms_lure)) as pool:
         for i, got in enumerate(pool.map(episode, jobs, chunksize=2)):
             rows.extend(got)
             if (i + 1) % 200 == 0:

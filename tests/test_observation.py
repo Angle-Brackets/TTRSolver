@@ -185,3 +185,35 @@ class LureSafetyTest(unittest.TestCase):
               env_mod.encode(self._lured(14), obs_version=5))
         self.assertEqual(v4[0], v4[1])
         self.assertNotEqual(v5[0], v5[1])
+
+
+class EncodingVersionPlumbingTest(unittest.TestCase):
+    """Each network reads the encoding it was trained on; data tools can
+    write rows at a new one; old data converts exactly."""
+
+    def _lured(self, rounds):
+        board = state(level=6)
+        board.cogs[0].status.apply_lure(90, rounds, level=6)
+        return board
+
+    def test_features_follow_the_version_asked_for(self):
+        try:
+            from solver.search import fastplayer
+        except Exception:                    # pragma: no cover
+            self.skipTest("fastplayer unavailable")
+        board = self._lured(3)
+        x5 = fastplayer.features(board, obs_version=5)[0][:env_mod.OBS_DIM]
+        self.assertEqual(list(env_mod.encode(board, 0, [None] * len(board.toons),
+                                             obs_version=5)), x5)
+
+    def test_old_rows_convert_exactly(self):
+        import pathlib
+        import sys
+        sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "tools"))
+        import reencode_lure
+        for rounds in (1, 4, 8):
+            board = self._lured(rounds)
+            v4 = list(env_mod.encode(board, obs_version=4))
+            v5 = list(env_mod.encode(board, obs_version=5))
+            self.assertEqual(v5, reencode_lure.convert_row({"x": v4})["x"])
+            self.assertEqual(v5, reencode_lure.convert_row(("gag", v4, [], 0))[1])

@@ -131,13 +131,21 @@ def horizon(state: BattleState, holdout: Optional[int] = None) -> List[float]:
 
 
 def features(state: BattleState, holdout: Optional[int] = None,
-             with_horizon: bool = False) -> Tuple[List[float], List[bool]]:
+             with_horizon: bool = False,
+             obs_version: Optional[int] = None) -> Tuple[List[float], List[bool]]:
     """(input vector, legal mask) for seat 0. `with_horizon` appends
     `horizon` -- off by default, because the playouts' value net reads this
-    same vector at its own fixed width."""
+    same vector at its own fixed width.
+
+    `obs_version` is the board encoding (`env.OBS_VERSION`): by default the
+    one the loaded weights were trained on, so a network never reads an
+    encoding it did not learn. A data tool writing rows for a NEW version
+    passes it explicitly."""
     from ..rl import env as env_mod
 
-    x = list(env_mod.encode(state, 0, [None] * len(state.toons)))
+    version = obs_version if obs_version is not None else _OBS_VERSION
+    x = list(env_mod.encode(state, 0, [None] * len(state.toons),
+                            obs_version=version))
     toon = state.toons[0]
     names = sos_names()
     held = {n: toon.sos_held(n) for n in names}
@@ -180,9 +188,14 @@ def action_of(index: int) -> Action:
     return entry if entry is not None else Action(track=None)
 
 
+# The board encoding the loaded weights were trained on. Files from before
+# it was recorded are version 4, the encoding of every network up to then.
+_OBS_VERSION = 4
+
+
 def use(path) -> bool:
     """Load weights from `path` (an export of `tools/train_fast_player.py`)."""
-    global _MODEL, _UNITE, _PATH, _HORIZON
+    global _MODEL, _UNITE, _PATH, _HORIZON, _OBS_VERSION
     path = Path(path)
     if _PATH == path and _MODEL is not None:
         return True
@@ -212,6 +225,7 @@ def use(path) -> bool:
         _MODEL, _UNITE, _PATH = None, None, path
         return False
     _MODEL, _UNITE, _PATH, _HORIZON = layers, unite, path, takes_horizon
+    _OBS_VERSION = int(payload.get("obs_version", 4))
     return True
 
 

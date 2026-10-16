@@ -105,6 +105,25 @@ def _soft(scores, unite):
     return sorted(best.items())
 
 
+# THE RULES AND ENCODING THIS RUN WRITES, set in every worker. `ROW_VERSION`
+# is the board encoding of the recorded rows (None: the loaded network's
+# own). The networks used to PLAY -- the teacher's rollout network, the
+# PPO proposals -- keep reading the encoding their weights were trained
+# on; only the rows change. `realms_lure` plays the fights under Realms'
+# Lure durations (`realms_session.REALMS_LURE_ROUNDS`) for Realms weights.
+ROW_VERSION = None
+
+
+def _setup(obs_version, realms_lure):
+    global ROW_VERSION
+    ROW_VERSION = obs_version
+    from solver import mechanics
+    mechanics.LURE_ROUNDS_OVERRIDE.clear()
+    if realms_lure:
+        from solver.live.realms_session import REALMS_LURE_ROUNDS
+        mechanics.LURE_ROUNDS_OVERRIDE.update(REALMS_LURE_ROUNDS)
+
+
 def episode(job):
     seed, kind, player, teacher, unites = job[:5]
     with_horizon = bool(job[5]) if len(job) > 5 else False
@@ -139,12 +158,14 @@ def episode(job):
             slot = fastplayer._slot_of(view.toons[0], unite)
             if slot >= 0 and umask[slot]:
                 rows.append(("unite", fastplayer.features(
-                    view, waiting, with_horizon)[0], umask, slot))
+                    view, waiting, with_horizon, obs_version=ROW_VERSION)[0],
+                    umask, slot))
         after = view
         if unite is not None:
             after = view.clone()
             unites_mod.apply(after.toons[0], unite)
-        features, mask = fastplayer.features(after, waiting, with_horizon)
+        features, mask = fastplayer.features(after, waiting, with_horizon,
+                                             obs_version=ROW_VERSION)
         label = fastplayer.index_of(plan[0] if plan else None)
         if label >= 0 and mask[label]:
             soft = _soft(scores, unite) if scores else None
@@ -179,6 +200,11 @@ def main() -> int:
                          "waves and SOS calls left -- what a policy playing "
                          "like the playouts needs to see")
     ap.add_argument("--workers", type=int, default=10)
+    ap.add_argument("--obs-version", type=int, default=None,
+                    help="board encoding of the written rows (env.OBS_VERSION); "
+                         "default: the loaded network's own")
+    ap.add_argument("--realms-lure", action="store_true",
+                    help="play the fights under Realms' Lure durations")
     args = ap.parse_args()
 
     from concurrent.futures import ProcessPoolExecutor
@@ -191,7 +217,8 @@ def main() -> int:
              args.unites, args.horizon) for i in range(args.episodes)]
     rows = []
     done = 0
-    with ProcessPoolExecutor(max_workers=args.workers) as pool:
+    with ProcessPoolExecutor(max_workers=args.workers, initializer=_setup,
+                             initargs=(args.obs_version, args.realms_lure)) as pool:
         for got in pool.map(episode, jobs, chunksize=4):
             rows.extend(got)
             done += 1
