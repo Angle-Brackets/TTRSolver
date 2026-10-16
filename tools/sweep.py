@@ -51,6 +51,8 @@ ARMS  (`name` or `name:key=value,key=value`)
             econ=0  econw=<w>  (the gag-economy charge off, or its weight;
                         `playout.ECONOMY_WEIGHT`, shipped 2)
             tie=0  (no tie-break to the cheaper move: the plain best mean)
+            lurecut=0  (cut playouts at ROLLOUT_DEPTH even while a lure runs)
+            realmslure=1  (Realms' Lure durations: Presentation 14 rounds)
             wastecap=<share>  (refuse menu moves wasting more reach than
                         this; shipped 0.5, 1 turns the filter off)
             sosprice=<cogs>  (a price per SOS call; shipped 0)
@@ -226,6 +228,14 @@ def play(job):
     playout.REDRAW_ASSUMED = opts.get("redraw", "1") != "0"
     playout.TIE_TO_CHEAPEST = opts.get("tie", "1") != "0"
     playout.WASTE_CAP = float(opts.get("wastecap", 0.5))
+    playout.LURE_AWARE_DEPTH = opts.get("lurecut", "1") != "0"
+    # Realms' Lure durations for this job, or TTR's. Set or cleared EVERY
+    # job: pool workers are reused across arms.
+    from solver import mechanics as _mech
+    _mech.LURE_ROUNDS_OVERRIDE.clear()
+    if opts.get("realmslure") == "1":
+        from solver.live.realms_session import REALMS_LURE_ROUNDS
+        _mech.LURE_ROUNDS_OVERRIDE.update(REALMS_LURE_ROUNDS)
     playout.ECONOMY_WEIGHT = float(opts.get("econw", playout.DEFAULT_ECONOMY_WEIGHT))
     fastplayer.use(opts.get("net") or fastplayer.DEFAULT_WEIGHTS)
     # Shipped: shortened playouts (8 rounds, the repo's value net). trunc=0

@@ -596,6 +596,12 @@ from the battle object. TTR names it from the CLIENT'S LOG
 observed 2026-10-10, and the only room mapped (`boss.TTR_BOSS_PLACES`);
 the CFO, CJ and CEO stay on the picker until each is seen.
 
+**A playout is not cut while a lure runs** (`playout.LURE_AWARE_DEPTH`):
+after the opening move the cut waits for the longest lure to expire, capped
+at 16 rounds, because the value net caps lure rounds at 8 in its inputs and
+could not see a long lure's back half. With Realms' durations: 36 vs 27 of
+100 Realms VPs (+14/-5, p 0.064).
+
 **Realms' Presentation holds 14 rounds** (`realms_session.REALMS_LURE_ROUNDS`,
 set process-wide by `use_realms_rules` in the Realms panel and its pools,
 through `mechanics.LURE_ROUNDS_OVERRIDE`). [OWNER] the tooltip reads 15 on

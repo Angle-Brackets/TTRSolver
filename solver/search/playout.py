@@ -513,6 +513,17 @@ def step_round(env, plan):
 # time a decision, duo VP 57 vs 52 of 100 (1.72s vs 1.37s -- short fights
 # save less than the extra playouts cost).
 ROLLOUT_DEPTH: Optional[int] = 8
+# NOT WHILE A LURE IS STILL RUNNING. After the opening move, the cut waits
+# for the longest lure on the board to run out (capped at
+# LURE_DEPTH_CAP), so a Lure's whole quiet is played rather than half of
+# it handed to a value net that cannot tell 8 rounds of lure from 14
+# (its inputs cap lure rounds at 8). [OWNER] "the threat of a cog should
+# be related to the lure duration": a Realms Presentation is 14 rounds of
+# quiet, and the cut at 8 threw away the back six. On TTR, where no lure
+# outlasts 8, it adds at most a round. Measured with Realms' durations:
+# 36 vs 27 of 100 Realms VPs (+14/-5, p 0.064), same time a decision.
+LURE_AWARE_DEPTH = True
+LURE_DEPTH_CAP = 16
 ROLLOUT_VALUE = "auto"
 PLAYOUT_VALUE_WEIGHTS = (Path(__file__).resolve().parents[1] / "rl"
                          / "playout_value.json")
@@ -544,6 +555,11 @@ def rollout(state, plan, horizon, seed: int) -> float:
     done, _info = step_round(env, plan)
     guard = 0
     use_net = False
+    depth = ROLLOUT_DEPTH
+    if depth is not None and LURE_AWARE_DEPTH:
+        longest = max((c.status.lure_rounds_remaining for c in env.state.cogs
+                       if not c.status.is_dead and c.status.lured), default=0)
+        depth = max(depth, min(LURE_DEPTH_CAP, longest + 1))
     # The net knows one seat; a party is played on by climb, which plans
     # every seat jointly, at the menu's budget.
     party = len(state.active_toons()) > 1
@@ -552,7 +568,7 @@ def rollout(state, plan, horizon, seed: int) -> float:
         use_net = fastplayer.available()
     while not done and guard < ROUND_CAP:
         guard += 1
-        if use_net and ROLLOUT_DEPTH is not None and guard > ROLLOUT_DEPTH:
+        if use_net and depth is not None and guard > depth:
             model = _rollout_value()
             if model is not None:
                 from . import valuenet
