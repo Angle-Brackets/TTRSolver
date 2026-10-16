@@ -218,6 +218,8 @@ def wasted_reach(state: BattleState, action: Action) -> float:
             overflow = sum(max(0, share - (int(t.max_laff) - int(t.laff)))
                            for t in toons)
             return min(1.0, overflow / float(card.amount)) if card.amount else 0.0
+        if kind == sos_mod.RESTOCK:
+            return _restock_waste(state, card)
         shape = {sos_mod.DAMAGE_UNLURED: Track.DROP, sos_mod.LURE: Track.LURE,
                  sos_mod.TRAP: Track.TRAP}.get(kind)
     elif (action.track is not None and action.target_index is None
@@ -234,6 +236,27 @@ def wasted_reach(state: BattleState, action: Action) -> float:
     else:
         return 0.0
     return missed / float(len(live))
+
+
+def _restock_waste(state: BattleState, card) -> float:
+    """Share of a restock card's gags that cannot fit in the pouches.
+
+    [OWNER] "a bad play": Professor Pete (45 gags, every track) called at
+    73/80 adds 7 and throws 38 away. Dry-run on COPIED pouches -- `clone`
+    shares the gag dicts, and a restock writes into them.
+    """
+    toons = [t for t in state.toons if t.laff > 0]
+    if not toons or not card.amount:
+        return 0.0
+    probe = state.clone()
+    for toon in probe.toons:
+        toon.gag_counts = dict(toon.gag_counts)
+    try:
+        added = sos_mod.apply(card, probe).get("restocked", 0)
+    except Exception:                      # noqa: BLE001
+        return 0.0
+    capacity = card.amount * len(toons)
+    return max(0.0, min(1.0, 1.0 - added / float(capacity)))
 
 
 def is_productive(state: BattleState, action: Action) -> bool:

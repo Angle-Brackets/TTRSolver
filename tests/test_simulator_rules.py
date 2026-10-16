@@ -196,3 +196,42 @@ class HealCardWasteTest(unittest.TestCase):
         state = self._state(10)
         self.assertGreater(simulator.wasted_reach(state, Action(track=None, sos="Flippy")),
                            simulator.wasted_reach(state, Action(track=None, sos="Daffy Don")))
+
+
+class RestockCardWasteTest(unittest.TestCase):
+    """[OWNER] a bad play: Professor Pete (45 gags) called at 73/80 adds 7."""
+
+    def _state(self, empty):
+        from solver import data
+        from solver.state import BattleState, CogState, ToonState, Track
+        exp = {t: 7 for t in (Track.TRAP, Track.LURE, Track.SOUND, Track.THROW,
+                              Track.SQUIRT, Track.DROP)}
+        counts = {(t, lv): 3 for t in exp for lv in (4, 5, 6)}
+        counts.update({(Track.THROW, 5): 7, (Track.SQUIRT, 5): 7, (Track.DROP, 5): 7})
+        toon = ToonState(90, 100, exp, counts, pouch_capacity=80)
+        from solver.data import gags as g
+        while g.pouch_total(toon.gag_counts) > 80 - empty:
+            key = next(k for k, v in toon.gag_counts.items() if v > 0 and k[1] < 7)
+            toon.gag_counts[key] -= 1
+        hp = data.cog_max_hp(6)
+        return BattleState(toons=[toon], cogs=[CogState("name_dropper", "sellbot", 6, hp, hp)])
+
+    def test_pete_into_a_nearly_full_pouch_is_mostly_waste(self):
+        from solver import simulator
+        from solver.state import Action
+        waste = simulator.wasted_reach(self._state(empty=7), Action(track=None, sos="Professor Pete"))
+        self.assertGreater(waste, 0.5)
+
+    def test_the_dry_run_does_not_touch_the_real_pouch(self):
+        from solver import simulator
+        from solver.state import Action
+        state = self._state(empty=30)
+        before = dict(state.toons[0].gag_counts)
+        simulator.wasted_reach(state, Action(track=None, sos="Professor Pete"))
+        self.assertEqual(before, state.toons[0].gag_counts)
+
+    def test_pete_into_an_empty_pouch_wastes_little(self):
+        from solver import simulator
+        from solver.state import Action
+        waste = simulator.wasted_reach(self._state(empty=45), Action(track=None, sos="Professor Pete"))
+        self.assertLess(waste, 0.5)
