@@ -177,10 +177,20 @@ class HealCardWasteTest(unittest.TestCase):
         return BattleState(toons=[toon], cogs=[CogState("name_dropper", "sellbot", 6, hp, hp)])
 
     def test_flippy_at_92_of_100_is_almost_all_waste(self):
+        """8 restored of the 100 the toon could ever take."""
         from solver import simulator
         from solver.state import Action
         waste = simulator.wasted_reach(self._state(92), Action(track=None, sos="Flippy"))
-        self.assertAlmostEqual(172 / 180, waste, places=6)
+        self.assertAlmostEqual(0.92, waste, places=6)
+
+    def test_a_card_too_big_for_any_laff_is_not_waste_for_that(self):
+        """Flippy (180) cannot fit a 100-laff toon at all. Counting that
+        made it 'wasted' at 10 laff, and a filter on waste then forbade
+        heals until the toon was nearly dead."""
+        from solver import simulator
+        from solver.state import Action
+        waste = simulator.wasted_reach(self._state(10), Action(track=None, sos="Flippy"))
+        self.assertAlmostEqual(0.10, waste, places=6)
 
     def test_a_heal_that_fits_wastes_nothing(self):
         from solver import simulator
@@ -188,14 +198,14 @@ class HealCardWasteTest(unittest.TestCase):
         self.assertEqual(0.0, simulator.wasted_reach(self._state(30),
                                                     Action(track=None, sos="Madam Chuckle")))
 
-    def test_a_smaller_card_wastes_less_for_the_same_heal(self):
-        """At 10/100 Flippy and Daffy Don both restore 90; the premium
-        card throws away more, so it is charged more."""
+    def test_a_smaller_card_wastes_less_when_the_toon_is_barely_hurt(self):
+        """At 70/100 Flippy restores 30 of a possible 100; Madam Chuckle 30
+        of 60."""
         from solver import simulator
         from solver.state import Action
-        state = self._state(10)
+        state = self._state(70)
         self.assertGreater(simulator.wasted_reach(state, Action(track=None, sos="Flippy")),
-                           simulator.wasted_reach(state, Action(track=None, sos="Daffy Don")))
+                           simulator.wasted_reach(state, Action(track=None, sos="Madam Chuckle")))
 
 
 class RestockCardWasteTest(unittest.TestCase):

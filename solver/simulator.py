@@ -213,11 +213,17 @@ def wasted_reach(state: BattleState, action: Action) -> float:
         card = sos_mod.BY_NAME.get(action.sos)
         kind = getattr(card, "kind", None)
         if kind == sos_mod.HEAL:
+            # Against what the toons COULD take, not the card's face
+            # value: Flippy's 180 cannot fit a 140-laff toon at any laff,
+            # and counting that as waste made it 28% wasted at 10 laff --
+            # so the menu filter forbade it above 50/140 and toons died
+            # holding it (112 vs 146 of 200 solo VPs).
             toons = [t for t in state.toons if t.laff > 0]
             share = sos_mod.heal_share(card, len(toons))
-            overflow = sum(max(0, share - (int(t.max_laff) - int(t.laff)))
-                           for t in toons)
-            return min(1.0, overflow / float(card.amount)) if card.amount else 0.0
+            usable = sum(min(share, int(t.max_laff)) for t in toons)
+            healed = sum(min(share, max(0, int(t.max_laff) - int(t.laff)))
+                         for t in toons)
+            return max(0.0, 1.0 - healed / float(usable)) if usable else 0.0
         if kind == sos_mod.RESTOCK:
             return _restock_waste(state, card)
         shape = {sos_mod.DAMAGE_UNLURED: Track.DROP, sos_mod.LURE: Track.LURE,
